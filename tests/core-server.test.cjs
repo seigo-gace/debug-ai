@@ -10,25 +10,28 @@ const {Store}=require('../orchestrator/store.js');
 const {makeRequest}=require('../orchestrator/contracts.js');
 const DebugGovernance=require('../orchestrator/debug-governance-core.js');
 
-test('latest six-role authority is fixed and AI Core aliases match',()=>{
+test('latest six-role authority is fixed and shared AI Core routing matches',()=>{
   assert.equal(assertRoleContract(),true);
-  assert.equal(ROLES.code_scout.authority_model,'Qwen2.5-Coder 7B');
-  assert.equal(ROLES.causal_scout.authority_model,'Qwen3 8B non-thinking');
-  assert.equal(ROLES.researcher.authority_model,'Granite 4.2 8B');
-  assert.equal(ROLES.diagnoser.authority_model,'Qwen3 8B thinking');
-  assert.equal(ROLES.patch_engineer.authority_model,'Qwen2.5-Coder 7B');
-  assert.equal(ROLES.local_reviewer.authority_model,'Ministral 3 8B Reasoning');
+  assert.equal(ROLES.code_scout.backend_model,'coder//models/qwen2.5-coder-7b-instruct-q4_k_m.gguf');
+  assert.equal(ROLES.causal_scout.backend_model,'qwen3//models/Qwen3-8B-Q4_K_M.gguf');
+  assert.equal(ROLES.causal_scout.thinking,false);
+  assert.equal(ROLES.researcher.backend_model,'granite//models/granite-4.2-8b-Q4_K_M.gguf');
+  assert.equal(ROLES.diagnoser.backend_model,'qwen3//models/Qwen3-8B-Q4_K_M.gguf');
+  assert.equal(ROLES.diagnoser.thinking,true);
+  assert.equal(ROLES.patch_engineer.backend_model,'coder//models/qwen2.5-coder-7b-instruct-q4_k_m.gguf');
+  assert.equal(ROLES.local_reviewer.backend_model,'ministral//models/Ministral-3-8B-Reasoning-2512-Q4_K_M.gguf');
   assert.deepEqual(EXTERNAL_REVIEW_POINTS,['hypothesis','final']);
 });
 
-test('AI Core adapter sends aliases only, never backend model or port',async()=>{
-  let body;
-  const a=createAiCoreAdapter({baseUrl:'http://ai-core.internal:9000',fetchImpl:async(_u,o)=>{body=JSON.parse(o.body);return new Response(JSON.stringify({choices:[{message:{content:'{"ok":true}'}}]}),{status:200});}});
-  await a.call('code_scout',{user:'x'});
-  assert.equal(body.model,'debugai/code-scout');
-  const text=JSON.stringify(body);
-  assert.ok(!text.includes('Qwen2.5-Coder'));
-  assert.ok(!text.includes('11434'));
+test('AI Core adapter sends llama-swap model, bearer auth, and thinking control',async()=>{
+  let request;
+  const a=createAiCoreAdapter({baseUrl:'http://ai-core.internal:18080',apiKey:'secret',fetchImpl:async(_u,o)=>{request={headers:o.headers,body:JSON.parse(o.body)};return new Response(JSON.stringify({choices:[{message:{content:'{"ok":true}'}}]}),{status:200});}});
+  await a.call('causal_scout',{user:'x'});
+  assert.equal(request.body.model,'qwen3//models/Qwen3-8B-Q4_K_M.gguf');
+  assert.deepEqual(request.body.chat_template_kwargs,{enable_thinking:false});
+  assert.equal(request.headers.authorization,'Bearer secret');
+  await a.call('diagnoser',{user:'x'});
+  assert.deepEqual(request.body.chat_template_kwargs,{enable_thinking:true});
 });
 
 test('canonical state machine remains fail-closed',()=>{
