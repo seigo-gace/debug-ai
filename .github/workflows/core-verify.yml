@@ -18,4 +18,7 @@ jobs:
         with:
           node-version: '24'
       - run: npm install --ignore-scripts --no-audit --no-fund
-      - run: npm run verify:core
+      - name: Syntax and source gate
+        run: npm run check
+      - name: Unit and server tests
+        run: npm test
