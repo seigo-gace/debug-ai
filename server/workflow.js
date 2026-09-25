@@ -11,19 +11,23 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
     runId=runId||crypto.randomUUID();
     runtimeEvidence?.write(runId,"failure",failure);
     await logRuntime({run_id:runId,severity:"error",kind:"failure",failure});
-    const scouts=await Promise.all([
-      aiCore.call("code_scout",{system:"Code Scout. JSON only.",user:JSON.stringify({failure,evidence:localEvidence})}),
-      aiCore.call("causal_scout",{system:"Causal Scout. JSON only.",user:JSON.stringify({failure,evidence:localEvidence})})
+    const query=String(failure?.message||failure?.summary||"debug failure");
+    const [scouts,knownKnowledge,official]=await Promise.all([
+      Promise.all([
+        aiCore.call("code_scout",{system:"Code Scout. JSON only.",user:JSON.stringify({failure,evidence:localEvidence})}),
+        aiCore.call("causal_scout",{system:"Causal Scout. JSON only.",user:JSON.stringify({failure,evidence:localEvidence})})
+      ]),
+      tgserver?tgserver.search(query):Promise.resolve([]),
+      evidenceSearch?evidenceSearch.search({query}):Promise.resolve([]),
     ]);
-    const official=evidenceSearch?await evidenceSearch.search({query:String(failure?.message||failure?.summary||"debug failure")}):[];
-    const research=await aiCore.call("researcher",{system:"Researcher. Select decisive evidence. JSON only.",user:JSON.stringify({failure,localEvidence,scouts:scouts.map(x=>parseJson(x.content)),official})});
-    const diagnosis=await aiCore.call("diagnoser",{system:"Diagnoser. Produce falsifiable diagnosis. JSON only.",user:JSON.stringify({failure,research:parseJson(research.content)})});
+    const research=await aiCore.call("researcher",{system:"Researcher. Select decisive evidence. JSON only.",user:JSON.stringify({failure,localEvidence,scouts:scouts.map(x=>parseJson(x.content)),knownKnowledge,official})});
+    const diagnosis=await aiCore.call("diagnoser",{system:"Diagnoser. Produce falsifiable diagnosis. JSON only.",user:JSON.stringify({failure,research:parseJson(research.content),knownKnowledge})});
     const diagnosisJson=parseJson(diagnosis.content);
-    const hypothesis={privacy_class:"PUBLIC",sanitized:true,opaque_evidence:true,statement:String(diagnosisJson?.public_statement||"behavioral mismatch"),cause_class:String(diagnosisJson?.cause_kind||"UNKNOWN"),evidence_count:localEvidence.length+official.length};
+    const hypothesis={privacy_class:"PUBLIC",sanitized:true,opaque_evidence:true,statement:String(diagnosisJson?.public_statement||"behavioral mismatch"),cause_class:String(diagnosisJson?.cause_kind||"UNKNOWN"),evidence_count:localEvidence.length+knownKnowledge.length+official.length};
     let external=null;if(externalReview)external=await externalReview.hypothesis({privacy:{privacy_class:"PUBLIC",sanitized:true,opaque_evidence:true},hypothesis});
-    const result={run_id:runId,scouts:scouts.map(x=>parseJson(x.content)),official_evidence:official,research:parseJson(research.content),diagnosis:diagnosisJson,external_hypothesis_review:external,state:external?.json?.verdict==="PASS"?"HYPOTHESIS_APPROVED":"AWAITING_EXTERNAL_HYPOTHESIS_REVIEW"};
+    const result={run_id:runId,scouts:scouts.map(x=>parseJson(x.content)),known_knowledge:knownKnowledge,official_evidence:official,research:parseJson(research.content),diagnosis:diagnosisJson,external_hypothesis_review:external,state:external?.json?.verdict==="PASS"?"HYPOTHESIS_APPROVED":"AWAITING_EXTERNAL_HYPOTHESIS_REVIEW"};
     runtimeEvidence?.write(runId,"analysis",result);
-    await logRuntime({run_id:runId,severity:"info",kind:"analysis",state:result.state,diagnosis:result.diagnosis,official_evidence_count:official.length});
+    await logRuntime({run_id:runId,severity:"info",kind:"analysis",state:result.state,diagnosis:result.diagnosis,known_knowledge_count:knownKnowledge.length,official_evidence_count:official.length});
     return result;
   }
   async function patchCandidate({runId,analysis,repo,selectedPaths,context,task}){
