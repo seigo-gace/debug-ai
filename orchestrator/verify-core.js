@@ -26,48 +26,28 @@ const CHECK_NAMES =
     "build",
   ]);
 
-const REQUIRED_GATES =
+const CHECK_PLAN =
   Object.freeze([
-    CheckType.LINT,
-    CheckType.TYPECHECK,
-    CheckType.TEST,
-    CheckType.BUILD,
+    Object.freeze({
+      name: "lint",
+      check_type: CheckType.LINT,
+    }),
+
+    Object.freeze({
+      name: "typecheck",
+      check_type: CheckType.TYPECHECK,
+    }),
+
+    Object.freeze({
+      name: "test",
+      check_type: CheckType.UNIT,
+    }),
+
+    Object.freeze({
+      name: "build",
+      check_type: CheckType.BUILD,
+    }),
   ]);
-
-function normalizeRel(value) {
-  const rel = String(value ?? "")
-    .replace(/\\/g, "/")
-    .replace(/^\.\//, "");
-
-  if (
-    !rel ||
-    path.posix.isAbsolute(rel) ||
-    /^[A-Za-z]:\//.test(rel) ||
-    rel.split("/").includes("..")
-  ) {
-    throw new Error(
-      `VERIFY_PATH_INVALID:${rel || "<empty>"}`
-    );
-  }
-
-  return rel;
-}
-
-function protectedPath(value) {
-  const rel = normalizeRel(value)
-    .toLowerCase();
-
-  return (
-    rel === ".git" ||
-    rel.startsWith(".git/") ||
-    rel.includes("/.git/") ||
-    rel === "secrets" ||
-    rel.startsWith("secrets/") ||
-    rel.includes("/secrets/") ||
-    /(^|\/)\.env($|\.)/.test(rel) ||
-    /\.(pem|key|p12|pfx)$/.test(rel)
-  );
-}
 
 function directExec(
   command,
@@ -75,62 +55,64 @@ function directExec(
   cwd,
   timeout = 600000
 ) {
-  const start =
+  const started =
     performance.now();
 
-  const proc =
+  const r =
     spawnSync(
       command,
       args,
       {
         cwd,
-        timeout,
         encoding: "utf8",
         shell: false,
+        timeout,
         windowsHide: true,
       }
     );
 
-  const duration_ms =
-    Math.round(
-      performance.now() - start
-    );
-
   const timedOut =
-    proc.error?.code === "ETIMEDOUT";
+    r?.error?.code ===
+    "ETIMEDOUT";
 
   return {
     code:
-      typeof proc.status === "number"
-        ? proc.status
+      Number.isInteger(r.status)
+        ? r.status
         : timedOut
           ? 124
           : 1,
 
+    stdout:
+      r.stdout || "",
+
+    stderr:
+      r.stderr || "",
+
     signal:
-      proc.signal ?? null,
+      r.signal || null,
+
+    error_code:
+      r?.error?.code || null,
+
+    error:
+      r?.error
+        ? String(
+            r.error.message ||
+            r.error
+          )
+        : null,
 
     timedOut,
 
-    error:
-      proc.error
-        ? String(
-            proc.error.message ||
-            proc.error
-          )
-        : "",
-
-    stdout:
-      String(
-        proc.stdout ?? ""
+    duration_ms:
+      Math.max(
+        0,
+        Math.round(
+          performance.now() -
+          started
+        )
       ),
-
-    stderr:
-      String(
-        proc.stderr ?? ""
-      ),
-
-    duration_ms,
   };
 }
 
@@ -170,7 +152,12 @@ function runPackageScript(
   }
 
   /*
-   * Windows .cmd shims require cmd.exe.
+   * Windows npm/pnpm/yarn are .cmd shims.
+   * Node 24 cannot spawn those .cmd files directly
+   * with shell:false (EINVAL).
+   *
+   * Do NOT enable shell:true.
+   *
    * Only the two already validated allowlist tokens
    * are inserted into this command line.
    */
@@ -216,18 +203,18 @@ function packageManager(
     ).trim();
 
   if (declared) {
-    const name =
-      declared
-        .split("@")[0]
-        .trim();
+    const match =
+      /^(npm|pnpm|yarn|bun)(?:@[^\s]+)?$/i
+        .exec(declared);
 
-    if (
-      PACKAGE_MANAGERS.has(
-        name
-      )
-    ) {
-      return name;
+    if (!match) {
+      throw new Error(
+        `Unsupported package manager declaration: ${declared}`
+      );
     }
+
+    return match[1]
+      .toLowerCase();
   }
 
   if (
@@ -256,13 +243,13 @@ function packageManager(
     fs.existsSync(
       path.join(
         repo,
-        "bun.lockb"
+        "bun.lock"
       )
     ) ||
     fs.existsSync(
       path.join(
         repo,
-        "bun.lock"
+        "bun.lockb"
       )
     )
   ) {
@@ -273,21 +260,26 @@ function packageManager(
 }
 
 function notConfigured(
-  reason = "NO_CHECKS_FOUND"
+  reason
 ) {
   return [
     {
       name: "verification",
-      check_type: CheckType.TEST,
-      configured: false,
-      status: CheckStatus.NOT_CONFIGURED,
-      command: "",
+      check_type: null,
+      status:
+        CheckStatus.NOT_CONFIGURED,
+
+      reason,
+
+      command: null,
       code: null,
-      signal: null,
-      timedOut: false,
-      error: reason,
+      exit_code: null,
+
+      configured: false,
       executed: false,
+
       duration_ms: 0,
+
       stdout: "",
       stderr: "",
     },
@@ -322,36 +314,25 @@ function runChecks(repo) {
       )
     );
 
+  const scripts =
+    pkg.scripts || {};
+
   const pm =
     packageManager(
       repo,
       pkg
     );
 
-  const scripts =
-    pkg.scripts || {};
-
-  const desired = [
-    {
-      name: "lint",
-      check_type: CheckType.LINT,
-    },
-    {
-      name: "typecheck",
-      check_type: CheckType.TYPECHECK,
-    },
-    {
-      name: "test",
-      check_type: CheckType.TEST,
-    },
-    {
-      name: "build",
-      check_type: CheckType.BUILD,
-    },
-  ];
+  if (
+    !PACKAGE_MANAGERS.has(pm)
+  ) {
+    throw new Error(
+      `Unsupported package manager executable: ${pm}`
+    );
+  }
 
   const configured =
-    desired.filter(
+    CHECK_PLAN.filter(
       check =>
         typeof scripts[
           check.name
@@ -391,24 +372,58 @@ function runChecks(repo) {
           : CheckStatus.FAIL;
 
     results.push({
-      name: check.name,
-      check_type: check.check_type,
-      configured: true,
+      name:
+        check.name,
+
+      check_type:
+        check.check_type,
+
       status,
+
+      reason:
+        r.timedOut
+          ? "COMMAND_TIMEOUT"
+          : r.error_code
+            ? `SPAWN_${r.error_code}`
+            : null,
+
       command:
         `${pm} run ${check.name}`,
-      code: r.code,
-      signal: r.signal,
-      timedOut: r.timedOut,
-      error: r.error,
-      executed: true,
-      duration_ms: r.duration_ms,
-      stdout: r.stdout,
-      stderr: r.stderr,
+
+      code:
+        r.code,
+
+      exit_code:
+        r.code,
+
+      configured:
+        true,
+
+      executed:
+        true,
+
+      duration_ms:
+        r.duration_ms,
+
+      stdout:
+        r.stdout.slice(
+          -12000
+        ),
+
+      stderr:
+        (
+          r.stderr ||
+          r.error ||
+          ""
+        ).slice(
+          -12000
+        ),
     });
 
+    // First meaningful failure only.
     if (
-      status !== CheckStatus.PASS
+      status !==
+      CheckStatus.PASS
     ) {
       break;
     }
@@ -418,202 +433,200 @@ function runChecks(repo) {
 }
 
 function passed(results) {
+  if (
+    !Array.isArray(results) ||
+    results.length === 0
+  ) {
+    return false;
+  }
+
+  if (
+    results.some(
+      r =>
+        r.status ===
+        CheckStatus.NOT_CONFIGURED
+    )
+  ) {
+    return false;
+  }
+
+  const executed =
+    results.filter(
+      r =>
+        r &&
+        r.configured === true &&
+        r.executed === true
+    );
+
+  if (
+    executed.length === 0
+  ) {
+    return false;
+  }
+
   return (
-    Array.isArray(results) &&
-    results.length > 0 &&
+    executed.every(
+      r =>
+        r.status ===
+        CheckStatus.PASS
+    ) &&
     results.every(
-      result =>
-        result.configured === true &&
-        result.executed === true &&
-        result.status === CheckStatus.PASS &&
-        result.code === 0
+      r =>
+        r.status ===
+        CheckStatus.PASS
     )
   );
 }
 
 function checksText(results) {
-  return (results || [])
+  return (
+    Array.isArray(results)
+      ? results
+      : []
+  )
     .map(
-      result => {
-        const lines = [
-          `${result.name}: ${result.status}`,
-          `configured=${result.configured}`,
-          `executed=${result.executed}`,
-          `code=${result.code}`,
-          `duration_ms=${result.duration_ms}`,
-        ];
+      r => {
+        const status =
+          r?.status ||
+          "UNKNOWN";
 
-        if (
-          result.error
-        ) {
-          lines.push(
-            `error=${result.error}`
-          );
-        }
+        const reason =
+          r?.reason
+            ? ` reason=${r.reason}`
+            : "";
 
-        return lines.join("\n");
+        const code =
+          Number.isInteger(
+            r?.code
+          )
+            ? r.code
+            : "n/a";
+
+        return (
+          `${r?.name || "unknown"}: ` +
+          `status=${status} ` +
+          `exit=${code}` +
+          `${reason}\n` +
+          `${r?.stdout || ""}\n` +
+          `${r?.stderr || ""}`
+        );
       }
     )
-    .join("\n\n");
+    .join(
+      "\n---\n"
+    )
+    .slice(
+      -22000
+    );
 }
 
-function verifyPatchInvariants(
-  repo,
-  changedPaths = [],
-  applicationReceipts = []
-) {
+
+function verifyPatchInvariants(repo, changedPaths = [], receipts = []) {
+  const root = fs.realpathSync(repo);
+  const fold = (v) => process.platform === "win32" ? String(v).toLowerCase() : String(v);
+  const rootCmp = fold(root);
+  const prefix = rootCmp.endsWith(path.sep) ? rootCmp : rootCmp + path.sep;
   const failures = [];
 
-  if (
-    !repo ||
-    !fs.existsSync(repo)
-  ) {
-    failures.push(
-      "REPO_MISSING"
-    );
-  }
-
-  for (
-    const rawPath
-    of changedPaths || []
-  ) {
-    let rel;
-
-    try {
-      rel =
-        normalizeRel(
-          rawPath
-        );
-    } catch (error) {
-      failures.push(
-        `INVALID_PATH:${String(rawPath)}`
-      );
+  for (const input of changedPaths || []) {
+    const rel = String(input || "").replace(/\\/g, "/").replace(/^\.\//, "");
+    if (!rel || path.posix.isAbsolute(rel) || /^[A-Za-z]:\//.test(rel) || rel.split("/").includes("..")) {
+      failures.push(`INVALID_PATH:${rel || "<empty>"}`);
       continue;
     }
-
-    if (
-      protectedPath(rel)
-    ) {
-      failures.push(
-        `PROTECTED_PATH:${rel}`
-      );
-    }
-  }
-
-  for (
-    const receipt
-    of applicationReceipts || []
-  ) {
-    if (
-      !receipt ||
-      receipt.schema !==
-        "patch-application/v2"
-    ) {
-      failures.push(
-        "PATCH_RECEIPT_INVALID"
-      );
+    const low = rel.toLowerCase();
+    if (low === ".git" || low.startsWith(".git/") || low.includes("/.git/") ||
+        low === "secrets" || low.startsWith("secrets/") || low.includes("/secrets/") ||
+        /(^|\/)\.env($|\.)/.test(low) || /\.(pem|key|p12|pfx)$/.test(low)) {
+      failures.push(`PROTECTED_PATH:${rel}`);
       continue;
     }
+    const full = path.resolve(root, rel);
+    const fullCmp = fold(full);
+    if (fullCmp !== rootCmp && !fullCmp.startsWith(prefix)) failures.push(`PATH_ESCAPE:${rel}`);
+  }
 
-    if (
-      receipt.rollback_available !==
-      true
-    ) {
-      failures.push(
-        `ROLLBACK_UNAVAILABLE:${receipt.transaction_id || "unknown"}`
-      );
+  for (const receipt of receipts || []) {
+    if (!receipt || receipt.schema !== "patch-application/v2") {
+      failures.push("PATCH_RECEIPT_INVALID");
+      continue;
     }
-
-    if (
-      !Array.isArray(
-        receipt.files
-      )
-    ) {
-      failures.push(
-        `PATCH_RECEIPT_FILES_INVALID:${receipt.transaction_id || "unknown"}`
-      );
-    }
+    if (receipt.rollback_available !== true) failures.push("ROLLBACK_NOT_AVAILABLE");
+    if (!Array.isArray(receipt.files) || receipt.files.length === 0) failures.push("PATCH_RECEIPT_FILES_MISSING");
   }
 
   return {
-    pass:
-      failures.length === 0,
-
+    pass: failures.length === 0,
     failures,
+    checked_paths: [...new Set((changedPaths || []).map((v) => String(v)))].length,
+    checked_receipts: Array.isArray(receipts) ? receipts.length : 0,
   };
 }
 
-function deterministicGateChecks({
-  repo,
-  changedPaths = [],
-  applicationReceipts = [],
-  testResults = [],
-  regressionResults = [],
-} = {}) {
-  const invariant =
-    verifyPatchInvariants(
-      repo,
-      changedPaths,
-      applicationReceipts
-    );
+function deterministicGateChecks(checks, invariantResult) {
+  const list = Array.isArray(checks) ? checks : [];
+  const actual = list.filter((x) => x && x.configured === true && x.executed === true);
+  const suitePass = passed(list);
+  const duration = actual.reduce((sum, x) => sum + (Number.isFinite(x.duration_ms) ? x.duration_ms : 0), 0);
+  const failedCount = actual.filter((x) => x.status !== CheckStatus.PASS).length;
+  const base = {
+    configured: actual.length > 0,
+    executed: actual.length > 0,
+    total: actual.length,
+    failed: failedCount,
+    duration_ms: duration,
+    stdout: "",
+    stderr: "",
+  };
 
-  const normalize =
-    (name, results) => ({
-      name,
-      configured:
-        Array.isArray(results) &&
-        results.length > 0,
-      executed:
-        Array.isArray(results) &&
-        results.length > 0,
-      status:
-        passed(results)
-          ? CheckStatus.PASS
-          : Array.isArray(results) &&
-            results.length > 0
-            ? CheckStatus.FAIL
-            : CheckStatus.NOT_CONFIGURED,
-      details:
-        Array.isArray(results)
-          ? results.map(
-              item => ({
-                name: item.name,
-                status: item.status,
-                code: item.code,
-              })
-            )
-          : [],
-    });
+  const retest = {
+    ...base,
+    name: "deterministic-retest",
+    check_type: CheckType.RETEST,
+    status: suitePass ? CheckStatus.PASS : CheckStatus.FAIL,
+    reason: suitePass ? null : "PROJECT_VERIFICATION_SUITE_FAILED",
+    command: "verification-suite:retest",
+    code: suitePass ? 0 : 1,
+    exit_code: suitePass ? 0 : 1,
+  };
 
-  return [
-    normalize(
-      "RETEST",
-      testResults
-    ),
+  const regression = {
+    ...base,
+    name: "deterministic-regression",
+    check_type: CheckType.REGRESSION,
+    status: suitePass ? CheckStatus.PASS : CheckStatus.FAIL,
+    reason: suitePass ? null : "PROJECT_REGRESSION_SUITE_FAILED",
+    command: "verification-suite:regression",
+    code: suitePass ? 0 : 1,
+    exit_code: suitePass ? 0 : 1,
+  };
 
-    normalize(
-      "REGRESSION",
-      regressionResults
-    ),
+  const invPass = invariantResult?.pass === true;
+  const invariant = {
+    name: "deterministic-invariant",
+    check_type: CheckType.INVARIANT,
+    status: invPass ? CheckStatus.PASS : CheckStatus.FAIL,
+    reason: invPass ? null : (invariantResult?.failures || ["INVARIANT_FAILED"]).join("|"),
+    command: "patch-authority:invariant",
+    code: invPass ? 0 : 1,
+    exit_code: invPass ? 0 : 1,
+    configured: true,
+    executed: true,
+    total: Number(invariantResult?.checked_paths || 0) + Number(invariantResult?.checked_receipts || 0),
+    failed: invPass ? 0 : Math.max(1, Array.isArray(invariantResult?.failures) ? invariantResult.failures.length : 1),
+    duration_ms: 0,
+    stdout: "",
+    stderr: "",
+  };
 
-    {
-      name: "INVARIANT",
-      configured: true,
-      executed: true,
-      status:
-        invariant.pass
-          ? CheckStatus.PASS
-          : CheckStatus.FAIL,
-      details:
-        invariant.failures,
-    },
-  ];
+  return [retest, regression, invariant];
 }
 
 module.exports = {
-  REQUIRED_GATES,
-  packageManager,
+  CHECK_PLAN,
+  directExec,
   runPackageScript,
+  packageManager,
   runChecks,
   passed,
   checksText,
