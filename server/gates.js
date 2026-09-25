@@ -1,0 +1,8 @@
+"use strict";
+const fs=require("node:fs"),path=require("node:path"),crypto=require("node:crypto");
+const FORBIDDEN_PROD=[/AI_DEV_OLLAMA_URL/i,/127\.0\.0\.1:11434/,/telegram.*(?:redis|meilisearch)|(?:redis|meilisearch).*telegram/i];
+function walk(root,out=[]){for(const e of fs.readdirSync(root,{withFileTypes:true})){if(['.git','node_modules','runtime','legacy'].includes(e.name))continue;const p=path.join(root,e.name);if(e.isDirectory())walk(p,out);else out.push(p);}return out;}
+function sourceGate(root){const failures=[];for(const f of walk(root)){const rel=path.relative(root,f).replaceAll('\\','/');if(!/\.(?:js|mjs|cjs|json|ya?ml|md)$/.test(rel))continue;if(rel==='server/gates.js')continue;let s;try{s=fs.readFileSync(f,'utf8')}catch{continue}if(rel.startsWith('server/')||rel.startsWith('orchestrator/'))for(const re of FORBIDDEN_PROD)if(re.test(s))failures.push(`${rel}:${re}`);}return {pass:failures.length===0,failures};}
+function composeGate(file){const s=fs.readFileSync(file,'utf8');const failures=[];if(!/services:\s*\n\s+debug-ai:/m.test(s))failures.push('DEBUG_AI_SERVICE_MISSING');if(/network_mode:\s*host/i.test(s))failures.push('HOST_NETWORK_FORBIDDEN');if(/privileged:\s*true/i.test(s))failures.push('PRIVILEGED_FORBIDDEN');if(!/cap_drop:\s*\n\s+- ALL/m.test(s))failures.push('CAP_DROP_ALL_REQUIRED');if(!/no-new-privileges:true/.test(s))failures.push('NO_NEW_PRIVILEGES_REQUIRED');return {pass:failures.length===0,failures};}
+function manifest(root){return walk(root).filter(f=>!f.includes('/runtime/')).sort().map(f=>({path:path.relative(root,f).replaceAll('\\','/'),sha256:crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex'),size:fs.statSync(f).size}));}
+module.exports={sourceGate,composeGate,manifest};
