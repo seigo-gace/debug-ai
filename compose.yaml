@@ -7,6 +7,11 @@ services:
       DEBUG_AI_CORE_URL: ${DEBUG_AI_CORE_URL:?required}
       AI_CORE_API_KEY: ${AI_CORE_API_KEY:?required}
       DEBUG_AI_EVIDENCE_SEARCH_URL: ${DEBUG_AI_EVIDENCE_SEARCH_URL:?required}
+      DEBUG_AI_EVIDENCE_SEARCH_SERVICE: ${DEBUG_AI_EVIDENCE_SEARCH_SERVICE:-debug-ai}
+      DEBUG_AI_EVIDENCE_SEARCH_CALLER_ID: ${DEBUG_AI_EVIDENCE_SEARCH_CALLER_ID:-debug-ai}
+      DEBUG_AI_EVIDENCE_SEARCH_SHARED_KEY_FILE: /run/secrets/astera-internal-service
+      DEBUG_AI_EVALUATOR_URL: ${DEBUG_AI_EVALUATOR_URL:-http://127.0.0.1:7374}
+      DEBUG_AI_EVALUATOR_API_KEY_FILE: /run/secrets/astera-evaluator-api-key
       DEBUG_AI_TGSERVER_URL: ${DEBUG_AI_TGSERVER_URL:?required}
       DEBUG_AI_TGSERVER_PROJECT_ID: ${DEBUG_AI_TGSERVER_PROJECT_ID:?required}
       DEBUG_AI_REPO_ALLOWLIST: ${DEBUG_AI_REPO_ALLOWLIST:?required}
@@ -26,6 +31,8 @@ services:
       - ${DEBUG_AI_WORKSPACE_HOST_PATH:?required}:/workspace:rw
       - ${DEBUG_AI_OSV_DB_HOST_PATH:?required}:/opt/osv-db:ro
       - ${DEBUG_AI_TOOLS_HOST_PATH:?required}:/opt/debugai-tools:ro
+      - ${DEBUG_AI_EVIDENCE_SEARCH_SHARED_KEY_HOST_PATH:?required}:/run/secrets/astera-internal-service:ro
+      - ${DEBUG_AI_EVALUATOR_API_KEY_HOST_PATH:?required}:/run/secrets/astera-evaluator-api-key:ro
     security_opt:
       - no-new-privileges:true
     cap_drop:

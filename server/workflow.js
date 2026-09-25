@@ -1,7 +1,10 @@
 "use strict";
 const crypto=require("node:crypto");
 const {assertPromotable}=require("./asset-promotion.js");
+const EXTERNAL_EVIDENCE_CATEGORIES=new Set(["DEPENDENCY","API","VERSION","KNOWN_BUG","CVE","SPECIFICATION_CONFLICT","SPEC_CONFLICT"]);
 function parseJson(c){if(typeof c!=="string")return c;return JSON.parse(c.trim().replace(/^```json\s*/i,"").replace(/```$/i,"").trim());}
+function localEvidenceSufficient(localEvidence=[]){return localEvidence.some(x=>x&&typeof x==="object"&&(x.sufficient_for_attribution===true||x.root_cause_confirmed===true||String(x.status||"").toUpperCase()==="CONFIRMED_CAUSE"));}
+function shouldSearchExternalEvidence({failure,localEvidence=[]}={}){if(failure?.evidence_gap===true||failure?.external_evidence_required===true)return true;if(localEvidenceSufficient(localEvidence))return false;const category=String(failure?.category||failure?.cause_class||failure?.kind||"").trim().toUpperCase().replace(/[ -]+/g,"_");return EXTERNAL_EVIDENCE_CATEGORIES.has(category);}
 function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeEvidence=null,tgAssets=null,patchService=null,authority=null}={}){
   if(!aiCore)throw new Error("AI_CORE_ADAPTER_REQUIRED");
   async function runAnalysis({runId=null,rawRequest="",failure,localEvidence=[],repo=null,projectId=null}={}){
@@ -13,12 +16,14 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
       aiCore.call("code_scout",{system:"Code Scout. JSON only.",user:JSON.stringify({failure,evidence:localEvidence})}),
       aiCore.call("causal_scout",{system:"Causal Scout. JSON only.",user:JSON.stringify({failure,evidence:localEvidence})})
     ]);
-    const official=evidenceSearch?await evidenceSearch.search({query:String(failure?.message||failure?.summary||"debug failure")}):[];
+    const searchRequired=shouldSearchExternalEvidence({failure,localEvidence});
+    const searchResult=searchRequired&&evidenceSearch?await evidenceSearch.search({query:String(failure?.message||failure?.summary||"debug failure"),context:JSON.stringify({category:failure?.category||failure?.cause_class||failure?.kind||null}),requestId:`${runId}-evidence`}):{performed:false,status:searchRequired?"UNAVAILABLE":"NOT_REQUIRED",evidence:[],evidence_registry:null,evidence_bindings:null};
+    const official=Array.isArray(searchResult.evidence)?searchResult.evidence:[];
     const research=await aiCore.call("researcher",{system:"Researcher. Select decisive evidence. JSON only.",user:JSON.stringify({failure,localEvidence,scouts:scouts.map(x=>parseJson(x.content)),official})});
     const diagnosis=await aiCore.call("diagnoser",{system:"Diagnoser. Produce falsifiable diagnosis. JSON only.",user:JSON.stringify({failure,research:parseJson(research.content)})});
     const hypothesis={privacy_class:"PUBLIC",sanitized:true,opaque_evidence:true,statement:String(parseJson(diagnosis.content)?.public_statement||"behavioral mismatch"),cause_class:String(parseJson(diagnosis.content)?.cause_kind||"UNKNOWN"),evidence_count:localEvidence.length+official.length};
     let external=null;if(externalReview)external=await externalReview.hypothesis({privacy:{privacy_class:"PUBLIC",sanitized:true,opaque_evidence:true},hypothesis});
-    const result={run_id:runId,scouts:scouts.map(x=>parseJson(x.content)),official_evidence:official,research:parseJson(research.content),diagnosis:parseJson(diagnosis.content),external_hypothesis_review:external,state:external?.json?.verdict==="PASS"?"HYPOTHESIS_APPROVED":"AWAITING_EXTERNAL_HYPOTHESIS_REVIEW"};
+    const result={run_id:runId,scouts:scouts.map(x=>parseJson(x.content)),official_evidence:official,evidence_search:{performed:searchResult.performed===true,required:searchRequired,status:searchResult.status,evidence_registry:searchResult.evidence_registry||null,evidence_bindings:searchResult.evidence_bindings||null},research:parseJson(research.content),diagnosis:parseJson(diagnosis.content),external_hypothesis_review:external,state:external?.json?.verdict==="PASS"?"HYPOTHESIS_APPROVED":"AWAITING_EXTERNAL_HYPOTHESIS_REVIEW"};
     runtimeEvidence?.write(runId,"analysis",result);return result;
   }
   async function patchCandidate({runId,analysis,repo,selectedPaths,context,task}){
@@ -47,4 +52,4 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
   async function promote(asset){assertPromotable(asset);if(!tgAssets)throw new Error("TGSERVER_ASSET_ADAPTER_REQUIRED");return tgAssets.promote(asset);}
   return {runAnalysis,patchCandidate,approveAndVerify,promote};
 }
-module.exports={createWorkflow};
+module.exports={EXTERNAL_EVIDENCE_CATEGORIES,localEvidenceSufficient,shouldSearchExternalEvidence,createWorkflow};
