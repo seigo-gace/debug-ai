@@ -1,0 +1,9 @@
+"use strict";
+const C=require("./contracts.js");
+function splitText(s,max){s=String(s??"");if(s.length<=max)return [s];const out=[];for(let i=0;i<s.length;i+=max)out.push(s.slice(i,i+max));return out;}
+function compileInstruction(task){const request=C.makeRequest(String(task??""));const blocks=[];for(const [i,text] of splitText(request.raw,6000).entries())blocks.push(C.makeBlock({request_hash:request.request_hash,kind:"MATERIAL",authority:"MASTER",content:text,ordinal:i}));return {request,blocks};}
+function buildStagePackets(plan,stage,maxChars=12000){const chunks=[];let cur=[];let size=0;for(const b of plan.blocks){const text=`[${b.authority||"MASTER"}/${b.kind||"MATERIAL"}]\n${b.content||b.text||""}`;if(cur.length&&size+text.length>maxChars){chunks.push(cur.join("\n\n"));cur=[];size=0;}cur.push(text);size+=text.length;}if(cur.length)chunks.push(cur.join("\n\n"));return chunks.map((text,i)=>({stage,packet_index:i+1,packet_count:chunks.length,text}));}
+function mergeOperationFragments(frags){const operations=[],seen=new Set(),summaries=[];for(const f of frags){if(f?.summary)summaries.push(f.summary);for(const op of f?.operations||[]){const k=JSON.stringify(op);if(!seen.has(k)){seen.add(k);operations.push(op);}}}return {status:frags.every(x=>!x?.status||x.status==="READY")?"READY":"BLOCKED",summary:summaries.join(" | "),operations};}
+function mergeReviewFragments(frags){const issues=[...new Set(frags.flatMap(x=>x?.issues||[]))];return {verdict:frags.every(x=>x?.verdict==="PASS")?"PASS":"FAIL",issues,summary:frags.map(x=>x?.summary).filter(Boolean).join(" | ")};}
+function planSummary(plan,maxChars=12000){const packets=buildStagePackets(plan,"summary",maxChars);return {schema:"block-plan/v1",request_hash:plan.request.request_hash,block_count:plan.blocks.length,packet_count:packets.length};}
+module.exports={compileInstruction,buildStagePackets,mergeOperationFragments,mergeReviewFragments,planSummary};
