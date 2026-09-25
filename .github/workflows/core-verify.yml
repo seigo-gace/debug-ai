@@ -36,5 +36,7 @@ jobs:
         run: node --test --test-name-pattern='run authority persists' tests/core-server.test.cjs
       - name: Server behavior tests
         run: node --test server/tests/server.test.cjs
+      - name: Evidence, evaluator and benchmark contracts
+        run: node --test server/tests/evidence-evaluator-benchmark.test.cjs
       - name: TypeScript 7 real gate
         run: DEBUG_AI_REQUIRE_TS7_REAL=1 node --test server/tests/typescript7-real.test.cjs
