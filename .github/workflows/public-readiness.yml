@@ -19,102 +19,79 @@ jobs:
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import base64, gzip, io, os, pathlib, re, subprocess, tarfile, sys
+          import base64, hashlib, io, pathlib, re, subprocess, tarfile, sys
 
-          ROOT = pathlib.Path('.')
-          findings = []
-          warnings = []
-
-          SECRET_PATTERNS = [
-              ('PRIVATE_KEY', re.compile(rb'-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----')),
-              ('GITHUB_TOKEN', re.compile(rb'\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}\b')),
-              ('GITHUB_FINE_GRAINED_PAT', re.compile(rb'\bgithub_pat_[A-Za-z0-9_]{20,}\b')),
-              ('GOOGLE_CLIENT_SECRET', re.compile(rb'\bGOCSPX-[A-Za-z0-9_-]{20,}\b')),
-              ('AWS_ACCESS_KEY', re.compile(rb'\b(?:AKIA|ASIA)[A-Z0-9]{16}\b')),
-              ('SLACK_TOKEN', re.compile(rb'\bxox[baprs]-[A-Za-z0-9-]{20,}\b')),
-              ('STRIPE_LIVE_KEY', re.compile(rb'\b(?:sk_live|rk_live)_[A-Za-z0-9]{16,}\b')),
-              ('TELEGRAM_BOT_TOKEN', re.compile(rb'\b\d{8,12}:[A-Za-z0-9_-]{30,}\b')),
-              ('BEARER_TOKEN', re.compile(rb'Bearer\s+[A-Za-z0-9._~+/=-]{24,}')),
+          ROOT=pathlib.Path('.')
+          findings=[]; warnings=[]
+          SECRET_PATTERNS=[
+            ('PRIVATE_KEY',re.compile(rb'-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----')),
+            ('GITHUB_TOKEN',re.compile(rb'\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}\b')),
+            ('GITHUB_FINE_GRAINED_PAT',re.compile(rb'\bgithub_pat_[A-Za-z0-9_]{20,}\b')),
+            ('GOOGLE_CLIENT_SECRET',re.compile(rb'\bGOCSPX-[A-Za-z0-9_-]{20,}\b')),
+            ('AWS_ACCESS_KEY',re.compile(rb'\b(?:AKIA|ASIA)[A-Z0-9]{16}\b')),
+            ('SLACK_TOKEN',re.compile(rb'\bxox[baprs]-[A-Za-z0-9-]{20,}\b')),
+            ('STRIPE_LIVE_KEY',re.compile(rb'\b(?:sk_live|rk_live)_[A-Za-z0-9]{16,}\b')),
+            ('TELEGRAM_BOT_TOKEN',re.compile(rb'\b\d{8,12}:[A-Za-z0-9_-]{30,}\b')),
+            ('BEARER_TOKEN',re.compile(rb'Bearer\s+[A-Za-z0-9._~+/=-]{24,}')),
           ]
-          ENV_NAME = re.compile(rb'(?im)^\s*([A-Z0-9_]*(?:API_KEY|TOKEN|SECRET|PASSWORD|PRIVATE_KEY|CLIENT_SECRET)[A-Z0-9_]*)\s*=\s*([^\r\n#]+)')
-          HOME_PATH = re.compile(rb'/home/admin1(?:/|\b)')
+          ENV_NAME=re.compile(rb'(?im)^\s*([A-Z0-9_]*(?:API_KEY|TOKEN|SECRET|PASSWORD|PRIVATE_KEY|CLIENT_SECRET)[A-Z0-9_]*)\s*=\s*([^\r\n#]+)')
+          HOME_PATH=re.compile(rb'/home/admin1(?:/|\b)')
 
-          def scan_bytes(scope, path, data):
-              if not data or b'\x00' in data[:8192]:
-                  return
-              for label, rx in SECRET_PATTERNS:
-                  if rx.search(data):
-                      findings.append((scope, path, label))
-              for m in ENV_NAME.finditer(data):
-                  value = m.group(2).strip().strip(b'"\'')
-                  if not value or value.startswith((b'${', b'$(', b'<', b'[REDACTED]')):
-                      continue
-                  low = value.lower()
-                  if low in {b'test', b'dummy', b'example', b'placeholder', b'changeme'}:
-                      continue
-                  if len(value) >= 16:
-                      findings.append((scope, path, 'NONEMPTY_SECRET_ASSIGNMENT'))
-              if HOME_PATH.search(data):
-                  warnings.append((scope, path, 'HARDCODED_HOME_PATH'))
+          def scan_bytes(scope,path,data):
+            if not data or b'\x00' in data[:8192]: return
+            for label,rx in SECRET_PATTERNS:
+              if rx.search(data): findings.append((scope,path,label))
+            for m in ENV_NAME.finditer(data):
+              key=m.group(1).decode('ascii','replace')
+              value=m.group(2).strip().strip(b'"\'')
+              if not value or value.startswith((b'${',b'$(',b'<',b'[REDACTED]')): continue
+              if value.lower() in {b'test',b'dummy',b'example',b'placeholder',b'changeme'}: continue
+              if len(value)>=16: findings.append((scope,path,f'NONEMPTY_SECRET_ASSIGNMENT:{key}'))
+            if HOME_PATH.search(data): warnings.append((scope,path,'HARDCODED_HOME_PATH'))
 
-          # Current tree.
           for p in ROOT.rglob('*'):
-              if not p.is_file() or '.git' in p.parts:
-                  continue
-              try:
-                  data = p.read_bytes()
-              except OSError:
-                  continue
-              if len(data) <= 2_000_000:
-                  scan_bytes('CURRENT', p.as_posix(), data)
+            if not p.is_file() or '.git' in p.parts: continue
+            try: data=p.read_bytes()
+            except OSError: continue
+            if len(data)<=2_000_000: scan_bytes('CURRENT',p.as_posix(),data)
 
-          # Every reachable git blob. Values are never printed.
-          rows = subprocess.check_output(['git','rev-list','--objects','--all'], text=True).splitlines()
-          seen = set()
+          rows=subprocess.check_output(['git','rev-list','--objects','--all'],text=True).splitlines(); seen=set()
           for row in rows:
-              parts = row.split(' ', 1)
-              oid = parts[0]
-              path = parts[1] if len(parts) > 1 else '<unknown>'
-              if oid in seen:
-                  continue
-              seen.add(oid)
-              typ = subprocess.run(['git','cat-file','-t',oid], capture_output=True, text=True).stdout.strip()
-              if typ != 'blob':
-                  continue
-              size_s = subprocess.run(['git','cat-file','-s',oid], capture_output=True, text=True).stdout.strip()
-              if not size_s.isdigit() or int(size_s) > 2_000_000:
-                  continue
-              data = subprocess.check_output(['git','cat-file','blob',oid])
-              scan_bytes(f'HISTORY:{oid[:12]}', path, data)
+            parts=row.split(' ',1); oid=parts[0]; path=parts[1] if len(parts)>1 else '<unknown>'
+            if oid in seen: continue
+            seen.add(oid)
+            if subprocess.run(['git','cat-file','-t',oid],capture_output=True,text=True).stdout.strip()!='blob': continue
+            size=subprocess.run(['git','cat-file','-s',oid],capture_output=True,text=True).stdout.strip()
+            if not size.isdigit() or int(size)>2_000_000: continue
+            scan_bytes(f'HISTORY:{oid[:12]}',path,subprocess.check_output(['git','cat-file','blob',oid]))
 
-          # Decode the bootstrap recovery archive and scan its actual files.
-          parts = sorted((ROOT / 'bootstrap' / 'payload').glob('part-*')) if (ROOT / 'bootstrap' / 'payload').exists() else []
+          payload_dir=ROOT/'bootstrap'/'payload'
+          parts=sorted(payload_dir.glob('part-*')) if payload_dir.exists() else []
           if parts:
-              encoded = b''.join(p.read_bytes().strip() for p in parts)
-              try:
-                  archive = base64.b64decode(encoded, validate=True)
-                  with tarfile.open(fileobj=io.BytesIO(archive), mode='r:gz') as tf:
-                      for member in tf.getmembers():
-                          if not member.isfile() or member.size > 2_000_000:
-                              continue
-                          f = tf.extractfile(member)
-                          if f:
-                              scan_bytes('BOOTSTRAP_ARCHIVE', member.name, f.read())
-              except Exception as exc:
-                  findings.append(('BOOTSTRAP_ARCHIVE', '<archive>', f'DECODE_OR_TAR_ERROR:{type(exc).__name__}'))
+            encoded=b''.join(p.read_bytes() for p in parts)
+            b64_sha=hashlib.sha256(encoded).hexdigest()
+            print(f'BOOTSTRAP_B64_SHA256={b64_sha}')
+            expected_b64='4d1b6de8a99ca18d7d3bf9c87a1a90cd1e6676db76fd2e94d5695c7a412420a4'
+            if b64_sha!=expected_b64:
+              findings.append(('BOOTSTRAP_ARCHIVE','<archive>','B64_SHA_MISMATCH'))
+            try:
+              archive=base64.b64decode(encoded,validate=False)
+              tar_sha=hashlib.sha256(archive).hexdigest(); print(f'BOOTSTRAP_TAR_SHA256={tar_sha}')
+              expected_tar='d99d3b90e90298a5c78113800f8f37ed3a010cd62dfcd3d8032a2c4d0755a2b1'
+              if tar_sha!=expected_tar: findings.append(('BOOTSTRAP_ARCHIVE','<archive>','TAR_SHA_MISMATCH'))
+              with tarfile.open(fileobj=io.BytesIO(archive),mode='r:gz') as tf:
+                for member in tf.getmembers():
+                  if not member.isfile() or member.size>2_000_000: continue
+                  f=tf.extractfile(member)
+                  if f: scan_bytes('BOOTSTRAP_ARCHIVE',member.name,f.read())
+            except Exception as exc:
+              findings.append(('BOOTSTRAP_ARCHIVE','<archive>',f'DECODE_OR_TAR_ERROR:{type(exc).__name__}'))
 
-          # Deduplicate without exposing values.
-          findings = sorted(set(findings))
-          warnings = sorted(set(warnings))
-          for scope, path, label in warnings:
-              print(f'PUBLIC_WARNING scope={scope} path={path} kind={label}')
-          for scope, path, label in findings:
-              print(f'PUBLIC_BLOCK scope={scope} path={path} kind={label}')
-
-          print(f'PUBLIC_SECRET_FINDINGS={len(findings)}')
-          print(f'PUBLIC_METADATA_WARNINGS={len(warnings)}')
+          findings=sorted(set(findings)); warnings=sorted(set(warnings))
+          for scope,path,label in warnings: print(f'PUBLIC_WARNING scope={scope} path={path} kind={label}')
+          for scope,path,label in findings: print(f'PUBLIC_BLOCK scope={scope} path={path} kind={label}')
+          print(f'PUBLIC_SECRET_FINDINGS={len(findings)}'); print(f'PUBLIC_METADATA_WARNINGS={len(warnings)}')
           if findings:
-              print('PUBLIC_READINESS=BLOCKED')
-              sys.exit(1)
+            print('PUBLIC_READINESS=BLOCKED'); sys.exit(1)
           print('PUBLIC_READINESS=SECRET_SCAN_PASS')
           PY
