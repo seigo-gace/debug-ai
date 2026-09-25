@@ -158,7 +158,42 @@ class Store {
     const filePath =
       path.join(this.dirs.request, `${request.request_hash}.json`);
 
-    immutableWrite(filePath, JSON.stringify(request));
+    const matchesStoredRequest = () => {
+      if (!fs.existsSync(filePath)) return false;
+
+      const stored =
+        JSON.parse(fs.readFileSync(filePath, "utf8"));
+
+      validateRequest(stored);
+
+      return (
+        stored.schema === request.schema &&
+        stored.request_hash === request.request_hash &&
+        stored.raw === request.raw &&
+        stored.length === request.length
+      );
+    };
+
+    // request_hash is the durable identity of the immutable Master source.
+    // created_at is observation metadata and may differ across replays.
+    // Never rewrite the first durable bytes; an identical source replay is
+    // idempotent, while any semantic mismatch remains fail-closed.
+    if (matchesStoredRequest()) {
+      return request.request_hash;
+    }
+
+    try {
+      immutableWrite(filePath, JSON.stringify(request));
+    } catch (error) {
+      // A concurrent identical replay can lose the create race because its
+      // created_at differs. Re-read the winner and accept only exact durable
+      // request identity; otherwise preserve the immutable-write failure.
+      if (matchesStoredRequest()) {
+        return request.request_hash;
+      }
+      throw error;
+    }
+
     return request.request_hash;
   }
 
