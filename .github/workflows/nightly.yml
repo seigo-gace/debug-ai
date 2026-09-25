@@ -1,0 +1,29 @@
+name: Nightly Regression
+on:
+  schedule:
+    - cron: '41 18 * * *'
+  workflow_dispatch:
+concurrency:
+  group: nightly-debug-ai
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  full-regression:
+    if: github.event.repository.visibility == 'public' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.20.0'
+      - uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node-24.20.0-npm-${{ hashFiles('package.json') }}
+          restore-keys: ${{ runner.os }}-node-24.20.0-npm-
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: DEBUG_AI_REQUIRE_TS7_REAL=1 npm run verify
+      - run: npm run test:legacy
+      - run: docker build -t debug-ai:ci .

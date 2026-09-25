@@ -17,4 +17,24 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - run: npm run verify:core
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Syntax and source gate
+        run: npm run check
+      - name: Role routing contract
+        run: node --test --test-name-pattern='latest six-role authority' tests/core-server.test.cjs
+      - name: AI Core request contract
+        run: node --test --test-name-pattern='AI Core adapter sends' tests/core-server.test.cjs
+      - name: State machine contract
+        run: node --test --test-name-pattern='canonical state machine' tests/core-server.test.cjs
+      - name: Store idempotency contract
+        run: node --test --test-name-pattern='store same request replay' tests/core-server.test.cjs
+      - name: Governance surface contract
+        run: node --test --test-name-pattern='debug governance module' tests/core-server.test.cjs
+      - name: Repo policy contract
+        run: node --test --test-name-pattern='repo policy blocks' tests/core-server.test.cjs
+      - name: Run authority contract
+        run: node --test --test-name-pattern='run authority persists' tests/core-server.test.cjs
+      - name: Server behavior tests
+        run: node --test server/tests/server.test.cjs
+      - name: TypeScript 7 real gate
+        run: DEBUG_AI_REQUIRE_TS7_REAL=1 node --test server/tests/typescript7-real.test.cjs
