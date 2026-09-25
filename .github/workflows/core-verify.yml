@@ -38,5 +38,7 @@ jobs:
         run: node --test server/tests/server.test.cjs
       - name: Evidence, evaluator and benchmark contracts
         run: node --test server/tests/evidence-evaluator-benchmark.test.cjs
+      - name: TGserver non-critical telemetry contract
+        run: node --test server/tests/tgserver-telemetry.test.cjs
       - name: TypeScript 7 real gate
         run: DEBUG_AI_REQUIRE_TS7_REAL=1 node --test server/tests/typescript7-real.test.cjs
