@@ -126,12 +126,19 @@ test('Evidence Search adapter uses signed API-only contract and keeps provenance
 });
 
 const {createTgserverAssetAdapter}=require('../adapters/tgserver-assets.js');
-test('TGserver adapter is API-only and redacts secrets before promotion',async()=>{
+test('TGserver adapter uses real /ingest contract, redacts, and emits knowledge asset record',async()=>{
   let got;
-  const a=createTgserverAssetAdapter({baseUrl:'http://tg.internal:3000',projectId:'P009',fetchImpl:async(u,o)=>{got={u,b:JSON.parse(o.body)};return new Response('{"ok":true}',{status:200});}});
-  await a.promote({kind:'accepted_fix',authorization:'Bearer abc',nested:{api_key:'xyz'},summary:'ok'});
-  assert.match(got.u,/\/v1\/projects\/P009\/assets$/);
-  const s=JSON.stringify(got.b);assert.ok(!s.includes('abc'));assert.ok(!s.includes('xyz'));
+  const outbox=fs.mkdtempSync(path.join(os.tmpdir(),'tgo-'));
+  const a=createTgserverAssetAdapter({baseUrl:'http://tg.internal:3000',projectId:'P009',outboxDir:outbox,fetchImpl:async(u,o)=>{got={u,b:JSON.parse(o.body)};return new Response('{"status":"accepted","hash":"h1"}',{status:200});}});
+  const delivered=await a.promote({kind:'accepted_fix',confirmed:true,run_id:'run-tg-1',authorization:'Bearer abc',nested:{api_key:'xyz'},summary:'ok'});
+  assert.equal(delivered.status,'DELIVERED');
+  assert.match(got.u,/\/ingest$/);
+  assert.equal(got.b.project_id,'P009');
+  const msg=JSON.parse(got.b.message);
+  assert.equal(msg.stream,'RESULT');
+  assert.equal(msg.event_type,'KNOWLEDGE_ASSET');
+  assert.equal(msg.payload.record_type,'knowledge_asset');
+  const s=JSON.stringify(msg);assert.ok(!s.includes('abc'));assert.ok(!s.includes('xyz'));
 });
 
 const {assertPublicOpaque,createExternalReviewAdapter}=require('../adapters/external-review.js');
