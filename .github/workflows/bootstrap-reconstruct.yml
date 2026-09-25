@@ -36,3 +36,13 @@ jobs:
           git diff --cached --quiet && exit 0
           git commit -m 'feat: import canonical DebugAI codebase'
           git push origin HEAD:migration/server-canonical-20260925
+      - name: Capture current branch for forensic reconstruction
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debugai-migration-snapshot
+          path: |
+            .
+            !.git
+          include-hidden-files: true
+          retention-days: 1
