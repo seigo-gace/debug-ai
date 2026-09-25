@@ -29,8 +29,8 @@ jobs:
         run: |
           set -o pipefail
           DEBUG_AI_REQUIRE_TS7_REAL=1 npm run verify 2>&1 | tee verify.log
-      - name: Upload verify log
-        if: always()
+      - name: Upload verify log on failure
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: verify-log-${{ github.run_id }}
