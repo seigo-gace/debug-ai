@@ -1,97 +1,22 @@
 "use strict";
-
+const fs=require("node:fs"),path=require("node:path"),crypto=require("node:crypto");
+const {stableStringify,sha256}=require("../deterministic-json.js");
 const FORBIDDEN=/(authorization|cookie|api[_-]?key|secret|password|private[_-]?key|access[_-]?token|refresh[_-]?token)/i;
-const SEVERITIES=new Set(["error","warn","info","debug","trace"]);
-
-class TgserverError extends Error{
-  constructor(code,message,meta={}){super(message);this.code=code;this.meta=meta;}
+const SEVERITIES=new Set(["error","warn","info","debug","trace"]),STREAMS=new Set(["EVIDENCE","TRACE","RESULT"]);
+class TgserverError extends Error{constructor(code,message,meta={}){super(message);this.code=code;this.meta=meta;}}
+function redact(v){if(v==null)return v;if(typeof v==="string")return v.replace(/Bearer\s+\S+/gi,"Bearer [REDACTED]").replace(/(?:api[_-]?key|secret|password|token)\s*[:=]\s*\S+/gi,m=>m.split(/[:=]/)[0]+"=[REDACTED]");if(Array.isArray(v))return v.map(redact);if(typeof v==="object"){const o={};for(const [k,x] of Object.entries(v))o[k]=FORBIDDEN.test(k)?"[REDACTED]":redact(x);return o;}return v;}
+function createTgserverAdapter({baseUrl=process.env.DEBUG_AI_TGSERVER_URL,logProjectId=process.env.DEBUG_AI_TGSERVER_LOG_PROJECT_ID,kbProjectId=process.env.DEBUG_AI_TGSERVER_KB_PROJECT_ID,fetchImpl=globalThis.fetch,outboxDir=process.env.DEBUG_AI_TGSERVER_OUTBOX_DIR||path.join(process.env.DEBUG_AI_RUNTIME_ROOT||"/app/runtime","tgserver-outbox"),timeoutMs=10000,replayLimit=20}={}){
+ if(!baseUrl)throw new TgserverError("TGSERVER_URL_REQUIRED","DEBUG_AI_TGSERVER_URL is required");if(!logProjectId||!/^P\d+$/.test(String(logProjectId)))throw new TgserverError("TGSERVER_LOG_PROJECT_ID_REQUIRED","DEBUG_AI_TGSERVER_LOG_PROJECT_ID is required");if(!kbProjectId||!/^P\d+$/.test(String(kbProjectId)))throw new TgserverError("TGSERVER_KB_PROJECT_ID_REQUIRED","DEBUG_AI_TGSERVER_KB_PROJECT_ID is required");if(typeof fetchImpl!=="function")throw new TgserverError("TGSERVER_FETCH_REQUIRED","fetch implementation required");
+ const ingestEndpoint=new URL("/ingest",baseUrl).toString(),searchEndpoint=new URL("/search",baseUrl).toString();fs.mkdirSync(outboxDir,{recursive:true});
+ async function postJson(endpoint,body){const ctl=new AbortController(),timer=setTimeout(()=>ctl.abort(),timeoutMs);try{let r;try{r=await fetchImpl(endpoint,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body),signal:ctl.signal});}catch(error){throw new TgserverError(error?.name==="AbortError"?"TGSERVER_TIMEOUT":"TGSERVER_NETWORK",error?.message||"TGserver unavailable");}const text=await r.text();if(!r.ok)throw new TgserverError("TGSERVER_HTTP",`TGserver HTTP ${r.status}`,{status:r.status});try{return JSON.parse(text);}catch{throw new TgserverError("TGSERVER_ENVELOPE","TGserver returned invalid JSON");}}finally{clearTimeout(timer);}}
+ function envelope({projectId=logProjectId,stream,eventType,runId,payload,severity="info",timestamp=new Date().toISOString()}){stream=String(stream||"").toUpperCase();if(!STREAMS.has(stream))throw new TgserverError("TGSERVER_STREAM_INVALID","stream must be EVIDENCE, TRACE, or RESULT");if(!String(eventType||"").trim())throw new TgserverError("TGSERVER_EVENT_TYPE_REQUIRED","event type required");if(!String(runId||"").trim())throw new TgserverError("TGSERVER_RUN_ID_REQUIRED","run id required");return {schema_version:"debug-ai.telemetry.v1",project_id:String(projectId),stream,event_type:String(eventType),run_id:String(runId),payload:redact(payload),timestamp:new Date(timestamp).toISOString(),severity:SEVERITIES.has(String(severity))?String(severity):"info"};}
+ async function postRecord(record){const {project_id,...messageRecord}=record;const out=await postJson(ingestEndpoint,{project_id,severity:record.severity,message:stableStringify(messageRecord),hint:`${record.stream}:${record.event_type}`,timestamp:record.timestamp});if(!out||!["accepted","duplicate"].includes(out.status))throw new TgserverError("TGSERVER_INGEST_REJECTED","TGserver did not accept event",{status:out?.status});return out;}
+ function queue(record,error){const safe={...record,delivery:{status:"TELEMETRY_DEGRADED",error_code:String(error?.code||error?.name||"TGSERVER_UNAVAILABLE")}};const file=path.join(outboxDir,`${Date.now()}-${sha256(safe).slice(0,24)}.json`);fs.writeFileSync(file,stableStringify(safe)+"\n",{flag:"wx",mode:0o600});return file;}
+ async function flushOutbox({limit=100}={}){const files=fs.readdirSync(outboxDir).filter(x=>x.endsWith(".json")).sort().slice(0,Math.max(1,Number(limit)||100));let delivered=0;const failures=[];for(const name of files){const file=path.join(outboxDir,name);try{const parsed=JSON.parse(fs.readFileSync(file,"utf8"));delete parsed.delivery;await postRecord(parsed);fs.unlinkSync(file);delivered++;}catch(error){failures.push({file:name,error:String(error?.message||error)});break;}}return {delivered,pending:fs.readdirSync(outboxDir).filter(x=>x.endsWith(".json")).length,failures};}
+ async function emit(input){const record=envelope(input);try{const receipt=await postRecord(record);let replay={delivered:0,pending:0,failures:[]};try{replay=await flushOutbox({limit:Math.max(1,Number(replayLimit)||20)});}catch(error){replay={delivered:0,pending:fs.readdirSync(outboxDir).filter(x=>x.endsWith(".json")).length,failures:[{error:String(error?.message||error)}]};}return {status:"DELIVERED",receipt,replay,record_hash:sha256(record)};}catch(error){return {status:"TELEMETRY_DEGRADED",outbox_path:queue(record,error),record_hash:sha256(record)};}}
+ async function log(event){if(!event||typeof event!=="object")throw new TgserverError("TGSERVER_EVENT_REQUIRED","runtime event object required");return emit({projectId:logProjectId,stream:String(event.stream||"TRACE"),eventType:String(event.event_type||event.kind||"RUNTIME_EVENT"),runId:String(event.run_id||event.runId||`runtime-${crypto.randomUUID()}`),payload:event,severity:String(event.severity||"info")});}
+ async function promote(asset){if(!asset||typeof asset!=="object")throw new TgserverError("TGSERVER_ASSET_REQUIRED","knowledge asset object required");return emit({projectId:kbProjectId,stream:"RESULT",eventType:"KNOWLEDGE_ASSET",runId:String(asset.run_id||asset.runId||`asset-${crypto.randomUUID()}`),payload:{record_type:"knowledge_asset",asset},severity:"info"});}
+ async function search(query,{projectId=kbProjectId,severity,from,to}={}){const q=String(query||"").trim();if(!q)throw new TgserverError("TGSERVER_SEARCH_QUERY_REQUIRED","search query required");const body={query:q,project_id:projectId};if(severity)body.severity=severity;if(from)body.from=from;if(to)body.to=to;try{const out=await postJson(searchEndpoint,body);return Array.isArray(out?.hits)?out.hits:[];}catch{return [];}}
+ return {ingestEndpoint,searchEndpoint,logProjectId,kbProjectId,outboxDir,emit,log,promote,search,flushOutbox,redact};
 }
-
-function redact(v){
-  if(v==null)return v;
-  if(typeof v==="string")return v
-    .replace(/Bearer\s+\S+/gi,"Bearer [REDACTED]")
-    .replace(/(?:api[_-]?key|secret|password|token)\s*[:=]\s*\S+/gi,m=>m.split(/[:=]/)[0]+"=[REDACTED]");
-  if(Array.isArray(v))return v.map(redact);
-  if(typeof v==="object"){
-    const o={};
-    for(const [k,x] of Object.entries(v))o[k]=FORBIDDEN.test(k)?"[REDACTED]":redact(x);
-    return o;
-  }
-  return v;
-}
-
-function createTgserverAdapter({
-  baseUrl=process.env.DEBUG_AI_TGSERVER_URL,
-  logProjectId=process.env.DEBUG_AI_TGSERVER_LOG_PROJECT_ID,
-  kbProjectId=process.env.DEBUG_AI_TGSERVER_KB_PROJECT_ID,
-  fetchImpl=globalThis.fetch,
-  timeoutMs=30000,
-}={}){
-  if(!baseUrl)throw new TgserverError("TGSERVER_URL_REQUIRED","DEBUG_AI_TGSERVER_URL is required");
-  if(!logProjectId)throw new TgserverError("TGSERVER_LOG_PROJECT_ID_REQUIRED","DEBUG_AI_TGSERVER_LOG_PROJECT_ID is required");
-  if(!kbProjectId)throw new TgserverError("TGSERVER_KB_PROJECT_ID_REQUIRED","DEBUG_AI_TGSERVER_KB_PROJECT_ID is required");
-  const ingestEndpoint=new URL("/ingest",baseUrl).toString();
-  const searchEndpoint=new URL("/search",baseUrl).toString();
-
-  async function postJson(endpoint,body){
-    const ctl=new AbortController();
-    const timer=setTimeout(()=>ctl.abort(),timeoutMs);
-    try{
-      let r;
-      try{
-        r=await fetchImpl(endpoint,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body),signal:ctl.signal});
-      }catch(error){
-        const code=error?.name==="AbortError"?"TGSERVER_TIMEOUT":"TGSERVER_NETWORK";
-        throw new TgserverError(code,error?.message||code);
-      }
-      const text=await r.text();
-      if(!r.ok)throw new TgserverError("TGSERVER_HTTP",`TGserver HTTP ${r.status}`,{status:r.status});
-      try{return JSON.parse(text);}catch{throw new TgserverError("TGSERVER_ENVELOPE","TGserver returned invalid JSON");}
-    }finally{clearTimeout(timer);}
-  }
-
-  async function ingest(projectId,severity,payload,hint){
-    const sev=SEVERITIES.has(severity)?severity:"info";
-    const safe=redact(payload);
-    const envelope={
-      project_id:projectId,
-      severity:sev,
-      message:JSON.stringify(safe),
-      hint:String(hint||"debug-ai"),
-      timestamp:new Date().toISOString(),
-    };
-    const out=await postJson(ingestEndpoint,envelope);
-    if(!out||!["accepted","duplicate"].includes(out.status)){
-      throw new TgserverError("TGSERVER_INGEST_REJECTED","TGserver did not accept event",{status:out?.status});
-    }
-    return out;
-  }
-
-  async function log(event){
-    if(!event||typeof event!=="object")throw new TgserverError("TGSERVER_EVENT_REQUIRED","runtime event object required");
-    const severity=String(event.severity||"info");
-    return ingest(logProjectId,severity,{schema_version:1,event_type:"runtime",...event},"debug-ai-runtime");
-  }
-
-  async function promote(asset){
-    if(!asset||typeof asset!=="object")throw new TgserverError("TGSERVER_ASSET_REQUIRED","knowledge asset object required");
-    const event={schema_version:1,event_type:"knowledge",...asset};
-    return ingest(kbProjectId,"info",event,"debug-ai-kb");
-  }
-
-  async function search(query,{projectId=kbProjectId,severity,from,to}={}){
-    const q=String(query||"").trim();
-    if(!q)throw new TgserverError("TGSERVER_SEARCH_QUERY_REQUIRED","search query required");
-    const body={query:q,project_id:projectId};
-    if(severity)body.severity=severity;
-    if(from)body.from=from;
-    if(to)body.to=to;
-    const out=await postJson(searchEndpoint,body);
-    return Array.isArray(out?.hits)?out.hits:[];
-  }
-
-  return {ingestEndpoint,searchEndpoint,logProjectId,kbProjectId,log,promote,search,redact};
-}
-
-module.exports={TgserverError,createTgserverAdapter,redact};
+module.exports={STREAMS,TgserverError,createTgserverAdapter,redact};

@@ -1,7 +1,7 @@
 name: Verify
 on:
   push:
-    branches: [main]
+    branches: [main, migration/server-canonical-20260925, fix/tgserver-authority-alignment-20260926]
   pull_request:
   workflow_dispatch:
 concurrency:
