@@ -1,10 +1,14 @@
 {
-  "name": "debug-ai",
-  "private": true,
-  "version": "0.0.0-server-port",
-  "scripts": {
-    "check:core": "node --check orchestrator/debug-governance-core.js",
-    "test:core": "node --test orchestrator/tests/debug-governance.test.cjs",
-    "verify:core": "npm run check:core && npm run test:core"
+  "name":"debug-ai",
+  "private":true,
+  "version":"0.3.0-server",
+  "engines":{"node":"24.20.0"},
+  "dependencies":{"typescript":"7.0.2"},
+  "scripts":{
+    "check":"find server orchestrator tests -type f \\( -name '*.js' -o -name '*.mjs' -o -name '*.cjs' \\) -print0 | xargs -0 -n1 node --check",
+    "test":"node --test tests/*.test.cjs server/tests/*.test.cjs",
+    "verify":"npm run check && npm test",
+    "test:legacy":"node --test legacy/pc-authority/orchestrator/tests/*.cjs legacy/pc-authority/gateway/*.test.mjs",
+    "start":"node server/main.js"
   }
 }
