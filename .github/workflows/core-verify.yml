@@ -20,5 +20,9 @@ jobs:
       - run: npm install --ignore-scripts --no-audit --no-fund
       - name: Syntax and source gate
         run: npm run check
-      - name: Unit and server tests
-        run: npm test
+      - name: Core contract tests
+        run: node --test tests/core-server.test.cjs
+      - name: Server behavior tests
+        run: node --test server/tests/server.test.cjs
+      - name: TypeScript 7 real gate
+        run: DEBUG_AI_REQUIRE_TS7_REAL=1 node --test server/tests/typescript7-real.test.cjs
