@@ -125,20 +125,26 @@ test('Evidence Search adapter uses signed API-only contract and keeps provenance
   assert.equal(out.evidence_registry.registry_hash,sha256([]));
 });
 
-const {createTgserverAssetAdapter}=require('../adapters/tgserver-assets.js');
-test('TGserver adapter uses real /ingest contract, redacts, and emits knowledge asset record',async()=>{
-  let got;
+const {createTgserverAdapter}=require('../adapters/tgserver.js');
+test('TGserver adapter uses authoritative /ingest contract, P004/P005 separation, and redacts knowledge assets',async()=>{
+  const calls=[];
   const outbox=fs.mkdtempSync(path.join(os.tmpdir(),'tgo-'));
-  const a=createTgserverAssetAdapter({baseUrl:'http://tg.internal:3000',projectId:'P009',outboxDir:outbox,fetchImpl:async(u,o)=>{got={u,b:JSON.parse(o.body)};return new Response('{"status":"accepted","hash":"h1"}',{status:200});}});
-  const delivered=await a.promote({kind:'accepted_fix',confirmed:true,run_id:'run-tg-1',authorization:'Bearer abc',nested:{api_key:'xyz'},summary:'ok'});
+  const a=createTgserverAdapter({baseUrl:'http://tg.internal:3000',logProjectId:'P004',kbProjectId:'P005',outboxDir:outbox,fetchImpl:async(u,o)=>{
+    calls.push({u,b:JSON.parse(o.body)});
+    return new Response('{"status":"accepted","hash":"h1"}',{status:200});
+  }});
+  await a.log({run_id:'run-tg-1',kind:'analysis',severity:'info',authorization:'Bearer abc'});
+  const delivered=await a.promote({kind:'accepted_fix',confirmed:true,run_id:'run-tg-1',nested:{api_key:'xyz'},summary:'ok'});
   assert.equal(delivered.status,'DELIVERED');
-  assert.match(got.u,/\/ingest$/);
-  assert.equal(got.b.project_id,'P009');
-  const msg=JSON.parse(got.b.message);
+  assert.match(calls[0].u,/\/ingest$/);
+  assert.equal(calls[0].b.project_id,'P004');
+  assert.equal(calls[1].b.project_id,'P005');
+  const msg=JSON.parse(calls[1].b.message);
   assert.equal(msg.stream,'RESULT');
   assert.equal(msg.event_type,'KNOWLEDGE_ASSET');
   assert.equal(msg.payload.record_type,'knowledge_asset');
-  const s=JSON.stringify(msg);assert.ok(!s.includes('abc'));assert.ok(!s.includes('xyz'));
+  const s=JSON.stringify(calls);assert.ok(!s.includes('abc'));assert.ok(!s.includes('xyz'));
+  fs.rmSync(outbox,{recursive:true,force:true});
 });
 
 const {assertPublicOpaque,createExternalReviewAdapter}=require('../adapters/external-review.js');
