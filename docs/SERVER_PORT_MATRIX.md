@@ -2,7 +2,7 @@
 
 Authority: `2026-09-25 15:11 JST｜新CHAT完全引継ぎ固定｜DebugAI Server再構築の最新Authority`
 
-Scope: existing Windows/PC DebugAI -> Contabo Server `/home/admin1/projects/debug-ai`. Production residency is Docker Compose only. Astera implementation is out of scope. TGserver and Evidence Search Module are API-only dependencies.
+Scope: existing Windows/PC DebugAI -> Contabo Server `/srv/debug-ai`. Production residency is Docker Compose only. Astera implementation is out of scope. TGserver and Evidence Search Module are API-only dependencies.
 
 ## Classification rules
 
