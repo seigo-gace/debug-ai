@@ -34,7 +34,7 @@ jobs:
             ('TELEGRAM_BOT_TOKEN',re.compile(rb'\b\d{8,12}:[A-Za-z0-9_-]{30,}\b')),
             ('BEARER_TOKEN',re.compile(rb'Bearer\s+[A-Za-z0-9._~+/=-]{24,}')),
           ]
-          ENV_NAME=re.compile(rb'(?im)^\s*([A-Z0-9_]*(?:API_KEY|TOKEN|SECRET|PASSWORD|PRIVATE_KEY|CLIENT_SECRET)[A-Z0-9_]*)\s*=\s*([^\r\n#]+)')
+          ENV_NAME=re.compile(rb'(?im)^[ \t]*([A-Z0-9_]*(?:API_KEY|TOKEN|SECRET|PASSWORD|PRIVATE_KEY|CLIENT_SECRET)[A-Z0-9_]*)[ \t]*=[ \t]*([^\r\n#]*)')
           HOME_PATH=re.compile(rb'/home/admin1(?:/|\b)')
 
           def scan_bytes(scope,path,data):
@@ -47,7 +47,8 @@ jobs:
               if not value or value.startswith((b'${',b'$(',b'<',b'[REDACTED]')): continue
               if value.lower() in {b'test',b'dummy',b'example',b'placeholder',b'changeme'}: continue
               if len(value)>=16: findings.append((scope,path,f'NONEMPTY_SECRET_ASSIGNMENT:{key}'))
-            if HOME_PATH.search(data): warnings.append((scope,path,'HARDCODED_HOME_PATH'))
+            if path!='.github/workflows/public-readiness.yml' and HOME_PATH.search(data):
+              warnings.append((scope,path,'HARDCODED_HOME_PATH'))
 
           for p in ROOT.rglob('*'):
             if not p.is_file() or '.git' in p.parts: continue
@@ -72,8 +73,7 @@ jobs:
             b64_sha=hashlib.sha256(encoded).hexdigest()
             print(f'BOOTSTRAP_B64_SHA256={b64_sha}')
             expected_b64='4d1b6de8a99ca18d7d3bf9c87a1a90cd1e6676db76fd2e94d5695c7a412420a4'
-            if b64_sha!=expected_b64:
-              findings.append(('BOOTSTRAP_ARCHIVE','<archive>','B64_SHA_MISMATCH'))
+            if b64_sha!=expected_b64: findings.append(('BOOTSTRAP_ARCHIVE','<archive>','B64_SHA_MISMATCH'))
             try:
               archive=base64.b64decode(encoded,validate=False)
               tar_sha=hashlib.sha256(archive).hexdigest(); print(f'BOOTSTRAP_TAR_SHA256={tar_sha}')
