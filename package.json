@@ -1,0 +1,10 @@
+{
+  "name": "debug-ai",
+  "private": true,
+  "version": "0.0.0-server-port",
+  "scripts": {
+    "check:core": "node --check orchestrator/debug-governance-core.js",
+    "test:core": "node --test orchestrator/tests/debug-governance.test.cjs",
+    "verify:core": "npm run check:core && npm run test:core"
+  }
+}
