@@ -1,0 +1,18 @@
+const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
+const {createServer}=require('../http.js');
+const {createBenchmarkService}=require('../benchmark/service.js');
+
+test('runtime HTTP route delegates fixed benchmark evaluation and health reports configured evaluator',async()=>{
+  let got=null;const workflow={runAnalysis:async()=>({}),patchCandidate:async()=>({}),approveAndVerify:async()=>({}),promote:async()=>({})};
+  const benchmarkService={ready:true,evaluate:async body=>{got=body;return {packet:{run_id:body.runId},result:{result_hash:'rh'}};}};
+  const s=createServer({workflow,benchmarkService});await new Promise(r=>s.listen(0,'127.0.0.1',r));
+  try{const port=s.address().port;let r=await fetch(`http://127.0.0.1:${port}/health`);let h=await r.json();assert.equal(h.benchmark_evaluator,'configured');r=await fetch(`http://127.0.0.1:${port}/internal/v1/benchmark/evaluate`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({runId:'bench-1',cases:[{case_id:'x'}]})});assert.equal(r.status,200);assert.equal(got.runId,'bench-1');const b=await r.json();assert.equal(b.result.result_hash,'rh');}finally{await new Promise(r=>s.close(r));}
+});
+
+test('benchmark service uses fixed evaluator and telemetry is non-critical',async()=>{
+  let packet=null,telemetry=null;const evaluator={evaluate:async p=>{packet=p;return {schema_version:'astera.evaluation.result.v2',result_hash:'result-hash',total_score:91,judgment:'PASS',ai_used:false};}};const tgTelemetry={emit:async e=>{telemetry=e;throw new Error('tg down');}};const svc=createBenchmarkService({evaluator,tgTelemetry});
+  const base={case_id:'c1',reproduced:true,confirmed_cause:true,root_cause_proof:true,patch_success:true,regression_pass:true,invariant_pass:true,evidence_covered:true,persistent_replay_pass:true,recovery_pass:true,human_intervention:false,repeat_attempt:false,external_lookup_used:true,external_lookup_useful:true,false_complete:false,secret_exposure:false,unauthorized_production_write:false,store_corruption:false,benchmark_leakage:false,localization_rank:1,attempts_to_fix:1};
+  const out=await svc.evaluate({runId:'bench-2',evaluationTime:'2026-09-25T00:00:00.000Z',cases:[base]});assert.equal(packet.profile_id,'debug-ai.benchmark.v1');assert.equal(out.result.total_score,91);await new Promise(r=>setImmediate(r));assert.equal(telemetry.eventType,'BENCHMARK_EVALUATED');assert.equal(telemetry.payload.ai_used,false);
+});
+
+test('production main wires evaluator into benchmark service and HTTP server',()=>{const src=fs.readFileSync(path.join(__dirname,'..','main.js'),'utf8');assert.match(src,/createEvaluatorAdapter/);assert.match(src,/createBenchmarkService\(\{evaluator,tgTelemetry:tgAssets\}\)/);assert.match(src,/createServer\(\{workflow,benchmarkService,host,port\}\)/);});

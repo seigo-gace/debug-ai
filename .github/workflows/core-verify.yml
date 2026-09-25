@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: '24.20.0'
       - run: npm install --ignore-scripts --no-audit --no-fund
       - name: Syntax and source gate
         run: npm run check
@@ -37,6 +37,6 @@ jobs:
       - name: Server behavior tests
         run: node --test server/tests/server.test.cjs
       - name: Deterministic integration contracts
-        run: node --test server/tests/evidence-evaluator-benchmark.test.cjs server/tests/telemetry-outbox.test.cjs
+        run: node --test server/tests/evidence-evaluator-benchmark.test.cjs server/tests/tgserver-telemetry.test.cjs server/tests/runtime-wiring.test.cjs
       - name: TypeScript 7 real gate
         run: DEBUG_AI_REQUIRE_TS7_REAL=1 node --test server/tests/typescript7-real.test.cjs
