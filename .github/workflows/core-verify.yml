@@ -1,22 +1,19 @@
 name: Core Verify
-
 on:
   push:
     branches: [main]
   pull_request:
-
 permissions:
   contents: read
-
 jobs:
   core-verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: '24.20.0'
       - run: npm install --ignore-scripts --no-audit --no-fund
       - name: Syntax and source gate
         run: npm run check
@@ -35,6 +32,64 @@ jobs:
       - name: Run authority contract
         run: node --test --test-name-pattern='run authority persists' tests/core-server.test.cjs
       - name: Server behavior tests
-        run: node --test server/tests/server.test.cjs
+        run: node --test server/tests/server.test.cjs server/tests/workflow-tgserver.test.cjs
+      - name: Deterministic integration contracts
+        run: node --test server/tests/evidence-evaluator-benchmark.test.cjs server/tests/tgserver-telemetry.test.cjs server/tests/runtime-wiring.test.cjs
       - name: TypeScript 7 real gate
         run: DEBUG_AI_REQUIRE_TS7_REAL=1 node --test server/tests/typescript7-real.test.cjs
+      - name: Read-only Contabo preflight syntax
+        run: bash -n scripts/contabo-preflight.sh
+      - name: Compose render gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          export DEBUG_AI_CORE_URL=http://127.0.0.1:18080
+          export AI_CORE_API_KEY=ci-placeholder
+          export DEBUG_AI_EVIDENCE_SEARCH_URL=http://127.0.0.1:7376
+          export DEBUG_AI_EVALUATOR_URL=http://127.0.0.1:7374
+          export DEBUG_AI_TGSERVER_URL=http://127.0.0.1:3000
+          export DEBUG_AI_TGSERVER_LOG_PROJECT_ID=P004
+          export DEBUG_AI_TGSERVER_KB_PROJECT_ID=P005
+          export DEBUG_AI_REPO_ALLOWLIST=repo-a
+          export DEBUG_AI_WORKSPACE_HOST_PATH=/tmp/debugai-workspace
+          export DEBUG_AI_OSV_DB_HOST_PATH=/tmp/debugai-osv
+          export DEBUG_AI_TOOLS_HOST_PATH=/tmp/debugai-tools
+          export DEBUG_AI_EVIDENCE_SEARCH_SHARED_KEY_HOST_PATH=/tmp/debugai-evidence-key
+          export DEBUG_AI_EVALUATOR_API_KEY_HOST_PATH=/tmp/debugai-evaluator-key
+          docker compose config --quiet
+      - name: Docker build and real container health smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE="debug-ai-ci:${GITHUB_SHA}"
+          NAME="debug-ai-ci-smoke"
+          KEYDIR="$(mktemp -d)"
+          cleanup(){ docker rm -f "$NAME" >/dev/null 2>&1 || true; rm -rf "$KEYDIR"; }
+          trap cleanup EXIT
+          printf '%s' '0123456789abcdef0123456789abcdef0123456789abcdef' > "$KEYDIR/evidence-key"
+          printf '%s' 'ci-evaluator-key' > "$KEYDIR/evaluator-key"
+          chmod 0644 "$KEYDIR/evidence-key" "$KEYDIR/evaluator-key"
+          docker build -t "$IMAGE" .
+          docker run -d --name "$NAME" --network host \
+            -e DEBUG_AI_HOST=127.0.0.1 \
+            -e DEBUG_AI_PORT=8787 \
+            -e DEBUG_AI_CORE_URL=http://127.0.0.1:18080 \
+            -e AI_CORE_API_KEY=ci-placeholder \
+            -e DEBUG_AI_EVIDENCE_SEARCH_URL=http://127.0.0.1:7376 \
+            -e DEBUG_AI_EVIDENCE_SEARCH_SHARED_KEY_FILE=/run/secrets/evidence-key \
+            -e DEBUG_AI_EVALUATOR_URL=http://127.0.0.1:7374 \
+            -e DEBUG_AI_EVALUATOR_API_KEY_FILE=/run/secrets/evaluator-key \
+            -e DEBUG_AI_TGSERVER_URL=http://127.0.0.1:3000 \
+            -e DEBUG_AI_TGSERVER_LOG_PROJECT_ID=P004 \
+            -e DEBUG_AI_TGSERVER_KB_PROJECT_ID=P005 \
+            -e DEBUG_AI_REPO_ALLOWLIST=repo-a \
+            -e GROQ_API_KEY=ci-placeholder \
+            -v "$KEYDIR/evidence-key:/run/secrets/evidence-key:ro" \
+            -v "$KEYDIR/evaluator-key:/run/secrets/evaluator-key:ro" \
+            "$IMAGE"
+          ok=0
+          for _ in $(seq 1 20); do
+            if node -e "fetch('http://127.0.0.1:8787/health').then(async r=>{const b=await r.json();if(!r.ok||b.ok!==true||b.benchmark_evaluator!=='configured')process.exit(1)}).catch(()=>process.exit(1))"; then ok=1; break; fi
+            sleep 1
+          done
+          if [ "$ok" -ne 1 ]; then docker logs "$NAME"; exit 1; fi

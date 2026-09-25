@@ -1,30 +1,5 @@
 const test=require('node:test');
 const assert=require('node:assert/strict');
 const {createWorkflow}=require('../workflow.js');
-
-test('workflow reuses TGserver KB and emits runtime events',async()=>{
-  const calls=[];
-  const tgserver={
-    search:async q=>{calls.push(['search',q]);return [{project_id:'P004',message:'known root cause'}];},
-    log:async event=>{calls.push(['log',event.kind,event.severity]);return {status:'accepted'};},
-    promote:async()=>({status:'accepted'}),
-  };
-  const ai={
-    call:async(role,req)=>{
-      calls.push(['ai',role,req.user]);
-      if(role==='researcher')return {content:JSON.stringify({evidence_ids:['kb-1']})};
-      if(role==='diagnoser')return {content:JSON.stringify({public_statement:'known mismatch',cause_kind:'CONFIG'})};
-      return {content:JSON.stringify({role})};
-    },
-  };
-  const evidenceSearch={search:async()=>[{title:'Official',url:'https://example.test',authority:'official'}]};
-  const externalReview={hypothesis:async()=>({json:{verdict:'PASS'}})};
-  const w=createWorkflow({aiCore:ai,tgserver,evidenceSearch,externalReview});
-  const out=await w.runAnalysis({failure:{message:'boom'}});
-  assert.equal(out.state,'HYPOTHESIS_APPROVED');
-  assert.equal(out.known_knowledge.length,1);
-  const researcher=JSON.parse(calls.find(x=>x[0]==='ai'&&x[1]==='researcher')[2]);
-  assert.equal(researcher.knownKnowledge[0].message,'known root cause');
-  assert.ok(calls.some(x=>x[0]==='log'&&x[1]==='failure'&&x[2]==='error'));
-  assert.ok(calls.some(x=>x[0]==='log'&&x[1]==='analysis'&&x[2]==='info'));
-});
+test('workflow reuses P005 TGserver KB, emits structured telemetry, and skips external search without Evidence Gap',async()=>{const calls=[];const tgserver={search:async q=>{calls.push(['search',q]);return [{project_id:'P005',message:'known root cause'}];},emit:async e=>{calls.push(['emit',e.stream,e.eventType,e.severity]);return {status:'DELIVERED'};},promote:async()=>({status:'DELIVERED'})};const ai={call:async(role,req)=>{calls.push(['ai',role,req.user]);if(role==='researcher')return {content:JSON.stringify({evidence_ids:['kb-1']})};if(role==='diagnoser')return {content:JSON.stringify({public_statement:'known mismatch',cause_kind:'CONFIG'})};return {content:JSON.stringify({role})};}};let evidenceCalls=0;const evidenceSearch={search:async()=>{evidenceCalls++;return {performed:true,status:'FINAL_VALID',evidence:[]};}};const externalReview={hypothesis:async()=>({json:{verdict:'PASS'}})};const w=createWorkflow({aiCore:ai,tgserver,evidenceSearch,externalReview});const out=await w.runAnalysis({failure:{message:'boom',category:'RUNTIME'},localEvidence:[{root_cause_confirmed:true}]});assert.equal(out.state,'HYPOTHESIS_APPROVED');assert.equal(out.known_knowledge.length,1);assert.equal(evidenceCalls,0);const researcher=JSON.parse(calls.find(x=>x[0]==='ai'&&x[1]==='researcher')[2]);assert.equal(researcher.knownKnowledge[0].message,'known root cause');assert.ok(calls.some(x=>x[0]==='emit'&&x[1]==='EVIDENCE'&&x[2]==='FAILURE_OBSERVED'));assert.ok(calls.some(x=>x[0]==='emit'&&x[1]==='TRACE'&&x[2]==='ANALYSIS_COMPLETE'));});
+test('workflow calls Evidence Search API adapter only for deterministic Evidence Gap and preserves Registry/Bindings',async()=>{const tgserver={search:async()=>[],emit:async()=>({status:'DELIVERED'}),promote:async()=>({})};const ai={call:async role=>role==='diagnoser'?{content:'{"public_statement":"dep mismatch","cause_kind":"DEPENDENCY"}'}:{content:'{}'}};let request=null;const evidenceSearch={search:async r=>{request=r;return {performed:true,status:'FINAL_VALID',evidence:[{candidate_id:'c1'}],evidence_registry:{registry_hash:'rh'},evidence_bindings:{bindings_hash:'bh'}};}};const externalReview={hypothesis:async()=>({json:{verdict:'PASS'}})};const out=await createWorkflow({aiCore:ai,tgserver,evidenceSearch,externalReview}).runAnalysis({failure:{message:'package mismatch',category:'DEPENDENCY'},localEvidence:[]});assert.ok(request);assert.equal(out.evidence_search.required,true);assert.equal(out.evidence_search.evidence_registry.registry_hash,'rh');assert.equal(out.evidence_search.evidence_bindings.bindings_hash,'bh');});
