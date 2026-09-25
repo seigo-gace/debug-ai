@@ -18,9 +18,16 @@ jobs:
         run: |
           set -euo pipefail
           cat bootstrap/payload/part-* > /tmp/debugai-canonical.b64
-          echo '4d1b6de8a99ca18d7d3bf9c87a1a90cd1e6676db76fd2e94d5695c7a412420a4  /tmp/debugai-canonical.b64' | sha256sum -c -
+          echo "ACTUAL_B64_SHA256=$(sha256sum /tmp/debugai-canonical.b64 | awk '{print $1}')"
+          echo "EXPECTED_B64_SHA256=4d1b6de8a99ca18d7d3bf9c87a1a90cd1e6676db76fd2e94d5695c7a412420a4"
           base64 -d /tmp/debugai-canonical.b64 > /tmp/debugai-canonical.tar.gz
+          echo "ACTUAL_TAR_SHA256=$(sha256sum /tmp/debugai-canonical.tar.gz | awk '{print $1}')"
+          echo "EXPECTED_TAR_SHA256=d99d3b90e90298a5c78113800f8f37ed3a010cd62dfcd3d8032a2c4d0755a2b1"
+          tar -tzf /tmp/debugai-canonical.tar.gz >/tmp/debugai-canonical.files
+          echo "TAR_INTEGRITY=PASS"
+          cat /tmp/debugai-canonical.files
           echo 'd99d3b90e90298a5c78113800f8f37ed3a010cd62dfcd3d8032a2c4d0755a2b1  /tmp/debugai-canonical.tar.gz' | sha256sum -c -
+          echo '4d1b6de8a99ca18d7d3bf9c87a1a90cd1e6676db76fd2e94d5695c7a412420a4  /tmp/debugai-canonical.b64' | sha256sum -c -
           tar -xzf /tmp/debugai-canonical.tar.gz -C .
           rm -rf bootstrap .github/workflows/bootstrap-reconstruct.yml
           git config user.name 'github-actions[bot]'
