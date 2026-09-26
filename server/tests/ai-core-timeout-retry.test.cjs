@@ -56,3 +56,31 @@ test("Undici response header timeout is retried",async()=>{
   assert.equal(attempts,2);
   assert.equal(out.attempts,2);
 });
+
+test("AI Core transport is single-flight even when callers invoke in parallel",async()=>{
+  let active=0;
+  let maxActive=0;
+  const order=[];
+  const fetchImpl=async(_url,opts)=>{
+    const body=JSON.parse(opts.body);
+    const role=body.model;
+    active++;
+    maxActive=Math.max(maxActive,active);
+    order.push(`start:${role}`);
+    await new Promise(resolve=>setTimeout(resolve,20));
+    order.push(`end:${role}`);
+    active--;
+    return {ok:true,text:async()=>JSON.stringify({choices:[{message:{content:"{\"ok\":true}"}}]})};
+  };
+  const ai=createAiCoreAdapter({baseUrl:"http://127.0.0.1:18080",apiKey:"test",fetchImpl,timeoutMs:600000,maxTimeoutRetries:5});
+  await Promise.all([
+    ai.call("code_scout",{user:"x"}),
+    ai.call("causal_scout",{user:"y"})
+  ]);
+  assert.equal(maxActive,1);
+  assert.equal(order.length,4);
+  assert.match(order[0],/^start:/);
+  assert.match(order[1],/^end:/);
+  assert.match(order[2],/^start:/);
+  assert.match(order[3],/^end:/);
+});
