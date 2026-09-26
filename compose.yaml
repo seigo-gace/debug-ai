@@ -7,6 +7,8 @@ services:
       DEBUG_AI_CORE_URL: ${DEBUG_AI_CORE_URL:?required}
       AI_CORE_API_KEY: ${AI_CORE_API_KEY:?required}
       DEBUG_AI_EVIDENCE_SEARCH_URL: ${DEBUG_AI_EVIDENCE_SEARCH_URL:?required}
+      DEBUG_AI_EVIDENCE_SEARCH_SECRET_FILE: /run/secrets/astera_internal_service_secret
+      DEBUG_AI_EVIDENCE_SEARCH_CALLER_ID: ${DEBUG_AI_EVIDENCE_SEARCH_CALLER_ID:-debug-ai}
       DEBUG_AI_TGSERVER_URL: ${DEBUG_AI_TGSERVER_URL:?required}
       DEBUG_AI_TGSERVER_LOG_PROJECT_ID: ${DEBUG_AI_TGSERVER_LOG_PROJECT_ID:?required}
       DEBUG_AI_TGSERVER_KB_PROJECT_ID: ${DEBUG_AI_TGSERVER_KB_PROJECT_ID:?required}
@@ -27,6 +29,7 @@ services:
       - ${DEBUG_AI_WORKSPACE_HOST_PATH:?required}:/workspace:rw
       - ${DEBUG_AI_OSV_DB_HOST_PATH:?required}:/opt/osv-db:ro
       - ${DEBUG_AI_TOOLS_HOST_PATH:?required}:/opt/debugai-tools:ro
+      - ${DEBUG_AI_EVIDENCE_SEARCH_SECRET_HOST_PATH:?required}:/run/secrets/astera_internal_service_secret:ro
     security_opt:
       - no-new-privileges:true
     cap_drop:
