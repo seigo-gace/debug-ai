@@ -1,5 +1,5 @@
 "use strict";
-const {Agent}=require("undici");
+const {Agent,fetch:undiciFetch}=require("undici");
 const {ROLES}=require("../roles.js");
 const ROLE_ALIASES=Object.freeze(Object.fromEntries(Object.entries(ROLES).map(([k,v])=>[k,v.alias])));
 class AiCoreError extends Error{constructor(code,msg,meta={}){super(msg);this.name="AiCoreError";this.code=code;this.meta=meta;}}
@@ -10,7 +10,7 @@ function isTimeoutError(error){
   }
   return false;
 }
-function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=process.env.AI_CORE_API_KEY,fetchImpl=globalThis.fetch,timeoutMs=600000,maxTimeoutRetries=5,dispatcher}={}){
+function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=process.env.AI_CORE_API_KEY,fetchImpl=undiciFetch,timeoutMs=600000,maxTimeoutRetries=5,dispatcher}={}){
   if(!baseUrl) throw new AiCoreError("AI_CORE_URL_REQUIRED","DEBUG_AI_CORE_URL is required");
   if(!apiKey) throw new AiCoreError("AI_CORE_API_KEY_REQUIRED","AI_CORE_API_KEY is required");
   if(typeof fetchImpl!=="function") throw new AiCoreError("FETCH_REQUIRED","fetch implementation is required");
