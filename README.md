@@ -218,3 +218,96 @@ Production is defined by Docker Compose and currently uses:
 - runtime state on a named volume;
 - workspace mounted read/write only where patch operations require it;
 - OSV DB, debugging tools, and Evidence Search credential mounted read-only.
+
+Do not bypass the Compose/runtime contract with ad-hoc host execution for production.
+
+## Development and verification
+
+Required Node.js runtime:
+
+```text
+24.20.0
+```
+
+Install dependencies and run the current server verification:
+
+```bash
+npm install
+npm run verify
+```
+
+`npm run verify` performs syntax checks and the active server/orchestrator test suites.
+
+Legacy PC authority regression tests are separate:
+
+```bash
+npm run test:legacy
+```
+
+Run the production server locally only with all required environment values available:
+
+```bash
+npm start
+```
+
+## Deployment rule
+
+Server changes follow this order:
+
+```text
+GitHub branch
+ -> focused tests
+ -> repository verification / CI
+ -> pull request
+ -> merge to main
+ -> Contabo git sync
+ -> Docker image build
+ -> container recreate
+ -> /health
+ -> real E2E gate
+```
+
+Do not make production-only source edits on Contabo and then treat them as canonical.
+
+## Safety boundaries
+
+The following are intentional system boundaries, not optional conventions:
+
+- **AI Core is a separate service.** DebugAI consumes it through the API and does not rewrite AI Core internals.
+- **External AI cannot apply code.** External providers review hypotheses/final results only.
+- **Patch Engineer cannot apply code.** It creates a candidate only.
+- **Patch application requires explicit approval.** A generated candidate is not authorization to write.
+- **Evidence Search is authoritative only when its result is final-valid.** Rejected/insufficient evidence is carried as uncertainty.
+- **TGserver is API-only.** Direct Telegram/Redis/Meilisearch access is outside the DebugAI runtime contract.
+- **Secrets must never be emitted to logs or committed to this repository.**
+- **Repository writes must stay inside the workspace/allowlist boundary.**
+
+## Runtime validation status
+
+As of 2026-09-26, real Contabo validation has demonstrated:
+
+- AI Core authenticated access through the single API entrypoint;
+- Code Scout and Causal Scout execution;
+- Researcher execution with thinking disabled;
+- Diagnoser execution with thinking enabled and a measured role-specific timeout budget;
+- Evidence Search signed API reach plus explicit evidence-gap handling;
+- TGserver runtime logging and knowledge search/promotion adapter paths;
+- Groq and Gemini external-review reach;
+- external-review verdict normalization (`PASS|FAIL|PENDING`);
+- `/v1/analyze` reaching both internal diagnosis and external hypothesis review;
+- Docker build/recreate/health on the Contabo runtime.
+
+The full real closed-loop acceptance gate — Patch Candidate -> Master Approval -> Apply -> Retest -> Local Review -> External Final Review -> COMPLETE — must be proven by real E2E before the project is called complete. This README intentionally does not claim that final gate prematurely.
+
+## Non-goals
+
+DebugAI is not:
+
+- an unrestricted autonomous code writer;
+- a replacement for AI Core routing/model residency;
+- a direct TGserver storage client;
+- a direct Evidence Search implementation;
+- a mechanism for bypassing explicit patch approval;
+- a reason to treat weak or missing evidence as authoritative fact.
+
+Its job is to make debugging faster **without removing evidence, verification, repository, approval, and security boundaries**.
