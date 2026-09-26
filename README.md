@@ -59,7 +59,7 @@ All internal AI execution goes through the AI Core API. DebugAI does not directl
 | Patch Engineer | Qwen2.5-Coder 7B | provider default | candidate generation only; never applies |
 | Local Reviewer | Ministral 3 8B Reasoning | provider default | deterministic-result review |
 
-The Diagnoser has a role-specific 180 s timeout. Other AI Core calls retain the default 120 s timeout. This exists because real Contabo profiling measured the thinking-enabled Diagnoser close to the previous global timeout ceiling.
+The Researcher and Diagnoser have role-specific 180 s timeouts. Code Scout, Causal Scout, Patch Engineer, and Local Reviewer retain the default 120 s timeout. These role-specific budgets are based on real Contabo measurements: the thinking-enabled Diagnoser was measured close to the previous 120 s ceiling, and the Researcher later hit the default 120 s boundary on a larger real-repository evidence payload while both scouts completed well below that limit.
 
 ### External review
 
@@ -94,7 +94,7 @@ A non-final search result such as `REJECTED_INITIAL_QUALITY` is carried forward 
 evidence_gap = true
 ```
 
-It is not treated as authoritative evidence, but it does not by itself crash the whole diagnostic workflow.
+It is not treated as authoritative evidence, but it does not by itself crash the whole diagnostic workflow. The gap is scoped to authoritative Evidence Search; supplied local evidence remains available to Researcher, Diagnoser, and the sanitized external hypothesis review path.
 
 ### TGserver
 
