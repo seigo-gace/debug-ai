@@ -17,7 +17,8 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
   if(!Number.isInteger(maxTimeoutRetries)||maxTimeoutRetries<1) throw new AiCoreError("AI_CORE_RETRY_INVALID","maxTimeoutRetries must be an integer >= 1");
   const endpoint=new URL("/v1/chat/completions",baseUrl).toString();
   const transport=dispatcher||new Agent({headersTimeout:timeoutMs+5000,bodyTimeout:timeoutMs+5000});
-  async function call(role,{system="",user="",maxTokens=1024,responseFormat="json_object",temperature=0}={}){
+  let queueTail=Promise.resolve();
+  async function execute(role,{system="",user="",maxTokens=1024,responseFormat="json_object",temperature=0}={}){
     const cfg=ROLES[role]; if(!cfg) throw new AiCoreError("ROLE_INVALID",`Unknown DebugAI role: ${role}`);
     const effectiveTimeoutMs=resolveRoleTimeoutMs(role,timeoutMs);
     const body={
@@ -46,6 +47,14 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
       }finally{clearTimeout(timer);}
     }
     throw new AiCoreError("AI_CORE_TIMEOUT","AI Core timeout retry loop exhausted",{timeout_ms:effectiveTimeoutMs,attempts:maxTimeoutRetries});
+  }
+  async function call(role,options={}){
+    let release;
+    const turn=new Promise(resolve=>{release=resolve;});
+    const previous=queueTail;
+    queueTail=turn;
+    await previous;
+    try{return await execute(role,options);}finally{release();}
   }
   return {endpoint,call};
 }
