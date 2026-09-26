@@ -2,6 +2,19 @@
 const crypto=require("node:crypto");
 const {assertPromotable}=require("./asset-promotion.js");
 function parseJson(c){if(typeof c!=="string")return c;return JSON.parse(c.trim().replace(/^```json\s*/i,"").replace(/```$/i,"").trim());}
+function pickDiagnosisStatement(diagnosisJson){
+  if(diagnosisJson?.public_statement)return String(diagnosisJson.public_statement);
+  if(diagnosisJson?.hypothesis)return String(diagnosisJson.hypothesis);
+  if(Array.isArray(diagnosisJson?.diagnoses)&&diagnosisJson.diagnoses[0]?.hypothesis)return String(diagnosisJson.diagnoses[0].hypothesis);
+  return "behavioral mismatch";
+}
+function publicLocalEvidence(localEvidence){
+  return (Array.isArray(localEvidence)?localEvidence:[]).map((item,index)=>({
+    id:String(item?.id||`L${String(index+1).padStart(3,"0")}`),
+    kind:String(item?.kind||"local"),
+    observation:String(item?.observation||item?.summary||"")
+  })).filter(item=>item.observation);
+}
 function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeEvidence=null,tgserver=null,patchService=null,authority=null}={}){
   if(!aiCore)throw new Error("AI_CORE_ADAPTER_REQUIRED");
   async function logRuntime(event){if(tgserver)await tgserver.log(event);}
@@ -34,10 +47,11 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
     const official=evidenceResult.official;
     const evidenceGap=evidenceResult.evidenceGap;
     const evidenceStatus=evidenceResult.evidenceStatus;
-    const research=await aiCore.call("researcher",{system:"Researcher. Select decisive evidence. JSON only. If evidence_gap is true, do not treat official evidence as confirmed.",user:JSON.stringify({failure,localEvidence,scouts:scouts.map(x=>parseJson(x.content)),knownKnowledge,official,evidence_gap:evidenceGap,evidence_status:evidenceStatus})});
-    const diagnosis=await aiCore.call("diagnoser",{system:"Diagnoser. Produce falsifiable diagnosis. JSON only. Preserve uncertainty when evidence_gap is true.",user:JSON.stringify({failure,research:parseJson(research.content),knownKnowledge,evidence_gap:evidenceGap,evidence_status:evidenceStatus})});
+    const research=await aiCore.call("researcher",{system:"Researcher. Select decisive evidence. JSON only. If evidence_gap is true, do not treat official evidence as confirmed; local evidence remains available and must be evaluated on its own merits.",user:JSON.stringify({failure,localEvidence,scouts:scouts.map(x=>parseJson(x.content)),knownKnowledge,official,evidence_gap:evidenceGap,evidence_status:evidenceStatus,evidence_gap_scope:"official_evidence_search"})});
+    const diagnosis=await aiCore.call("diagnoser",{system:"Diagnoser. Produce falsifiable diagnosis. JSON only. Preserve uncertainty about official evidence when evidence_gap is true, but do not discard supplied local evidence.",user:JSON.stringify({failure,localEvidence,research:parseJson(research.content),knownKnowledge,official,evidence_gap:evidenceGap,evidence_status:evidenceStatus,evidence_gap_scope:"official_evidence_search"})});
     const diagnosisJson=parseJson(diagnosis.content);
-    const hypothesis={privacy_class:"PUBLIC",sanitized:true,opaque_evidence:true,statement:String(diagnosisJson?.public_statement||"behavioral mismatch"),cause_class:String(diagnosisJson?.cause_kind||"UNKNOWN"),evidence_count:localEvidence.length+knownKnowledge.length+official.length,evidence_gap:evidenceGap,evidence_status:evidenceStatus};
+    const localPublic=publicLocalEvidence(localEvidence);
+    const hypothesis={privacy_class:"PUBLIC",sanitized:true,opaque_evidence:true,statement:pickDiagnosisStatement(diagnosisJson),cause_class:String(diagnosisJson?.cause_kind||"UNKNOWN"),evidence_count:localEvidence.length+knownKnowledge.length+official.length,local_evidence_count:localPublic.length,local_evidence:localPublic,evidence_gap:evidenceGap,evidence_status:evidenceStatus,evidence_gap_scope:evidenceGap?"official_evidence_search":null};
     let external=null;if(externalReview)external=await externalReview.hypothesis({privacy:{privacy_class:"PUBLIC",sanitized:true,opaque_evidence:true},hypothesis});
     const result={run_id:runId,scouts:scouts.map(x=>parseJson(x.content)),known_knowledge:knownKnowledge,official_evidence:official,evidence_gap:evidenceGap,evidence_status:evidenceStatus,research:parseJson(research.content),diagnosis:diagnosisJson,external_hypothesis_review:external,state:external?.json?.verdict==="PASS"?"HYPOTHESIS_APPROVED":"AWAITING_EXTERNAL_HYPOTHESIS_REVIEW"};
     runtimeEvidence?.write(runId,"analysis",result);
@@ -76,4 +90,4 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
   async function searchKnowledge(query,opts={}){if(!tgserver)throw new Error("TGSERVER_ADAPTER_REQUIRED");return tgserver.search(query,opts);}
   return {runAnalysis,patchCandidate,approveAndVerify,promote,searchKnowledge};
 }
-module.exports={createWorkflow};
+module.exports={createWorkflow,pickDiagnosisStatement,publicLocalEvidence};
