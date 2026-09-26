@@ -9,6 +9,7 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
   const endpoint=new URL("/v1/chat/completions",baseUrl).toString();
   async function call(role,{system="",user="",maxTokens=1024,responseFormat="json_object",temperature=0}={}){
     const cfg=ROLES[role]; if(!cfg) throw new AiCoreError("ROLE_INVALID",`Unknown DebugAI role: ${role}`);
+    const effectiveTimeoutMs=Number.isFinite(cfg.timeout_ms)&&cfg.timeout_ms>0?cfg.timeout_ms:timeoutMs;
     const body={
       model:cfg.backend_model,
       messages:[{role:"system",content:system},{role:"user",content:user}],
@@ -18,14 +19,14 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
       response_format:responseFormat?{type:responseFormat}:undefined
     };
     if(typeof cfg.thinking==="boolean") body.chat_template_kwargs={enable_thinking:cfg.thinking};
-    const ctl=new AbortController(); const timer=setTimeout(()=>ctl.abort(),timeoutMs);
+    const ctl=new AbortController(); const timer=setTimeout(()=>ctl.abort(),effectiveTimeoutMs);
     try{
       const r=await fetchImpl(endpoint,{method:"POST",headers:{authorization:`Bearer ${apiKey}`,"content-type":"application/json"},body:JSON.stringify(body),signal:ctl.signal});
       const text=await r.text(); if(!r.ok) throw new AiCoreError("AI_CORE_HTTP",`AI Core HTTP ${r.status}`,{status:r.status,body:text.slice(0,500)});
       let envelope; try{envelope=JSON.parse(text)}catch{throw new AiCoreError("AI_CORE_ENVELOPE","AI Core returned non-JSON envelope");}
       const content=envelope?.choices?.[0]?.message?.content; if(typeof content!=="string"||!content.trim()) throw new AiCoreError("AI_CORE_EMPTY","AI Core returned empty content");
       return {provider:"llama-swap",role,alias:cfg.alias,model:cfg.backend_model,thinking:cfg.thinking,content,raw:envelope};
-    }catch(e){if(e?.name==="AbortError") throw new AiCoreError("AI_CORE_TIMEOUT",`AI Core timeout after ${timeoutMs}ms`);throw e;}finally{clearTimeout(timer);}
+    }catch(e){if(e?.name==="AbortError") throw new AiCoreError("AI_CORE_TIMEOUT",`AI Core timeout after ${effectiveTimeoutMs}ms`);throw e;}finally{clearTimeout(timer);}
   }
   return {endpoint,call};
 }
