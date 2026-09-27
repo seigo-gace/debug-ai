@@ -26,47 +26,51 @@ function copySnapshot(source,destination,{maxFiles=8000,maxBytes=256*1024*1024}=
   }
   visit(root,destination);return {files,bytes,skipped_symlinks:skippedSymlinks};
 }
-function safeSystemBinds(){const candidates=["/usr","/lib","/lib64"];return candidates.filter(p=>fs.existsSync(p));}
-function repoNodeModules(repo){
-  const candidate=path.join(repo,"node_modules");if(!fs.existsSync(candidate))return null;
-  const st=fs.lstatSync(candidate);if(st.isSymbolicLink()||!st.isDirectory())return null;
-  const real=fs.realpathSync(candidate),root=fs.realpathSync(repo),rel=path.relative(root,real);if(rel.startsWith("..")||path.isAbsolute(rel))return null;return real;
+function buildSandboxArgs({snapshotDir,tmpDir,timeoutMs,command,args=[]}={}){
+  if(!snapshotDir||!tmpDir||!command||!Number.isInteger(timeoutMs))throw new Error("SANDBOX_HELPER_ARGS_REQUIRED");
+  return ["--snapshot",snapshotDir,"--tmp",tmpDir,"--timeout-ms",String(timeoutMs),"--",command,...args];
 }
-function buildBubblewrapArgs({snapshotDir,nodeModulesDir=null,command,args=[]}={}){
-  if(!snapshotDir||!command)throw new Error("SANDBOX_BWRAP_ARGS_REQUIRED");
-  const out=["--die-with-parent","--unshare-all","--new-session"];
-  for(const p of safeSystemBinds())out.push("--ro-bind",p,p);
-  out.push("--proc","/proc","--dev","/dev","--tmpfs","/tmp","--dir","/tmp/home","--bind",snapshotDir,"/sandbox");
-  if(nodeModulesDir)out.push("--ro-bind",nodeModulesDir,"/sandbox/node_modules");
-  out.push("--chdir","/sandbox","--clearenv","--setenv","PATH","/usr/local/bin:/usr/bin:/bin","--setenv","HOME","/tmp/home","--setenv","TMPDIR","/tmp","--setenv","CI","1","--setenv","NO_COLOR","1","--",command,...args);
-  return out;
-}
-function probeBubblewrap({command=process.env.DEBUG_AI_BWRAP_COMMAND||"bwrap",spawnSyncImpl=cp.spawnSync}={}){
-  const r=spawnSyncImpl(command,["--version"],{encoding:"utf8",shell:false,timeout:5000,windowsHide:true});
-  return {available:r.status===0,command,version:String(r.stdout||r.stderr||"").trim().slice(0,200),code:Number.isInteger(r.status)?r.status:1,error:r.error?String(r.error.message||r.error):null};
+function probeSandboxHelper({command=process.env.DEBUG_AI_SANDBOX_COMMAND||"debugai-sandbox-exec",spawnSyncImpl=cp.spawnSync}={}){
+  const r=spawnSyncImpl(command,["--probe"],{encoding:"utf8",shell:false,timeout:5000,windowsHide:true,env:{PATH:process.env.PATH||"/usr/local/bin:/usr/bin:/bin"}});
+  const text=String(r.stdout||r.stderr||"").trim().slice(0,500),match=text.match(/LANDLOCK_ABI=(\d+)/);
+  return {available:r.status===0&&Boolean(match),command,landlock_abi:match?Number(match[1]):null,details:text,code:Number.isInteger(r.status)?r.status:1,error:r.error?String(r.error.message||r.error):null};
 }
 function resolveAction(repo,action,args={}){
   if(!ACTIONS.has(action))throw new Error(`SANDBOX_ACTION_INVALID:${action}`);
   if(action==="node.check"){
     const rel=safeRel(args.path);if(!/\.[cm]?js$/i.test(rel))throw new Error(`SANDBOX_NODE_CHECK_EXTENSION:${rel}`);
-    return {command:process.execPath,args:["--check",`/sandbox/${rel}`],label:`node --check ${rel}`};
+    return {command:process.execPath,args:["--check",rel],label:`node --check ${rel}`};
   }
   const pkgPath=path.join(repo,"package.json");if(!fs.existsSync(pkgPath))throw new Error("SANDBOX_PACKAGE_JSON_REQUIRED");
   const pkg=JSON.parse(fs.readFileSync(pkgPath,"utf8").replace(/^\uFEFF/,"")),script=SCRIPT_BY_ACTION[action];
   if(typeof pkg?.scripts?.[script]!=="string"||!pkg.scripts[script].trim())throw new Error(`SANDBOX_SCRIPT_NOT_CONFIGURED:${script}`);
   const pm=packageManager(repo,pkg);return {command:pm,args:["run",script],label:`${pm} run ${script}`};
 }
-function executeSandboxed({repo,runtimeRoot,action,args={},timeoutMs=120000,bwrapCommand=process.env.DEBUG_AI_BWRAP_COMMAND||"bwrap",spawnSyncImpl=cp.spawnSync}={}){
-  if(!repo||!runtimeRoot)throw new Error("SANDBOX_REPO_RUNTIME_REQUIRED");if(!Number.isInteger(timeoutMs)||timeoutMs<1000||timeoutMs>300000)throw new Error("SANDBOX_TIMEOUT_INVALID");
-  const root=fs.realpathSync(repo),probe=probeBubblewrap({command:bwrapCommand,spawnSyncImpl});if(!probe.available)throw new Error(`SANDBOX_BWRAP_UNAVAILABLE:${probe.error||probe.code}`);
-  fs.mkdirSync(runtimeRoot,{recursive:true});const holder=fs.mkdtempSync(path.join(runtimeRoot,"sandbox-")),snapshot=path.join(holder,"repo");
+function normalizeJobRoot(jobRoot){const root=path.resolve(String(jobRoot||""));if(!root||root===path.parse(root).root)throw new Error("SANDBOX_JOB_ROOT_INVALID");return root;}
+function prepareSandboxJob({sourceRepo,jobRoot,action,args={},timeoutMs=120000}={}){
+  if(!sourceRepo||!jobRoot)throw new Error("SANDBOX_JOB_INPUT_REQUIRED");if(!ACTIONS.has(action))throw new Error(`SANDBOX_ACTION_INVALID:${action}`);if(!Number.isInteger(timeoutMs)||timeoutMs<1000||timeoutMs>300000)throw new Error("SANDBOX_TIMEOUT_INVALID");
+  const source=fs.realpathSync(sourceRepo),root=normalizeJobRoot(jobRoot),jobs=path.join(root,"jobs");fs.mkdirSync(jobs,{recursive:true});
+  const jobId=`JOB_${crypto.randomBytes(12).toString("hex")}`,pending=path.join(jobs,`.pending-${jobId}`),finalDir=path.join(jobs,jobId),snapshot=path.join(pending,"repo"),tmpDir=path.join(pending,"tmp");
+  fs.mkdirSync(pending,{recursive:false});fs.mkdirSync(tmpDir,{recursive:true});
   try{
-    const copied=copySnapshot(root,snapshot),resolved=resolveAction(root,action,args),nodeModulesDir=repoNodeModules(root);
-    if(nodeModulesDir)fs.mkdirSync(path.join(snapshot,"node_modules"),{recursive:true});
-    const bwrapArgs=buildBubblewrapArgs({snapshotDir:snapshot,nodeModulesDir,command:resolved.command,args:resolved.args});
-    const started=Date.now(),r=spawnSyncImpl(bwrapCommand,bwrapArgs,{encoding:"utf8",shell:false,timeout:timeoutMs,windowsHide:true,env:{PATH:process.env.PATH||"/usr/local/bin:/usr/bin:/bin"}}),durationMs=Date.now()-started;
-    const timedOut=r?.error?.code==="ETIMEDOUT",code=Number.isInteger(r.status)?r.status:timedOut?124:1;
-    return {schema:"debugai.sandbox-execution/v1",sandbox_id:`SBX_${crypto.createHash("sha256").update(`${root}:${action}:${Date.now()}`).digest("hex").slice(0,20)}`,action,command:resolved.label,code,pass:code===0&&!timedOut,timed_out:timedOut,duration_ms:durationMs,stdout:String(r.stdout||"").slice(-12000),stderr:String(r.stderr||r.error?.message||"").slice(-12000),isolation:{backend:"bubblewrap",network:"UNSHARED",root_filesystem:"MINIMAL_READ_ONLY_BINDS",workspace_mount:"ABSENT",secret_mounts:"ABSENT",environment:"CLEARED_ALLOWLIST_ONLY",snapshot_write_scope:"/sandbox",source_repo_mutation:false},snapshot:{...copied,node_modules_bound_read_only:Boolean(nodeModulesDir)}};
-  }finally{fs.rmSync(holder,{recursive:true,force:true});}
+    const copied=copySnapshot(source,snapshot);const request={schema:"debugai.sandbox-job/v1",job_id:jobId,action,args,timeout_ms:timeoutMs,source_snapshot:{files:copied.files,bytes:copied.bytes,skipped_symlinks:copied.skipped_symlinks}};
+    fs.writeFileSync(path.join(pending,"request.json"),JSON.stringify(request));fs.renameSync(pending,finalDir);return {job_id:jobId,job_dir:finalDir,request};
+  }catch(error){fs.rmSync(pending,{recursive:true,force:true});throw error;}
 }
-module.exports={ACTIONS,protectedRel,safeRel,copySnapshot,safeSystemBinds,repoNodeModules,buildBubblewrapArgs,probeBubblewrap,resolveAction,executeSandboxed};
+function readSandboxRequest(jobDir){
+  const raw=JSON.parse(fs.readFileSync(path.join(jobDir,"request.json"),"utf8"));
+  if(raw?.schema!=="debugai.sandbox-job/v1"||raw.job_id!==path.basename(jobDir)||!ACTIONS.has(raw.action)||!Number.isInteger(raw.timeout_ms)||raw.timeout_ms<1000||raw.timeout_ms>300000||!raw.args||typeof raw.args!=="object"||Array.isArray(raw.args))throw new Error("SANDBOX_JOB_REQUEST_INVALID");return raw;
+}
+function runPreparedSandboxJob({jobDir,sandboxCommand=process.env.DEBUG_AI_SANDBOX_COMMAND||"debugai-sandbox-exec",spawnSyncImpl=cp.spawnSync}={}){
+  if(!jobDir)throw new Error("SANDBOX_JOB_DIR_REQUIRED");const request=readSandboxRequest(jobDir),snapshot=path.join(jobDir,"repo"),tmpDir=path.join(jobDir,"tmp"),probe=probeSandboxHelper({command:sandboxCommand,spawnSyncImpl});
+  if(!probe.available)throw new Error(`SANDBOX_HELPER_UNAVAILABLE:${probe.error||probe.details||probe.code}`);fs.mkdirSync(tmpDir,{recursive:true});const homeDir=path.join(tmpDir,"home"),npmCache=path.join(tmpDir,"npm-cache");fs.mkdirSync(homeDir,{recursive:true});fs.mkdirSync(npmCache,{recursive:true});
+  const resolved=resolveAction(snapshot,request.action,request.args),helperArgs=buildSandboxArgs({snapshotDir:snapshot,tmpDir,timeoutMs:request.timeout_ms,command:resolved.command,args:resolved.args});
+  const env={PATH:process.env.PATH||"/usr/local/bin:/usr/bin:/bin",HOME:homeDir,TMPDIR:tmpDir,CI:"1",NO_COLOR:"1",npm_config_cache:npmCache};const started=Date.now();
+  const r=spawnSyncImpl(sandboxCommand,helperArgs,{encoding:"utf8",shell:false,timeout:request.timeout_ms+5000,windowsHide:true,env}),durationMs=Date.now()-started;
+  const code=Number.isInteger(r.status)?r.status:r?.error?.code==="ETIMEDOUT"?124:1,timedOut=code===124||r?.error?.code==="ETIMEDOUT";
+  const result={schema:"debugai.sandbox-result/v1",job_id:request.job_id,action:request.action,command:resolved.label,code,pass:code===0&&!timedOut,timed_out:timedOut,duration_ms:durationMs,stdout:String(r.stdout||"").slice(-12000),stderr:String(r.stderr||r.error?.message||"").slice(-12000),isolation:{backend:"sidecar+landlock+seccomp",landlock_abi:probe.landlock_abi,container_network:"NONE_REQUIRED",network:"LANDLOCK_TCP_DENY+SECCOMP_SOCKET_DENY",workspace_mount:"ABSENT",secret_mounts:"ABSENT",docker_socket:"ABSENT",environment:"CLEARED_ALLOWLIST_ONLY",job_child_write_scope:snapshot,signal_ptrace:"SECCOMP_DENY"},snapshot:request.source_snapshot};
+  const tmpResult=path.join(jobDir,".result.json.tmp");fs.writeFileSync(tmpResult,JSON.stringify(result));fs.renameSync(tmpResult,path.join(jobDir,"result.json"));return result;
+}
+function readSandboxResult({jobRoot,jobId}={}){const file=path.join(normalizeJobRoot(jobRoot),"jobs",String(jobId||""),"result.json");if(!fs.existsSync(file))return null;const result=JSON.parse(fs.readFileSync(file,"utf8"));if(result?.schema!=="debugai.sandbox-result/v1"||result.job_id!==jobId)throw new Error("SANDBOX_RESULT_INVALID");return result;}
+async function waitSandboxResult({jobRoot,jobId,timeoutMs=310000,pollMs=100}={}){const started=Date.now();for(;;){const result=readSandboxResult({jobRoot,jobId});if(result)return result;if(Date.now()-started>=timeoutMs)throw new Error(`SANDBOX_RESULT_TIMEOUT:${jobId}`);await new Promise(resolve=>setTimeout(resolve,pollMs));}}
+module.exports={ACTIONS,protectedRel,safeRel,copySnapshot,buildSandboxArgs,probeSandboxHelper,resolveAction,normalizeJobRoot,prepareSandboxJob,readSandboxRequest,runPreparedSandboxJob,readSandboxResult,waitSandboxResult};

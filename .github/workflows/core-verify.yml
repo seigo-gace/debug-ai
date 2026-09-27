@@ -38,7 +38,19 @@ jobs:
         run: node --test server/tests/server.test.cjs
       - name: TypeScript 7 real gate
         run: DEBUG_AI_REQUIRE_TS7_REAL=1 node --test server/tests/typescript7-real.test.cjs
-      - name: Sandbox image build
-        run: docker build -t debug-ai-sandbox-ci .
-      - name: Bubblewrap real isolation gate
-        run: docker run --rm --security-opt no-new-privileges:true --cap-drop ALL debug-ai-sandbox-ci node server/control/sandbox-selftest.js
+      - name: Sandbox sidecar image build
+        run: docker build --target sandbox-runner -t debug-ai-sandbox-ci .
+      - name: Landlock seccomp sidecar real isolation gate
+        run: >-
+          docker run --rm
+          --network none
+          --read-only
+          --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777
+          --tmpfs /sandbox-jobs:rw,nosuid,nodev,size=64m,mode=1777
+          --security-opt no-new-privileges:true
+          --cap-drop ALL
+          --pids-limit 128
+          --memory 512m
+          --cpus 1
+          debug-ai-sandbox-ci
+          node server/control/sandbox-selftest.js

@@ -2,23 +2,22 @@
 const fs=require("node:fs");
 const os=require("node:os");
 const path=require("node:path");
-const {executeSandboxed,probeBubblewrap}=require("./sandbox-runtime.js");
+const crypto=require("node:crypto");
+const {prepareSandboxJob,readSandboxResult,probeSandboxHelper}=require("./sandbox-runtime.js");
+const {runOnce}=require("./sandbox-sidecar.js");
 
 async function main(){
-  const runtimeRoot=process.env.DEBUG_AI_RUNTIME_ROOT||path.join(os.tmpdir(),"debugai-sandbox-runtime");
-  fs.mkdirSync(runtimeRoot,{recursive:true});
-  const source=fs.mkdtempSync(path.join(runtimeRoot,"sandbox-source-"));
+  const jobRoot=process.env.DEBUG_AI_SANDBOX_JOB_ROOT||"/sandbox-jobs",source=fs.mkdtempSync(path.join(os.tmpdir(),"debugai-original-repo-")),guard="/tmp/debugai-original-guard";
+  fs.mkdirSync(jobRoot,{recursive:true});fs.writeFileSync(guard,"ORIGINAL_GUARD\n");
   try{
+    const inner=`const fs=require('node:fs');\nconst net=require('node:net');\nconst dgram=require('node:dgram');\nfunction deny(label,fn){try{fn();throw new Error(label+'_ALLOWED')}catch(e){if(e&&e.message===label+'_ALLOWED')throw e;if(!['EACCES','EPERM','ENOENT'].includes(e&&e.code))throw e;}}\nfunction tcp(){return new Promise((resolve,reject)=>{let settled=false;const done=(err)=>{if(settled)return;settled=true;clearTimeout(timer);if(err&&['EACCES','EPERM'].includes(err.code))resolve();else reject(err||new Error('TCP_SOCKET_ALLOWED'));};let s;try{s=net.createConnection({host:'127.0.0.1',port:9});}catch(e){return done(e)}const timer=setTimeout(()=>{try{s.destroy()}catch{};reject(new Error('TCP_SOCKET_NOT_BLOCKED'))},1000);s.once('connect',()=>done(null));s.once('error',done);});}\nfunction udp(){return new Promise((resolve,reject)=>{let s;try{s=dgram.createSocket('udp4');}catch(e){if(['EACCES','EPERM'].includes(e.code))return resolve();return reject(e)}const timer=setTimeout(()=>{try{s.close()}catch{};reject(new Error('UDP_SOCKET_NOT_BLOCKED'))},1000);s.once('error',e=>{clearTimeout(timer);try{s.close()}catch{};if(['EACCES','EPERM'].includes(e.code))resolve();else reject(e)});try{s.bind(0,'127.0.0.1',()=>{clearTimeout(timer);try{s.close()}catch{};reject(new Error('UDP_BIND_ALLOWED'))})}catch(e){clearTimeout(timer);try{s.close()}catch{};if(['EACCES','EPERM'].includes(e.code))resolve();else reject(e)}});}\n(async()=>{fs.writeFileSync('inside-sandbox.txt','ok');if(fs.existsSync('/workspace'))throw new Error('WORKSPACE_PATH_VISIBLE');if(fs.existsSync('/run/secrets'))throw new Error('SECRET_PATH_VISIBLE');deny('ORIGINAL_READ',()=>fs.readFileSync('/tmp/debugai-original-guard'));deny('ORIGINAL_CHMOD',()=>fs.chmodSync('/tmp/debugai-original-guard',0o777));deny('SIGNAL',()=>process.kill(process.ppid,0));await tcp();await udp();console.log('SANDBOX_INNER_WRITE=PASS');console.log('SANDBOX_WORKSPACE_ABSENT=PASS');console.log('SANDBOX_SECRETS_ABSENT=PASS');console.log('SANDBOX_ORIGINAL_FS_DENY=PASS');console.log('SANDBOX_SIGNAL_DENY=PASS');console.log('SANDBOX_TCP_UDP_DENY=PASS');})().catch(e=>{console.error(e.stack||String(e));process.exit(23)});\n`;
     fs.writeFileSync(path.join(source,"package.json"),JSON.stringify({name:"sandbox-selftest",private:true,scripts:{test:"node sandbox.test.cjs"}},null,2));
-    fs.writeFileSync(path.join(source,"sandbox.test.cjs"),`const fs=require('node:fs');\n(async()=>{\nfs.writeFileSync('inside-sandbox.txt','ok');\nif(fs.existsSync('/workspace')){console.error('WORKSPACE_VISIBLE');process.exit(20)}\nif(fs.existsSync('/run/secrets')){console.error('SECRETS_VISIBLE');process.exit(21)}\nlet networkBlocked=false;\ntry{await fetch('https://example.com',{signal:AbortSignal.timeout(2000)})}catch{networkBlocked=true}\nif(!networkBlocked){console.error('NETWORK_AVAILABLE');process.exit(22)}\nconsole.log('SANDBOX_INNER_WRITE=PASS');\nconsole.log('SANDBOX_WORKSPACE_ABSENT=PASS');\nconsole.log('SANDBOX_SECRETS_ABSENT=PASS');\nconsole.log('SANDBOX_NETWORK_BLOCKED=PASS');\n})().catch(e=>{console.error(e.stack||String(e));process.exit(23)});\n`);
-    const probe=probeBubblewrap();if(!probe.available)throw new Error(`BWRAP_PROBE_FAILED:${probe.error||probe.code}`);
-    const result=executeSandboxed({repo:source,runtimeRoot,action:"package.test",timeoutMs:15000});
-    if(!result.pass)throw new Error(`SANDBOX_EXEC_FAILED:${result.code}:${result.stderr}`);
-    if(fs.existsSync(path.join(source,"inside-sandbox.txt")))throw new Error("SOURCE_REPO_MUTATED");
-    for(const marker of ["SANDBOX_INNER_WRITE=PASS","SANDBOX_WORKSPACE_ABSENT=PASS","SANDBOX_SECRETS_ABSENT=PASS","SANDBOX_NETWORK_BLOCKED=PASS"]){if(!result.stdout.includes(marker))throw new Error(`SANDBOX_MARKER_MISSING:${marker}`);}
-    console.log(`BWRAP_VERSION=${probe.version}`);
-    console.log("SANDBOX_SOURCE_REPO_MUTATION=NONE");
-    console.log("SANDBOX_REAL_ISOLATION=PASS");
-  }finally{fs.rmSync(source,{recursive:true,force:true});}
+    fs.writeFileSync(path.join(source,"sandbox.test.cjs"),inner);fs.writeFileSync(path.join(source,"source-marker.txt"),"SOURCE_UNCHANGED\n");
+    const before=crypto.createHash("sha256").update(fs.readFileSync(path.join(source,"source-marker.txt"))).digest("hex"),probe=probeSandboxHelper();if(!probe.available)throw new Error(`SANDBOX_HELPER_PROBE_FAILED:${probe.details||probe.error||probe.code}`);
+    const job=prepareSandboxJob({sourceRepo:source,jobRoot,action:"package.test",timeoutMs:15000});const executed=runOnce({jobRoot});if(!executed)throw new Error("SANDBOX_JOB_NOT_EXECUTED");const result=readSandboxResult({jobRoot,jobId:job.job_id});if(!result||!result.pass)throw new Error(`SANDBOX_EXEC_FAILED:${result?.code}:${result?.stderr||"missing"}`);
+    const after=crypto.createHash("sha256").update(fs.readFileSync(path.join(source,"source-marker.txt"))).digest("hex");if(before!==after)throw new Error("SOURCE_REPO_HASH_CHANGED");if(fs.existsSync(path.join(source,"inside-sandbox.txt")))throw new Error("SOURCE_REPO_MUTATED");if(fs.readFileSync(guard,"utf8")!=="ORIGINAL_GUARD\n")throw new Error("ORIGINAL_GUARD_MUTATED");
+    for(const marker of ["SANDBOX_INNER_WRITE=PASS","SANDBOX_WORKSPACE_ABSENT=PASS","SANDBOX_SECRETS_ABSENT=PASS","SANDBOX_ORIGINAL_FS_DENY=PASS","SANDBOX_SIGNAL_DENY=PASS","SANDBOX_TCP_UDP_DENY=PASS"]){if(!result.stdout.includes(marker))throw new Error(`SANDBOX_MARKER_MISSING:${marker}`);}
+    console.log(`LANDLOCK_ABI=${probe.landlock_abi}`);console.log("SANDBOX_SOURCE_REPO_HASH=UNCHANGED");console.log("SANDBOX_DOCKER_SOCKET=ABSENT");console.log("SANDBOX_REAL_ISOLATION=PASS");
+  }finally{fs.rmSync(source,{recursive:true,force:true});fs.rmSync(guard,{force:true});fs.rmSync(jobRoot,{recursive:true,force:true});}
 }
 main().catch(error=>{console.error(error.stack||String(error));process.exit(1);});
