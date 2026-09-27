@@ -69,7 +69,7 @@ struct sock_filter filter[256];size_t n=0;PUSH(BPF_STMT(BPF_LD|BPF_W|BPF_ABS,off
 if(allow_loopback_tcp){PUSH(BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K,__NR_socket,0,12));PUSH(BPF_STMT(BPF_LD|BPF_W|BPF_ABS,offsetof(struct seccomp_data,args[0])));PUSH(BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K,AF_INET,2,0));PUSH(BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K,AF_INET6,1,0));DENY_CURRENT();PUSH(BPF_STMT(BPF_LD|BPF_W|BPF_ABS,offsetof(struct seccomp_data,args[1])));PUSH(BPF_STMT(BPF_ALU|BPF_AND|BPF_K,SOCK_TYPE_MASK));PUSH(BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K,SOCK_STREAM,1,0));DENY_CURRENT();PUSH(BPF_STMT(BPF_LD|BPF_W|BPF_ABS,offsetof(struct seccomp_data,args[2])));PUSH(BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K,0,2,0));PUSH(BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K,IPPROTO_TCP,1,0));DENY_CURRENT();PUSH(BPF_STMT(BPF_LD|BPF_W|BPF_ABS,offsetof(struct seccomp_data,nr)));}else{DENY_SYSCALL(__NR_socket);}
 #endif
 #ifdef __NR_socketpair
-DENY_SYSCALL(__NR_socketpair);
+PUSH(BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K,__NR_socketpair,0,10));PUSH(BPF_STMT(BPF_LD|BPF_W|BPF_ABS,offsetof(struct seccomp_data,args[0])));PUSH(BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K,AF_UNIX,1,0));DENY_CURRENT();PUSH(BPF_STMT(BPF_LD|BPF_W|BPF_ABS,offsetof(struct seccomp_data,args[1])));PUSH(BPF_STMT(BPF_ALU|BPF_AND|BPF_K,SOCK_TYPE_MASK));PUSH(BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K,SOCK_STREAM,1,0));DENY_CURRENT();PUSH(BPF_STMT(BPF_LD|BPF_W|BPF_ABS,offsetof(struct seccomp_data,args[2])));PUSH(BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K,0,1,0));DENY_CURRENT();PUSH(BPF_STMT(BPF_LD|BPF_W|BPF_ABS,offsetof(struct seccomp_data,nr)));
 #endif
 #ifdef __NR_ptrace
 DENY_SYSCALL(__NR_ptrace);
