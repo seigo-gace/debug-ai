@@ -1,6 +1,9 @@
 "use strict";
 const crypto=require("node:crypto");
 const {assertPromotable}=require("./asset-promotion.js");
+const {createReadOnlyToolRuntime}=require("./control/read-only-tool-runtime.js");
+const {runRoleWithReadOnlyTools}=require("./control/tool-loop.js");
+
 function parseJson(c){if(typeof c!=="string")return c;return JSON.parse(c.trim().replace(/^```json\s*/i,"").replace(/```$/i,"").trim());}
 function pickDiagnosisStatement(diagnosisJson){
   if(diagnosisJson?.public_statement)return String(diagnosisJson.public_statement);
@@ -15,9 +18,16 @@ function publicLocalEvidence(localEvidence){
     observation:String(item?.observation||item?.summary||"")
   })).filter(item=>item.observation);
 }
-function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeEvidence=null,tgserver=null,patchService=null,authority=null}={}){
+function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeEvidence=null,tgserver=null,patchService=null,authority=null,repoPolicy=null}={}){
   if(!aiCore)throw new Error("AI_CORE_ADAPTER_REQUIRED");
   async function logRuntime(event){if(tgserver)await tgserver.log(event);}
+  function makeReadOnlyToolRuntime(repoPath){
+    if(!repoPolicy||!repoPath)return null;
+    return createReadOnlyToolRuntime({repo:repoPath,repoPolicy,tgserver,evidenceSearch});
+  }
+  async function callReadOnlyRole(role,{system,user},toolRuntime){
+    return runRoleWithReadOnlyTools({aiCore,role,system,user,toolRuntime,maxToolRounds:2,maxToolCalls:4});
+  }
   async function getOfficialEvidence(query){
     if(!evidenceSearch)return{official:[],evidenceGap:false,evidenceStatus:"NOT_CONFIGURED"};
     try{
@@ -31,15 +41,20 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
   }
   async function runAnalysis({runId=null,rawRequest="",failure,localEvidence=[],repo=null,projectId=null}={}){
     let authRun=null;
-    if(authority){authRun=authority.start({rawRequest,repo,projectId});runId=authRun.run_id;authority.transition(authRun,"PARSED");authority.transition(authRun,"CONTEXT_READY");authority.transition(authRun,"VERIFYING");authority.transition(authRun,"FAILED");authority.transition(authRun,"RESOLVING");}
+    if(authority){
+      authRun=authority.start({rawRequest,repo,projectId});runId=authRun.run_id;
+      authority.transition(authRun,"PARSED");authority.transition(authRun,"CONTEXT_READY");authority.transition(authRun,"VERIFYING");authority.transition(authRun,"FAILED");authority.transition(authRun,"RESOLVING");
+    }
     runId=runId||crypto.randomUUID();
+    const targetRepo=authRun?.project_dir||(repoPolicy&&repo?repoPolicy.assertRepo(repo):null);
+    const toolRuntime=makeReadOnlyToolRuntime(targetRepo);
     runtimeEvidence?.write(runId,"failure",failure);
     await logRuntime({run_id:runId,severity:"error",kind:"failure",failure});
     const query=String(failure?.message||failure?.summary||"debug failure");
     const [scouts,knownKnowledge,evidenceResult]=await Promise.all([
       Promise.all([
-        aiCore.call("code_scout",{system:"Code Scout. JSON only.",user:JSON.stringify({failure,evidence:localEvidence})}),
-        aiCore.call("causal_scout",{system:"Causal Scout. JSON only.",user:JSON.stringify({failure,evidence:localEvidence})})
+        callReadOnlyRole("code_scout",{system:"Code Scout. JSON only.",user:JSON.stringify({failure,evidence:localEvidence})},toolRuntime),
+        callReadOnlyRole("causal_scout",{system:"Causal Scout. JSON only.",user:JSON.stringify({failure,evidence:localEvidence})},toolRuntime)
       ]),
       tgserver?tgserver.search(query):Promise.resolve([]),
       getOfficialEvidence(query),
@@ -47,8 +62,8 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
     const official=evidenceResult.official;
     const evidenceGap=evidenceResult.evidenceGap;
     const evidenceStatus=evidenceResult.evidenceStatus;
-    const research=await aiCore.call("researcher",{system:"Researcher. Select decisive evidence. JSON only. If evidence_gap is true, do not treat official evidence as confirmed; local evidence remains available and must be evaluated on its own merits.",user:JSON.stringify({failure,localEvidence,scouts:scouts.map(x=>parseJson(x.content)),knownKnowledge,official,evidence_gap:evidenceGap,evidence_status:evidenceStatus,evidence_gap_scope:"official_evidence_search"})});
-    const diagnosis=await aiCore.call("diagnoser",{system:"Diagnoser. Produce falsifiable diagnosis. JSON only. Preserve uncertainty about official evidence when evidence_gap is true, but do not discard supplied local evidence.",user:JSON.stringify({failure,localEvidence,research:parseJson(research.content),knownKnowledge,official,evidence_gap:evidenceGap,evidence_status:evidenceStatus,evidence_gap_scope:"official_evidence_search"})});
+    const research=await callReadOnlyRole("researcher",{system:"Researcher. Select decisive evidence. JSON only. If evidence_gap is true, do not treat official evidence as confirmed; local evidence remains available and must be evaluated on its own merits.",user:JSON.stringify({failure,localEvidence,scouts:scouts.map(x=>parseJson(x.content)),knownKnowledge,official,evidence_gap:evidenceGap,evidence_status:evidenceStatus,evidence_gap_scope:"official_evidence_search"})},toolRuntime);
+    const diagnosis=await callReadOnlyRole("diagnoser",{system:"Diagnoser. Produce falsifiable diagnosis. JSON only. Preserve uncertainty about official evidence when evidence_gap is true, but do not discard supplied local evidence.",user:JSON.stringify({failure,localEvidence,research:parseJson(research.content),knownKnowledge,official,evidence_gap:evidenceGap,evidence_status:evidenceStatus,evidence_gap_scope:"official_evidence_search"})},toolRuntime);
     const diagnosisJson=parseJson(diagnosis.content);
     const localPublic=publicLocalEvidence(localEvidence);
     const hypothesis={privacy_class:"PUBLIC",sanitized:true,opaque_evidence:true,statement:pickDiagnosisStatement(diagnosisJson),cause_class:String(diagnosisJson?.cause_kind||"UNKNOWN"),evidence_count:localEvidence.length+knownKnowledge.length+official.length,local_evidence_count:localPublic.length,local_evidence:localPublic,evidence_gap:evidenceGap,evidence_status:evidenceStatus,evidence_gap_scope:evidenceGap?"official_evidence_search":null};

@@ -26,6 +26,6 @@ const runtimeEvidence=new RuntimeEvidenceStore(runtimeRoot);
 if(!process.env.GROQ_API_KEY&&!process.env.GEMINI_API_KEY)throw new Error("EXTERNAL_REVIEW_PROVIDER_REQUIRED");
 const externalReview=createExternalReviewAdapter();
 const patchService=new PatchService({runtimeRoot,repoPolicy});
-const workflow=createWorkflow({aiCore,externalReview,evidenceSearch,runtimeEvidence,tgserver,patchService,authority});
+const workflow=createWorkflow({aiCore,externalReview,evidenceSearch,runtimeEvidence,tgserver,patchService,authority,repoPolicy});
 const host=process.env.DEBUG_AI_HOST||"127.0.0.1",port=Number(process.env.DEBUG_AI_PORT||8787);
 createServer({workflow,host,port}).listen(port,host,()=>console.log(`DebugAI listening on http://${host}:${port}`));
