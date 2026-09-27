@@ -52,9 +52,10 @@ static const uint64_t FS_READ_EXEC = LANDLOCK_ACCESS_FS_EXECUTE|LANDLOCK_ACCESS_
 static long ll_create(const void *attr,size_t size,uint32_t flags){return syscall(SYS_landlock_create_ruleset,attr,size,flags);} static long ll_add(int fd,int type,const void *attr,uint32_t flags){return syscall(SYS_landlock_add_rule,fd,type,attr,flags);} static long ll_restrict(int fd,uint32_t flags){return syscall(SYS_landlock_restrict_self,fd,flags);}
 static int landlock_abi(void){errno=0;long abi=ll_create(NULL,0,LANDLOCK_CREATE_RULESET_VERSION);return abi<0?-1:(int)abi;}
 static int add_path_rule(int ruleset_fd,const char *path,uint64_t allowed,int required){int fd=open(path,O_PATH|O_CLOEXEC);if(fd<0){if(!required&&errno==ENOENT)return 0;fprintf(stderr,"SANDBOX_PATH_OPEN_FAILED:%s:%s\n",path,strerror(errno));return -1;}struct landlock_path_beneath_attr rule={.allowed_access=allowed,.parent_fd=fd};int rc=(int)ll_add(ruleset_fd,LANDLOCK_RULE_PATH_BENEATH,&rule,0),saved=errno;close(fd);if(rc<0){fprintf(stderr,"SANDBOX_PATH_RULE_FAILED:%s:%s\n",path,strerror(saved));errno=saved;return -1;}return 0;}
-static int apply_landlock(const char *snapshot,const char *tmpdir,const char *node_modules,int allow_loopback_tcp){int abi=landlock_abi();if(abi<4){fprintf(stderr,"SANDBOX_LANDLOCK_ABI_REQUIRED:4:actual=%d\n",abi);return -1;}uint64_t handled_fs=FS_BASE|LANDLOCK_ACCESS_FS_REFER|LANDLOCK_ACCESS_FS_TRUNCATE;struct debugai_ruleset_attr attr={.handled_access_fs=handled_fs,.handled_access_net=allow_loopback_tcp?0:(LANDLOCK_ACCESS_NET_BIND_TCP|LANDLOCK_ACCESS_NET_CONNECT_TCP)};int ruleset_fd=(int)ll_create(&attr,sizeof(attr),0);if(ruleset_fd<0){fprintf(stderr,"SANDBOX_LANDLOCK_CREATE_FAILED:%s\n",strerror(errno));return -1;}const char *readonly[]={"/usr","/usr/local","/bin","/lib","/lib64","/etc"};for(size_t i=0;i<sizeof(readonly)/sizeof(readonly[0]);i++)if(add_path_rule(ruleset_fd,readonly[i],FS_READ_EXEC,0)<0)goto fail;if(add_path_rule(ruleset_fd,"/dev/null",LANDLOCK_ACCESS_FS_READ_FILE|LANDLOCK_ACCESS_FS_WRITE_FILE,0)<0)goto fail;if(add_path_rule(ruleset_fd,"/dev/urandom",LANDLOCK_ACCESS_FS_READ_FILE,0)<0)goto fail;uint64_t rw=FS_READ_EXEC|LANDLOCK_ACCESS_FS_WRITE_FILE|LANDLOCK_ACCESS_FS_REMOVE_DIR|LANDLOCK_ACCESS_FS_REMOVE_FILE|LANDLOCK_ACCESS_FS_MAKE_DIR|LANDLOCK_ACCESS_FS_MAKE_REG|LANDLOCK_ACCESS_FS_MAKE_SYM|LANDLOCK_ACCESS_FS_REFER|LANDLOCK_ACCESS_FS_TRUNCATE;if(add_path_rule(ruleset_fd,snapshot,rw,1)<0)goto fail;if(add_path_rule(ruleset_fd,tmpdir,rw,1)<0)goto fail;if(node_modules&&node_modules[0]&&add_path_rule(ruleset_fd,node_modules,FS_READ_EXEC,1)<0)goto fail;if(prctl(PR_SET_NO_NEW_PRIVS,1,0,0,0)!=0){fprintf(stderr,"SANDBOX_NO_NEW_PRIVS_FAILED:%s\n",strerror(errno));goto fail;}if(ll_restrict(ruleset_fd,0)!=0){fprintf(stderr,"SANDBOX_LANDLOCK_RESTRICT_FAILED:%s\n",strerror(errno));goto fail;}close(ruleset_fd);return abi;fail:close(ruleset_fd);return -1;}
+static int apply_landlock(const char *snapshot,const char *tmpdir,const char *node_modules,int allow_loopback_tcp){int abi=landlock_abi();if(abi<4){fprintf(stderr,"SANDBOX_LANDLOCK_ABI_REQUIRED:4:actual=%d\n",abi);return -1;}uint64_t handled_fs=FS_BASE|LANDLOCK_ACCESS_FS_REFER|LANDLOCK_ACCESS_FS_TRUNCATE;struct debugai_ruleset_attr attr={.handled_access_fs=handled_fs,.handled_access_net=allow_loopback_tcp?0:(LANDLOCK_ACCESS_NET_BIND_TCP|LANDLOCK_ACCESS_NET_CONNECT_TCP)};int ruleset_fd=(int)ll_create(&attr,sizeof(attr),0);if(ruleset_fd<0){fprintf(stderr,"SANDBOX_LANDLOCK_CREATE_FAILED:%s\n",strerror(errno));return -1;}const char *readonly[]={"/usr","/usr/local","/bin","/lib","/lib64","/etc"};for(size_t i=0;i<sizeof(readonly)/sizeof(readonly[0]);i++)if(add_path_rule(ruleset_fd,readonly[i],FS_READ_EXEC,0)<0)goto fail;if(add_path_rule(ruleset_fd,"/dev/null",LANDLOCK_ACCESS_FS_READ_FILE|LANDLOCK_ACCESS_FS_WRITE_FILE,0)<0)goto fail;if(add_path_rule(ruleset_fd,"/dev/urandom",LANDLOCK_ACCESS_FS_READ_FILE,0)<0)goto fail;uint64_t rw=FS_READ_EXEC|LANDLOCK_ACCESS_FS_WRITE_FILE|LANDLOCK_ACCESS_FS_REMOVE_DIR|LANDLOCK_ACCESS_FS_REMOVE_FILE|LANDLOCK_ACCESS_FS_MAKE_DIR|LANDLOCK_ACCESS_FS_MAKE_REG|LANDLOCK_ACCESS_FS_MAKE_SYM|LANDLOCK_ACCESS_FS_REFER|LANDLOCK_ACCESS_FS_TRUNCATE;uint64_t tmp_rw=rw|(allow_loopback_tcp?LANDLOCK_ACCESS_FS_MAKE_SOCK:0);if(add_path_rule(ruleset_fd,snapshot,rw,1)<0)goto fail;if(add_path_rule(ruleset_fd,tmpdir,tmp_rw,1)<0)goto fail;if(node_modules&&node_modules[0]&&add_path_rule(ruleset_fd,node_modules,FS_READ_EXEC,1)<0)goto fail;if(prctl(PR_SET_NO_NEW_PRIVS,1,0,0,0)!=0){fprintf(stderr,"SANDBOX_NO_NEW_PRIVS_FAILED:%s\n",strerror(errno));goto fail;}if(ll_restrict(ruleset_fd,0)!=0){fprintf(stderr,"SANDBOX_LANDLOCK_RESTRICT_FAILED:%s\n",strerror(errno));goto fail;}close(ruleset_fd);return abi;fail:close(ruleset_fd);return -1;}
 #define PUSH(stmt) do{if(n>=sizeof(filter)/sizeof(filter[0]))return -1;filter[n++]=(struct sock_filter)stmt;}while(0)
 #define DENY_CURRENT() PUSH(BPF_STMT(BPF_RET|BPF_K,SECCOMP_RET_ERRNO|(EPERM&SECCOMP_RET_DATA)))
+#define ALLOW_CURRENT() PUSH(BPF_STMT(BPF_RET|BPF_K,SECCOMP_RET_ALLOW))
 #define DENY_SYSCALL(nr) do{PUSH(BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K,(nr),0,1));DENY_CURRENT();}while(0)
 static int install_seccomp(int allow_loopback_tcp){
 #if defined(__x86_64__)
@@ -66,7 +67,29 @@ const uint32_t expected_arch=AUDIT_ARCH_AARCH64;
 #endif
 struct sock_filter filter[256];size_t n=0;PUSH(BPF_STMT(BPF_LD|BPF_W|BPF_ABS,offsetof(struct seccomp_data,arch)));PUSH(BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K,expected_arch,1,0));PUSH(BPF_STMT(BPF_RET|BPF_K,SECCOMP_RET_KILL_PROCESS));PUSH(BPF_STMT(BPF_LD|BPF_W|BPF_ABS,offsetof(struct seccomp_data,nr)));
 #ifdef __NR_socket
-if(allow_loopback_tcp){PUSH(BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K,__NR_socket,0,12));PUSH(BPF_STMT(BPF_LD|BPF_W|BPF_ABS,offsetof(struct seccomp_data,args[0])));PUSH(BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K,AF_INET,2,0));PUSH(BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K,AF_INET6,1,0));DENY_CURRENT();PUSH(BPF_STMT(BPF_LD|BPF_W|BPF_ABS,offsetof(struct seccomp_data,args[1])));PUSH(BPF_STMT(BPF_ALU|BPF_AND|BPF_K,SOCK_TYPE_MASK));PUSH(BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K,SOCK_STREAM,1,0));DENY_CURRENT();PUSH(BPF_STMT(BPF_LD|BPF_W|BPF_ABS,offsetof(struct seccomp_data,args[2])));PUSH(BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K,0,2,0));PUSH(BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K,IPPROTO_TCP,1,0));DENY_CURRENT();PUSH(BPF_STMT(BPF_LD|BPF_W|BPF_ABS,offsetof(struct seccomp_data,nr)));}else{DENY_SYSCALL(__NR_socket);}
+if(allow_loopback_tcp){
+PUSH(BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K,__NR_socket,0,20));
+PUSH(BPF_STMT(BPF_LD|BPF_W|BPF_ABS,offsetof(struct seccomp_data,args[0])));
+PUSH(BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K,AF_UNIX,3,0));
+PUSH(BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K,AF_INET,9,0));
+PUSH(BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K,AF_INET6,8,0));
+DENY_CURRENT();
+PUSH(BPF_STMT(BPF_LD|BPF_W|BPF_ABS,offsetof(struct seccomp_data,args[1])));
+PUSH(BPF_STMT(BPF_ALU|BPF_AND|BPF_K,SOCK_TYPE_MASK));
+PUSH(BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K,SOCK_STREAM,0,2));
+PUSH(BPF_STMT(BPF_LD|BPF_W|BPF_ABS,offsetof(struct seccomp_data,args[2])));
+PUSH(BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K,0,0,1));
+ALLOW_CURRENT();
+DENY_CURRENT();
+PUSH(BPF_STMT(BPF_LD|BPF_W|BPF_ABS,offsetof(struct seccomp_data,args[1])));
+PUSH(BPF_STMT(BPF_ALU|BPF_AND|BPF_K,SOCK_TYPE_MASK));
+PUSH(BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K,SOCK_STREAM,0,4));
+PUSH(BPF_STMT(BPF_LD|BPF_W|BPF_ABS,offsetof(struct seccomp_data,args[2])));
+PUSH(BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K,0,2,0));
+PUSH(BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K,IPPROTO_TCP,1,0));
+DENY_CURRENT();
+ALLOW_CURRENT();
+}else{DENY_SYSCALL(__NR_socket);}
 #endif
 #ifdef __NR_socketpair
 PUSH(BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K,__NR_socketpair,0,10));PUSH(BPF_STMT(BPF_LD|BPF_W|BPF_ABS,offsetof(struct seccomp_data,args[0])));PUSH(BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K,AF_UNIX,1,0));DENY_CURRENT();PUSH(BPF_STMT(BPF_LD|BPF_W|BPF_ABS,offsetof(struct seccomp_data,args[1])));PUSH(BPF_STMT(BPF_ALU|BPF_AND|BPF_K,SOCK_TYPE_MASK));PUSH(BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K,SOCK_STREAM,1,0));DENY_CURRENT();PUSH(BPF_STMT(BPF_LD|BPF_W|BPF_ABS,offsetof(struct seccomp_data,args[2])));PUSH(BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K,0,1,0));DENY_CURRENT();PUSH(BPF_STMT(BPF_LD|BPF_W|BPF_ABS,offsetof(struct seccomp_data,nr)));
@@ -182,7 +205,7 @@ DENY_SYSCALL(__NR_futimesat);
 #ifdef __NR_utimensat
 DENY_SYSCALL(__NR_utimensat);
 #endif
-PUSH(BPF_STMT(BPF_RET|BPF_K,SECCOMP_RET_ALLOW));struct sock_fprog prog={.len=(unsigned short)n,.filter=filter};if(prctl(PR_SET_NO_NEW_PRIVS,1,0,0,0)!=0){fprintf(stderr,"SANDBOX_SECCOMP_NNP_FAILED:%s\n",strerror(errno));return -1;}if(prctl(PR_SET_SECCOMP,SECCOMP_MODE_FILTER,&prog)!=0){fprintf(stderr,"SANDBOX_SECCOMP_INSTALL_FAILED:%s\n",strerror(errno));return -1;}return 0;}
+ALLOW_CURRENT();struct sock_fprog prog={.len=(unsigned short)n,.filter=filter};if(prctl(PR_SET_NO_NEW_PRIVS,1,0,0,0)!=0){fprintf(stderr,"SANDBOX_SECCOMP_NNP_FAILED:%s\n",strerror(errno));return -1;}if(prctl(PR_SET_SECCOMP,SECCOMP_MODE_FILTER,&prog)!=0){fprintf(stderr,"SANDBOX_SECCOMP_INSTALL_FAILED:%s\n",strerror(errno));return -1;}return 0;}
 static void close_extra_fds(void){
 #ifdef SYS_close_range
 if(syscall(SYS_close_range,3U,~0U,0U)==0)return;
