@@ -56,6 +56,49 @@ jobs:
           --cpus 1
           debug-ai-sandbox-ci
           node server/control/sandbox-selftest.js
+      - name: Sandbox main-to-sidecar queue round-trip gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          name=debug-ai-sandbox-queue-ci
+          volume=debug_ai_sandbox_queue_ci
+          cleanup() {
+            docker rm -f "$name" >/dev/null 2>&1 || true
+            docker volume rm "$volume" >/dev/null 2>&1 || true
+          }
+          cleanup
+          trap cleanup EXIT
+          docker volume create "$volume" >/dev/null
+          docker run -d --name "$name" \
+            --network none \
+            --read-only \
+            --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 \
+            --security-opt no-new-privileges:true \
+            --cap-drop ALL \
+            --pids-limit 128 \
+            --memory 512m \
+            --cpus 1 \
+            -v "$volume:/sandbox-jobs" \
+            debug-ai-sandbox-ci >/dev/null
+          docker run --rm \
+            --network none \
+            --read-only \
+            --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 \
+            --security-opt no-new-privileges:true \
+            --cap-drop ALL \
+            -v "$volume:/sandbox-jobs" \
+            debug-ai-app-ci \
+            node server/control/sandbox-queue-selftest.js enqueue
+          docker run --rm \
+            --network none \
+            --read-only \
+            --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 \
+            --security-opt no-new-privileges:true \
+            --cap-drop ALL \
+            -v "$volume:/sandbox-jobs" \
+            debug-ai-app-ci \
+            node server/control/sandbox-queue-selftest.js verify
+          docker logs "$name"
       - name: Compose sandbox boundary render gate
         env:
           DEBUG_AI_CORE_URL: http://127.0.0.1:18080
