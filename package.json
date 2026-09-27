@@ -14,6 +14,7 @@
     "benchmark:skill-effect":"node server/control/skill-effect-benchmark.js",
     "benchmark:code-scout-skill-effect":"node server/control/code-scout-skill-effect-benchmark.js",
     "benchmark:causal-scout-skill-effect":"node server/control/causal-scout-skill-effect-benchmark.js",
+    "benchmark:researcher-skill-effect":"node server/control/researcher-skill-effect-benchmark.js",
     "start":"node server/main.js"
   }
 }
