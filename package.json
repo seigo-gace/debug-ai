@@ -11,6 +11,7 @@
     "verify:core":"npm run check && npm test",
     "test:legacy":"node --test legacy/pc-authority/orchestrator/tests/*.cjs legacy/pc-authority/gateway/*.test.mjs",
     "benchmark:local-reviewer":"node server/control/local-reviewer-benchmark.js",
+    "benchmark:skill-effect":"node server/control/skill-effect-benchmark.js",
     "start":"node server/main.js"
   }
 }
