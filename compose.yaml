@@ -1,6 +1,8 @@
 services:
   debug-ai:
-    build: .
+    build:
+      context: .
+      target: debug-ai
     restart: unless-stopped
     network_mode: host
     environment:
@@ -17,6 +19,7 @@ services:
       DEBUG_AI_OSV_SCANNER: /opt/debugai-tools/osv-scanner
       DEBUG_AI_RUNTIME_ROOT: /app/runtime
       DEBUG_AI_WORKSPACE_ROOT: /workspace
+      DEBUG_AI_SANDBOX_JOB_ROOT: /sandbox-jobs
       DEBUG_AI_TS_LSP_COMMAND: /app/node_modules/.bin/tsc
       DEBUG_AI_HOST: 127.0.0.1
       DEBUG_AI_PORT: 8787
@@ -26,6 +29,7 @@ services:
       DEBUG_AI_GEMINI_URL: ${DEBUG_AI_GEMINI_URL:-}
     volumes:
       - debug_ai_runtime:/app/runtime
+      - debug_ai_sandbox_jobs:/sandbox-jobs:rw
       - ${DEBUG_AI_WORKSPACE_HOST_PATH:?required}:/workspace:rw
       - ${DEBUG_AI_OSV_DB_HOST_PATH:?required}:/opt/osv-db:ro
       - ${DEBUG_AI_TOOLS_HOST_PATH:?required}:/opt/debugai-tools:ro
@@ -34,5 +38,30 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+
+  sandbox-runner:
+    build:
+      context: .
+      target: sandbox-runner
+    restart: unless-stopped
+    network_mode: none
+    read_only: true
+    environment:
+      DEBUG_AI_SANDBOX_JOB_ROOT: /sandbox-jobs
+      DEBUG_AI_SANDBOX_COMMAND: /usr/local/bin/debugai-sandbox-exec
+      DEBUG_AI_SANDBOX_POLL_MS: 250
+    volumes:
+      - debug_ai_sandbox_jobs:/sandbox-jobs:rw
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=64m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 128
+    mem_limit: 512m
+    cpus: 1.0
+
 volumes:
   debug_ai_runtime:
+  debug_ai_sandbox_jobs:
