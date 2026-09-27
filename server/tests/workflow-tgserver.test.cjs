@@ -2,7 +2,7 @@ const test=require('node:test');
 const assert=require('node:assert/strict');
 const {createWorkflow}=require('../workflow.js');
 
-test('workflow reuses TGserver KB and emits runtime events',async()=>{
+test('workflow reuses TGserver KB, runtime-registers it for roles, and emits runtime events',async()=>{
   const calls=[];
   const tgserver={
     search:async q=>{calls.push(['search',q]);return [{project_id:'P004',message:'known root cause'}];},
@@ -23,8 +23,13 @@ test('workflow reuses TGserver KB and emits runtime events',async()=>{
   const out=await w.runAnalysis({failure:{message:'boom'}});
   assert.equal(out.state,'HYPOTHESIS_APPROVED');
   assert.equal(out.known_knowledge.length,1);
+  assert.equal(out.known_knowledge[0].message,'known root cause');
   const researcher=JSON.parse(calls.find(x=>x[0]==='ai'&&x[1]==='researcher')[2]);
-  assert.equal(researcher.knownKnowledge[0].message,'known root cause');
+  assert.match(researcher.knownKnowledge[0].evidence_id,/^EVI_[a-f0-9]{24}$/);
+  assert.equal(researcher.knownKnowledge[0].source_type,'INTERNAL_KB');
+  assert.equal(researcher.knownKnowledge[0].payload.message,'known root cause');
+  assert.match(researcher.official[0].evidence_id,/^EVI_[a-f0-9]{24}$/);
+  assert.equal(researcher.official[0].source_type,'OFFICIAL_EXTERNAL');
   assert.ok(calls.some(x=>x[0]==='log'&&x[1]==='failure'&&x[2]==='error'));
   assert.ok(calls.some(x=>x[0]==='log'&&x[1]==='analysis'&&x[2]==='info'));
 });

@@ -35,7 +35,7 @@ test('analysis continues with explicit evidence gap when Astera evidence is non-
   assert.ok(out.diagnosis);
 });
 
-test('local evidence is preserved for Diagnoser and external hypothesis review when official evidence is non-final',async()=>{
+test('local evidence is runtime-registered for Diagnoser while external hypothesis review preserves sanitized public shape',async()=>{
   const err=Object.assign(new Error('Evidence Search status REJECTED_INITIAL_QUALITY'),{
     code:'EVIDENCE_SEARCH_NOT_FINAL',
     meta:{status:'REJECTED_INITIAL_QUALITY'}
@@ -49,7 +49,11 @@ test('local evidence is preserved for Diagnoser and external hypothesis review w
   const out=await w.runAnalysis({failure:{message:'topics:provision unavailable'},localEvidence});
   const diagnoserCall=calls.find(x=>x.role==='diagnoser');
   const diagnoserInput=JSON.parse(diagnoserCall.payload.user);
-  assert.deepEqual(diagnoserInput.localEvidence,localEvidence);
+  assert.equal(diagnoserInput.localEvidence.length,1);
+  assert.match(diagnoserInput.localEvidence[0].evidence_id,/^EVI_[a-f0-9]{24}$/);
+  assert.equal(diagnoserInput.localEvidence[0].source_type,'LOCAL_RUNTIME');
+  assert.equal(diagnoserInput.localEvidence[0].source_ref,'L001');
+  assert.deepEqual(diagnoserInput.localEvidence[0].payload,localEvidence[0]);
   assert.equal(diagnoserInput.evidence_gap_scope,'official_evidence_search');
   assert.equal(externalPayload.hypothesis.statement,'Dockerfile omits scripts directory');
   assert.equal(externalPayload.hypothesis.local_evidence_count,1);
