@@ -6,6 +6,7 @@ const {compileInvocation}=require("./invocation-compiler.js");
 
 const SCHEMA="debugai.researcher-skill-effect-benchmark/v1";
 const ROLE="researcher";
+const MAX_TOKENS=400;
 const OUTPUT_POLICY="Return JSON only with exactly these top-level keys: research_status, answer, evidence_refs, rejected_source_refs, contradictions, bound_version. research_status must be SUPPORTED, CONTRADICTORY_EVIDENCE, or INSUFFICIENT_EVIDENCE. answer must be a short string and must be UNKNOWN when evidence is insufficient or unresolved. evidence_refs/rejected_source_refs/contradictions must be arrays of strings. bound_version must be a string or null. Use only supplied source_ref values. Preserve contradictory evidence and never invent support.";
 
 const CASES=Object.freeze([
@@ -73,7 +74,7 @@ function scoreCase(testCase,value){
 function defaultClient({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=process.env.AI_CORE_API_KEY,fetchImpl=undiciFetch,timeoutMs=600000}={}){
   if(!baseUrl)throw new Error("AI_CORE_URL_REQUIRED");if(!apiKey)throw new Error("AI_CORE_API_KEY_REQUIRED");
   const endpoint=new URL("/v1/chat/completions",baseUrl).toString();const dispatcher=new Agent({headersTimeout:timeoutMs+5000,bodyTimeout:timeoutMs+5000});
-  return async function callModel({system,user}){const ctl=new AbortController();const timer=setTimeout(()=>ctl.abort(),timeoutMs);try{const r=await fetchImpl(endpoint,{method:"POST",headers:{authorization:`Bearer ${apiKey}`,"content-type":"application/json"},body:JSON.stringify({model:ROLES[ROLE].backend_model,messages:[{role:"system",content:system},{role:"user",content:user}],max_tokens:700,temperature:0,stream:false,response_format:{type:"json_object"},chat_template_kwargs:{enable_thinking:ROLES[ROLE].thinking}}),signal:ctl.signal,dispatcher});const text=await r.text();if(!r.ok)throw new Error(`AI_CORE_HTTP_${r.status}:${text.slice(0,300)}`);const envelope=JSON.parse(text);const content=envelope?.choices?.[0]?.message?.content;if(typeof content!=="string"||!content.trim())throw new Error("AI_CORE_EMPTY");return {content};}finally{clearTimeout(timer);}};
+  return async function callModel({system,user}){const ctl=new AbortController();const timer=setTimeout(()=>ctl.abort(),timeoutMs);try{const r=await fetchImpl(endpoint,{method:"POST",headers:{authorization:`Bearer ${apiKey}`,"content-type":"application/json"},body:JSON.stringify({model:ROLES[ROLE].backend_model,messages:[{role:"system",content:system},{role:"user",content:user}],max_tokens:MAX_TOKENS,temperature:0,stream:false,response_format:{type:"json_object"},chat_template_kwargs:{enable_thinking:ROLES[ROLE].thinking}}),signal:ctl.signal,dispatcher});const text=await r.text();if(!r.ok)throw new Error(`AI_CORE_HTTP_${r.status}:${text.slice(0,300)}`);const envelope=JSON.parse(text);const content=envelope?.choices?.[0]?.message?.content;if(typeof content!=="string"||!content.trim())throw new Error("AI_CORE_EMPTY");return {content};}finally{clearTimeout(timer);}};
 }
 async function runResearcherSkillEffectBenchmark({callModel=defaultClient(),clock=performance}={}){
   const results=[],totals={on:0,off:0,max:CASES.length*5};const started=clock.now();
@@ -82,4 +83,4 @@ async function runResearcherSkillEffectBenchmark({callModel=defaultClient(),cloc
 }
 async function cli(){try{process.stdout.write(`${JSON.stringify(await runResearcherSkillEffectBenchmark(),null,2)}\n`);}catch(error){process.stdout.write(`${JSON.stringify({schema:SCHEMA,authority:"MEASUREMENT_ONLY",completed:false,error:String(error?.message||error)},null,2)}\n`);process.exitCode=1;}}
 if(require.main===module)void cli();
-module.exports={SCHEMA,ROLE,CASES,OUTPUT_POLICY,parseJson,withoutSkillDirectives,buildSystemsForCase,scoreCase,defaultClient,runResearcherSkillEffectBenchmark};
+module.exports={SCHEMA,ROLE,MAX_TOKENS,CASES,OUTPUT_POLICY,parseJson,withoutSkillDirectives,buildSystemsForCase,scoreCase,defaultClient,runResearcherSkillEffectBenchmark};

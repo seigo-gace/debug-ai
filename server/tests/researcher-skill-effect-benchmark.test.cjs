@@ -1,9 +1,10 @@
 "use strict";
 const test=require("node:test");
 const assert=require("node:assert/strict");
-const {CASES,buildSystemsForCase,scoreCase,runResearcherSkillEffectBenchmark}=require("../control/researcher-skill-effect-benchmark.js");
+const {MAX_TOKENS,CASES,buildSystemsForCase,scoreCase,runResearcherSkillEffectBenchmark}=require("../control/researcher-skill-effect-benchmark.js");
 
 test("Researcher benchmark fixes five evidence capabilities within the three-skill boundary",()=>{
+  assert.equal(MAX_TOKENS,400);
   assert.deepEqual(CASES.map(x=>x.id),["authoritative_source_priority","exact_version_binding","contradictory_evidence_retention","no_evidence","unsupported_source_rejection"]);
   for(const c of CASES){
     const systems=buildSystemsForCase(c);
