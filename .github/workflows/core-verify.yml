@@ -71,17 +71,15 @@ jobs:
           debug-ai-sandbox-ci
           node server/control/sandbox-loopback-selftest.js
       - name: Managed Node and Python DAP real queue gate
+        id: dap_queue
+        continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
           name=debug-ai-dap-queue-ci
           volume=debug_ai_dap_queue_ci
-          cleanup() {
-            docker rm -f "$name" >/dev/null 2>&1 || true
-            docker volume rm "$volume" >/dev/null 2>&1 || true
-          }
-          cleanup
-          trap cleanup EXIT
+          docker rm -f "$name" >/dev/null 2>&1 || true
+          docker volume rm "$volume" >/dev/null 2>&1 || true
           docker volume create "$volume" >/dev/null
           docker run -d --name "$name" \
             --network none \
@@ -115,6 +113,46 @@ jobs:
               node server/control/dap-queue-selftest.js verify "$kind"
           done
           docker logs "$name"
+      - name: DAP diagnostic failure stage SANDBOX_EXEC_OR_EVIDENCE_PARSE
+        if: steps.dap_queue.outcome == 'failure'
+        continue-on-error: true
+        run: docker run --rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 --security-opt no-new-privileges:true --cap-drop ALL -v debug_ai_dap_queue_ci:/sandbox-jobs debug-ai-app-ci node server/control/dap-queue-selftest.js diagnose node SANDBOX_EXEC_OR_EVIDENCE_PARSE
+      - name: DAP diagnostic failure stage PRECHECK
+        if: steps.dap_queue.outcome == 'failure'
+        continue-on-error: true
+        run: docker run --rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 --security-opt no-new-privileges:true --cap-drop ALL -v debug_ai_dap_queue_ci:/sandbox-jobs debug-ai-app-ci node server/control/dap-queue-selftest.js diagnose node PRECHECK
+      - name: DAP diagnostic failure stage CONFIGURATION
+        if: steps.dap_queue.outcome == 'failure'
+        continue-on-error: true
+        run: docker run --rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 --security-opt no-new-privileges:true --cap-drop ALL -v debug_ai_dap_queue_ci:/sandbox-jobs debug-ai-app-ci node server/control/dap-queue-selftest.js diagnose node CONFIGURATION
+      - name: DAP diagnostic failure stage CONNECT_MCP
+        if: steps.dap_queue.outcome == 'failure'
+        continue-on-error: true
+        run: docker run --rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 --security-opt no-new-privileges:true --cap-drop ALL -v debug_ai_dap_queue_ci:/sandbox-jobs debug-ai-app-ci node server/control/dap-queue-selftest.js diagnose node CONNECT_MCP
+      - name: DAP diagnostic failure stage TOOL_DISCOVERY
+        if: steps.dap_queue.outcome == 'failure'
+        continue-on-error: true
+        run: docker run --rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 --security-opt no-new-privileges:true --cap-drop ALL -v debug_ai_dap_queue_ci:/sandbox-jobs debug-ai-app-ci node server/control/dap-queue-selftest.js diagnose node TOOL_DISCOVERY
+      - name: DAP diagnostic failure stage ADD_BREAKPOINT
+        if: steps.dap_queue.outcome == 'failure'
+        continue-on-error: true
+        run: docker run --rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 --security-opt no-new-privileges:true --cap-drop ALL -v debug_ai_dap_queue_ci:/sandbox-jobs debug-ai-app-ci node server/control/dap-queue-selftest.js diagnose node ADD_BREAKPOINT
+      - name: DAP diagnostic failure stage START_DEBUGGING
+        if: steps.dap_queue.outcome == 'failure'
+        continue-on-error: true
+        run: docker run --rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 --security-opt no-new-privileges:true --cap-drop ALL -v debug_ai_dap_queue_ci:/sandbox-jobs debug-ai-app-ci node server/control/dap-queue-selftest.js diagnose node START_DEBUGGING
+      - name: DAP queue diagnostic logs
+        if: steps.dap_queue.outcome == 'failure'
+        continue-on-error: true
+        run: docker logs debug-ai-dap-queue-ci
+      - name: DAP queue cleanup
+        if: always()
+        run: |
+          docker rm -f debug-ai-dap-queue-ci >/dev/null 2>&1 || true
+          docker volume rm debug_ai_dap_queue_ci >/dev/null 2>&1 || true
+      - name: Managed DAP gate enforcement
+        if: steps.dap_queue.outcome == 'failure'
+        run: exit 1
       - name: Sandbox main-to-sidecar queue round-trip gate
         shell: bash
         run: |
