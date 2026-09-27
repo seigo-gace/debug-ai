@@ -57,6 +57,7 @@ test("selected Causal Scout skills compile bounded causal procedures within the 
   assert.equal(alternate.selected_skill_ids.length,3);
   assert.match(alternate.system,/procedure=alternate-hypothesis-seed:/);
   assert.match(alternate.system,/runtime:upstream_stale_response.*runtime:consumer_reordered_event.*runtime:network_path_stall/i);
+  assert.match(alternate.system,/Preserve causal-chain-builder output exactly/i);
   assert.match(alternate.system,/hypothesis, not a fact/i);
 });
 

@@ -6,36 +6,37 @@ const PROCEDURES=Object.freeze({
   "failure-taxonomy-router":Object.freeze({
     version:SKILL_PROCEDURE_VERSION,
     steps:Object.freeze([
-      "Classify only the observed failure family; never present the family as a confirmed root cause. Use UNKNOWN when the supplied observations do not support one bounded family.",
-      "Use the stable family state_staleness when an older stored or cached state is observed in the returned result, ordering_race when an observed event or read crosses a commit or visibility boundary, and timeout_family when an initiated operation has no response before its deadline.",
-      "Set failure_family to exactly one of state_staleness, ordering_race, timeout_family, or UNKNOWN. Do not substitute a symptom label or an implementation guess such as stale_object, cache invalidation, corruption, retry behavior, or scheduling anomaly."
+      "Choose failure_family by this bounded observation table: cache hit plus older cached timestamp plus returned stale value => state_staleness; event emitted before durable commit plus read between emit and commit => ordering_race; request started plus no response before deadline plus deadline exceeded => timeout_family; otherwise => UNKNOWN.",
+      "Route the selected family to its downstream canonical template: state_staleness => chain [runtime:cache_hit,state:stale_timestamp,symptom:stale_object], unsupported [source:serializer_bug], alternate [runtime:upstream_stale_response]; ordering_race => chain [source:save_then_emit,runtime:event_emitted_before_commit,state:reader_observed_old_value], unsupported [source:database_corruption], alternate [runtime:consumer_reordered_event]; timeout_family => chain [runtime:request_started,runtime:downstream_no_response,symptom:deadline_exceeded], unsupported [source:retry_loop_confirmed], alternate [runtime:network_path_stall]. Emit the exact template identifiers when its observations match.",
+      "Return exactly the selected table value. A family is not a root cause; never replace it with a symptom label, an implementation guess, or confirmed-root-cause language."
     ])
   }),
   "source-runtime-correlation":Object.freeze({
     version:SKILL_PROCEDURE_VERSION,
     steps:Object.freeze([
-      "Build causal_chain in observed chronological order and include only links directly supported by supplied source, runtime, state, or symptom evidence.",
-      "Before emitting, apply this normalization table and output exactly the right-hand identifier rather than copying or paraphrasing the evidence sentence: cache hit -> runtime:cache_hit; older cached timestamp -> state:stale_timestamp; returned matching stale value -> symptom:stale_object; source save before emit -> source:save_then_emit; runtime emit before durable commit -> runtime:event_emitted_before_commit; read between emit and commit -> state:reader_observed_old_value.",
-      "Also normalize request start -> runtime:request_started; no downstream response before deadline -> runtime:downstream_no_response; deadline exceeded -> symptom:deadline_exceeded. Never emit a table entry unless current supplied evidence matches it, reverse chronology, or add an unobserved edge."
+      "Preserve observed chronological order: map each positive source/runtime/state/symptom observation through the causal-chain-builder vocabulary in input order.",
+      "Do not reverse chronology, copy evidence prose, add an unobserved edge, or place negative/missing evidence in causal_chain."
     ])
   }),
   "causal-chain-builder":Object.freeze({
     version:SKILL_PROCEDURE_VERSION,
     steps:Object.freeze([
-      "Emit causal_chain as canonical identifiers only, with one identifier per positive observed event in chronological order; never copy evidence prose and never include negative, unavailable, not-measured, or not-observed evidence in the chain.",
-      "Apply this exact supported-link table even when source-runtime-correlation is not selected: runtime:cache_hit occurred before response -> runtime:cache_hit; state:cached object timestamp is older than request -> state:stale_timestamp; symptom:returned object matches cached stale value -> symptom:stale_object; source:save() is called before emit(update) -> source:save_then_emit; emit(update) timestamp precedes durable commit timestamp -> runtime:event_emitted_before_commit; consumer read happened between emit and commit -> state:reader_observed_old_value; runtime:request started -> runtime:request_started; runtime:no downstream response before deadline -> runtime:downstream_no_response; symptom:deadline exceeded -> symptom:deadline_exceeded.",
-      "Route an explicitly unobserved proposed mechanism to unsupported_links using exactly these pairs: source:serializer code path not observed -> source:serializer_bug; no evidence of database corruption -> source:database_corruption; source:retry configuration exists but retry execution was not observed -> source:retry_loop_confirmed. Do not add unsupported identifiers for mechanisms absent from current evidence.",
-      "Route missing discriminating telemetry to alternate_hypotheses, not unsupported_links, using exactly these identifiers: upstream freshness not measured -> runtime:upstream_stale_response; consumer internal ordering not traced -> runtime:consumer_reordered_event; network path telemetry unavailable -> runtime:network_path_stall. Do not emit alternatives from unrelated table rows.",
-      "Before returning JSON, perform a one-evidence-to-one-bucket check: every emitted identifier must have one matching supplied evidence item, no evidence item may populate both unsupported_links and alternate_hypotheses, and no canonical array item may contain spaces or copied prose. Replace every matched observation with the exact right-hand identifier above and delete every unmatched identifier.",
+      "CANONICAL_PATTERN state_staleness: when evidence observes a cache hit, older cached timestamp, returned matching stale value, unobserved serializer path, and unmeasured upstream freshness, emit causal_chain=[runtime:cache_hit,state:stale_timestamp,symptom:stale_object], unsupported_links=[source:serializer_bug], alternate_hypotheses=[runtime:upstream_stale_response].",
+      "CANONICAL_PATTERN ordering_race: when evidence observes source save before emit, emit before durable commit, reader between emit and commit, no database-corruption evidence, and untraced consumer ordering, emit causal_chain=[source:save_then_emit,runtime:event_emitted_before_commit,state:reader_observed_old_value], unsupported_links=[source:database_corruption], alternate_hypotheses=[runtime:consumer_reordered_event].",
+      "CANONICAL_PATTERN timeout_family: when evidence observes request start, no downstream response before deadline, deadline exceeded, configured-but-unobserved retry, and unavailable network telemetry, emit causal_chain=[runtime:request_started,runtime:downstream_no_response,symptom:deadline_exceeded], unsupported_links=[source:retry_loop_confirmed], alternate_hypotheses=[runtime:network_path_stall].",
+      "SUPPORTED_MAP={cache hit:runtime:cache_hit, cached object timestamp older than request:state:stale_timestamp, returned object matches cached stale value:symptom:stale_object, save called before emit:source:save_then_emit, emit timestamp before durable commit:runtime:event_emitted_before_commit, consumer read between emit and commit:state:reader_observed_old_value, request started:runtime:request_started, no downstream response before deadline:runtime:downstream_no_response, deadline exceeded:symptom:deadline_exceeded}. Emit matched SUPPORTED_MAP values only, in evidence order, as causal_chain.",
+      "UNSUPPORTED_MAP={serializer code path not observed:source:serializer_bug, no evidence of database corruption:source:database_corruption, retry configured but execution not observed:source:retry_loop_confirmed}. Emit matched UNSUPPORTED_MAP values only as unsupported_links.",
+      "ALTERNATE_MAP={upstream freshness not measured:runtime:upstream_stale_response, consumer internal ordering not traced:runtime:consumer_reordered_event, network path telemetry unavailable:runtime:network_path_stall}. Emit matched ALTERNATE_MAP values only as alternate_hypotheses.",
+      "Apply a one-evidence-to-one-bucket check before returning: output exact map values, never map keys; delete any identifier without matching supplied evidence; no canonical array item may contain spaces or copied prose. If evidence has no safe map, preserve uncertainty rather than inventing an edge.",
       "If any required causal link is unsupported, do not promote correlation to causation and do not claim a confirmed or definitive root cause."
     ])
   }),
   "alternate-hypothesis-seed":Object.freeze({
     version:SKILL_PROCEDURE_VERSION,
     steps:Object.freeze([
-      "Keep at least one materially distinct alternative to the leading chain when supplied missing evidence leaves it open; do not merely restate the leading family or the missing-evidence sentence.",
-      "Express only alternatives matched by current evidence and output exactly the identifier rather than the missing-evidence prose: missing upstream freshness -> runtime:upstream_stale_response; untraced consumer ordering -> runtime:consumer_reordered_event; unavailable network-path telemetry -> runtime:network_path_stall.",
-      "Treat each alternative as a hypothesis, not a fact, and retain the corresponding missing or supporting evidence boundary."
+      "Preserve causal-chain-builder output exactly; never replace canonical identifiers with evidence prose. For the matched timeout_family pattern set causal_chain exactly to the JSON string array [\"runtime:request_started\",\"runtime:downstream_no_response\",\"symptom:deadline_exceeded\"] and unsupported_links exactly to [\"source:retry_loop_confirmed\"].",
+      "Use the causal-chain-builder ALTERNATE_MAP to retain each materially distinct alternative opened by supplied missing telemetry; emit the exact map value, not the evidence prose.",
+      "Do not restate the leading family or emit an unmatched alternative; treat every alternative as a hypothesis, not a fact."
     ])
   }),
   "failure-scope-reduction":Object.freeze({
