@@ -89,11 +89,23 @@ jobs:
           stage="$(docker run --rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 --security-opt no-new-privileges:true --cap-drop ALL -v debug_ai_dap_queue_ci:/sandbox-jobs debug-ai-app-ci node server/control/dap-queue-selftest.js stage node)"
           echo "stage=$stage" >> "$GITHUB_OUTPUT"
           echo "DAP_NODE_FAILURE_STAGE=$stage"
+      - name: Node DAP permission failure SPAWN
+        if: always() && steps.dap_node_stage.outputs.stage == 'CONNECT_MCP_PERMISSION_SPAWN'
+        run: exit 1
+      - name: Node DAP permission failure SIGNAL
+        if: always() && steps.dap_node_stage.outputs.stage == 'CONNECT_MCP_PERMISSION_SIGNAL'
+        run: exit 1
+      - name: Node DAP permission failure FILE
+        if: always() && steps.dap_node_stage.outputs.stage == 'CONNECT_MCP_PERMISSION_FILE'
+        run: exit 1
+      - name: Node DAP permission failure OTHER
+        if: always() && steps.dap_node_stage.outputs.stage == 'CONNECT_MCP_PERMISSION_OTHER'
+        run: exit 1
+      - name: Node DAP permission failure UNCLASSIFIED
+        if: always() && steps.dap_node_stage.outputs.stage == 'CONNECT_MCP_PERMISSION_UNCLASSIFIED'
+        run: exit 1
       - name: Node DAP connect failure MODULE_LOAD
         if: always() && steps.dap_node_stage.outputs.stage == 'CONNECT_MCP_MODULE_LOAD'
-        run: exit 1
-      - name: Node DAP connect failure PERMISSION
-        if: always() && steps.dap_node_stage.outputs.stage == 'CONNECT_MCP_PERMISSION'
         run: exit 1
       - name: Node DAP connect failure CONFIG
         if: always() && steps.dap_node_stage.outputs.stage == 'CONNECT_MCP_CONFIG'
