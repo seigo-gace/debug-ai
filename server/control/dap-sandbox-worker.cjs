@@ -5,7 +5,7 @@ const {pathToFileURL}=require("node:url");
 
 const ROOT=process.env.DEBUG_AI_DAP_ROOT||"/opt/debugai-dap";
 const SDK_ROOT=path.join(ROOT,"node_modules","@modelcontextprotocol","sdk");
-const DEBUGMCP_ENTRY=path.join(ROOT,"node_modules","debugmcp","dist","debugmcp.js");
+const DEBUGMCP_ENTRY=path.join(ROOT,"debugmcp.js");
 const JS_BRIDGE=path.join(ROOT,"js-debug-stdio-bridge.mjs");
 const JS_ENTRY=path.join(ROOT,"js-debug","src","dapDebugServer.js");
 const PYTHON=path.join(ROOT,"debugpy-venv","bin","python");
