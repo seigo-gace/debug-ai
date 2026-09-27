@@ -112,6 +112,26 @@ jobs:
             -v debug_ai_dap_queue_ci:/sandbox-jobs \
             debug-ai-app-ci \
             node server/control/dap-queue-selftest.js verify node
+      - name: Node DAP diagnostic EVIDENCE_BOUNDARY
+        if: steps.dap_node.outcome == 'failure'
+        continue-on-error: true
+        run: docker run --rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 --security-opt no-new-privileges:true --cap-drop ALL -v debug_ai_dap_queue_ci:/sandbox-jobs debug-ai-app-ci node server/control/dap-queue-selftest.js diagnose node EVIDENCE_BOUNDARY
+      - name: Node DAP diagnostic SECRET_BOUNDARY
+        if: steps.dap_node.outcome == 'failure'
+        continue-on-error: true
+        run: docker run --rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 --security-opt no-new-privileges:true --cap-drop ALL -v debug_ai_dap_queue_ci:/sandbox-jobs debug-ai-app-ci node server/control/dap-queue-selftest.js diagnose node SECRET_BOUNDARY
+      - name: Node DAP diagnostic VARIABLE_REQUEST
+        if: steps.dap_node.outcome == 'failure'
+        continue-on-error: true
+        run: docker run --rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 --security-opt no-new-privileges:true --cap-drop ALL -v debug_ai_dap_queue_ci:/sandbox-jobs debug-ai-app-ci node server/control/dap-queue-selftest.js diagnose node VARIABLE_REQUEST
+      - name: Node DAP diagnostic REQUIRED_TOOLS
+        if: steps.dap_node.outcome == 'failure'
+        continue-on-error: true
+        run: docker run --rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 --security-opt no-new-privileges:true --cap-drop ALL -v debug_ai_dap_queue_ci:/sandbox-jobs debug-ai-app-ci node server/control/dap-queue-selftest.js diagnose node REQUIRED_TOOLS
+      - name: Node DAP diagnostic VARIABLE_NAMES_TOOL
+        if: steps.dap_node.outcome == 'failure'
+        continue-on-error: true
+        run: docker run --rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 --security-opt no-new-privileges:true --cap-drop ALL -v debug_ai_dap_queue_ci:/sandbox-jobs debug-ai-app-ci node server/control/dap-queue-selftest.js diagnose node VARIABLE_NAMES_TOOL
       - name: Managed Python DAP real queue gate
         id: dap_python
         if: steps.dap_node.outcome == 'success'
