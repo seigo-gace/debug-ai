@@ -2,6 +2,7 @@
 
 const {COMMON,getRoleContract}=require("./role-contracts.js");
 const {getRoleSkills}=require("./skill-registry.js");
+const {compileSkillProcedure}=require("./skill-procedures.js");
 
 const KEYWORDS=Object.freeze({
   "source-runtime-correlation":["runtime","trace","state","chronology","mismatch"],
@@ -54,7 +55,8 @@ function resolveSkills(role,{task="",maxSkills=3,selectedSkillIds=null}={}){
 }
 
 function compactSkill(s){
-  return `${s.id}: ${s.purpose} | evidence=${s.evidence_required.join(",")||"none"} | stop=${s.stop_conditions.join(",")}`;
+  const procedure=compileSkillProcedure(s.id);
+  return `${s.id}: ${s.purpose} | evidence=${s.evidence_required.join(",")||"none"} | stop=${s.stop_conditions.join(",")}${procedure?` | procedure=${procedure}`:""}`;
 }
 
 function compileInvocation(role,{task="",extraSystem="",maxSkills=3,selectedSkillIds=null}={}){
