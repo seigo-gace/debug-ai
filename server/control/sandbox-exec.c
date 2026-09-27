@@ -5,6 +5,7 @@
 #include <linux/filter.h>
 #include <linux/landlock.h>
 #include <linux/seccomp.h>
+#include <netinet/in.h>
 #include <signal.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -12,6 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/prctl.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
@@ -39,6 +41,9 @@
 #define SYS_landlock_create_ruleset 444
 #define SYS_landlock_add_rule 445
 #define SYS_landlock_restrict_self 446
+#endif
+#ifndef SOCK_TYPE_MASK
+#define SOCK_TYPE_MASK 0xf
 #endif
 
 struct debugai_ruleset_attr {
@@ -105,7 +110,7 @@ static int add_path_rule(int ruleset_fd, const char *path, uint64_t allowed, int
     return 0;
 }
 
-static int apply_landlock(const char *snapshot, const char *tmpdir, const char *node_modules) {
+static int apply_landlock(const char *snapshot, const char *tmpdir, const char *node_modules, int allow_loopback_tcp) {
     int abi = landlock_abi();
     if (abi < 4) {
         fprintf(stderr, "SANDBOX_LANDLOCK_ABI_REQUIRED:4:actual=%d\n", abi);
@@ -114,7 +119,7 @@ static int apply_landlock(const char *snapshot, const char *tmpdir, const char *
     uint64_t handled_fs = FS_BASE | LANDLOCK_ACCESS_FS_REFER | LANDLOCK_ACCESS_FS_TRUNCATE;
     struct debugai_ruleset_attr attr = {
         .handled_access_fs = handled_fs,
-        .handled_access_net = LANDLOCK_ACCESS_NET_BIND_TCP | LANDLOCK_ACCESS_NET_CONNECT_TCP,
+        .handled_access_net = allow_loopback_tcp ? 0 : (LANDLOCK_ACCESS_NET_BIND_TCP | LANDLOCK_ACCESS_NET_CONNECT_TCP),
     };
     int ruleset_fd = (int)ll_create(&attr, sizeof(attr), 0);
     if (ruleset_fd < 0) {
@@ -159,11 +164,11 @@ fail:
     return -1;
 }
 
-#define DENY_SYSCALL(nr) \
-    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, (nr), 0, 1), \
-    BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ERRNO | (EPERM & SECCOMP_RET_DATA))
+#define PUSH(stmt) do { if (n >= sizeof(filter) / sizeof(filter[0])) return -1; filter[n++] = (struct sock_filter)stmt; } while (0)
+#define DENY_CURRENT() PUSH(BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ERRNO | (EPERM & SECCOMP_RET_DATA)))
+#define DENY_SYSCALL(nr) do { PUSH(BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, (nr), 0, 1)); DENY_CURRENT(); } while (0)
 
-static int install_seccomp(void) {
+static int install_seccomp(int allow_loopback_tcp) {
 #if defined(__x86_64__)
     const uint32_t expected_arch = AUDIT_ARCH_X86_64;
 #elif defined(__aarch64__)
@@ -171,132 +176,149 @@ static int install_seccomp(void) {
 #else
 #error Unsupported architecture for DebugAI sandbox
 #endif
-    struct sock_filter filter[] = {
-        BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, arch)),
-        BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, expected_arch, 1, 0),
-        BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_KILL_PROCESS),
-        BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, nr)),
+    struct sock_filter filter[256];
+    size_t n = 0;
+    PUSH(BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, arch)));
+    PUSH(BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, expected_arch, 1, 0));
+    PUSH(BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_KILL_PROCESS));
+    PUSH(BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, nr)));
 #ifdef __NR_socket
-        DENY_SYSCALL(__NR_socket),
+    if (allow_loopback_tcp) {
+        PUSH(BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_socket, 0, 12));
+        PUSH(BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, args[0])));
+        PUSH(BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, AF_INET, 2, 0));
+        PUSH(BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, AF_INET6, 1, 0));
+        DENY_CURRENT();
+        PUSH(BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, args[1])));
+        PUSH(BPF_STMT(BPF_ALU | BPF_AND | BPF_K, SOCK_TYPE_MASK));
+        PUSH(BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SOCK_STREAM, 1, 0));
+        DENY_CURRENT();
+        PUSH(BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, args[2])));
+        PUSH(BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, 0, 2, 0));
+        PUSH(BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, IPPROTO_TCP, 1, 0));
+        DENY_CURRENT();
+        PUSH(BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, nr)));
+    } else {
+        DENY_SYSCALL(__NR_socket);
+    }
 #endif
 #ifdef __NR_socketpair
-        DENY_SYSCALL(__NR_socketpair),
+    DENY_SYSCALL(__NR_socketpair);
 #endif
 #ifdef __NR_ptrace
-        DENY_SYSCALL(__NR_ptrace),
+    DENY_SYSCALL(__NR_ptrace);
 #endif
 #ifdef __NR_process_vm_readv
-        DENY_SYSCALL(__NR_process_vm_readv),
+    DENY_SYSCALL(__NR_process_vm_readv);
 #endif
 #ifdef __NR_process_vm_writev
-        DENY_SYSCALL(__NR_process_vm_writev),
+    DENY_SYSCALL(__NR_process_vm_writev);
 #endif
 #ifdef __NR_kill
-        DENY_SYSCALL(__NR_kill),
+    DENY_SYSCALL(__NR_kill);
 #endif
 #ifdef __NR_tkill
-        DENY_SYSCALL(__NR_tkill),
+    DENY_SYSCALL(__NR_tkill);
 #endif
 #ifdef __NR_tgkill
-        DENY_SYSCALL(__NR_tgkill),
+    DENY_SYSCALL(__NR_tgkill);
 #endif
 #ifdef __NR_pidfd_send_signal
-        DENY_SYSCALL(__NR_pidfd_send_signal),
+    DENY_SYSCALL(__NR_pidfd_send_signal);
 #endif
 #ifdef __NR_mount
-        DENY_SYSCALL(__NR_mount),
+    DENY_SYSCALL(__NR_mount);
 #endif
 #ifdef __NR_umount2
-        DENY_SYSCALL(__NR_umount2),
+    DENY_SYSCALL(__NR_umount2);
 #endif
 #ifdef __NR_pivot_root
-        DENY_SYSCALL(__NR_pivot_root),
+    DENY_SYSCALL(__NR_pivot_root);
 #endif
 #ifdef __NR_chroot
-        DENY_SYSCALL(__NR_chroot),
+    DENY_SYSCALL(__NR_chroot);
 #endif
 #ifdef __NR_unshare
-        DENY_SYSCALL(__NR_unshare),
+    DENY_SYSCALL(__NR_unshare);
 #endif
 #ifdef __NR_setns
-        DENY_SYSCALL(__NR_setns),
+    DENY_SYSCALL(__NR_setns);
 #endif
 #ifdef __NR_bpf
-        DENY_SYSCALL(__NR_bpf),
+    DENY_SYSCALL(__NR_bpf);
 #endif
 #ifdef __NR_keyctl
-        DENY_SYSCALL(__NR_keyctl),
+    DENY_SYSCALL(__NR_keyctl);
 #endif
 #ifdef __NR_add_key
-        DENY_SYSCALL(__NR_add_key),
+    DENY_SYSCALL(__NR_add_key);
 #endif
 #ifdef __NR_request_key
-        DENY_SYSCALL(__NR_request_key),
+    DENY_SYSCALL(__NR_request_key);
 #endif
 #ifdef __NR_open_by_handle_at
-        DENY_SYSCALL(__NR_open_by_handle_at),
+    DENY_SYSCALL(__NR_open_by_handle_at);
 #endif
 #ifdef __NR_perf_event_open
-        DENY_SYSCALL(__NR_perf_event_open),
+    DENY_SYSCALL(__NR_perf_event_open);
 #endif
 #ifdef __NR_userfaultfd
-        DENY_SYSCALL(__NR_userfaultfd),
+    DENY_SYSCALL(__NR_userfaultfd);
 #endif
 #ifdef __NR_chmod
-        DENY_SYSCALL(__NR_chmod),
+    DENY_SYSCALL(__NR_chmod);
 #endif
 #ifdef __NR_fchmod
-        DENY_SYSCALL(__NR_fchmod),
+    DENY_SYSCALL(__NR_fchmod);
 #endif
 #ifdef __NR_fchmodat
-        DENY_SYSCALL(__NR_fchmodat),
+    DENY_SYSCALL(__NR_fchmodat);
 #endif
 #ifdef __NR_chown
-        DENY_SYSCALL(__NR_chown),
+    DENY_SYSCALL(__NR_chown);
 #endif
 #ifdef __NR_fchown
-        DENY_SYSCALL(__NR_fchown),
+    DENY_SYSCALL(__NR_fchown);
 #endif
 #ifdef __NR_fchownat
-        DENY_SYSCALL(__NR_fchownat),
+    DENY_SYSCALL(__NR_fchownat);
 #endif
 #ifdef __NR_lchown
-        DENY_SYSCALL(__NR_lchown),
+    DENY_SYSCALL(__NR_lchown);
 #endif
 #ifdef __NR_setxattr
-        DENY_SYSCALL(__NR_setxattr),
+    DENY_SYSCALL(__NR_setxattr);
 #endif
 #ifdef __NR_lsetxattr
-        DENY_SYSCALL(__NR_lsetxattr),
+    DENY_SYSCALL(__NR_lsetxattr);
 #endif
 #ifdef __NR_fsetxattr
-        DENY_SYSCALL(__NR_fsetxattr),
+    DENY_SYSCALL(__NR_fsetxattr);
 #endif
 #ifdef __NR_removexattr
-        DENY_SYSCALL(__NR_removexattr),
+    DENY_SYSCALL(__NR_removexattr);
 #endif
 #ifdef __NR_lremovexattr
-        DENY_SYSCALL(__NR_lremovexattr),
+    DENY_SYSCALL(__NR_lremovexattr);
 #endif
 #ifdef __NR_fremovexattr
-        DENY_SYSCALL(__NR_fremovexattr),
+    DENY_SYSCALL(__NR_fremovexattr);
 #endif
 #ifdef __NR_utime
-        DENY_SYSCALL(__NR_utime),
+    DENY_SYSCALL(__NR_utime);
 #endif
 #ifdef __NR_utimes
-        DENY_SYSCALL(__NR_utimes),
+    DENY_SYSCALL(__NR_utimes);
 #endif
 #ifdef __NR_futimesat
-        DENY_SYSCALL(__NR_futimesat),
+    DENY_SYSCALL(__NR_futimesat);
 #endif
 #ifdef __NR_utimensat
-        DENY_SYSCALL(__NR_utimensat),
+    DENY_SYSCALL(__NR_utimensat);
 #endif
-        BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
-    };
+    PUSH(BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW));
     struct sock_fprog prog = {
-        .len = (unsigned short)(sizeof(filter) / sizeof(filter[0])),
+        .len = (unsigned short)n,
         .filter = filter,
     };
     if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0) {
@@ -325,7 +347,7 @@ static int64_t monotonic_ms(void) {
     return ((int64_t)ts.tv_sec * 1000) + (ts.tv_nsec / 1000000);
 }
 
-static int supervise(char **command, long timeout_ms) {
+static int supervise(char **command, long timeout_ms, int allow_loopback_tcp) {
     pid_t child = fork();
     if (child < 0) {
         fprintf(stderr, "SANDBOX_FORK_FAILED:%s\n", strerror(errno));
@@ -333,7 +355,7 @@ static int supervise(char **command, long timeout_ms) {
     }
     if (child == 0) {
         (void)setpgid(0, 0);
-        if (install_seccomp() != 0) _exit(67);
+        if (install_seccomp(allow_loopback_tcp) != 0) _exit(67);
         close_extra_fds();
         execvp(command[0], command);
         fprintf(stderr, "SANDBOX_EXEC_FAILED:%s:%s\n", command[0], strerror(errno));
@@ -366,7 +388,7 @@ static int supervise(char **command, long timeout_ms) {
 }
 
 static void usage(void) {
-    fprintf(stderr, "usage: debugai-sandbox-exec --probe | --snapshot PATH --tmp PATH --timeout-ms N [--node-modules PATH] -- COMMAND [ARGS...]\n");
+    fprintf(stderr, "usage: debugai-sandbox-exec --probe | --snapshot PATH --tmp PATH --timeout-ms N [--node-modules PATH] [--allow-loopback-tcp] -- COMMAND [ARGS...]\n");
 }
 
 int main(int argc, char **argv) {
@@ -376,7 +398,7 @@ int main(int argc, char **argv) {
             fprintf(stderr, "SANDBOX_LANDLOCK_ABI_REQUIRED:4:actual=%d\n", abi);
             return 2;
         }
-        printf("LANDLOCK_ABI=%d\nSECCOMP_FILTER=SUPPORTED\n", abi);
+        printf("LANDLOCK_ABI=%d\nSECCOMP_FILTER=SUPPORTED\nLOOPBACK_TCP_PROFILE=SUPPORTED\n", abi);
         return 0;
     }
 
@@ -384,12 +406,14 @@ int main(int argc, char **argv) {
     const char *tmpdir = NULL;
     const char *node_modules = NULL;
     long timeout_ms = 0;
+    int allow_loopback_tcp = 0;
     int i = 1;
     for (; i < argc; i++) {
         if (strcmp(argv[i], "--") == 0) { i++; break; }
         if (strcmp(argv[i], "--snapshot") == 0 && i + 1 < argc) { snapshot = argv[++i]; continue; }
         if (strcmp(argv[i], "--tmp") == 0 && i + 1 < argc) { tmpdir = argv[++i]; continue; }
         if (strcmp(argv[i], "--node-modules") == 0 && i + 1 < argc) { node_modules = argv[++i]; continue; }
+        if (strcmp(argv[i], "--allow-loopback-tcp") == 0) { allow_loopback_tcp = 1; continue; }
         if (strcmp(argv[i], "--timeout-ms") == 0 && i + 1 < argc) {
             char *end = NULL;
             errno = 0;
@@ -411,7 +435,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "SANDBOX_CHDIR_FAILED:%s\n", strerror(errno));
         return 65;
     }
-    int abi = apply_landlock(snapshot, tmpdir, node_modules);
+    int abi = apply_landlock(snapshot, tmpdir, node_modules, allow_loopback_tcp);
     if (abi < 0) return 66;
-    return supervise(&argv[i], timeout_ms);
+    return supervise(&argv[i], timeout_ms, allow_loopback_tcp);
 }
