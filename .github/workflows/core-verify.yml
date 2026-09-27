@@ -44,32 +44,20 @@ jobs:
         run: docker build --target sandbox-runner -t debug-ai-sandbox-ci .
       - name: Landlock seccomp sidecar real isolation gate
         run: >-
-          docker run --rm
-          --network none
-          --read-only
+          docker run --rm --network none --read-only
           --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777
           --tmpfs /sandbox-jobs:rw,nosuid,nodev,size=64m,mode=1777
-          --security-opt no-new-privileges:true
-          --cap-drop ALL
-          --pids-limit 128
-          --memory 512m
-          --cpus 1
-          debug-ai-sandbox-ci
-          node server/control/sandbox-selftest.js
+          --security-opt no-new-privileges:true --cap-drop ALL
+          --pids-limit 128 --memory 512m --cpus 1
+          debug-ai-sandbox-ci node server/control/sandbox-selftest.js
       - name: DAP loopback-only sandbox gate
         run: >-
-          docker run --rm
-          --network none
-          --read-only
+          docker run --rm --network none --read-only
           --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777
           --tmpfs /sandbox-jobs:rw,nosuid,nodev,size=64m,mode=1777
-          --security-opt no-new-privileges:true
-          --cap-drop ALL
-          --pids-limit 128
-          --memory 512m
-          --cpus 1
-          debug-ai-sandbox-ci
-          node server/control/sandbox-loopback-selftest.js
+          --security-opt no-new-privileges:true --cap-drop ALL
+          --pids-limit 128 --memory 512m --cpus 1
+          debug-ai-sandbox-ci node server/control/sandbox-loopback-selftest.js
       - name: Managed DAP queue setup
         shell: bash
         run: |
@@ -78,14 +66,10 @@ jobs:
           docker volume rm debug_ai_dap_queue_ci >/dev/null 2>&1 || true
           docker volume create debug_ai_dap_queue_ci >/dev/null
           docker run -d --name debug-ai-dap-queue-ci \
-            --network none \
-            --read-only \
+            --network none --read-only \
             --tmpfs /tmp:rw,nosuid,nodev,size=128m,mode=1777 \
-            --security-opt no-new-privileges:true \
-            --cap-drop ALL \
-            --pids-limit 192 \
-            --memory 768m \
-            --cpus 1 \
+            --security-opt no-new-privileges:true --cap-drop ALL \
+            --pids-limit 192 --memory 768m --cpus 1 \
             -v debug_ai_dap_queue_ci:/sandbox-jobs \
             debug-ai-sandbox-ci >/dev/null
       - name: Managed Node DAP real queue gate
@@ -96,57 +80,39 @@ jobs:
           set -euo pipefail
           docker run --rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 --security-opt no-new-privileges:true --cap-drop ALL -v debug_ai_dap_queue_ci:/sandbox-jobs debug-ai-app-ci node server/control/dap-queue-selftest.js enqueue node
           docker run --rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 --security-opt no-new-privileges:true --cap-drop ALL -v debug_ai_dap_queue_ci:/sandbox-jobs debug-ai-app-ci node server/control/dap-queue-selftest.js verify node
-      - name: Node DAP diagnostic SANDBOX_EXEC_OR_EVIDENCE_PARSE
+      - name: Classify Node DAP failure stage
+        id: dap_node_stage
         if: always() && steps.dap_node.outcome == 'failure'
-        run: docker run --rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 --security-opt no-new-privileges:true --cap-drop ALL -v debug_ai_dap_queue_ci:/sandbox-jobs debug-ai-app-ci node server/control/dap-queue-selftest.js diagnose node SANDBOX_EXEC_OR_EVIDENCE_PARSE
-      - name: Node DAP diagnostic PRECHECK
-        if: always() && steps.dap_node.outcome == 'failure'
-        run: docker run --rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 --security-opt no-new-privileges:true --cap-drop ALL -v debug_ai_dap_queue_ci:/sandbox-jobs debug-ai-app-ci node server/control/dap-queue-selftest.js diagnose node PRECHECK
-      - name: Node DAP diagnostic CONFIGURATION
-        if: always() && steps.dap_node.outcome == 'failure'
-        run: docker run --rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 --security-opt no-new-privileges:true --cap-drop ALL -v debug_ai_dap_queue_ci:/sandbox-jobs debug-ai-app-ci node server/control/dap-queue-selftest.js diagnose node CONFIGURATION
-      - name: Node DAP diagnostic CONNECT_MCP
-        if: always() && steps.dap_node.outcome == 'failure'
-        run: docker run --rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 --security-opt no-new-privileges:true --cap-drop ALL -v debug_ai_dap_queue_ci:/sandbox-jobs debug-ai-app-ci node server/control/dap-queue-selftest.js diagnose node CONNECT_MCP
-      - name: Node DAP diagnostic TOOL_DISCOVERY
-        if: always() && steps.dap_node.outcome == 'failure'
-        run: docker run --rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 --security-opt no-new-privileges:true --cap-drop ALL -v debug_ai_dap_queue_ci:/sandbox-jobs debug-ai-app-ci node server/control/dap-queue-selftest.js diagnose node TOOL_DISCOVERY
-      - name: Node DAP diagnostic ADD_BREAKPOINT
-        if: always() && steps.dap_node.outcome == 'failure'
-        run: docker run --rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 --security-opt no-new-privileges:true --cap-drop ALL -v debug_ai_dap_queue_ci:/sandbox-jobs debug-ai-app-ci node server/control/dap-queue-selftest.js diagnose node ADD_BREAKPOINT
-      - name: Node DAP diagnostic START_DEBUGGING
-        if: always() && steps.dap_node.outcome == 'failure'
-        run: docker run --rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 --security-opt no-new-privileges:true --cap-drop ALL -v debug_ai_dap_queue_ci:/sandbox-jobs debug-ai-app-ci node server/control/dap-queue-selftest.js diagnose node START_DEBUGGING
-      - name: Node DAP diagnostic OBSERVE_STATUS
-        if: always() && steps.dap_node.outcome == 'failure'
-        run: docker run --rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 --security-opt no-new-privileges:true --cap-drop ALL -v debug_ai_dap_queue_ci:/sandbox-jobs debug-ai-app-ci node server/control/dap-queue-selftest.js diagnose node OBSERVE_STATUS
-      - name: Node DAP diagnostic LIST_VARIABLE_NAMES
-        if: always() && steps.dap_node.outcome == 'failure'
-        run: docker run --rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 --security-opt no-new-privileges:true --cap-drop ALL -v debug_ai_dap_queue_ci:/sandbox-jobs debug-ai-app-ci node server/control/dap-queue-selftest.js diagnose node LIST_VARIABLE_NAMES
-      - name: Node DAP diagnostic GET_VARIABLE_VALUES
-        if: always() && steps.dap_node.outcome == 'failure'
-        run: docker run --rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 --security-opt no-new-privileges:true --cap-drop ALL -v debug_ai_dap_queue_ci:/sandbox-jobs debug-ai-app-ci node server/control/dap-queue-selftest.js diagnose node GET_VARIABLE_VALUES
-      - name: Node DAP diagnostic COMPLETE
-        if: always() && steps.dap_node.outcome == 'failure'
-        run: docker run --rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 --security-opt no-new-privileges:true --cap-drop ALL -v debug_ai_dap_queue_ci:/sandbox-jobs debug-ai-app-ci node server/control/dap-queue-selftest.js diagnose node COMPLETE
-      - name: Node DAP diagnostic UNKNOWN_RUNTIME_FAILURE
-        if: always() && steps.dap_node.outcome == 'failure'
-        run: docker run --rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 --security-opt no-new-privileges:true --cap-drop ALL -v debug_ai_dap_queue_ci:/sandbox-jobs debug-ai-app-ci node server/control/dap-queue-selftest.js diagnose node UNKNOWN_RUNTIME_FAILURE
-      - name: Node DAP diagnostic EVIDENCE_BOUNDARY
-        if: always() && steps.dap_node.outcome == 'failure'
-        run: docker run --rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 --security-opt no-new-privileges:true --cap-drop ALL -v debug_ai_dap_queue_ci:/sandbox-jobs debug-ai-app-ci node server/control/dap-queue-selftest.js diagnose node EVIDENCE_BOUNDARY
-      - name: Node DAP diagnostic SECRET_BOUNDARY
-        if: always() && steps.dap_node.outcome == 'failure'
-        run: docker run --rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 --security-opt no-new-privileges:true --cap-drop ALL -v debug_ai_dap_queue_ci:/sandbox-jobs debug-ai-app-ci node server/control/dap-queue-selftest.js diagnose node SECRET_BOUNDARY
-      - name: Node DAP diagnostic VARIABLE_REQUEST
-        if: always() && steps.dap_node.outcome == 'failure'
-        run: docker run --rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 --security-opt no-new-privileges:true --cap-drop ALL -v debug_ai_dap_queue_ci:/sandbox-jobs debug-ai-app-ci node server/control/dap-queue-selftest.js diagnose node VARIABLE_REQUEST
-      - name: Node DAP diagnostic REQUIRED_TOOLS
-        if: always() && steps.dap_node.outcome == 'failure'
-        run: docker run --rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 --security-opt no-new-privileges:true --cap-drop ALL -v debug_ai_dap_queue_ci:/sandbox-jobs debug-ai-app-ci node server/control/dap-queue-selftest.js diagnose node REQUIRED_TOOLS
-      - name: Node DAP diagnostic VARIABLE_NAMES_TOOL
-        if: always() && steps.dap_node.outcome == 'failure'
-        run: docker run --rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 --security-opt no-new-privileges:true --cap-drop ALL -v debug_ai_dap_queue_ci:/sandbox-jobs debug-ai-app-ci node server/control/dap-queue-selftest.js diagnose node VARIABLE_NAMES_TOOL
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="$(docker run --rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 --security-opt no-new-privileges:true --cap-drop ALL -v debug_ai_dap_queue_ci:/sandbox-jobs debug-ai-app-ci node server/control/dap-queue-selftest.js stage node)"
+          echo "stage=$stage" >> "$GITHUB_OUTPUT"
+          echo "DAP_NODE_FAILURE_STAGE=$stage"
+      - name: Node DAP connect failure MODULE_LOAD
+        if: always() && steps.dap_node_stage.outputs.stage == 'CONNECT_MCP_MODULE_LOAD'
+        run: exit 1
+      - name: Node DAP connect failure PERMISSION
+        if: always() && steps.dap_node_stage.outputs.stage == 'CONNECT_MCP_PERMISSION'
+        run: exit 1
+      - name: Node DAP connect failure CONFIG
+        if: always() && steps.dap_node_stage.outputs.stage == 'CONNECT_MCP_CONFIG'
+        run: exit 1
+      - name: Node DAP connect failure CLI
+        if: always() && steps.dap_node_stage.outputs.stage == 'CONNECT_MCP_CLI'
+        run: exit 1
+      - name: Node DAP connect failure PROTOCOL_OR_CLOSED
+        if: always() && steps.dap_node_stage.outputs.stage == 'CONNECT_MCP_PROTOCOL_OR_CLOSED'
+        run: exit 1
+      - name: Node DAP connect failure CHILD_STDERR
+        if: always() && steps.dap_node_stage.outputs.stage == 'CONNECT_MCP_CHILD_STDERR'
+        run: exit 1
+      - name: Node DAP connect failure NO_STDERR
+        if: always() && steps.dap_node_stage.outputs.stage == 'CONNECT_MCP_NO_STDERR'
+        run: exit 1
+      - name: Node DAP unexpected failure stage
+        if: always() && steps.dap_node.outcome == 'failure' && !startsWith(steps.dap_node_stage.outputs.stage, 'CONNECT_MCP_')
+        run: exit 1
       - name: Managed Python DAP real queue gate
         id: dap_python
         if: steps.dap_node.outcome == 'success'
@@ -180,17 +146,11 @@ jobs:
           cleanup
           trap cleanup EXIT
           docker volume create "$volume" >/dev/null
-          docker run -d --name "$name" \
-            --network none \
-            --read-only \
+          docker run -d --name "$name" --network none --read-only \
             --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 \
-            --security-opt no-new-privileges:true \
-            --cap-drop ALL \
-            --pids-limit 128 \
-            --memory 512m \
-            --cpus 1 \
-            -v "$volume:/sandbox-jobs" \
-            debug-ai-sandbox-ci >/dev/null
+            --security-opt no-new-privileges:true --cap-drop ALL \
+            --pids-limit 128 --memory 512m --cpus 1 \
+            -v "$volume:/sandbox-jobs" debug-ai-sandbox-ci >/dev/null
           docker run --rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 --security-opt no-new-privileges:true --cap-drop ALL -v "$volume:/sandbox-jobs" debug-ai-app-ci node server/control/sandbox-queue-selftest.js enqueue
           docker run --rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 --security-opt no-new-privileges:true --cap-drop ALL -v "$volume:/sandbox-jobs" debug-ai-app-ci node server/control/sandbox-queue-selftest.js verify
           docker logs "$name"
