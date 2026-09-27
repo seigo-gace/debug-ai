@@ -3,6 +3,30 @@
 const SKILL_PROCEDURE_VERSION="debugai.skill-procedure/v1";
 
 const PROCEDURES=Object.freeze({
+  "failure-scope-reduction":Object.freeze({
+    version:SKILL_PROCEDURE_VERSION,
+    steps:Object.freeze([
+      "Reduce the failure to the smallest supplied source set that directly participates in the observed behavior; do not include files that only provide unrelated UI, metrics, logging, or presentation behavior.",
+      "Place supplied but non-participating files in excluded_files when the output schema provides that field, and never invent additional files.",
+      "Preserve uncertainty when the supplied source facts are insufficient instead of expanding scope speculatively."
+    ])
+  }),
+  "source-call-path-trace":Object.freeze({
+    version:SKILL_PROCEDURE_VERSION,
+    steps:Object.freeze([
+      "Trace only call edges explicitly supported by supplied source facts and stop at the last supported edge; do not append hypothetical fallback calls.",
+      "Emit each call-path element in stable canonical file:symbol form using the supplied file path and function or method name only, without parentheses or argument lists.",
+      "Do not treat adjacent helpers, metrics, or presentation files as part of the call path unless a supplied fact establishes the edge."
+    ])
+  }),
+  "source-contract-mismatch":Object.freeze({
+    version:SKILL_PROCEDURE_VERSION,
+    steps:Object.freeze([
+      "Report contract_mismatch only when an explicit supplied contract conflicts with an explicit supplied source fact; otherwise return null.",
+      "When a mismatch exists, keep file to the implementing file and preserve the smallest exact contract clause and observed behavior needed to express the conflict without embellishment.",
+      "A failure symptom by itself is not a contract mismatch and must not be rewritten into an invented contract."
+    ])
+  }),
   "fresh-context-review":Object.freeze({
     version:SKILL_PROCEDURE_VERSION,
     steps:Object.freeze([
