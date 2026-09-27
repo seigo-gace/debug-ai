@@ -12,6 +12,8 @@ test("Operational skill procedures are structurally valid",()=>{
   assert.match(compileSkillProcedure("failure-scope-reduction"),/smallest supplied source set/i);
   assert.match(compileSkillProcedure("source-call-path-trace"),/canonical file:symbol form/i);
   assert.match(compileSkillProcedure("source-contract-mismatch"),/explicit supplied contract.*explicit supplied source fact/i);
+  assert.match(compileSkillProcedure("source-contract-mismatch"),/shortest exact predicate clauses/i);
+  assert.match(compileSkillProcedure("source-contract-mismatch"),/do not paraphrase or explain/i);
 });
 
 test("selected Local Reviewer skills compile operational procedures into runtime invocation",()=>{
@@ -31,6 +33,7 @@ test("selected Code Scout skills compile operational procedures into runtime inv
   assert.match(out.system,/procedure=failure-scope-reduction:/);
   assert.match(out.system,/smallest supplied source set/i);
   assert.match(out.system,/canonical file:symbol form/i);
+  assert.match(out.system,/shortest exact predicate clauses/i);
   assert.match(out.system,/failure symptom by itself is not a contract mismatch/i);
 });
 
