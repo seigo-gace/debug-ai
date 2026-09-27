@@ -48,9 +48,10 @@ RUN python3 -m venv /opt/debugai-dap/debugpy-venv \
     && /opt/debugai-dap/debugpy-venv/bin/pip install --no-cache-dir debugpy==1.8.21 \
     && /opt/debugai-dap/debugpy-venv/bin/python -c "import debugpy; assert debugpy.__version__ == '1.8.21', debugpy.__version__"
 COPY server/control/js-debug-stdio-bridge.mjs /opt/debugai-dap/js-debug-stdio-bridge.mjs
+COPY server/control/dap-supervisor-stdio-bridge.mjs /opt/debugai-dap/dap-supervisor-stdio-bridge.mjs
 COPY server/control/dap-sandbox-worker.cjs /opt/debugai-dap/dap-sandbox-worker.cjs
 RUN test -s /opt/debugai-dap/debugmcp.js \
-    && chmod 0555 /opt/debugai-dap/debugmcp.js /opt/debugai-dap/js-debug-stdio-bridge.mjs /opt/debugai-dap/dap-sandbox-worker.cjs \
+    && chmod 0555 /opt/debugai-dap/debugmcp.js /opt/debugai-dap/js-debug-stdio-bridge.mjs /opt/debugai-dap/dap-supervisor-stdio-bridge.mjs /opt/debugai-dap/dap-sandbox-worker.cjs \
     && chown -R root:root /opt/debugai-dap \
     && chmod -R a-w /opt/debugai-dap \
     && mkdir -p /sandbox-jobs \
