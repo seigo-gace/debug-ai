@@ -3,6 +3,38 @@
 const SKILL_PROCEDURE_VERSION="debugai.skill-procedure/v1";
 
 const PROCEDURES=Object.freeze({
+  "failure-taxonomy-router":Object.freeze({
+    version:SKILL_PROCEDURE_VERSION,
+    steps:Object.freeze([
+      "Classify only the observed failure family; never present the family as a confirmed root cause. Use UNKNOWN when the supplied observations do not support one bounded family.",
+      "Use the stable family state_staleness when an older stored or cached state is observed in the returned result, ordering_race when an observed event or read crosses a commit or visibility boundary, and timeout_family when an initiated operation has no response before its deadline.",
+      "Do not substitute implementation guesses such as cache invalidation, corruption, retry behavior, or scheduling anomalies for the bounded observed family."
+    ])
+  }),
+  "source-runtime-correlation":Object.freeze({
+    version:SKILL_PROCEDURE_VERSION,
+    steps:Object.freeze([
+      "Build causal_chain in observed chronological order and include only links directly supported by supplied source, runtime, state, or symptom evidence.",
+      "Emit supported links as stable namespace:name identifiers: a cache hit is runtime:cache_hit; an older cached timestamp is state:stale_timestamp; a returned matching stale value is symptom:stale_object; source save before emit is source:save_then_emit; runtime emit before durable commit is runtime:event_emitted_before_commit; a read between emit and commit is state:reader_observed_old_value.",
+      "Normalize request start to runtime:request_started, no downstream response before the deadline to runtime:downstream_no_response, and deadline exceeded to symptom:deadline_exceeded. Never reverse chronology or add an unobserved edge."
+    ])
+  }),
+  "causal-chain-builder":Object.freeze({
+    version:SKILL_PROCEDURE_VERSION,
+    steps:Object.freeze([
+      "Keep causal_chain limited to the supported canonical links and put every causal candidate lacking supplied observation in unsupported_links instead of mixing it into the chain.",
+      "Use stable unsupported candidate identifiers: an unobserved serializer fault is source:serializer_bug; database corruption explicitly lacking evidence is source:database_corruption; configured retries whose execution was not observed are source:retry_loop_confirmed.",
+      "If any required causal link is unsupported, do not promote correlation to causation and do not claim a confirmed or definitive root cause."
+    ])
+  }),
+  "alternate-hypothesis-seed":Object.freeze({
+    version:SKILL_PROCEDURE_VERSION,
+    steps:Object.freeze([
+      "Keep at least one materially distinct alternative to the leading chain when supplied missing evidence leaves it open; do not merely restate the leading family or the missing-evidence sentence.",
+      "Express the alternative as a stable candidate identifier: missing upstream freshness leaves runtime:upstream_stale_response; untraced consumer ordering leaves runtime:consumer_reordered_event; unavailable network-path telemetry leaves runtime:network_path_stall.",
+      "Treat each alternative as a hypothesis, not a fact, and retain the corresponding missing or supporting evidence boundary."
+    ])
+  }),
   "failure-scope-reduction":Object.freeze({
     version:SKILL_PROCEDURE_VERSION,
     steps:Object.freeze([
