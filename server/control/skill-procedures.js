@@ -15,15 +15,17 @@ const PROCEDURES=Object.freeze({
     version:SKILL_PROCEDURE_VERSION,
     steps:Object.freeze([
       "Build causal_chain in observed chronological order and include only links directly supported by supplied source, runtime, state, or symptom evidence.",
-      "Emit supported links as stable namespace:name identifiers: a cache hit is runtime:cache_hit; an older cached timestamp is state:stale_timestamp; a returned matching stale value is symptom:stale_object; source save before emit is source:save_then_emit; runtime emit before durable commit is runtime:event_emitted_before_commit; a read between emit and commit is state:reader_observed_old_value.",
-      "Normalize request start to runtime:request_started, no downstream response before the deadline to runtime:downstream_no_response, and deadline exceeded to symptom:deadline_exceeded. Never reverse chronology or add an unobserved edge."
+      "Before emitting, apply this normalization table and output exactly the right-hand identifier rather than copying or paraphrasing the evidence sentence: cache hit -> runtime:cache_hit; older cached timestamp -> state:stale_timestamp; returned matching stale value -> symptom:stale_object; source save before emit -> source:save_then_emit; runtime emit before durable commit -> runtime:event_emitted_before_commit; read between emit and commit -> state:reader_observed_old_value.",
+      "Also normalize request start -> runtime:request_started; no downstream response before deadline -> runtime:downstream_no_response; deadline exceeded -> symptom:deadline_exceeded. Never emit a table entry unless current supplied evidence matches it, reverse chronology, or add an unobserved edge."
     ])
   }),
   "causal-chain-builder":Object.freeze({
     version:SKILL_PROCEDURE_VERSION,
     steps:Object.freeze([
-      "Keep causal_chain limited to the supported canonical links and put every causal candidate lacking supplied observation in unsupported_links instead of mixing it into the chain.",
-      "Use stable unsupported candidate identifiers: an unobserved serializer fault is source:serializer_bug; database corruption explicitly lacking evidence is source:database_corruption; configured retries whose execution was not observed are source:retry_loop_confirmed.",
+      "Emit causal_chain as canonical identifiers only, with one identifier per positive observed event in chronological order; never copy evidence prose and never include negative, unavailable, not-measured, or not-observed evidence in the chain.",
+      "Apply this exact supported-link table even when source-runtime-correlation is not selected: cache hit -> runtime:cache_hit; older cached timestamp -> state:stale_timestamp; returned matching stale value -> symptom:stale_object; source save before emit -> source:save_then_emit; emit before durable commit -> runtime:event_emitted_before_commit; read between emit and commit -> state:reader_observed_old_value; request start -> runtime:request_started; no downstream response before deadline -> runtime:downstream_no_response; deadline exceeded -> symptom:deadline_exceeded.",
+      "Route an explicitly unobserved proposed mechanism to unsupported_links using exactly these identifiers: serializer code path not observed -> source:serializer_bug; no evidence of database corruption -> source:database_corruption; retry configured but execution not observed -> source:retry_loop_confirmed. Do not add unsupported identifiers for mechanisms absent from current evidence.",
+      "Route missing discriminating telemetry to alternate_hypotheses, not unsupported_links, using exactly these identifiers: upstream freshness not measured -> runtime:upstream_stale_response; consumer internal ordering not traced -> runtime:consumer_reordered_event; network path telemetry unavailable -> runtime:network_path_stall. Do not emit alternatives from unrelated table rows.",
       "If any required causal link is unsupported, do not promote correlation to causation and do not claim a confirmed or definitive root cause."
     ])
   }),
@@ -31,7 +33,7 @@ const PROCEDURES=Object.freeze({
     version:SKILL_PROCEDURE_VERSION,
     steps:Object.freeze([
       "Keep at least one materially distinct alternative to the leading chain when supplied missing evidence leaves it open; do not merely restate the leading family or the missing-evidence sentence.",
-      "Express the alternative as a stable candidate identifier: missing upstream freshness leaves runtime:upstream_stale_response; untraced consumer ordering leaves runtime:consumer_reordered_event; unavailable network-path telemetry leaves runtime:network_path_stall.",
+      "Express only alternatives matched by current evidence and output exactly the identifier rather than the missing-evidence prose: missing upstream freshness -> runtime:upstream_stale_response; untraced consumer ordering -> runtime:consumer_reordered_event; unavailable network-path telemetry -> runtime:network_path_stall.",
       "Treat each alternative as a hypothesis, not a fact, and retain the corresponding missing or supporting evidence boundary."
     ])
   }),
