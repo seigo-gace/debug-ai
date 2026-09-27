@@ -6,7 +6,7 @@ const ROLE_RUNTIME_BUDGETS=Object.freeze({
   researcher:Object.freeze({max_tokens:600,turn_timeout_ms:180000,tool_loop_wall_ms:360000,max_tool_rounds:2,max_tool_calls:4,source:"DebugAI r25 exact authority 2026-09-24"}),
   diagnoser:Object.freeze({max_tokens:800,turn_timeout_ms:240000,tool_loop_wall_ms:480000,max_tool_rounds:2,max_tool_calls:4,source:"DebugAI r25 exact authority 2026-09-24"}),
   patch_engineer:Object.freeze({max_tokens:2048,turn_timeout_ms:360000,tool_loop_wall_ms:null,max_tool_rounds:0,max_tool_calls:0,source:"DebugAI r25 exact authority 2026-09-24"}),
-  local_reviewer:Object.freeze({max_tokens:1024,turn_timeout_ms:600000,tool_loop_wall_ms:null,max_tool_rounds:0,max_tool_calls:0,source:"Current server compatibility; no exact r25 Local Reviewer timeout authority",qualification:"PENDING_REAL_ROLE_BENCHMARK"}),
+  local_reviewer:Object.freeze({max_tokens:1024,turn_timeout_ms:600000,tool_loop_wall_ms:null,max_tool_rounds:0,max_tool_calls:0,source:"Contabo real Local Reviewer benchmark 2026-09-27; current compatibility budget retained",qualification:"REAL_ROLE_BENCHMARK_PASS"}),
 });
 
 function getRoleRuntimeBudget(role){

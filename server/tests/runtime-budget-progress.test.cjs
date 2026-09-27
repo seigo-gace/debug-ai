@@ -6,7 +6,7 @@ const {createProgressController}=require("../control/progress-controller.js");
 const {resolveEffectiveTimeoutMs}=require("../adapters/ai-core.js");
 const {runRoleWithReadOnlyTools}=require("../control/tool-loop.js");
 
-test("r25 role runtime budgets are restored for the five roles with exact authority",()=>{
+test("r25 role runtime budgets are restored and Local Reviewer has real benchmark qualification",()=>{
   assert.equal(assertRoleRuntimeBudgets(),true);
   assert.deepEqual([ROLE_RUNTIME_BUDGETS.code_scout.max_tokens,ROLE_RUNTIME_BUDGETS.code_scout.turn_timeout_ms],[600,180000]);
   assert.deepEqual([ROLE_RUNTIME_BUDGETS.causal_scout.max_tokens,ROLE_RUNTIME_BUDGETS.causal_scout.turn_timeout_ms],[600,180000]);
@@ -14,7 +14,8 @@ test("r25 role runtime budgets are restored for the five roles with exact author
   assert.deepEqual([ROLE_RUNTIME_BUDGETS.diagnoser.max_tokens,ROLE_RUNTIME_BUDGETS.diagnoser.turn_timeout_ms],[800,240000]);
   assert.deepEqual([ROLE_RUNTIME_BUDGETS.patch_engineer.max_tokens,ROLE_RUNTIME_BUDGETS.patch_engineer.turn_timeout_ms],[2048,360000]);
   assert.equal(ROLE_RUNTIME_BUDGETS.local_reviewer.turn_timeout_ms,600000);
-  assert.equal(ROLE_RUNTIME_BUDGETS.local_reviewer.qualification,"PENDING_REAL_ROLE_BENCHMARK");
+  assert.equal(ROLE_RUNTIME_BUDGETS.local_reviewer.qualification,"REAL_ROLE_BENCHMARK_PASS");
+  assert.match(ROLE_RUNTIME_BUDGETS.local_reviewer.source,/real Local Reviewer benchmark 2026-09-27/);
 });
 
 test("effective timeout is bounded by role override and remaining aggregate deadline",()=>{

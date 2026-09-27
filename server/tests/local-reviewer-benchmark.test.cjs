@@ -32,7 +32,7 @@ test("Local Reviewer benchmark uses fresh no-tool strict-evidence production pat
   assert.equal(out.authority,"MEASUREMENT_ONLY");
   assert.equal(out.elapsed_ms,50);
   assert.equal(out.runtime_budget.configured_timeout_ms,600000);
-  assert.equal(out.runtime_budget.qualification,"PENDING_REAL_ROLE_BENCHMARK");
+  assert.equal(out.runtime_budget.qualification,"REAL_ROLE_BENCHMARK_PASS");
   assert.equal(out.contract.strict_evidence_refs,true);
   assert.equal(out.contract.tool_calls,0);
   assert.equal(out.review.verdict,"PASS");
