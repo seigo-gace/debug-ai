@@ -1,6 +1,8 @@
 "use strict";
 const {selectSkills}=require("./invocation-compiler.js");
 const {getRoleContract}=require("./role-contracts.js");
+const {assertToolResultIntegrity}=require("./read-only-tool-runtime.js");
+const {parseAndValidateRoleOutput}=require("./role-output-validator.js");
 
 function parseJsonContent(content){
   if(typeof content!=="string")return content;
@@ -24,13 +26,31 @@ function stableJson(value){
   const keys=Object.keys(value).sort();return `{${keys.map(k=>`${JSON.stringify(k)}:${stableJson(value[k])}`).join(",")}}`;
 }
 function toolFingerprint(tool,args){return `${tool}:${stableJson(args)}`;}
-function parseFinal(role,content){
-  try{return parseJsonContent(content);}catch(error){const e=new Error(`ROLE_OUTPUT_JSON_INVALID:${role}`);e.cause=error;throw e;}
+function parseIntermediate(role,content){
+  try{
+    const parsed=parseJsonContent(content);
+    if(!parsed||typeof parsed!=="object"||Array.isArray(parsed))throw new Error("OBJECT_REQUIRED");
+    return parsed;
+  }catch(error){const e=new Error(`ROLE_OUTPUT_JSON_INVALID:${role}`);e.cause=error;throw e;}
+}
+function collectEvidenceIds(observations){
+  const out=[];
+  for(const observation of observations)for(const item of observation.results||[]){
+    const result=item?.result;
+    if(result?.status==="OK"){
+      assertToolResultIntegrity(result);
+      const id=result.evidence_id;if(typeof id==="string"&&id&&!out.includes(id))out.push(id);
+    }
+  }
+  return out;
 }
 
 async function runRoleWithReadOnlyTools({aiCore,role,system="",user="",toolRuntime=null,maxToolRounds=2,maxToolCalls=4}={}){
   if(!aiCore||typeof aiCore.call!=="function")throw new Error("AI_CORE_CALL_REQUIRED");
-  if(!toolRuntime)return aiCore.call(role,{system,user});
+  if(!toolRuntime){
+    const out=await aiCore.call(role,{system,user});
+    return {...out,validated_output:parseAndValidateRoleOutput(role,out.content),tool_loop:{rounds:0,total_calls:0,observations:[],evidence_ids:[],parse_status:"FINAL",selected_skill_ids:[...(out.control_plane?.selected_skill_ids||[])]}};
+  }
   if(!Number.isInteger(maxToolRounds)||maxToolRounds<1||maxToolRounds>3)throw new Error("TOOL_ROUNDS_INVALID");
   if(!Number.isInteger(maxToolCalls)||maxToolCalls<1||maxToolCalls>8)throw new Error("TOOL_CALL_BUDGET_INVALID");
   const selected=availableForSelection(role,toolRuntime,user);
@@ -40,9 +60,13 @@ async function runRoleWithReadOnlyTools({aiCore,role,system="",user="",toolRunti
     const finalRound=round===maxToolRounds;
     const roundSystem=[system,protocol,finalRound?"TOOL_BUDGET_FINAL_ROUND=true. Do not request more tools; return final JSON or explicit INSUFFICIENT_EVIDENCE.":""].filter(Boolean).join("\n");
     last=await aiCore.call(role,{system:roundSystem,user:currentUser,selectedSkillIds:selected.skillIds});
-    const parsed=parseFinal(role,last.content);
+    const parsed=parseIntermediate(role,last.content);
     const requests=requestList(parsed);
-    if(!requests.length)return {...last,tool_loop:{rounds:round,total_calls:totalCalls,observations,parse_status:"FINAL",selected_skill_ids:[...selected.skillIds]}};
+    if(!requests.length){
+      const evidenceIds=collectEvidenceIds(observations);
+      const validated=parseAndValidateRoleOutput(role,last.content,{availableEvidenceIds:evidenceIds});
+      return {...last,validated_output:validated,tool_loop:{rounds:round,total_calls:totalCalls,observations,evidence_ids:evidenceIds,parse_status:"FINAL",selected_skill_ids:[...selected.skillIds]}};
+    }
     if(finalRound)throw new Error(`ROLE_TOOL_LOOP_LIVELOCK:${role}`);
     const remaining=maxToolCalls-totalCalls;if(remaining<=0)throw new Error(`ROLE_TOOL_CALL_BUDGET_EXHAUSTED:${role}`);
     const bounded=requests.slice(0,Math.min(3,remaining));const results=[];
@@ -56,6 +80,7 @@ async function runRoleWithReadOnlyTools({aiCore,role,system="",user="",toolRunti
       seenToolCalls.add(fingerprint);
       try{
         const result=await toolRuntime.execute({role,selectedSkillIds:selected.skillIds,tool,arguments:args});
+        assertToolResultIntegrity(result);
         results.push({request:{tool,reason:String(req.reason||"").slice(0,300)},result});
       }catch(error){results.push({request:{tool,reason:String(req.reason||"").slice(0,300)},result:safeToolError(error)});}
       totalCalls++;
@@ -66,4 +91,4 @@ async function runRoleWithReadOnlyTools({aiCore,role,system="",user="",toolRunti
   throw new Error(`ROLE_TOOL_LOOP_UNREACHABLE:${role}`);
 }
 
-module.exports={parseJsonContent,availableForSelection,toolProtocol,toolFingerprint,runRoleWithReadOnlyTools};
+module.exports={parseJsonContent,availableForSelection,toolProtocol,toolFingerprint,collectEvidenceIds,runRoleWithReadOnlyTools};

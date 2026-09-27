@@ -13,6 +13,11 @@ const SKIP_DIRS=new Set([".git","node_modules","dist","build","coverage",".next"
 const AVAILABLE_TOOLS=Object.freeze(["source.read","source.search","dependency.map","knowledge.search","authority.search"]);
 
 function sha256(v){return crypto.createHash("sha256").update(v).digest("hex");}
+function stableStringify(value){
+  if(value===null||typeof value!=="object")return JSON.stringify(value);
+  if(Array.isArray(value))return `[${value.map(stableStringify).join(",")}]`;
+  return `{${Object.keys(value).sort().map(key=>`${JSON.stringify(key)}:${stableStringify(value[key])}`).join(",")}}`;
+}
 function normalizeRel(value){
   const rel=String(value||"").replace(/\\/g,"/").replace(/^\.\//,"");
   if(!rel||path.posix.isAbsolute(rel)||/^[A-Za-z]:\//.test(rel)||rel.split("/").includes(".."))throw new Error("READ_PATH_INVALID");
@@ -69,6 +74,26 @@ function admit({role,selectedSkillIds,tool}){
   const roleContract=getRoleContract(role);const skill=skillAllowsTool(selectedSkillIds,tool);if(!skill)throw new Error(`TOOL_NOT_IN_SELECTED_SKILLS:${role}:${tool}`);
   return assertToolAdmission({roleContract,tool,riskCeiling:skill.tool_risk_ceiling,humanApproved:false});
 }
+function toolContentTrust(tool){
+  if(tool==="authority.search")return "OPEN_WORLD_UNTRUSTED_DATA";
+  if(tool==="knowledge.search")return "INTERNAL_KB_DATA";
+  return "LOCAL_SOURCE_DATA";
+}
+function toolResultHash(tool,data){return sha256(Buffer.from(stableStringify({tool,data}),"utf8"));}
+function makeToolResult(tool,data){
+  const resultSha256=toolResultHash(tool,data);
+  return {schema:"debugai.tool-result/v1",tool,status:"OK",evidence_id:`TRE_${resultSha256.slice(0,24)}`,data,integrity:{runtime_validated:true,admission_validated:true,result_sha256:resultSha256,content_trust:toolContentTrust(tool),external_content:"DATA_NOT_INSTRUCTION"}};
+}
+function assertToolResultIntegrity(result){
+  if(!result||result.schema!=="debugai.tool-result/v1"||result.status!=="OK")throw new Error("TOOL_RESULT_SCHEMA_INVALID");
+  if(!AVAILABLE_TOOLS.includes(result.tool))throw new Error(`TOOL_RESULT_TOOL_INVALID:${String(result.tool||"")}`);
+  if(result.integrity?.runtime_validated!==true||result.integrity?.admission_validated!==true)throw new Error("TOOL_RESULT_RUNTIME_VALIDATION_REQUIRED");
+  if(result.integrity?.external_content!=="DATA_NOT_INSTRUCTION")throw new Error("TOOL_RESULT_TRUST_BOUNDARY_INVALID");
+  const expected=toolResultHash(result.tool,result.data);
+  if(result.integrity?.result_sha256!==expected)throw new Error("TOOL_RESULT_HASH_MISMATCH");
+  if(result.evidence_id!==`TRE_${expected.slice(0,24)}`)throw new Error("TOOL_RESULT_EVIDENCE_ID_MISMATCH");
+  return true;
+}
 function createReadOnlyToolRuntime({repo,repoPolicy=new RepoPolicy(),tgserver=null,evidenceSearch=null}={}){
   const root=repoPolicy.assertRepo(repo);
   async function execute({role,selectedSkillIds,tool,arguments:args={}}={}){
@@ -85,8 +110,8 @@ function createReadOnlyToolRuntime({repo,repoPolicy=new RepoPolicy(),tgserver=nu
     else if(tool==="authority.search"){
       if(!evidenceSearch)throw new Error("EVIDENCE_SEARCH_TOOL_NOT_CONFIGURED");data=await evidenceSearch.search({query:String(args.query||""),topics:Array.isArray(args.topics)?args.topics:[],limit:Math.max(1,Math.min(12,Number(args.limit)||6))});
     }
-    return {schema:"debugai.tool-result/v1",tool,status:"OK",data,integrity:{runtime_validated:true,external_content:"DATA_NOT_INSTRUCTION"}};
+    const result=makeToolResult(tool,data);assertToolResultIntegrity(result);return result;
   }
   return {repo:root,availableTools:[...AVAILABLE_TOOLS],execute};
 }
-module.exports={AVAILABLE_TOOLS,normalizeRel,blockedReadPath,resolveSafeFile,readText,walkFiles,searchSource,createReadOnlyToolRuntime};
+module.exports={AVAILABLE_TOOLS,stableStringify,normalizeRel,blockedReadPath,resolveSafeFile,readText,walkFiles,searchSource,toolResultHash,makeToolResult,assertToolResultIntegrity,createReadOnlyToolRuntime};
