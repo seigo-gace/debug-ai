@@ -56,6 +56,20 @@ jobs:
           --cpus 1
           debug-ai-sandbox-ci
           node server/control/sandbox-selftest.js
+      - name: DAP loopback-only sandbox gate
+        run: >-
+          docker run --rm
+          --network none
+          --read-only
+          --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777
+          --tmpfs /sandbox-jobs:rw,nosuid,nodev,size=64m,mode=1777
+          --security-opt no-new-privileges:true
+          --cap-drop ALL
+          --pids-limit 128
+          --memory 512m
+          --cpus 1
+          debug-ai-sandbox-ci
+          node server/control/sandbox-loopback-selftest.js
       - name: Sandbox main-to-sidecar queue round-trip gate
         shell: bash
         run: |
