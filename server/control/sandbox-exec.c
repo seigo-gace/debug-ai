@@ -81,7 +81,7 @@ DENY_SYSCALL(__NR_process_vm_readv);
 DENY_SYSCALL(__NR_process_vm_writev);
 #endif
 #ifdef __NR_kill
-DENY_SYSCALL(__NR_kill);
+if(allow_loopback_tcp){PUSH(BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K,__NR_kill,0,4));PUSH(BPF_STMT(BPF_LD|BPF_W|BPF_ABS,offsetof(struct seccomp_data,args[1])));PUSH(BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K,0,1,0));DENY_CURRENT();PUSH(BPF_STMT(BPF_LD|BPF_W|BPF_ABS,offsetof(struct seccomp_data,nr)));}else{DENY_SYSCALL(__NR_kill);}
 #endif
 #ifdef __NR_tkill
 DENY_SYSCALL(__NR_tkill);
