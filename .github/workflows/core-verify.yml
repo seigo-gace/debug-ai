@@ -11,7 +11,7 @@ permissions:
 jobs:
   core-verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -70,6 +70,51 @@ jobs:
           --cpus 1
           debug-ai-sandbox-ci
           node server/control/sandbox-loopback-selftest.js
+      - name: Managed Node and Python DAP real queue gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          name=debug-ai-dap-queue-ci
+          volume=debug_ai_dap_queue_ci
+          cleanup() {
+            docker rm -f "$name" >/dev/null 2>&1 || true
+            docker volume rm "$volume" >/dev/null 2>&1 || true
+          }
+          cleanup
+          trap cleanup EXIT
+          docker volume create "$volume" >/dev/null
+          docker run -d --name "$name" \
+            --network none \
+            --read-only \
+            --tmpfs /tmp:rw,nosuid,nodev,size=128m,mode=1777 \
+            --security-opt no-new-privileges:true \
+            --cap-drop ALL \
+            --pids-limit 192 \
+            --memory 768m \
+            --cpus 1 \
+            -v "$volume:/sandbox-jobs" \
+            debug-ai-sandbox-ci >/dev/null
+          for kind in node python; do
+            docker run --rm \
+              --network none \
+              --read-only \
+              --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 \
+              --security-opt no-new-privileges:true \
+              --cap-drop ALL \
+              -v "$volume:/sandbox-jobs" \
+              debug-ai-app-ci \
+              node server/control/dap-queue-selftest.js enqueue "$kind"
+            docker run --rm \
+              --network none \
+              --read-only \
+              --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 \
+              --security-opt no-new-privileges:true \
+              --cap-drop ALL \
+              -v "$volume:/sandbox-jobs" \
+              debug-ai-app-ci \
+              node server/control/dap-queue-selftest.js verify "$kind"
+          done
+          docker logs "$name"
       - name: Sandbox main-to-sidecar queue round-trip gate
         shell: bash
         run: |
