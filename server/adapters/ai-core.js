@@ -24,10 +24,10 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
   const endpoint=new URL("/v1/chat/completions",baseUrl).toString();
   const transport=dispatcher||new Agent({headersTimeout:timeoutMs+5000,bodyTimeout:timeoutMs+5000});
   let queueTail=Promise.resolve();
-  async function execute(role,{system="",user="",maxTokens=1024,responseFormat="json_object",temperature=0}={}){
+  async function execute(role,{system="",user="",maxTokens=1024,responseFormat="json_object",temperature=0,selectedSkillIds=null}={}){
     const cfg=ROLES[role];if(!cfg)throw new AiCoreError("ROLE_INVALID",`Unknown DebugAI role: ${role}`);
     const effectiveTimeoutMs=resolveRoleTimeoutMs(role,timeoutMs);
-    const invocation=compileInvocation(role,{task:user,extraSystem:system});
+    const invocation=compileInvocation(role,{task:user,extraSystem:system,selectedSkillIds});
     const body={model:cfg.backend_model,messages:[{role:"system",content:invocation.system},{role:"user",content:user}],max_tokens:maxTokens,temperature,stream:false,response_format:responseFormat?{type:responseFormat}:undefined};
     if(typeof cfg.thinking==="boolean")body.chat_template_kwargs={enable_thinking:cfg.thinking};
     for(let attempt=1;attempt<=maxTransportTimeoutAttempts;attempt++){
@@ -39,7 +39,7 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
         const text=await r.text();if(!r.ok)throw new AiCoreError("AI_CORE_HTTP",`AI Core HTTP ${r.status}`,{status:r.status,body:text.slice(0,500)});
         let envelope;try{envelope=JSON.parse(text)}catch{throw new AiCoreError("AI_CORE_ENVELOPE","AI Core returned non-JSON envelope");}
         const content=envelope?.choices?.[0]?.message?.content;if(typeof content!=="string"||!content.trim())throw new AiCoreError("AI_CORE_EMPTY","AI Core returned empty content");
-        return {provider:"llama-swap",role,alias:cfg.alias,model:cfg.backend_model,thinking:cfg.thinking,content,raw:envelope,attempts:attempt,control_plane:{selected_skill_ids:[...invocation.selected_skill_ids],role_contract_version:invocation.role_contract_version,output_schema:invocation.output_schema,guardrail_profile:invocation.guardrail_profile}};
+        return {provider:"llama-swap",role,alias:cfg.alias,model:cfg.backend_model,thinking:cfg.thinking,content,raw:envelope,attempts:attempt,control_plane:{selected_skill_ids:[...invocation.selected_skill_ids],skill_selection_mode:invocation.skill_selection_mode,role_contract_version:invocation.role_contract_version,output_schema:invocation.output_schema,guardrail_profile:invocation.guardrail_profile}};
       }catch(e){
         const timeoutClass=classifyTimeoutError(e,{deadlineTriggered});
         if(timeoutClass===TIMEOUT_CLASS.DEADLINE_ABORT){
