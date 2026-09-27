@@ -23,7 +23,7 @@ const PROCEDURES=Object.freeze({
     version:SKILL_PROCEDURE_VERSION,
     steps:Object.freeze([
       "Report contract_mismatch only when an explicit supplied contract conflicts with an explicit supplied source fact; otherwise return null.",
-      "When a mismatch exists, keep file to the implementing file and preserve the smallest exact contract clause and observed behavior needed to express the conflict without embellishment.",
+      "When a mismatch exists, keep file to the implementing file and set expected and observed to the shortest exact predicate clauses from the supplied contract and source fact that express the contradiction; preserve original wording, remove only surrounding subject or condition text that is not needed for the conflicting predicate, and do not paraphrase or explain.",
       "A failure symptom by itself is not a contract mismatch and must not be rewritten into an invented contract."
     ])
   }),
