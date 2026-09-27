@@ -6,6 +6,11 @@ const crypto=require("node:crypto");
 const {prepareSandboxJob,readSandboxResult,probeSandboxHelper}=require("./sandbox-runtime.js");
 const {runOnce}=require("./sandbox-sidecar.js");
 
+function clearJobRootContents(jobRoot){
+  if(!fs.existsSync(jobRoot))return;
+  for(const name of fs.readdirSync(jobRoot))fs.rmSync(path.join(jobRoot,name),{recursive:true,force:true});
+}
+
 async function main(){
   const jobRoot=process.env.DEBUG_AI_SANDBOX_JOB_ROOT||"/sandbox-jobs",source=fs.mkdtempSync(path.join(os.tmpdir(),"debugai-original-repo-")),guard="/tmp/debugai-original-guard";
   fs.mkdirSync(jobRoot,{recursive:true});fs.writeFileSync(guard,"ORIGINAL_GUARD\n");
@@ -18,6 +23,6 @@ async function main(){
     const after=crypto.createHash("sha256").update(fs.readFileSync(path.join(source,"source-marker.txt"))).digest("hex");if(before!==after)throw new Error("SOURCE_REPO_HASH_CHANGED");if(fs.existsSync(path.join(source,"inside-sandbox.txt")))throw new Error("SOURCE_REPO_MUTATED");if(fs.readFileSync(guard,"utf8")!=="ORIGINAL_GUARD\n")throw new Error("ORIGINAL_GUARD_MUTATED");
     for(const marker of ["SANDBOX_INNER_WRITE=PASS","SANDBOX_WORKSPACE_ABSENT=PASS","SANDBOX_SECRETS_ABSENT=PASS","SANDBOX_ORIGINAL_FS_DENY=PASS","SANDBOX_SIGNAL_DENY=PASS","SANDBOX_TCP_UDP_DENY=PASS"]){if(!result.stdout.includes(marker))throw new Error(`SANDBOX_MARKER_MISSING:${marker}`);}
     console.log(`LANDLOCK_ABI=${probe.landlock_abi}`);console.log("SANDBOX_SOURCE_REPO_HASH=UNCHANGED");console.log("SANDBOX_DOCKER_SOCKET=ABSENT");console.log("SANDBOX_REAL_ISOLATION=PASS");
-  }finally{fs.rmSync(source,{recursive:true,force:true});fs.rmSync(guard,{force:true});fs.rmSync(jobRoot,{recursive:true,force:true});}
+  }finally{fs.rmSync(source,{recursive:true,force:true});fs.rmSync(guard,{force:true});clearJobRootContents(jobRoot);}
 }
 main().catch(error=>{console.error(error.stack||String(error));process.exit(1);});
