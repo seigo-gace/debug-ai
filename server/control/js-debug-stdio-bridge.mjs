@@ -71,7 +71,7 @@ class DapPeer {
 
 class MultiSessionProxy {
   constructor() {
-    this.serverProcess = null; this.host = '127.0.0.1'; this.port = null; this.root = null; this.targets = new Set(); this.activeTarget = null; this.childSeq = 0; this.externalSeq = 1; this.externalBuffer = Buffer.alloc(0); this.initializeArgs = null; this.breakpointRequests = new Map(); this.exceptionBreakpoints = null; this.customBreakpoints = null; this.debuggees = new Set(); this.closing = false; this.closePromise = null;
+    this.serverProcess = null; this.host = '127.0.0.1'; this.port = null; this.root = null; this.targets = new Set(); this.activeTarget = null; this.childSeq = 0; this.externalSeq = 1; this.externalBuffer = Buffer.alloc(0); this.initializeArgs = null; this.breakpointRequests = new Map(); this.exceptionBreakpoints = null; this.customBreakpoints = null; this.debuggees = new Set(); this.closing = false; this.closePromise = null; this.disconnecting = false;
   }
   sendExternal(message) { const payload = Buffer.from(JSON.stringify(message), 'utf8'); process.stdout.write(`Content-Length: ${payload.length}\r\n\r\n`); process.stdout.write(payload); }
   respondExternal(request, body = {}, success = true, message = undefined) { this.sendExternal({ seq: this.externalSeq++, type: 'response', request_seq: request.seq, command: request.command, success, ...(success ? { body } : { message: String(message || 'DAP proxy request failed') }) }); }
@@ -83,7 +83,7 @@ class MultiSessionProxy {
     this.serverProcess = spawn(process.execPath, [entry, '0', this.host], { cwd: process.cwd(), env: { ...process.env }, stdio: ['ignore', 'pipe', 'pipe'], shell: false, windowsHide: true });
     this.serverProcess.stdout.on('data', chunk => { stdoutBuffer += String(chunk || ''); const lines = stdoutBuffer.split(/\r?\n/); stdoutBuffer = lines.pop() || ''; for (const line of lines) { if (!line.trim()) continue; const match = line.match(/Debug server listening at\s+(.+):(\d+)\s*$/i); if (match && !this.port) { this.host = match[1].replace(/^::ffff:/, '') || '127.0.0.1'; this.port = Number(match[2]); clearTimeout(timer); resolveReady(); } else log(`js-debug stdout: ${line.trim()}`); } });
     this.serverProcess.stderr.on('data', chunk => { const text = String(chunk || '').trimEnd(); if (text) log(`js-debug stderr: ${text}`); });
-    this.serverProcess.on('error', error => rejectReady(error)); this.serverProcess.on('exit', (code, signal) => { if (!this.closing) this.fatal(new Error(`JS_DEBUG_SERVER_EXIT:${code}:${signal || ''}`)); });
+    this.serverProcess.on('error', error => rejectReady(error)); this.serverProcess.on('exit', (code, signal) => { if (!this.closing && !this.disconnecting) this.fatal(new Error(`JS_DEBUG_SERVER_EXIT:${code}:${signal || ''}`)); });
     await ready; this.root = await this.connectPeer('root'); log(`READY=${this.host}:${this.port}`);
   }
   async connectPeer(label) { const socket = net.createConnection({ host: this.host, port: this.port }); await new Promise((resolve, reject) => { const timer = setTimeout(() => reject(new Error(`DAP_CONNECT_TIMEOUT:${label}`)), 10000); socket.once('connect', () => { clearTimeout(timer); resolve(); }); socket.once('error', error => { clearTimeout(timer); reject(error); }); }); socket.setNoDelay(true); return new DapPeer(socket, label, this); }
@@ -93,8 +93,29 @@ class MultiSessionProxy {
   }
   choosePeer(command) { const rootCommands = new Set(['initialize', 'launch', 'attach', 'configurationDone', 'disconnect', 'terminate', 'restart']); if (rootCommands.has(command)) return this.root; return this.activeTarget || this.root; }
   recordBreakpoint(args) { const source = args?.source || {}, key = normalizeSourceKey(source); if (key) this.breakpointRequests.set(key, structuredClone(args)); }
+  finishDisconnect(request) {
+    if (this.disconnecting) { this.respondExternal(request, {}); return; }
+    this.disconnecting = true;
+    this.respondExternal(request, {});
+    log('DISCONNECT_DELEGATED_TO_SANDBOX_SUPERVISOR');
+    for (const target of this.targets) { try { target.close(); } catch {} }
+    this.targets.clear();
+    try { this.root?.close(); } catch {}
+    setImmediate(() => process.exit(0));
+  }
   async handleExternalRequest(request) {
-    try { if (!this.root) throw new Error('JS_DEBUG_PROXY_ROOT_NOT_READY'); let args = request.arguments && typeof request.arguments === 'object' ? { ...request.arguments } : {}; if (request.command === 'initialize') { this.initializeArgs = { ...args, supportsStartDebuggingRequest: true, supportsRunInTerminalRequest: true }; const body = await this.root.request('initialize', this.initializeArgs); this.respondExternal(request, body); return; } if (request.command === 'setBreakpoints') this.recordBreakpoint(args); if (request.command === 'setExceptionBreakpoints') this.exceptionBreakpoints = structuredClone(args); if (request.command === 'setCustomBreakpoints') this.customBreakpoints = structuredClone(args); if (request.command === 'launch' && args.autoAttachChildProcesses === undefined) args = { ...args, autoAttachChildProcesses: false }; const peer = this.choosePeer(request.command), body = await peer.request(request.command, args); this.respondExternal(request, body); } catch (error) { this.respondExternal(request, {}, false, error?.message || error); }
+    try {
+      if (!this.root) throw new Error('JS_DEBUG_PROXY_ROOT_NOT_READY');
+      if (request.command === 'disconnect') { this.finishDisconnect(request); return; }
+      let args = request.arguments && typeof request.arguments === 'object' ? { ...request.arguments } : {};
+      if (request.command === 'initialize') { this.initializeArgs = { ...args, supportsStartDebuggingRequest: true, supportsRunInTerminalRequest: true }; const body = await this.root.request('initialize', this.initializeArgs); this.respondExternal(request, body); return; }
+      if (request.command === 'setBreakpoints') this.recordBreakpoint(args);
+      if (request.command === 'setExceptionBreakpoints') this.exceptionBreakpoints = structuredClone(args);
+      if (request.command === 'setCustomBreakpoints') this.customBreakpoints = structuredClone(args);
+      if (request.command === 'launch' && args.autoAttachChildProcesses === undefined) args = { ...args, autoAttachChildProcesses: false };
+      const peer = this.choosePeer(request.command), body = await peer.request(request.command, args);
+      this.respondExternal(request, body);
+    } catch (error) { this.respondExternal(request, {}, false, error?.message || error); }
   }
   onInternalEvent(peer, message) { if (peer !== this.root && message.event === 'initialized') return; if (peer === this.root && message.event !== 'initialized' && this.activeTarget && ['thread', 'stopped', 'continued', 'breakpoint', 'process', 'output'].includes(message.event)) return; this.forwardEvent(message); }
   async handleReverseRequest(peer, request) {
