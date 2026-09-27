@@ -50,6 +50,8 @@ test("selected Causal Scout skills compile bounded causal procedures within the 
   assert.match(correlation.system,/procedure=failure-taxonomy-router:/);
   assert.match(correlation.system,/runtime:cache_hit.*state:stale_timestamp.*symptom:stale_object/i);
   assert.match(correlation.system,/source:database_corruption/i);
+  assert.match(correlation.system,/one-evidence-to-one-bucket/i);
+  assert.match(correlation.system,/no canonical array item may contain spaces or copied prose/i);
 
   const alternate=compileInvocation("causal_scout",{task:"retain an alternate causal hypothesis",selectedSkillIds:["failure-taxonomy-router","causal-chain-builder","alternate-hypothesis-seed"]});
   assert.equal(alternate.selected_skill_ids.length,3);
