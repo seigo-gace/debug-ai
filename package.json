@@ -10,6 +10,7 @@
     "verify":"npm run check && npm test",
     "verify:core":"npm run check && npm test",
     "test:legacy":"node --test legacy/pc-authority/orchestrator/tests/*.cjs legacy/pc-authority/gateway/*.test.mjs",
+    "benchmark:local-reviewer":"node server/control/local-reviewer-benchmark.js",
     "start":"node server/main.js"
   }
 }
