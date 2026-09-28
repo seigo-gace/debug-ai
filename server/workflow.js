@@ -1,11 +1,14 @@
 "use strict";
 const crypto=require("node:crypto");
+const {execFileSync}=require("node:child_process");
+const {contentHash}=require("../orchestrator/durable-contracts.js");
 const {assertPromotable}=require("./asset-promotion.js");
 const {createReadOnlyToolRuntime,assertToolResultIntegrity,readText,testInventory}=require("./control/read-only-tool-runtime.js");
 const {runRoleWithReadOnlyTools,mergeEvidenceIds}=require("./control/tool-loop.js");
 const {parseAndValidateRoleOutput}=require("./control/role-output-validator.js");
 const {getRoleRuntimeBudget}=require("./control/role-runtime-budgets.js");
 const {registerEvidenceList,evidenceIds,registrySummary}=require("./control/evidence-registry.js");
+const {runResearcherContinuation}=require("./control/researcher-continuation.js");
 
 function parseJson(c){if(typeof c!=="string")return c;return JSON.parse(c.trim().replace(/^```json\s*/i,"").replace(/```$/i,"").trim());}
 function roleOutput(call,role){if(call?.validated_output&&typeof call.validated_output==="object")return call.validated_output;return parseAndValidateRoleOutput(role,call?.content,{availableEvidenceIds:call?.tool_loop?.evidence_ids||[]});}
@@ -34,6 +37,15 @@ function reviewableVerificationCheck(check){
   return {...item,stdout:reviewStreamEvidence(item.stdout,{includeExcerpt}),stderr:reviewStreamEvidence(item.stderr,{includeExcerpt})};
 }
 function evidencePromptView(records){return (Array.isArray(records)?records:[]).map(record=>{if(!record||typeof record!=="object")return record;const {integrity,...view}=record;return view;});}
+function repositorySnapshotId(repoPath){
+  if(typeof repoPath!=="string"||!repoPath)throw new Error("DURABLE_REPO_SNAPSHOT_REPO_REQUIRED");
+  try{
+    const head=execFileSync("git",["-C",repoPath,"rev-parse","HEAD"],{encoding:"utf8",timeout:10000,stdio:["ignore","pipe","pipe"]}).trim();
+    const status=execFileSync("git",["-C",repoPath,"status","--porcelain=v1","--untracked-files=no"],{encoding:"utf8",timeout:10000,stdio:["ignore","pipe","pipe"]});
+    if(!/^[a-f0-9]{40}$/i.test(head))throw new Error("INVALID_HEAD");
+    return `git_${contentHash({head,status})}`;
+  }catch(error){const e=new Error("DURABLE_REPO_SNAPSHOT_UNAVAILABLE");e.cause=error;throw e;}
+}
 function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeEvidence=null,tgserver=null,patchService=null,authority=null,repoPolicy=null,sandboxVerification=null,dapEvidence=null}={}){
   if(!aiCore)throw new Error("AI_CORE_ADAPTER_REQUIRED");
   async function logRuntime(event){if(tgserver)await tgserver.log(event);}
@@ -42,8 +54,12 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
   async function callDirectRole(role,{system,user}){const b=getRoleRuntimeBudget(role);return aiCore.call(role,{system,user,maxTokens:b.max_tokens,timeoutMsOverride:b.turn_timeout_ms,deadlineAt:Date.now()+b.turn_timeout_ms});}
   async function getOfficialEvidence(query){if(!evidenceSearch)return{official:[],evidenceGap:false,evidenceStatus:"NOT_CONFIGURED"};try{return{official:await evidenceSearch.search({query}),evidenceGap:false,evidenceStatus:"FINAL_VALID"};}catch(e){if(e?.code==="EVIDENCE_SEARCH_NOT_FINAL")return{official:[],evidenceGap:true,evidenceStatus:String(e?.meta?.status||"NOT_FINAL")};throw e;}}
   async function runAnalysis({runId=null,rawRequest="",failure,localEvidence=[],repo=null,projectId=null}={}){
-    let authRun=null;
-    if(authority){authRun=authority.start({rawRequest,repo,projectId});runId=authRun.run_id;authority.transition(authRun,"PARSED");authority.transition(authRun,"CONTEXT_READY");authority.transition(authRun,"VERIFYING");authority.transition(authRun,"FAILED");authority.transition(authRun,"RESOLVING");}
+    let authRun=null,resuming=false;
+    if(authority){
+      if(runId){authRun=authority.load(runId);resuming=true;}
+      else{authRun=authority.start({rawRequest,repo,projectId});runId=authRun.run_id;authority.transition(authRun,"PARSED");authority.transition(authRun,"CONTEXT_READY");authority.transition(authRun,"VERIFYING");authority.transition(authRun,"FAILED");authority.transition(authRun,"RESOLVING");}
+      if(authority.durableEnabled?.())await authority.initializeDurable(authRun);
+    }
     runId=runId||crypto.randomUUID();const targetRepo=authRun?.project_dir||(repoPolicy&&repo?repoPolicy.assertRepo(repo):null),toolRuntime=makeReadOnlyToolRuntime(targetRepo);
     const deterministicVerification=sandboxVerification&&targetRepo?await sandboxVerification.collect(targetRepo):{status:"NOT_CONFIGURED",checks:[]};
     const deterministicChecks=Array.isArray(deterministicVerification?.checks)?deterministicVerification.checks:[];
@@ -73,18 +89,38 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
     const official=evidenceResult.official,evidenceGap=evidenceResult.evidenceGap,evidenceStatus=evidenceResult.evidenceStatus;
     const knowledgeRecords=registerEvidenceList("INTERNAL_KB",knownKnowledge),officialRecords=registerEvidenceList("OFFICIAL_EXTERNAL",official);
     const researchBase=mergeEvidenceIds(localIds,evidenceIds(knowledgeRecords),evidenceIds(officialRecords),scoutToolEvidence.map(x=>x.evidence_id));
-    const research=await callReadOnlyRole("researcher",{system:["Researcher. Select decisive evidence. Return JSON only with exactly these top-level keys: research_status, answer, evidence_refs, rejected_source_refs, contradictions, bound_version. research_status must be SUPPORTED, CONTRADICTORY_EVIDENCE, or INSUFFICIENT_EVIDENCE. Keep answer under 120 characters; use at most 3 short strings per array; target under 100 tokens. Use only registered evidence IDs. If evidence_gap is true, do not treat official evidence as confirmed; local evidence remains available and must be evaluated on its own merits.",hintProtocol].filter(Boolean).join("\n"),user:JSON.stringify({failure,localEvidence:evidencePromptView(localRecords),dap_hint:dapHint,scouts:scoutJson,scout_tool_evidence:evidencePromptView(scoutToolEvidence),knownKnowledge:evidencePromptView(knowledgeRecords),official:evidencePromptView(officialRecords),evidence_gap:evidenceGap,evidence_status:evidenceStatus,evidence_gap_scope:"official_evidence_search"})},toolRuntime,{baseEvidenceIds:researchBase});
-    const researchJson=roleOutput(research,"researcher"),researchToolEvidence=toolEvidenceRecords(research);
-    const diagnosisBase=mergeEvidenceIds(researchBase,researchToolEvidence.map(x=>x.evidence_id));
+    let research=null,researchJson=null,researchToolEvidence=[],researchContinuation=null;
+    if(authority?.durableEnabled?.()){
+      const repoSnapshotId=repositorySnapshotId(targetRepo);
+      const inputManifestRef=`request:${authRun.request_hash}`;
+      const inputBindingDigest=contentHash({run_id:runId,request_hash:authRun.request_hash,repo_snapshot_id:repoSnapshotId,failure,local_evidence_ids:localIds,query});
+      researchContinuation=await runResearcherContinuation({authority,runId,repoSnapshotId,inputManifestRef,inputBindingDigest,executeWorkUnit:async({unit,restoredResults})=>{
+        if(unit.work_unit_id==="researcher.A")return{payload:{localEvidence:evidencePromptView(localRecords),scouts:scoutJson,scout_tool_evidence:evidencePromptView(scoutToolEvidence)},evidence_refs:mergeEvidenceIds(localIds,scoutToolEvidence.map(x=>x.evidence_id))};
+        if(unit.work_unit_id==="researcher.B")return{payload:{knownKnowledge:evidencePromptView(knowledgeRecords)},evidence_refs:evidenceIds(knowledgeRecords)};
+        if(unit.work_unit_id==="researcher.C")return{payload:{official:evidencePromptView(officialRecords),evidence_gap:evidenceGap,evidence_status:evidenceStatus,evidence_gap_scope:"official_evidence_search"},evidence_refs:evidenceIds(officialRecords)};
+        if(unit.work_unit_id==="researcher.D")return{payload:{A:restoredResults["researcher.A"]?.payload||null,B:restoredResults["researcher.B"]?.payload||null,C:restoredResults["researcher.C"]?.payload||null},evidence_refs:researchBase};
+        if(unit.work_unit_id!=="researcher.E")throw new Error(`RESEARCHER_WORK_UNIT_UNKNOWN:${unit.work_unit_id}`);
+        const assembled=restoredResults["researcher.D"]?.payload||{};
+        research=await callReadOnlyRole("researcher",{system:["Researcher. Select decisive evidence. Return JSON only with exactly these top-level keys: research_status, answer, evidence_refs, rejected_source_refs, contradictions, bound_version. research_status must be SUPPORTED, CONTRADICTORY_EVIDENCE, or INSUFFICIENT_EVIDENCE. Keep answer under 120 characters; use at most 3 short strings per array; target under 100 tokens. Use only registered evidence IDs. If evidence_gap is true, do not treat official evidence as confirmed; local evidence remains available and must be evaluated on its own merits.",hintProtocol].filter(Boolean).join("\n"),user:JSON.stringify({failure,dap_hint:dapHint,...(assembled.A||{}),...(assembled.B||{}),...(assembled.C||{})})},toolRuntime,{baseEvidenceIds:researchBase});
+        const payload=roleOutput(research,"researcher"),tools=toolEvidenceRecords(research);
+        return{payload,evidence_refs:mergeEvidenceIds(researchBase,tools.map(x=>x.evidence_id)),effect_refs:[],validation_summary:"Validated by existing researcher role-output contract"};
+      }});
+      researchJson=researchContinuation.payload;
+      researchToolEvidence=research?toolEvidenceRecords(research):[];
+    }else{
+      research=await callReadOnlyRole("researcher",{system:["Researcher. Select decisive evidence. Return JSON only with exactly these top-level keys: research_status, answer, evidence_refs, rejected_source_refs, contradictions, bound_version. research_status must be SUPPORTED, CONTRADICTORY_EVIDENCE, or INSUFFICIENT_EVIDENCE. Keep answer under 120 characters; use at most 3 short strings per array; target under 100 tokens. Use only registered evidence IDs. If evidence_gap is true, do not treat official evidence as confirmed; local evidence remains available and must be evaluated on its own merits.",hintProtocol].filter(Boolean).join("\n"),user:JSON.stringify({failure,localEvidence:evidencePromptView(localRecords),dap_hint:dapHint,scouts:scoutJson,scout_tool_evidence:evidencePromptView(scoutToolEvidence),knownKnowledge:evidencePromptView(knowledgeRecords),official:evidencePromptView(officialRecords),evidence_gap:evidenceGap,evidence_status:evidenceStatus,evidence_gap_scope:"official_evidence_search"})},toolRuntime,{baseEvidenceIds:researchBase});
+      researchJson=roleOutput(research,"researcher");researchToolEvidence=toolEvidenceRecords(research);
+    }
+    const diagnosisBase=mergeEvidenceIds(researchBase,researchContinuation?.final_role_result?.evidence_refs||[],researchToolEvidence.map(x=>x.evidence_id));
     const diagnosis=await callReadOnlyRole("diagnoser",{system:["Diagnoser. Produce a falsifiable diagnosis as one compact JSON object under 600 tokens, with at most 3 items per array and no prose outside JSON. Preserve uncertainty about official evidence when evidence_gap is true, but do not discard supplied local evidence.",hintProtocol].filter(Boolean).join("\n"),user:JSON.stringify({failure,localEvidence:evidencePromptView(localRecords),dap_hint:dapHint,research:researchJson,research_tool_evidence:evidencePromptView(researchToolEvidence),knownKnowledge:evidencePromptView(knowledgeRecords),official:evidencePromptView(officialRecords),evidence_gap:evidenceGap,evidence_status:evidenceStatus,evidence_gap_scope:"official_evidence_search"})},toolRuntime,{baseEvidenceIds:diagnosisBase});
     const diagnosisJson=roleOutput(diagnosis,"diagnoser"),diagnosisToolEvidence=toolEvidenceRecords(diagnosis),localPublic=publicLocalEvidence(localEvidence);
     const hypothesis={privacy_class:"PUBLIC",sanitized:true,opaque_evidence:true,statement:pickDiagnosisStatement(diagnosisJson),cause_class:String(diagnosisJson?.cause_kind||"UNKNOWN"),evidence_count:localEvidence.length+deterministicChecks.length+knownKnowledge.length+official.length,local_evidence_count:localPublic.length,local_evidence:localPublic,evidence_gap:evidenceGap,evidence_status:evidenceStatus,evidence_gap_scope:evidenceGap?"official_evidence_search":null};
     let external=null;if(externalReview)external=await externalReview.hypothesis({privacy:{privacy_class:"PUBLIC",sanitized:true,opaque_evidence:true},hypothesis});
-    const tool_audit={code_scout:toolAudit(scouts[0]),causal_scout:toolAudit(scouts[1]),researcher:toolAudit(research),diagnoser:toolAudit(diagnosis)};
+    const tool_audit={code_scout:toolAudit(scouts[0]),causal_scout:toolAudit(scouts[1]),researcher:research?toolAudit(research):researchContinuation?{durable_reuse:true,role_execution_id:researchContinuation.role_execution_id,attempt_no:researchContinuation.attempt_no,executed_work_units:researchContinuation.executed_work_units}:null,diagnoser:toolAudit(diagnosis)};
     const evidence_registry=registrySummary({local:localRecords,knowledge:knowledgeRecords,official:officialRecords});
     evidence_registry.tool_evidence_ids=mergeEvidenceIds(scoutToolEvidence.map(x=>x.evidence_id),researchToolEvidence.map(x=>x.evidence_id),diagnosisToolEvidence.map(x=>x.evidence_id));
     evidence_registry.total_with_tools=evidence_registry.total+evidence_registry.tool_evidence_ids.length;
-    const result={run_id:runId,deterministic_verification:{status:deterministicVerification.status,checks:deterministicChecks},dap_hint:dapHint,scouts:scoutJson,known_knowledge:knownKnowledge,official_evidence:official,evidence_gap:evidenceGap,evidence_status:evidenceStatus,evidence_registry,research:researchJson,diagnosis:diagnosisJson,tool_audit,external_hypothesis_review:external,state:external?.json?.verdict==="PASS"?"HYPOTHESIS_APPROVED":"AWAITING_EXTERNAL_HYPOTHESIS_REVIEW"};
+    const result={run_id:runId,resumed,durable_researcher:researchContinuation?{role_execution_id:researchContinuation.role_execution_id,attempt_no:researchContinuation.attempt_no,reused_complete:researchContinuation.reused_complete,executed_work_units:researchContinuation.executed_work_units}:null,deterministic_verification:{status:deterministicVerification.status,checks:deterministicChecks},dap_hint:dapHint,scouts:scoutJson,known_knowledge:knownKnowledge,official_evidence:official,evidence_gap:evidenceGap,evidence_status:evidenceStatus,evidence_registry,research:researchJson,diagnosis:diagnosisJson,tool_audit,external_hypothesis_review:external,state:external?.json?.verdict==="PASS"?"HYPOTHESIS_APPROVED":"AWAITING_EXTERNAL_HYPOTHESIS_REVIEW"};
     runtimeEvidence?.write(runId,"analysis",result);await logRuntime({run_id:runId,severity:evidenceGap?"warn":"info",kind:"analysis",state:result.state,diagnosis:result.diagnosis,known_knowledge_count:knownKnowledge.length,official_evidence_count:official.length,evidence_registry_total:evidence_registry.total_with_tools,dap_hint_status:dapHint?.status||"NOT_CONFIGURED",evidence_gap:evidenceGap,evidence_status:evidenceStatus,deterministic_check_count:deterministicChecks.length,tool_calls:Object.values(tool_audit).reduce((n,x)=>n+(x?.total_calls||0),0)});return result;
   }
   async function patchCandidate({runId,analysis,repo,selectedPaths,context,task}){
@@ -113,10 +149,14 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
     try{const review=await runRoleWithReadOnlyTools({aiCore,role:"local_reviewer",system:"Local Reviewer. Review read-only deterministic verification from fresh context. JSON only. Never claim patch application.",user:JSON.stringify({verification_evidence:records}),toolRuntime:null,baseEvidenceIds:ids,strictEvidenceRefs:true});local_review=roleOutput(review,"local_reviewer");}catch(error){local_review_error=String(error?.code||error?.message||"LOCAL_REVIEW_UNAVAILABLE").split(":")[0];}
     const verdict=verificationVerdict(deterministic,local_review,local_review_error),result={schema:"debugai.verify-result/v1",verification_id:verificationId,read_only:true,patch_applied:false,repo:targetRepo,scope:{mode:scopeBefore.mode,files:scopeBefore.files,change_scope:Array.isArray(changeScope)?changeScope.map(String):[]},test_inventory:inventory,deterministic_verification:deterministic,invariants,local_review,local_review_error,verdict};runtimeEvidence?.write(verificationId,"read_only_verification",result);await logRuntime({run_id:verificationId,severity:verdict==="PASS"?"info":verdict==="FAIL"?"error":"warn",kind:"read_only_verification",verdict,check_count:deterministic.checks.length,patch_applied:false});return result;
   }
-  function status(runId){if(!authority)throw new Error("RUN_AUTHORITY_REQUIRED");const run=authority.load(runId);return{schema:"debugai.run-status/v1",run_id:run.run_id,state:run.state,project_id:run.project_id,project_dir:run.project_dir,created_at:run.created_at,updated_at:run.updated_at};}
-  function inspect(runId){const run=status(runId);if(!runtimeEvidence)return{schema:"debugai.run-inspection/v1",run,artifacts:{}};const records=runtimeEvidence.list(runId,{types:["analysis","patch_candidate","verification"],limit:16}),artifacts={};for(const record of records)if(!artifacts[record.type])artifacts[record.type]=record;return{schema:"debugai.run-inspection/v1",run,artifacts};}
+  function durableStatus(runId){
+    if(!authority?.durableEnabled?.())return null;
+    try{const {state,manifest}=authority.loadDurable(runId);return{generation:state.generation,execution_epoch:state.execution_epoch,job_status:state.job_status,workflow_cursor:manifest.workflow_cursor,role_executions:Object.fromEntries(Object.entries(manifest.role_execution_refs||{}).map(([id,ref])=>[id,{role:ref.role,status:ref.status,attempt_no:ref.attempt_no,latest_checkpoint_ref:ref.latest_checkpoint_ref||null,final_role_result_ref:ref.final_role_result_ref||null}]))};}catch(error){if(String(error?.message||error).includes("DURABLE_RECORD_NOT_FOUND")||String(error?.message||error).includes("ENOENT"))return null;throw error;}
+  }
+  function status(runId){if(!authority)throw new Error("RUN_AUTHORITY_REQUIRED");const run=authority.load(runId);return{schema:"debugai.run-status/v1",run_id:run.run_id,state:run.state,project_id:run.project_id,project_dir:run.project_dir,created_at:run.created_at,updated_at:run.updated_at,durable:durableStatus(runId)};}
+  function inspect(runId){const run=status(runId),durable=run.durable;if(!runtimeEvidence)return{schema:"debugai.run-inspection/v1",run,durable,artifacts:{}};const records=runtimeEvidence.list(runId,{types:["analysis","patch_candidate","verification"],limit:16}),artifacts={};for(const record of records)if(!artifacts[record.type])artifacts[record.type]=record;return{schema:"debugai.run-inspection/v1",run,durable,artifacts};}
   async function promote(asset){assertPromotable(asset);if(!tgserver)throw new Error("TGSERVER_ADAPTER_REQUIRED");return tgserver.promote(asset);}
   async function searchKnowledge(query,opts={}){if(!tgserver)throw new Error("TGSERVER_ADAPTER_REQUIRED");return tgserver.search(query,opts);}
   return {runAnalysis,patchCandidate,approveAndVerify,verifyReadOnly,status,inspect,promote,searchKnowledge};
 }
-module.exports={createWorkflow,parseJson,roleOutput,toolEvidenceRecords,toolAudit,pickDiagnosisStatement,publicLocalEvidence,dapFailureChecks,activeDapHint,dapHintProtocol,reviewStreamEvidence,reviewableVerificationCheck,evidencePromptView};
+module.exports={createWorkflow,parseJson,roleOutput,toolEvidenceRecords,toolAudit,pickDiagnosisStatement,publicLocalEvidence,dapFailureChecks,activeDapHint,dapHintProtocol,reviewStreamEvidence,reviewableVerificationCheck,evidencePromptView,repositorySnapshotId};
