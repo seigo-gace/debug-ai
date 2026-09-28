@@ -13,11 +13,11 @@ test("control-plane gap audit makes missing Skill procedures and runtime tools e
     skill_procedures:25,
     skill_procedures_missing:0,
     declared_tools:18,
-    runtime_tools_available:6,
-    runtime_tools_missing:12
+    runtime_tools_available:7,
+    runtime_tools_missing:11
   });
   assert.deepEqual(report.missing_skill_procedures,[]);
-  assert.ok(report.runtime_tools.missing.includes("test.inventory"));
+  assert.ok(report.runtime_tools.available.includes("test.inventory"));
   assert.ok(report.runtime_tools.missing.includes("evidence.read"));
   assert.ok(report.roles.patch_engineer.runtime_tools_missing.includes("diff.plan"));
   assert.ok(report.roles.local_reviewer.runtime_tools_missing.includes("test.result.read"));

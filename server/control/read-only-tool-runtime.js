@@ -12,7 +12,7 @@ const {assertToolAdmission}=require("./tool-risk.js");
 const SEARCH_EXT=/\.(?:[cm]?[jt]sx?|json|md|py|go|rs|java|kt|kts|cs|cpp|cc|c|h|hpp|rb|php|swift|vue|svelte|toml|ya?ml|css|scss|html)$/i;
 const TS_JS_EXT=/\.(?:[cm]?[jt]sx?)$/i;
 const SKIP_DIRS=new Set([".git","node_modules","dist","build","coverage",".next",".cache","runtime"]);
-const AVAILABLE_TOOLS=Object.freeze(["source.read","source.search","symbol.lookup","dependency.map","knowledge.search","authority.search"]);
+const AVAILABLE_TOOLS=Object.freeze(["source.read","source.search","symbol.lookup","dependency.map","test.inventory","knowledge.search","authority.search"]);
 
 function sha256(v){return crypto.createHash("sha256").update(v).digest("hex");}
 function stableStringify(value){
@@ -68,6 +68,19 @@ function searchSource(repo,query,{limit=12,maxFiles=500}={}){
     hits.push({path:rel,sha256:item.sha256,excerpt:excerpt(item.content,idx),truncated:item.truncated});
   }
   return hits;
+}
+function testInventory(repo){
+  const item=readText(repo,"package.json",{maxChars:1024*1024});let pkg;
+  try{pkg=JSON.parse(item.content);}catch{throw new Error("TEST_INVENTORY_PACKAGE_JSON_INVALID");}
+  const scripts=pkg?.scripts&&typeof pkg.scripts==="object"&&!Array.isArray(pkg.scripts)?pkg.scripts:{};
+  let packageManager="npm";
+  const declared=String(pkg?.packageManager||"").trim();
+  if(/^(npm|pnpm|yarn|bun)(?:@|$)/i.test(declared))packageManager=declared.match(/^(npm|pnpm|yarn|bun)/i)[1].toLowerCase();
+  else if(fs.existsSync(path.join(repo,"pnpm-lock.yaml")))packageManager="pnpm";
+  else if(fs.existsSync(path.join(repo,"yarn.lock")))packageManager="yarn";
+  else if(fs.existsSync(path.join(repo,"bun.lock"))||fs.existsSync(path.join(repo,"bun.lockb")))packageManager="bun";
+  const checks=["lint","typecheck","test","build"].map(name=>({name,configured:typeof scripts[name]==="string"&&scripts[name].trim().length>0,command:typeof scripts[name]==="string"?scripts[name].slice(0,1000):null}));
+  return{package_json:{path:item.path,sha256:item.sha256},package_manager:packageManager,checks};
 }
 function languageIdFor(rel){
   const low=String(rel).toLowerCase();
@@ -141,10 +154,11 @@ function createReadOnlyToolRuntime({repo,repoPolicy=new RepoPolicy(),tgserver=nu
     else if(tool==="source.search")data=searchSource(root,args.query,{limit:Math.max(1,Math.min(20,Number(args.limit)||12)),maxFiles:Math.max(50,Math.min(1000,Number(args.max_files)||500))});
     else if(tool==="symbol.lookup")data=await symbolLookup(root,args,{lspFactory:lspFactory||((options)=>new TypeScript7LspClient(options))});
     else if(tool==="dependency.map"){const item=readText(root,args.path,{maxChars:100000});data={path:item.path,sha256:item.sha256,specifiers:extractSpecifiers(item.content).slice(0,128)};}
+    else if(tool==="test.inventory")data=testInventory(root);
     else if(tool==="knowledge.search"){if(!tgserver)throw new Error("TGSERVER_TOOL_NOT_CONFIGURED");data=await tgserver.search(String(args.query||""),{});}
     else if(tool==="authority.search"){if(!evidenceSearch)throw new Error("EVIDENCE_SEARCH_TOOL_NOT_CONFIGURED");data=await evidenceSearch.search({query:String(args.query||""),topics:Array.isArray(args.topics)?args.topics:[],limit:Math.max(1,Math.min(12,Number(args.limit)||6))});}
     const result=makeToolResult(tool,data);assertToolResultIntegrity(result);return result;
   }
   return {repo:root,availableTools:[...AVAILABLE_TOOLS],execute};
 }
-module.exports={AVAILABLE_TOOLS,stableStringify,normalizeRel,blockedReadPath,resolveSafeFile,readText,walkFiles,searchSource,languageIdFor,repoRelativeLocation,sanitizeSymbols,symbolLookup,toolResultHash,makeToolResult,assertToolResultIntegrity,createReadOnlyToolRuntime};
+module.exports={AVAILABLE_TOOLS,stableStringify,normalizeRel,blockedReadPath,resolveSafeFile,readText,walkFiles,searchSource,testInventory,languageIdFor,repoRelativeLocation,sanitizeSymbols,symbolLookup,toolResultHash,makeToolResult,assertToolResultIntegrity,createReadOnlyToolRuntime};
