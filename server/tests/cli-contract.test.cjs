@@ -10,7 +10,7 @@ const {spawn}=require("node:child_process");
 
 function runCli(args,env){return new Promise((resolve,reject)=>{const child=spawn(process.execPath,[path.join(__dirname,"..","..","bin","debugai.js"),...args],{env:{...process.env,...env},cwd:env.TEST_CWD,stdio:["ignore","pipe","pipe"]});let stdout="",stderr="";child.stdout.on("data",chunk=>stdout+=chunk);child.stderr.on("data",chunk=>stderr+=chunk);child.on("error",reject);child.on("close",code=>{let json;try{json=JSON.parse(stdout);}catch(error){return reject(new Error(`CLI_NON_JSON:${stdout}:${error.message}`));}resolve({code,json,stderr});});});}
 
-test("debugai CLI is a JSON HTTP client for health, analyze, patch, verify, status, and inspect",async t=>{
+test("debugai CLI is a JSON HTTP client for health, analyze, resume, patch, verify, status, and inspect",async t=>{
   const root=fs.mkdtempSync(path.join(os.tmpdir(),"debugai-cli-")),repo=path.join(root,"repo"),state=path.join(root,"state.json");fs.mkdirSync(repo);t.after(()=>fs.rmSync(root,{recursive:true,force:true}));const calls=[];
   const analysis={run_id:"run_cli_1",state:"HYPOTHESIS_APPROVED",diagnosis:{public_statement:"fixture"},external_hypothesis_review:{json:{verdict:"PASS"}}};
   const server=http.createServer(async(req,res)=>{let raw="";for await(const chunk of req)raw+=chunk;const body=raw?JSON.parse(raw):null;calls.push({method:req.method,url:req.url,body});let value,status=200;
@@ -26,12 +26,13 @@ test("debugai CLI is a JSON HTTP client for health, analyze, patch, verify, stat
 
   const health=await runCli(["health"],env);assert.equal(health.code,0);assert.equal(health.json.ok,true);assert.match(health.stderr,/health: PASS/);
   const analyze=await runCli(["analyze","investigate callback redirect"],env);assert.equal(analyze.code,0);assert.equal(analyze.json.run_id,"run_cli_1");assert.equal(JSON.parse(fs.readFileSync(state,"utf8")).run_id,"run_cli_1");
+  const resume=await runCli(["resume","continue callback redirect"],env);assert.equal(resume.code,0);assert.equal(resume.json.run_id,"run_cli_1");assert.match(resume.stderr,/resume: HYPOTHESIS_APPROVED/);
   const patch=await runCli(["patch","fix only the callback","--paths","src/auth.js"],env);assert.equal(patch.code,0);assert.equal(patch.json.state,"WAITING_MASTER_APPROVAL");
   const verify=await runCli(["verify","--repo",repo,"--paths","src/auth.js","--change-scope","oauth callback"],env);assert.equal(verify.code,0);assert.equal(verify.json.patch_applied,false);assert.match(verify.stderr,/verify: PASS/);
   const status=await runCli(["status","run_cli_1"],env);assert.equal(status.code,0);assert.equal(status.json.state,"RESOLVING");
   const inspect=await runCli(["inspect","run_cli_1"],env);assert.equal(inspect.code,0);assert.equal(inspect.json.run.run_id,"run_cli_1");
 
-  const analyzeCall=calls.find(call=>call.url==="/v1/analyze");assert.equal(analyzeCall.body.repo,"/workspace/repo");assert.equal(analyzeCall.body.failure.message,"investigate callback redirect");
+  const analyzeCalls=calls.filter(call=>call.url==="/v1/analyze");assert.equal(analyzeCalls.length,2);assert.equal(analyzeCalls[0].body.repo,"/workspace/repo");assert.equal(analyzeCalls[0].body.failure.message,"investigate callback redirect");assert.equal(analyzeCalls[0].body.runId,undefined);assert.equal(analyzeCalls[1].body.runId,"run_cli_1");assert.equal(analyzeCalls[1].body.failure.message,"continue callback redirect");
   const patchCall=calls.find(call=>call.url==="/v1/patch-candidate");assert.equal(patchCall.body.runId,"run_cli_1");assert.deepEqual(patchCall.body.selectedPaths,["src/auth.js"]);assert.deepEqual(patchCall.body.analysis,analysis);
   const verifyCall=calls.find(call=>call.url==="/v1/verify");assert.equal(verifyCall.body.repo,"/workspace/repo");assert.deepEqual(verifyCall.body.selectedPaths,["src/auth.js"]);assert.equal(calls.some(call=>call.url==="/v1/approve-apply-verify"),false);
 });
