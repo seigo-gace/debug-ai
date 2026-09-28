@@ -31,7 +31,7 @@ if(!process.env.DEBUG_AI_TGSERVER_URL)throw new Error("TGSERVER_URL_REQUIRED");
 if(!process.env.DEBUG_AI_TGSERVER_LOG_PROJECT_ID)throw new Error("TGSERVER_LOG_PROJECT_ID_REQUIRED");
 if(!process.env.DEBUG_AI_TGSERVER_KB_PROJECT_ID)throw new Error("TGSERVER_KB_PROJECT_ID_REQUIRED");
 const tgserver=createTgserverAdapter();
-const runtimeEvidenceRetentionMs=envInt("DEBUG_AI_RUNTIME_EVIDENCE_RETENTION_MS",6*3600e3,{min:5*60e3,max:7*24*3600e3});
+const runtimeEvidenceRetentionMs=envInt("DEBUG_AI_RUNTIME_EVIDENCE_RETENTION_MS",12*3600e3,{min:5*60e3,max:7*24*3600e3});
 const runtimeEvidenceMaxBytes=envInt("DEBUG_AI_RUNTIME_EVIDENCE_MAX_BYTES",32*1024**2,{min:4*1024**2,max:1024**3});
 const runtimeEvidenceRotateMs=envInt("DEBUG_AI_RUNTIME_EVIDENCE_ROTATE_MS",15*60e3,{min:60e3,max:24*3600e3});
 const runtimeEvidence=new RuntimeEvidenceStore(runtimeRoot,{retentionMs:runtimeEvidenceRetentionMs,maxBytes:runtimeEvidenceMaxBytes});
