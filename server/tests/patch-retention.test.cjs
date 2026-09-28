@@ -4,7 +4,11 @@ const assert=require("node:assert/strict");
 const fs=require("node:fs");
 const os=require("node:os");
 const path=require("node:path");
-const {patchBackupRetention,writeRetentionReceipt,PASS_BACKUP_RETENTION_MS,FAIL_BACKUP_RETENTION_MS}=require("../patch-service.js");
+const {patchCandidateRetention,patchBackupRetention,writeRetentionReceipt,CANDIDATE_RETENTION_MS,PASS_BACKUP_RETENTION_MS,FAIL_BACKUP_RETENTION_MS}=require("../patch-service.js");
+
+test("patch candidate retention is 7d",()=>{
+  const now=1_000_000,retention=patchCandidateRetention({createdAt:now});assert.equal(retention.retention_ms,CANDIDATE_RETENTION_MS);assert.equal(retention.created_at,now);assert.equal(retention.retain_until,now+7*24*3600e3);
+});
 
 test("patch backup retention is 72h after PASS and 7d after FAIL",()=>{
   const now=1_000_000,pass=patchBackupRetention({pass:true,verifiedAt:now}),fail=patchBackupRetention({pass:false,verifiedAt:now});
