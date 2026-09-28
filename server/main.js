@@ -16,6 +16,8 @@ const {createDapEvidenceLane}=require("./control/dap-evidence-runtime.js");
 const {DurableWriterLock}=require("../orchestrator/durable-writer-lock.js");
 const {DurableFileIO}=require("../orchestrator/durable-file-io.js");
 
+function envInt(name,fallback,{min=1,max=Number.MAX_SAFE_INTEGER}={}){const raw=process.env[name];if(raw===undefined||raw==="")return fallback;const value=Number(raw);if(!Number.isSafeInteger(value)||value<min||value>max)throw new Error(`${name}_INVALID`);return value;}
+
 const root=process.cwd(),runtimeRoot=process.env.DEBUG_AI_RUNTIME_ROOT||path.join(root,"runtime");
 const gate=sourceGate(root);if(!gate.pass)throw new Error(`SOURCE_GATE_FAILED:${gate.failures.join(",")}`);
 const repoPolicy=new RepoPolicy();
@@ -29,7 +31,10 @@ if(!process.env.DEBUG_AI_TGSERVER_URL)throw new Error("TGSERVER_URL_REQUIRED");
 if(!process.env.DEBUG_AI_TGSERVER_LOG_PROJECT_ID)throw new Error("TGSERVER_LOG_PROJECT_ID_REQUIRED");
 if(!process.env.DEBUG_AI_TGSERVER_KB_PROJECT_ID)throw new Error("TGSERVER_KB_PROJECT_ID_REQUIRED");
 const tgserver=createTgserverAdapter();
-const runtimeEvidence=new RuntimeEvidenceStore(runtimeRoot);
+const runtimeEvidenceRetentionMs=envInt("DEBUG_AI_RUNTIME_EVIDENCE_RETENTION_MS",6*3600e3,{min:5*60e3,max:7*24*3600e3});
+const runtimeEvidenceMaxBytes=envInt("DEBUG_AI_RUNTIME_EVIDENCE_MAX_BYTES",32*1024**2,{min:4*1024**2,max:1024**3});
+const runtimeEvidenceRotateMs=envInt("DEBUG_AI_RUNTIME_EVIDENCE_ROTATE_MS",15*60e3,{min:60e3,max:24*3600e3});
+const runtimeEvidence=new RuntimeEvidenceStore(runtimeRoot,{retentionMs:runtimeEvidenceRetentionMs,maxBytes:runtimeEvidenceMaxBytes});
 const sandboxVerification=createSandboxVerificationLane();
 const dapEvidence=createDapEvidenceLane();
 if(!process.env.GROQ_API_KEY&&!process.env.GEMINI_API_KEY)throw new Error("EXTERNAL_REVIEW_PROVIDER_REQUIRED");
@@ -38,9 +43,10 @@ const patchService=new PatchService({runtimeRoot,repoPolicy});
 const workflow=createWorkflow({aiCore,externalReview,evidenceSearch,runtimeEvidence,tgserver,patchService,authority,repoPolicy,sandboxVerification,dapEvidence});
 const host=process.env.DEBUG_AI_HOST||"127.0.0.1",port=Number(process.env.DEBUG_AI_PORT||8787);
 const server=createServer({workflow,host,port});
-let shuttingDown=false;
-function shutdown(signal){if(shuttingDown)return;shuttingDown=true;server.close(()=>{try{writerLock.close();}finally{process.exit(0);}});setTimeout(()=>{try{writerLock.close();}finally{process.exit(1);}},5000).unref();if(signal)console.error(`DebugAI shutdown: ${signal}`);}
+let shuttingDown=false,rotationTimer=null;
+function rotateRuntimeEvidence(){try{const result=runtimeEvidence.rotate();if(result.orphans_removed>0)console.warn(`DebugAI runtime cache cleanup: files=${result.files} bytes=${result.bytes} orphans_removed=${result.orphans_removed}`);}catch(error){console.error(`DebugAI runtime cache cleanup failed: ${String(error?.message||error)}`);}}
+function shutdown(signal){if(shuttingDown)return;shuttingDown=true;if(rotationTimer)clearInterval(rotationTimer);server.close(()=>{try{writerLock.close();}finally{process.exit(0);}});setTimeout(()=>{try{writerLock.close();}finally{process.exit(1);}},5000).unref();if(signal)console.error(`DebugAI shutdown: ${signal}`);}
 process.once("SIGTERM",()=>shutdown("SIGTERM"));
 process.once("SIGINT",()=>shutdown("SIGINT"));
-async function start(){const recovery=await workflow.recoverStartup();if(recovery.claimed.length||recovery.incompatible.length)console.log(`DebugAI startup recovery: claimed=${recovery.claimed.length} incompatible=${recovery.incompatible.length}`);server.listen(port,host,()=>console.log(`DebugAI listening on http://${host}:${port}`));}
+async function start(){rotateRuntimeEvidence();rotationTimer=setInterval(rotateRuntimeEvidence,runtimeEvidenceRotateMs);rotationTimer.unref();const recovery=await workflow.recoverStartup();if(recovery.claimed.length||recovery.incompatible.length)console.log(`DebugAI startup recovery: claimed=${recovery.claimed.length} incompatible=${recovery.incompatible.length}`);server.listen(port,host,()=>console.log(`DebugAI listening on http://${host}:${port}; runtime-cache retention_ms=${runtimeEvidenceRetentionMs} max_bytes=${runtimeEvidenceMaxBytes} rotate_ms=${runtimeEvidenceRotateMs}`));}
 void start().catch(error=>{console.error(`DebugAI startup failed: ${String(error?.message||error)}`);try{writerLock.close();}finally{process.exitCode=1;}});
