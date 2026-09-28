@@ -15,10 +15,16 @@ test("Operational skill procedures are structurally valid",()=>{
   assert.match(compileSkillProcedure("source-contract-mismatch"),/shortest exact predicate clauses/i);
   assert.match(compileSkillProcedure("source-contract-mismatch"),/common to both sides of the mismatch/i);
   assert.match(compileSkillProcedure("source-contract-mismatch"),/do not paraphrase, explain, or repeat shared context/i);
+  assert.match(compileSkillProcedure("evidence-pack-builder"),/stable source reference/i);
   assert.match(compileSkillProcedure("failure-taxonomy-router"),/state_staleness.*ordering_race.*timeout_family/i);
   assert.match(compileSkillProcedure("source-runtime-correlation"),/observed chronological order/i);
   assert.match(compileSkillProcedure("causal-chain-builder"),/unsupported_links/i);
   assert.match(compileSkillProcedure("alternate-hypothesis-seed"),/materially distinct alternative/i);
+  assert.match(compileSkillProcedure("evidence-first-research"),/never fill an evidence gap from model memory/i);
+  assert.match(compileSkillProcedure("source-verifier"),/verification is VERIFIED.*target_version/i);
+  assert.match(compileSkillProcedure("source-priority-filter"),/Authority priority does not erase a conflict/i);
+  assert.match(compileSkillProcedure("version-specific-research"),/Do not merge behavior across versions/i);
+  assert.match(compileSkillProcedure("contradictory-source-detection"),/CONTRADICTORY_EVIDENCE.*answer UNKNOWN/i);
   assert.match(compileSkillProcedure("hypothesis-falsification"),/concrete observation that would falsify/i);
   assert.match(compileSkillProcedure("cross-refutation"),/cache bypassed.*H_CACHE_BUG REJECTED/i);
   assert.match(compileSkillProcedure("evidence-sufficiency-assessment"),/full causal chain.*otherwise keep it null/i);
@@ -27,6 +33,7 @@ test("Operational skill procedures are structurally valid",()=>{
   assert.match(compileSkillProcedure("minimal-diff-planner"),/smallest source_scope member/i);
   assert.match(compileSkillProcedure("regression-risk-map"),/adjacent behaviors/i);
   assert.match(compileSkillProcedure("rollback-plan-builder"),/revert:file:symbol/i);
+  assert.match(compileSkillProcedure("regression-review"),/coverage gap instead of inventing PASS or FAIL/i);
 });
 
 test("selected Local Reviewer skills compile operational procedures into runtime invocation",()=>{
@@ -69,7 +76,6 @@ test("selected Causal Scout skills compile bounded causal procedures within the 
   assert.match(alternate.system,/hypothesis, not a fact/i);
 });
 
-test("skills without qualified procedures do not invent procedure text",()=>{
-  const out=compileInvocation("researcher",{task:"find evidence",selectedSkillIds:["evidence-first-research"]});
-  assert.doesNotMatch(out.system,/procedure=evidence-first-research:/);
+test("unknown procedure identifiers do not invent procedure text",()=>{
+  assert.equal(compileSkillProcedure("not-a-registered-skill"),"");
 });

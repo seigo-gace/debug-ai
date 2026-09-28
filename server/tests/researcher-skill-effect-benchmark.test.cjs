@@ -11,7 +11,8 @@ test("Researcher benchmark fixes five evidence capabilities within the three-ski
     assert.ok(systems.selected_skill_ids.length>=1&&systems.selected_skill_ids.length<=3);
     assert.deepEqual(systems.selected_skill_ids,[...c.skills]);
     assert.match(systems.on,/SELECTED_SKILLS=/);
-    assert.doesNotMatch(systems.off,/SELECTED_SKILLS=/);
+    assert.match(systems.on,/procedure=/);
+    assert.doesNotMatch(systems.off,/SELECTED_SKILLS=|procedure=/);
     assert.match(systems.off,/ROLE=researcher/);
     assert.match(systems.off,/Preserve contradictory evidence and never invent support/i);
   }

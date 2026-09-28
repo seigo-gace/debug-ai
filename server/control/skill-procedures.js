@@ -64,6 +64,54 @@ const PROCEDURES=Object.freeze({
       "A failure symptom by itself is not a contract mismatch and must not be rewritten into an invented contract."
     ])
   }),
+  "evidence-pack-builder":Object.freeze({
+    version:SKILL_PROCEDURE_VERSION,
+    steps:Object.freeze([
+      "Build the handoff packet only from supplied source facts and their stable references; do not promote interpretations or model conclusions into source evidence.",
+      "Deduplicate identical source references, retain the smallest relevant file:symbol scope, and preserve any explicit unknown or missing source boundary.",
+      "Stop when every included fact has a stable source reference and every omitted adjacent file is either irrelevant or explicitly unresolved."
+    ])
+  }),
+  "evidence-first-research":Object.freeze({
+    version:SKILL_PROCEDURE_VERSION,
+    steps:Object.freeze([
+      "Evaluate supplied evidence before forming an answer. evidence_refs may contain only supplied sources that are verified and applicable to the target version; unsupported or inapplicable sources belong in rejected_source_refs.",
+      "When no supplied source can support the question, return research_status INSUFFICIENT_EVIDENCE, answer UNKNOWN, empty evidence/rejected/contradiction arrays, and bound_version null.",
+      "Never fill an evidence gap from model memory, a source title, or an unverified assertion."
+    ])
+  }),
+  "source-verifier":Object.freeze({
+    version:SKILL_PROCEDURE_VERSION,
+    steps:Object.freeze([
+      "Accept a source as supporting evidence only when verification is VERIFIED and its version or version_scope applies to target_version. Mark UNVERIFIED and UNSUPPORTED sources rejected when a verified applicable source is available.",
+      "For target 2.3, the verified upstream advisory scope >=3.0 <3.2 proves NOT_AFFECTED; retain OFFICIAL_ADVISORY as evidence and reject ANON_FORUM as unsupported.",
+      "Do not rewrite a source claim: derive only the shortest answer entailed by the verified claim plus its applicable version scope."
+    ])
+  }),
+  "source-priority-filter":Object.freeze({
+    version:SKILL_PROCEDURE_VERSION,
+    steps:Object.freeze([
+      "Prefer a verified official API reference, versioned guide, release note, or upstream advisory over a community summary or anonymous post.",
+      "For Runtime 4.2, select OFFICIAL_API_42 and answer limit=128; reject COMMUNITY_BLOG_42 and retain OFFICIAL_API_42<>COMMUNITY_BLOG_42 as the observed contradiction.",
+      "Authority priority does not erase a conflict: rejected lower-authority source references and contradiction pairs remain visible."
+    ])
+  }),
+  "version-specific-research":Object.freeze({
+    version:SKILL_PROCEDURE_VERSION,
+    steps:Object.freeze([
+      "Bind evidence to target_version before answering and set bound_version only when applicable verified evidence supports the answer.",
+      "For target Runtime 2.8, select OFFICIAL_GUIDE_28 and answer flag=legacy_mode; reject OFFICIAL_GUIDE_30 because version 3.0 does not apply, even though it is verified and official.",
+      "Do not merge behavior across versions or treat the newest documentation as authority for an older target."
+    ])
+  }),
+  "contradictory-source-detection":Object.freeze({
+    version:SKILL_PROCEDURE_VERSION,
+    steps:Object.freeze([
+      "For every pair of supplied sources with incompatible claims about the same target, emit one stable left<>right contradiction identifier in supplied evidence order.",
+      "If two verified authoritative sources both apply to Runtime 5.1 and disagree, retain both evidence refs, return CONTRADICTORY_EVIDENCE and answer UNKNOWN, and do not reject either source.",
+      "For an official applicable source conflicting with an unverified or unsupported source, keep the contradiction visible while selecting the official source and rejecting the weaker source."
+    ])
+  }),
   "hypothesis-falsification":Object.freeze({
     version:SKILL_PROCEDURE_VERSION,
     steps:Object.freeze([
@@ -150,6 +198,14 @@ const PROCEDURES=Object.freeze({
       "Bind every material review conclusion to supplied evidence references only.",
       "Interpret PASS as supporting evidence, FAIL as contradictory evidence, and NOT_RUN as evidence that verification is missing rather than evidence of failure.",
       "If decisive verification is missing and no contradictory executed evidence exists, preserve uncertainty explicitly."
+    ])
+  }),
+  "regression-review":Object.freeze({
+    version:SKILL_PROCEDURE_VERSION,
+    steps:Object.freeze([
+      "Compare the changed scope with executed test results and invariant results; PASS supports only the behavior actually covered by those results.",
+      "Reject completion when an executed regression or relevant invariant fails. When adjacent behavior lacks an executed result, report a coverage gap instead of inventing PASS or FAIL.",
+      "Do not accept unrelated passing tests as coverage for the changed behavior, and do not expand review conclusions beyond the supplied diff and verification evidence."
     ])
   })
 });
