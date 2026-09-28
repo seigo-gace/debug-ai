@@ -5,9 +5,19 @@ const fs=require("node:fs");
 const os=require("node:os");
 const path=require("node:path");
 const {RepoPolicy}=require("../repo-policy.js");
+const {RunAuthority}=require("../run-authority.js");
 const {createReadOnlyToolRuntime}=require("../control/read-only-tool-runtime.js");
 const {createProgressController}=require("../control/progress-controller.js");
 const {runRoleWithReadOnlyTools}=require("../control/tool-loop.js");
+const {createDurableToolEffectHooks}=require("../control/durable-tool-effects.js");
+const {contentHash}=require("../../orchestrator/durable-contracts.js");
+
+class FakeDurableIo{
+  constructor(){this.records=new Map();}
+  readRecord(key,{expectedSchema=null,allowMissing=false}={}){if(!this.records.has(key)){if(allowMissing)return null;throw new Error(`MISSING:${key}`);}const value=structuredClone(this.records.get(key));if(expectedSchema&&value.schema!==expectedSchema)throw new Error(`SCHEMA:${key}:${value.schema}`);return value;}
+  writeImmutableRecord(key,record){if(this.records.has(key)){const prior=JSON.stringify(this.records.get(key)),next=JSON.stringify(record);if(prior!==next)throw new Error(`IMMUTABLE_CONFLICT:${key}`);return;}this.records.set(key,structuredClone(record));}
+  replaceRecord(key,record){this.records.set(key,structuredClone(record));}
+}
 
 function fixture(){
   const workspace=fs.mkdtempSync(path.join(os.tmpdir(),"debugai-continuation-"));
@@ -77,5 +87,29 @@ test("tool loop resumes from committed continuation and reuses a prior tool resu
     assert.equal(out.tool_loop.total_calls,1);
     assert.equal(out.tool_loop.parse_status,"FINAL");
     assert.equal(out.tool_loop.continuation_state.completed_effect_ids.includes("effect_A"),true);
+  }finally{f.cleanup();}
+});
+
+test("real durable effect hooks prevent redispatch across a fresh Tool Loop attempt",async()=>{
+  const f=fixture();try{
+    const io=new FakeDurableIo();
+    const authority=new RunAuthority({runtimeRoot:f.workspace,durableIo:io});
+    const run=authority.start({rawRequest:"inspect alpha",repo:f.repo,projectId:"P"});
+    await authority.initializeDurable(run);
+    const baseRuntime=createReadOnlyToolRuntime({repo:f.repo,repoPolicy:new RepoPolicy({workspaceRoot:f.workspace})});
+    let executeCount=0;
+    const runtime={availableTools:baseRuntime.availableTools,execute:async input=>{executeCount++;return await baseRuntime.execute(input);}};
+    const shared={authority,runId:run.run_id,roleExecutionId:"rex_tool_loop",workUnitId:"researcher.E",inputBindingDigest:contentHash({fixture:"same-input"}),repoSnapshotId:"snapshot_tool_loop"};
+    let calls1=0;
+    const aiCore1={call:async()=>{calls1++;if(calls1===1)return{content:JSON.stringify({tool_requests:[{tool:"source.read",arguments:{path:"a.js"},reason:"inspect"}]})};throw new Error("SIMULATED_PROCESS_CRASH");}};
+    await assert.rejects(()=>runRoleWithReadOnlyTools({aiCore:aiCore1,role:"code_scout",user:"inspect alpha",toolRuntime:runtime,maxToolRounds:2,maxToolCalls:4,durableHooks:createDurableToolEffectHooks({...shared,attemptId:"att_1"})}),/SIMULATED_PROCESS_CRASH/);
+    assert.equal(executeCount,1);
+
+    let calls2=0;
+    const aiCore2={call:async()=>{calls2++;if(calls2===1)return{content:JSON.stringify({tool_requests:[{tool:"source.read",arguments:{path:"a.js"},reason:"resume"}]})};const result=await baseRuntime.execute({role:"code_scout",selectedSkillIds:["code-scout-source-inspection"],tool:"source.read",arguments:{path:"a.js"}}).catch(()=>null);return{content:JSON.stringify({claims:[],decision:"HANDOFF",note:result?"reused":"done"})};}};
+    const out=await runRoleWithReadOnlyTools({aiCore:aiCore2,role:"code_scout",user:"inspect alpha",toolRuntime:runtime,maxToolRounds:2,maxToolCalls:4,durableHooks:createDurableToolEffectHooks({...shared,attemptId:"att_2"})});
+    assert.equal(executeCount,1);
+    assert.equal(out.tool_loop.observations[0].results[0].reused,true);
+    assert.ok(out.tool_loop.continuation_state.completed_effect_ids.length>=1);
   }finally{f.cleanup();}
 });
