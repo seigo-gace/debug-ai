@@ -7,7 +7,7 @@ const path=require("node:path");
 const {RunAuthority}=require("../run-authority.js");
 const {contentHash}=require("../../orchestrator/durable-contracts.js");
 const {makeToolResult}=require("../control/read-only-tool-runtime.js");
-const {createDurableToolEffectHooks,expectedEffectId,effectRecordPath,toolResultPath}=require("../control/durable-tool-effects.js");
+const {createDurableToolEffectHooks,expectedEffectId,effectRecordPath,toolResultPath,isReusableTool}=require("../control/durable-tool-effects.js");
 
 class FakeDurableIo{
   constructor(){this.records=new Map();}
@@ -57,5 +57,24 @@ test("durable tool effect is not reused when logical arguments change",async()=>
     await hooks.onToolResult({tool:"source.read",arguments:{path:"a.js"},result});
     const reused=await hooks.reuseToolResult({tool:"source.read",arguments:{path:"b.js"}});
     assert.equal(reused.reused,false);
+  }finally{fs.rmSync(root,{recursive:true,force:true});}
+});
+
+test("authority.search effects are recorded but never replayed without a verified freshness proof",async()=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),"debugai-tool-effect-freshness-"));
+  try{
+    const authority=new RunAuthority({runtimeRoot:root,durableIo:new FakeDurableIo()});
+    const run=authority.start({rawRequest:"research current authority",repo:root,projectId:"P"});
+    await authority.initializeDurable(run);
+    const context={authority,runId:run.run_id,roleExecutionId:"rex_fixture",attemptId:"att_1",workUnitId:"researcher.E",inputBindingDigest:contentHash({fixture:"stable-input"}),repoSnapshotId:"snapshot_fixture"};
+    const hooks=createDurableToolEffectHooks(context);
+    const args={query:"current specification"};
+    const result=makeToolResult("authority.search",[{title:"fixture"}]);
+    assert.equal(isReusableTool("authority.search"),false);
+    const saved=await hooks.onToolResult({tool:"authority.search",arguments:args,result});
+    assert.ok(saved?.effect_id);
+    const reused=await hooks.reuseToolResult({tool:"authority.search",arguments:args});
+    assert.equal(reused.reused,false);
+    assert.equal(reused.reason,"FRESHNESS_REUSE_DISABLED");
   }finally{fs.rmSync(root,{recursive:true,force:true});}
 });
