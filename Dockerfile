@@ -26,6 +26,8 @@ WORKDIR /app
 COPY --from=sandbox-builder /debugai-sandbox-exec /usr/local/bin/debugai-sandbox-exec
 COPY package.json ./
 RUN npm install --omit=dev --ignore-scripts --no-audit --no-fund
+COPY bin ./bin
+RUN chmod 0555 /app/bin/debugai.js && ln -s /app/bin/debugai.js /usr/local/bin/debugai
 COPY orchestrator ./orchestrator
 COPY server ./server
 ENV DEBUG_AI_SANDBOX_COMMAND=/usr/local/bin/debugai-sandbox-exec
