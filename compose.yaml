@@ -11,6 +11,11 @@ services:
       - debug_ai_sandbox_jobs:/sandbox-jobs:rw
     security_opt:
       - no-new-privileges:true
+    logging:
+      driver: local
+      options:
+        max-size: "1m"
+        max-file: "2"
 
   debug-ai:
     depends_on:
@@ -34,6 +39,9 @@ services:
       DEBUG_AI_OSV_DB: /opt/osv-db
       DEBUG_AI_OSV_SCANNER: /opt/debugai-tools/osv-scanner
       DEBUG_AI_RUNTIME_ROOT: /app/runtime
+      DEBUG_AI_RUNTIME_EVIDENCE_RETENTION_MS: ${DEBUG_AI_RUNTIME_EVIDENCE_RETENTION_MS:-21600000}
+      DEBUG_AI_RUNTIME_EVIDENCE_MAX_BYTES: ${DEBUG_AI_RUNTIME_EVIDENCE_MAX_BYTES:-33554432}
+      DEBUG_AI_RUNTIME_EVIDENCE_ROTATE_MS: ${DEBUG_AI_RUNTIME_EVIDENCE_ROTATE_MS:-900000}
       DEBUG_AI_WORKSPACE_ROOT: /workspace
       DEBUG_AI_SANDBOX_JOB_ROOT: /sandbox-jobs
       DEBUG_AI_TS_LSP_COMMAND: /app/node_modules/.bin/tsc
@@ -54,6 +62,11 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    logging:
+      driver: local
+      options:
+        max-size: "5m"
+        max-file: "3"
 
   sandbox-runner:
     depends_on:
@@ -80,6 +93,11 @@ services:
     pids_limit: 128
     mem_limit: 512m
     cpus: 1.0
+    logging:
+      driver: local
+      options:
+        max-size: "2m"
+        max-file: "2"
 
 volumes:
   debug_ai_runtime:
