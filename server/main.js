@@ -13,10 +13,15 @@ const {createServer}=require("./http.js");
 const {sourceGate}=require("./gates.js");
 const {createSandboxVerificationLane}=require("./control/sandbox-verification.js");
 const {createDapEvidenceLane}=require("./control/dap-evidence-runtime.js");
+const {DurableWriterLock}=require("../orchestrator/durable-writer-lock.js");
+const {DurableFileIO}=require("../orchestrator/durable-file-io.js");
+
 const root=process.cwd(),runtimeRoot=process.env.DEBUG_AI_RUNTIME_ROOT||path.join(root,"runtime");
 const gate=sourceGate(root);if(!gate.pass)throw new Error(`SOURCE_GATE_FAILED:${gate.failures.join(",")}`);
 const repoPolicy=new RepoPolicy();
-const authority=new RunAuthority({runtimeRoot,repoPolicy});
+const writerLock=DurableWriterLock.acquire({root:path.join(runtimeRoot,"durable")});
+const durableIo=new DurableFileIO({writerLock});
+const authority=new RunAuthority({runtimeRoot,repoPolicy,durableIo});
 const aiCore=createAiCoreAdapter();
 if(!process.env.DEBUG_AI_EVIDENCE_SEARCH_URL)throw new Error("EVIDENCE_SEARCH_URL_REQUIRED");
 const evidenceSearch=createEvidenceSearchAdapter();
@@ -32,4 +37,9 @@ const externalReview=createExternalReviewAdapter();
 const patchService=new PatchService({runtimeRoot,repoPolicy});
 const workflow=createWorkflow({aiCore,externalReview,evidenceSearch,runtimeEvidence,tgserver,patchService,authority,repoPolicy,sandboxVerification,dapEvidence});
 const host=process.env.DEBUG_AI_HOST||"127.0.0.1",port=Number(process.env.DEBUG_AI_PORT||8787);
-createServer({workflow,host,port}).listen(port,host,()=>console.log(`DebugAI listening on http://${host}:${port}`));
+const server=createServer({workflow,host,port});
+let shuttingDown=false;
+function shutdown(signal){if(shuttingDown)return;shuttingDown=true;server.close(()=>{try{writerLock.close();}finally{process.exit(0);}});setTimeout(()=>{try{writerLock.close();}finally{process.exit(1);}},5000).unref();if(signal)console.error(`DebugAI shutdown: ${signal}`);}
+process.once("SIGTERM",()=>shutdown("SIGTERM"));
+process.once("SIGINT",()=>shutdown("SIGINT"));
+server.listen(port,host,()=>console.log(`DebugAI listening on http://${host}:${port}`));
