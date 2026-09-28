@@ -9,6 +9,7 @@
     "test":"node --test tests/*.test.cjs server/tests/*.test.cjs",
     "verify":"npm run check && npm test",
     "verify:core":"npm run check && npm test",
+    "test:e2e-fixture":"node --test server/tests/full-debugai-e2e-fixture.test.cjs",
     "test:legacy":"node --test legacy/pc-authority/orchestrator/tests/*.cjs legacy/pc-authority/gateway/*.test.mjs",
     "benchmark:local-reviewer":"node server/control/local-reviewer-benchmark.js",
     "benchmark:skill-effect":"node server/control/skill-effect-benchmark.js",

@@ -238,6 +238,14 @@ npm run verify
 
 `npm run verify` performs syntax checks and the active server/orchestrator test suites.
 
+Run the deterministic HTTP closed-loop fixture before any live real-repository E2E:
+
+```bash
+npm run test:e2e-fixture
+```
+
+This gate exercises Analyze -> Patch Candidate -> explicit approval -> apply -> real package test -> Local Review -> External Final Review -> COMPLETE without calling live AI providers.
+
 Inspect the current executable Skill procedure and runtime Tool gaps without invoking AI Core:
 
 ```bash
