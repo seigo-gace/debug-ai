@@ -87,3 +87,21 @@ test("startup scan fails closed for an incompatible durable storage format",asyn
     assert.match(scan.incompatible[0].error,/incompatible storage_format_version=999/);
   }finally{fs.rmSync(runtimeRoot,{recursive:true,force:true});}
 });
+
+test("startup scan fails closed before claiming an incompatible workflow version",async()=>{
+  const runtimeRoot=fs.mkdtempSync(path.join(os.tmpdir(),"debugai-workflow-incompatible-"));
+  try{
+    const io=new FakeDurableIo();const authority=new RunAuthority({runtimeRoot,durableIo:io});
+    const run=authority.start({rawRequest:"future workflow",repo:runtimeRoot,projectId:"P"});
+    const initialized=await authority.initializeDurable(run);
+    const manifestKey=`durable/execution-manifest/${initialized.state.execution_ref.manifest_id}.json`;
+    const manifest=io.records.get(manifestKey);
+    io.records.set(manifestKey,{...manifest,workflow_cursor:{...manifest.workflow_cursor,workflow_version:999}});
+    const scan=authority.inspectDurableRuns();
+    assert.deepEqual(scan.recoverable,[]);
+    assert.deepEqual(scan.terminal,[]);
+    assert.equal(scan.incompatible.length,1);
+    assert.equal(scan.incompatible[0].run_id,run.run_id);
+    assert.match(scan.incompatible[0].error,/incompatible workflow_version=999/);
+  }finally{fs.rmSync(runtimeRoot,{recursive:true,force:true});}
+});
