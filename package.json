@@ -6,10 +6,11 @@
   "engines":{"node":"24.20.0"},
   "dependencies":{"typescript":"7.0.2","undici":"8.11.2"},
   "scripts":{
+    "build:durable-native":"node scripts/build-durable-native.cjs",
     "check":"find server orchestrator tests -type f \\( -name '*.js' -o -name '*.mjs' -o -name '*.cjs' \\) -print0 | xargs -0 -n1 node --check",
     "test":"node --test tests/*.test.cjs server/tests/*.test.cjs",
-    "verify":"npm run check && npm test",
-    "verify:core":"npm run check && npm test",
+    "verify":"npm run build:durable-native && npm run check && npm test",
+    "verify:core":"npm run build:durable-native && npm run check && npm test",
     "debugai":"node bin/debugai.js",
     "test:e2e-fixture":"node --test server/tests/full-debugai-e2e-fixture.test.cjs",
     "test:legacy":"node --test legacy/pc-authority/orchestrator/tests/*.cjs legacy/pc-authority/gateway/*.test.mjs",
