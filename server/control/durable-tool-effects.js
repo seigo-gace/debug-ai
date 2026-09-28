@@ -6,18 +6,21 @@ const {assertToolResultIntegrity}=require("./read-only-tool-runtime.js");
 
 const TOOL_CONTRACT_VERSION="debugai.read-only-tool-runtime/v1";
 const ENVIRONMENT_DIGEST=contentHash({runtime:"debugai.read-only-tool-runtime",contract:TOOL_CONTRACT_VERSION});
+const NON_REUSABLE_TOOLS=new Set(["authority.search"]);
 
 function safeId(value,label){const v=String(value||"");if(!/^[A-Za-z0-9._-]{1,200}$/.test(v))throw new Error(`${label}_INVALID`);return v;}
 function effectRecordPath(effectId){return `durable/effect-ledger/${safeId(effectId,"EFFECT_ID")}.json`;}
 function toolResultPath(effectId){return `durable/tool-result/${safeId(effectId,"EFFECT_ID")}.json`;}
 function effectFields({runId,roleExecutionId,workUnitId,tool,args,inputBindingDigest,repoSnapshotId}){assertReplayEligibleOperation(tool);return{run_id:runId,role_execution_id:roleExecutionId,work_unit_id:workUnitId,operation_name:tool,tool_contract_version:TOOL_CONTRACT_VERSION,canonical_arguments_digest:contentHash(args||{}),input_binding_digest:inputBindingDigest,repo_snapshot_id:repoSnapshotId,verification_environment_digest:ENVIRONMENT_DIGEST,freshness_policy_ref:tool==="authority.search"?"authority-search-current/v1":null};}
 function expectedEffectId(context){return deriveEffectId(effectFields(context));}
+function isReusableTool(tool){return !NON_REUSABLE_TOOLS.has(String(tool||""));}
 
 function createDurableToolEffectHooks({authority,runId,roleExecutionId,attemptId,workUnitId,inputBindingDigest,repoSnapshotId}={}){
   if(!authority?.durableEnabled?.())throw new Error("DURABLE_RUN_AUTHORITY_REQUIRED");
   const base={runId,roleExecutionId,workUnitId,inputBindingDigest,repoSnapshotId};
   return{
     async reuseToolResult({tool,arguments:args}){
+      if(!isReusableTool(tool))return{reused:false,reason:"FRESHNESS_REUSE_DISABLED"};
       const fields=effectFields({...base,tool,args});const effectId=deriveEffectId(fields);const record=authority.readDurableRecord(effectRecordPath(effectId),{expectedSchema:"effect-record/v1",allowMissing:true});
       if(!record||record.status!=="SUCCEEDED")return{reused:false};
       verifyEffectIdentity(record);
@@ -39,4 +42,4 @@ function createDurableToolEffectHooks({authority,runId,roleExecutionId,attemptId
   };
 }
 
-module.exports={TOOL_CONTRACT_VERSION,ENVIRONMENT_DIGEST,effectRecordPath,toolResultPath,expectedEffectId,createDurableToolEffectHooks};
+module.exports={TOOL_CONTRACT_VERSION,ENVIRONMENT_DIGEST,NON_REUSABLE_TOOLS,isReusableTool,effectRecordPath,toolResultPath,expectedEffectId,createDurableToolEffectHooks};
