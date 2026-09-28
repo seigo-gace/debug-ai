@@ -3,7 +3,7 @@ const fs=require("node:fs");
 const path=require("node:path");
 const cp=require("node:child_process");
 const crypto=require("node:crypto");
-const {copySnapshot,normalizeJobRoot,probeSandboxHelper}=require("./sandbox-runtime.js");
+const {copySnapshot,normalizeJobRoot,probeSandboxHelper,cleanupTerminalSandboxArtifacts}=require("./sandbox-runtime.js");
 const {assertDapEvidenceBoundary}=require("./dap-evidence-policy.js");
 
 const DAP_JOB_SCHEMA="debugai.dap-job/v1";
@@ -25,7 +25,7 @@ function runPreparedDapJob({jobDir,sandboxCommand=process.env.DEBUG_AI_SANDBOX_C
   const worker=path.join(dapRoot,"dap-sandbox-worker.cjs");const args=["--snapshot",snapshot,"--tmp",tmpDir,"--timeout-ms",String(request.timeout_ms),"--node-modules",dapRoot,"--allow-loopback-tcp","--",process.execPath,worker,observePath];const env={PATH:process.env.PATH||"/usr/local/bin:/usr/bin:/bin",HOME:home,TMPDIR:tmpDir,CI:"1",NO_COLOR:"1",DEBUG_AI_DAP_ROOT:dapRoot};const started=Date.now();const r=spawnSyncImpl(sandboxCommand,args,{encoding:"utf8",shell:false,timeout:request.timeout_ms+10000,windowsHide:true,env}),durationMs=Date.now()-started;const code=Number.isInteger(r.status)?r.status:r?.error?.code==="ETIMEDOUT"?124:1;
   let evidence=null;try{evidence=JSON.parse(String(r.stdout||"").trim());assertDapEvidenceBoundary(evidence);}catch(error){evidence={schema:"debugai-dap-runtime-evidence/v1",authority:"HINT_ONLY",local_only:true,status:"FAIL",configured:true,executed:true,reason:`DAP_EVIDENCE_PARSE_FAILED:${error.message}`,failure_stage:"SANDBOX_EXEC_OR_EVIDENCE_PARSE",target:{file:request.target_path,line:request.line,configurationName:request.configuration_name},records:[]};}
   const result={schema:DAP_RESULT_SCHEMA,job_id:request.job_id,pass:code===0&&evidence.status==="PASS",code,timed_out:code===124,duration_ms:durationMs,evidence,stderr:String(r.stderr||r.error?.message||"").slice(-4000),isolation:{backend:"sidecar+landlock+seccomp:loopback-tcp-only",landlock_abi:probe.landlock_abi,container_network:"NONE_REQUIRED",external_network:"BLOCKED_BY_CONTAINER_NETWORK_NONE",workspace_mount:"ABSENT",secret_mounts:"ABSENT",docker_socket:"ABSENT",job_child_write_scope:snapshot}};
-  const tmpResult=path.join(jobDir,".result.json.tmp");fs.writeFileSync(tmpResult,JSON.stringify(result));fs.renameSync(tmpResult,path.join(jobDir,"result.json"));return result;
+  const tmpResult=path.join(jobDir,".result.json.tmp");fs.writeFileSync(tmpResult,JSON.stringify(result));fs.renameSync(tmpResult,path.join(jobDir,"result.json"));cleanupTerminalSandboxArtifacts(jobDir);return result;
 }
 function readDapSandboxResult({jobRoot,jobId}={}){const file=path.join(normalizeJobRoot(jobRoot),"jobs",String(jobId||""),"result.json");if(!fs.existsSync(file))return null;const result=JSON.parse(fs.readFileSync(file,"utf8"));if(result?.schema!==DAP_RESULT_SCHEMA||result.job_id!==jobId)throw new Error("DAP_SANDBOX_RESULT_INVALID");assertDapEvidenceBoundary(result.evidence);return result;}
 async function waitDapSandboxResult({jobRoot,jobId,timeoutMs=130000,pollMs=100}={}){const started=Date.now();for(;;){const result=readDapSandboxResult({jobRoot,jobId});if(result)return result;if(Date.now()-started>=timeoutMs)throw new Error(`DAP_SANDBOX_RESULT_TIMEOUT:${jobId}`);await new Promise(resolve=>setTimeout(resolve,pollMs));}}
