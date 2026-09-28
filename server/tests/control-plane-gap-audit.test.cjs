@@ -10,25 +10,17 @@ test("control-plane gap audit makes missing Skill procedures and runtime tools e
   assert.equal(report.schema,SCHEMA);
   assert.deepEqual(report.summary,{
     skill_contracts:25,
-    skill_procedures:10,
-    skill_procedures_missing:15,
+    skill_procedures:18,
+    skill_procedures_missing:7,
     declared_tools:18,
     runtime_tools_available:6,
     runtime_tools_missing:12
   });
   assert.deepEqual(report.missing_skill_procedures,[
     "contradictory-source-detection",
-    "cross-refutation",
     "evidence-first-research",
     "evidence-pack-builder",
-    "evidence-sufficiency-assessment",
-    "hypothesis-falsification",
-    "minimal-diff-planner",
     "regression-review",
-    "regression-risk-map",
-    "rejected-hypothesis-avoidance",
-    "reproduce-before-fix",
-    "rollback-plan-builder",
     "source-priority-filter",
     "source-verifier",
     "version-specific-research"

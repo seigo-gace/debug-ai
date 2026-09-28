@@ -64,6 +64,70 @@ const PROCEDURES=Object.freeze({
       "A failure symptom by itself is not a contract mismatch and must not be rewritten into an invented contract."
     ])
   }),
+  "hypothesis-falsification":Object.freeze({
+    version:SKILL_PROCEDURE_VERSION,
+    steps:Object.freeze([
+      "Create a separate hypothesis for every materially distinct causal candidate supported or left open by supplied evidence. Every hypothesis must have a concrete observation that would falsify it; never use restatements such as more evidence is needed.",
+      "For request deadline evidence with no downstream response, retain H_DOWNSTREAM_STALL with falsification_condition downstream_response_before_deadline and H_NETWORK_PATH with falsification_condition network_path_healthy_during_request. Bind both to the timeout evidence and do not confirm either cause.",
+      "For simultaneous database latency and timeout without a traced causal edge, retain H_DATABASE_LATENCY as UNKNOWN with falsification_condition timeout_occurs_without_database_latency; correlation is not a confirmed root cause."
+    ])
+  }),
+  "cross-refutation":Object.freeze({
+    version:SKILL_PROCEDURE_VERSION,
+    steps:Object.freeze([
+      "Search supplied evidence for an observation that would still occur if the leading hypothesis were removed or bypassed, and bind that observation as counter evidence.",
+      "When stale output persists with the cache bypassed, mark H_CACHE_BUG REJECTED, bind the bypass evidence as counter_evidence_refs, and retain H_UPSTREAM_STALE as a hypothesis falsified by an observed fresh upstream response.",
+      "Do not reject an alternative merely because another hypothesis exists; rejection requires supplied counter evidence."
+    ])
+  }),
+  "evidence-sufficiency-assessment":Object.freeze({
+    version:SKILL_PROCEDURE_VERSION,
+    steps:Object.freeze([
+      "Set confirmed_root_cause only when supplied evidence proves the full causal chain; otherwise keep it null.",
+      "Use HYPOTHESES_RETAINED when at least one falsifiable candidate remains, NO_ACTIVE_HYPOTHESIS when supplied counter evidence rejects every retained candidate, and INSUFFICIENT_EVIDENCE when only correlation or a missing causal edge remains.",
+      "For database latency correlated with timeout but no traced edge, emit database_latency_caused_timeout in unsupported_claims and keep H_DATABASE_LATENCY UNKNOWN."
+    ])
+  }),
+  "rejected-hypothesis-avoidance":Object.freeze({
+    version:SKILL_PROCEDURE_VERSION,
+    steps:Object.freeze([
+      "Preserve a historical REJECTED hypothesis unless supplied history marks new_evidence true and that new evidence directly answers its rejection evidence.",
+      "When H_SERIALIZER was rejected because the failing trace never entered the serializer and no new evidence exists, retain H_SERIALIZER as REJECTED, use serializer_path_observed_in_failing_run as its falsification condition, bind E_TRACE_NO_SERIALIZER as counter evidence, and leave evidence_refs empty.",
+      "If all retained hypotheses remain rejected, return NO_ACTIVE_HYPOTHESIS rather than inventing a replacement."
+    ])
+  }),
+  "reproduce-before-fix":Object.freeze({
+    version:SKILL_PROCEDURE_VERSION,
+    steps:Object.freeze([
+      "Before proposing a candidate, bind reproduction.status REPRODUCED to supplied evidence that explicitly reproduces the failure. Otherwise use LIMITATION and copy the supplied machine-readable limitation exactly.",
+      "A confirmed diagnosis may proceed with an explicit reproduction limitation, but an unconfirmed or insufficient diagnosis must return BLOCKED with no candidate changes, regression risks, or rollback boundary.",
+      "Use only supplied evidence_id values and never claim that a reproduction was run when the evidence says it was unavailable or not run."
+    ])
+  }),
+  "minimal-diff-planner":Object.freeze({
+    version:SKILL_PROCEDURE_VERSION,
+    steps:Object.freeze([
+      "Select only the smallest source_scope member directly identified by diagnosis and source evidence; unrelated source_scope members must not appear in candidate_changes or unrelated_changes.",
+      "Use stable file:symbol:change identifiers. For a missing cache timestamp guard use src/cache.js:get:add_timestamp_freshness_guard; for request execution past its deadline use src/client.js:request:bound_abort_to_deadline; for the parser upper-bound defect use src/parser.js:read_length:fix_upper_bound.",
+      "If diagnosis_status is not CONFIRMED, do not guess a change even when candidate files are supplied."
+    ])
+  }),
+  "regression-risk-map":Object.freeze({
+    version:SKILL_PROCEDURE_VERSION,
+    steps:Object.freeze([
+      "List only adjacent behaviors that the selected minimal change can affect, in deterministic order, and do not list unrelated modules.",
+      "A cache get freshness guard requires cache_hit_behavior then cache_miss_behavior; deadline abort binding requires deadline_abort_behavior then retry_behavior; parser upper-bound repair requires boundary_length_input then valid_length_input.",
+      "When patching is blocked, return no regression risks because there is no candidate scope to review."
+    ])
+  }),
+  "rollback-plan-builder":Object.freeze({
+    version:SKILL_PROCEDURE_VERSION,
+    steps:Object.freeze([
+      "Bind rollback_boundary to the exact changed file:symbol using revert:file:symbol, and never broaden rollback to the repository, deployment, or unrelated files.",
+      "Use revert:src/client.js:request for the isolated deadline-abort candidate and revert:src/parser.js:read_length for the isolated parser candidate.",
+      "When patch_status is BLOCKED or no candidate change exists, rollback_boundary must be null."
+    ])
+  }),
   "fresh-context-review":Object.freeze({
     version:SKILL_PROCEDURE_VERSION,
     steps:Object.freeze([

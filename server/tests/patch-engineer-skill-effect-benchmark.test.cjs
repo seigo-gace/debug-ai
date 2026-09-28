@@ -7,7 +7,7 @@ function good(c){return{patch_status:c.expected.patch_status,reproduction:{statu
 
 test("Patch Engineer benchmark fixes reproduction, minimal scope, blocked diagnosis, and rollback cases",()=>{
   assert.equal(MAX_TOKENS,600);assert.deepEqual(CASES.map(x=>x.id),["minimal_reproduced_candidate","explicit_reproduction_limitation","uncertain_diagnosis_blocks_patch","unrelated_refactor_avoidance"]);
-  for(const c of CASES){const systems=buildSystemsForCase(c);assert.equal(systems.selected_skill_ids.length,3);assert.deepEqual(systems.selected_skill_ids,[...c.skills]);assert.match(systems.on,/SELECTED_SKILLS=/);assert.doesNotMatch(systems.off,/SELECTED_SKILLS=/);assert.match(systems.off,/ROLE=patch_engineer/);assert.match(systems.off,/Candidate plan only: never claim or perform patch application/i);}
+  for(const c of CASES){const systems=buildSystemsForCase(c);assert.equal(systems.selected_skill_ids.length,3);assert.deepEqual(systems.selected_skill_ids,[...c.skills]);assert.match(systems.on,/SELECTED_SKILLS=/);assert.match(systems.on,/procedure=/);assert.doesNotMatch(systems.off,/SELECTED_SKILLS=|procedure=/);assert.match(systems.off,/ROLE=patch_engineer/);assert.match(systems.off,/Candidate plan only: never claim or perform patch application/i);}
 });
 
 test("Patch Engineer deterministic scorer enforces candidate-only minimal reversible output",()=>{

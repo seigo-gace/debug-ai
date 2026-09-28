@@ -19,6 +19,14 @@ test("Operational skill procedures are structurally valid",()=>{
   assert.match(compileSkillProcedure("source-runtime-correlation"),/observed chronological order/i);
   assert.match(compileSkillProcedure("causal-chain-builder"),/unsupported_links/i);
   assert.match(compileSkillProcedure("alternate-hypothesis-seed"),/materially distinct alternative/i);
+  assert.match(compileSkillProcedure("hypothesis-falsification"),/concrete observation that would falsify/i);
+  assert.match(compileSkillProcedure("cross-refutation"),/cache bypassed.*H_CACHE_BUG REJECTED/i);
+  assert.match(compileSkillProcedure("evidence-sufficiency-assessment"),/full causal chain.*otherwise keep it null/i);
+  assert.match(compileSkillProcedure("rejected-hypothesis-avoidance"),/historical REJECTED hypothesis/i);
+  assert.match(compileSkillProcedure("reproduce-before-fix"),/explicit reproduction limitation/i);
+  assert.match(compileSkillProcedure("minimal-diff-planner"),/smallest source_scope member/i);
+  assert.match(compileSkillProcedure("regression-risk-map"),/adjacent behaviors/i);
+  assert.match(compileSkillProcedure("rollback-plan-builder"),/revert:file:symbol/i);
 });
 
 test("selected Local Reviewer skills compile operational procedures into runtime invocation",()=>{

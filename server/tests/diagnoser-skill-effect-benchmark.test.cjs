@@ -8,7 +8,7 @@ function good(c){return{diagnosis_status:c.expected.diagnosis_status,hypotheses:
 test("Diagnoser benchmark fixes falsification, refutation, rejection history, and insufficiency cases",()=>{
   assert.equal(MAX_TOKENS,600);
   assert.deepEqual(CASES.map(x=>x.id),["competing_falsifiable_hypotheses","cross_refutation","rejected_hypothesis_avoidance","correlation_insufficient"]);
-  for(const c of CASES){const systems=buildSystemsForCase(c);assert.equal(systems.selected_skill_ids.length,3);assert.deepEqual(systems.selected_skill_ids,[...c.skills]);assert.match(systems.on,/SELECTED_SKILLS=/);assert.doesNotMatch(systems.off,/SELECTED_SKILLS=/);assert.match(systems.off,/ROLE=diagnoser/);assert.match(systems.off,/never expose raw chain-of-thought/i);}
+  for(const c of CASES){const systems=buildSystemsForCase(c);assert.equal(systems.selected_skill_ids.length,3);assert.deepEqual(systems.selected_skill_ids,[...c.skills]);assert.match(systems.on,/SELECTED_SKILLS=/);assert.match(systems.on,/procedure=/);assert.doesNotMatch(systems.off,/SELECTED_SKILLS=|procedure=/);assert.match(systems.off,/ROLE=diagnoser/);assert.match(systems.off,/never expose raw chain-of-thought/i);}
 });
 
 test("Diagnoser deterministic scorer requires exact verifiable hypothesis artifacts",()=>{
