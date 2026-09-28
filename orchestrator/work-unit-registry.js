@@ -1,0 +1,57 @@
+"use strict";
+
+const { DurableContractError, contentHash, WorkUnitTreatment } = require("./durable-contracts.js");
+
+const WorkUnitKind=Object.freeze({TOOL_OBSERVATION:"TOOL_OBSERVATION",MODEL_STRUCTURED_TASK:"MODEL_STRUCTURED_TASK",ASSEMBLY:"ASSEMBLY"});
+const REPLAY_POLICY=Object.freeze({REUSE_IF_COMMITTED:"REUSE_IF_COMMITTED",RECHECK_FRESHNESS:"RECHECK_FRESHNESS",RECONCILE_BEFORE_RETRY:"RECONCILE_BEFORE_RETRY",NEVER_AUTOREPLAY_MUTATION:"NEVER_AUTOREPLAY_MUTATION"});
+
+class WorkUnitRegistryError extends Error{constructor(code,message=code){super(message);this.name="WorkUnitRegistryError";this.code=code;}}
+
+class WorkUnitRegistry{
+  constructor(){this.units=new Map();}
+  register({work_unit_id,contract_version="work-unit/v1",kind,dependencies=[],input_binding={},allowed_tools=[],result_schema,completion_rule,replay_policy=REPLAY_POLICY.REUSE_IF_COMMITTED,size_limit=null,role_scope}){
+    if(typeof work_unit_id!=="string"||!/^[A-Za-z0-9._-]{1,160}$/.test(work_unit_id))throw new WorkUnitRegistryError("WORK_UNIT_ID_INVALID");
+    if(this.units.has(work_unit_id))throw new WorkUnitRegistryError("WORK_UNIT_DUPLICATE",work_unit_id);
+    if(!Object.values(WorkUnitKind).includes(kind))throw new WorkUnitRegistryError("WORK_UNIT_KIND_INVALID");
+    if(!Object.values(REPLAY_POLICY).includes(replay_policy))throw new WorkUnitRegistryError("WORK_UNIT_REPLAY_POLICY_INVALID");
+    if(!Array.isArray(dependencies)||!Array.isArray(allowed_tools))throw new WorkUnitRegistryError("WORK_UNIT_ARRAY_INVALID");
+    if(typeof result_schema!=="string"||!result_schema)throw new WorkUnitRegistryError("WORK_UNIT_RESULT_SCHEMA_REQUIRED");
+    if(typeof completion_rule!=="string"||!completion_rule)throw new WorkUnitRegistryError("WORK_UNIT_COMPLETION_RULE_REQUIRED");
+    if(typeof role_scope!=="string"||!role_scope)throw new WorkUnitRegistryError("WORK_UNIT_ROLE_SCOPE_REQUIRED");
+    for(const dep of dependencies)if(!this.units.has(dep))throw new WorkUnitRegistryError("DEPENDENCY_NOT_REGISTERED",dep);
+    const unit=Object.freeze({work_unit_id,contract_version,kind,dependencies:[...dependencies],input_binding:{...input_binding},allowed_tools:[...allowed_tools],result_schema,completion_rule,replay_policy,size_limit,role_scope,definition_digest:contentHash({work_unit_id,contract_version,kind,dependencies,input_binding,allowed_tools,result_schema,completion_rule,replay_policy,size_limit,role_scope})});
+    this.units.set(work_unit_id,unit);return unit;
+  }
+  get(id){const unit=this.units.get(id);if(!unit)throw new WorkUnitRegistryError("WORK_UNIT_NOT_REGISTERED",id);return unit;}
+  has(id){return this.units.has(id);}
+  list(){return [...this.units.values()];}
+  topologicalOrder(){const done=new Set(),active=new Set(),out=[];const visit=id=>{if(done.has(id))return;if(active.has(id))throw new WorkUnitRegistryError("WORK_UNIT_CYCLE",id);active.add(id);const unit=this.get(id);for(const dep of unit.dependencies)visit(dep);active.delete(id);done.add(id);out.push(id);};for(const id of this.units.keys())visit(id);return out;}
+  selectNextPending(workStates={}){for(const id of this.topologicalOrder()){const treatment=workStates[id];if(treatment===WorkUnitTreatment.DONE||treatment===WorkUnitTreatment.GAP_ACCEPTED)continue;const unit=this.get(id);const depsReady=unit.dependencies.every(dep=>[WorkUnitTreatment.DONE,WorkUnitTreatment.GAP_ACCEPTED].includes(workStates[dep]));if(depsReady)return unit;}return null;}
+  evaluateCompletion({workUnitId,work_states={},work_result_refs={},input_binding_matches,result_schema_matches,evidence_validated,effect_treatment_settled,completion_rule_evaluator}){
+    const unit=this.get(workUnitId);
+    if(!input_binding_matches)return{treatment:WorkUnitTreatment.PENDING,reason:"INPUT_BINDING_MISMATCH"};
+    for(const dep of unit.dependencies)if(![WorkUnitTreatment.DONE,WorkUnitTreatment.GAP_ACCEPTED].includes(work_states[dep]))return{treatment:WorkUnitTreatment.PENDING,reason:`DEPENDENCY_NOT_RESOLVED:${dep}`};
+    if(!work_result_refs[workUnitId])return{treatment:WorkUnitTreatment.PENDING,reason:"NO_RESULT_REF"};
+    if(!result_schema_matches)return{treatment:WorkUnitTreatment.PENDING,reason:"RESULT_SCHEMA_MISMATCH"};
+    if(!evidence_validated)return{treatment:WorkUnitTreatment.PENDING,reason:"EVIDENCE_NOT_VALIDATED"};
+    if(!effect_treatment_settled)return{treatment:WorkUnitTreatment.PENDING,reason:"EFFECT_TREATMENT_UNSETTLED"};
+    if(typeof completion_rule_evaluator!=="function")return{treatment:WorkUnitTreatment.PENDING,reason:"NO_COMPLETION_RULE_EVALUATOR"};
+    const result=completion_rule_evaluator(unit);if(!result||result.ok!==true)return{treatment:WorkUnitTreatment.PENDING,reason:`COMPLETION_RULE_FAILED:${result?.reason||"unknown"}`};
+    return{treatment:WorkUnitTreatment.DONE,reason:null};
+  }
+  evaluateGapAcceptance({workUnitId,gap_contract,gap_evidence}){const unit=this.get(workUnitId);if(!gap_contract||gap_contract.work_unit_id!==workUnitId)return{accepted:false,reason:"GAP_CONTRACT_INVALID"};if(!Array.isArray(gap_evidence)||!gap_evidence.length)return{accepted:false,reason:"GAP_EVIDENCE_REQUIRED"};if(typeof gap_contract.rationale!=="string"||!gap_contract.rationale.trim())return{accepted:false,reason:"GAP_RATIONALE_REQUIRED"};return{accepted:true,reason:null,unit};}
+  computeProgressDelta({prev_seen_evidence=[],next_seen_evidence=[],prev_completed_work=[],next_completed_work=[],prev_completed_effect=[],next_completed_effect=[]}){const pE=new Set(prev_seen_evidence),pW=new Set(prev_completed_work),pF=new Set(prev_completed_effect);let e=0,w=0,f=0;for(const id of next_seen_evidence)if(!pE.has(id))e++;for(const id of next_completed_work)if(!pW.has(id))w++;for(const id of next_completed_effect)if(!pF.has(id))f++;return{new_evidence_delta:e,new_work_delta:w,new_effect_delta:f,progress_delta:e+w+f};}
+  assertSizeWithinLimit(workUnitId,payload){const unit=this.get(workUnitId);if(unit.size_limit==null)return true;const bytes=Buffer.byteLength(JSON.stringify(payload),"utf8");if(bytes>unit.size_limit)throw new WorkUnitRegistryError("WORK_UNIT_SIZE_EXCEEDED",`${workUnitId}:${bytes}`);return true;}
+}
+
+function buildResearcherWorkUnits(registry){
+  registry.register({work_unit_id:"researcher.A",kind:WorkUnitKind.MODEL_STRUCTURED_TASK,dependencies:[],input_binding:{kind:"local_scout_evidence_evaluation"},allowed_tools:["source.read","source.search","evidence.read"],result_schema:"debugai.researcher.work.A/v1",completion_rule:"evidence_refs_evaluated_and_gap_items_recorded",replay_policy:REPLAY_POLICY.REUSE_IF_COMMITTED,size_limit:65536,role_scope:"researcher"});
+  registry.register({work_unit_id:"researcher.B",kind:WorkUnitKind.MODEL_STRUCTURED_TASK,dependencies:[],input_binding:{kind:"internal_knowledge_evaluation"},allowed_tools:["knowledge.search","evidence.read"],result_schema:"debugai.researcher.work.B/v1",completion_rule:"knowledge_refs_classified",replay_policy:REPLAY_POLICY.REUSE_IF_COMMITTED,size_limit:65536,role_scope:"researcher"});
+  registry.register({work_unit_id:"researcher.C",kind:WorkUnitKind.TOOL_OBSERVATION,dependencies:[],input_binding:{kind:"official_evidence_evaluation"},allowed_tools:["authority.search","source.verify"],result_schema:"debugai.researcher.work.C/v1",completion_rule:"official_refs_with_version_and_freshness_recorded",replay_policy:REPLAY_POLICY.RECHECK_FRESHNESS,size_limit:65536,role_scope:"researcher"});
+  registry.register({work_unit_id:"researcher.D",kind:WorkUnitKind.MODEL_STRUCTURED_TASK,dependencies:["researcher.A","researcher.B","researcher.C"],input_binding:{kind:"contradiction_reconciliation"},allowed_tools:[],result_schema:"debugai.researcher.work.D/v1",completion_rule:"contradictions_mapped_and_unsupported_links_labeled",replay_policy:REPLAY_POLICY.REUSE_IF_COMMITTED,size_limit:65536,role_scope:"researcher"});
+  registry.register({work_unit_id:"researcher.E",kind:WorkUnitKind.ASSEMBLY,dependencies:["researcher.D"],input_binding:{kind:"final_payload_assembly"},allowed_tools:[],result_schema:"debugai.evidence-selection/v2",completion_rule:"existing_researcher_schema_satisfied",replay_policy:REPLAY_POLICY.REUSE_IF_COMMITTED,size_limit:65536,role_scope:"researcher"});return registry;
+}
+function createDefaultRegistry(){return new WorkUnitRegistry();}
+function assertNoMutationReplay(registry){for(const unit of registry.list()){if(unit.replay_policy===REPLAY_POLICY.NEVER_AUTOREPLAY_MUTATION)continue;for(const tool of unit.allowed_tools)if(["patch.apply","file.write","dependency.change","git.publish","deploy"].includes(tool))throw new DurableContractError("work-unit-registry",`mutation tool cannot be autoreplayed: ${unit.work_unit_id}:${tool}`);}return true;}
+
+module.exports={WorkUnitKind,REPLAY_POLICY,WorkUnitRegistryError,WorkUnitRegistry,buildResearcherWorkUnits,createDefaultRegistry,assertNoMutationReplay};
