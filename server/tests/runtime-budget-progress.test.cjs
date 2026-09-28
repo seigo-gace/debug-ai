@@ -48,7 +48,7 @@ test("read-only role call applies recovered role token and timeout budget even w
   assert.equal(out.validated_output.decision,"HANDOFF");
 });
 
-test("tool loop stops when successive tool rounds produce zero new evidence",async()=>{
+test("tool loop stops when successive tool rounds produce zero durable progress",async()=>{
   const toolRuntime={availableTools:["source.read"],execute:async()=>{throw new Error("READ_FAILED");}};
   let n=0;
   const aiCore={call:async()=>{
@@ -57,5 +57,5 @@ test("tool loop stops when successive tool rounds produce zero new evidence",asy
     if(n===2)return{content:JSON.stringify({tool_requests:[{tool:"source.read",arguments:{path:"b.js"}}]})};
     return{content:JSON.stringify({decision:"INSUFFICIENT_EVIDENCE"})};
   }};
-  await assert.rejects(()=>runRoleWithReadOnlyTools({aiCore,role:"code_scout",user:"x",toolRuntime,maxToolRounds:2,maxToolCalls:4}),/ROLE_TOOL_NO_PROGRESS:code_scout:NEW_EVIDENCE_DELTA_0/);
+  await assert.rejects(()=>runRoleWithReadOnlyTools({aiCore,role:"code_scout",user:"x",toolRuntime,maxToolRounds:2,maxToolCalls:4}),/ROLE_TOOL_NO_PROGRESS:code_scout:PROGRESS_DELTA_0/);
 });
