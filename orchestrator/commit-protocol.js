@@ -1,156 +1,31 @@
 "use strict";
 
-const crypto = require("node:crypto");
-const {
-  validateRunStateV2,
-  validateExecutionManifest,
-} = require("./durable-contracts.js");
+const crypto=require("node:crypto");
+const {validateRunStateV2,validateExecutionManifest}=require("./durable-contracts.js");
 
-class CommitError extends Error {
-  constructor(code, message = code, meta = null) {
-    super(message);
-    this.name = "CommitError";
-    this.code = code;
-    this.meta = meta;
+class CommitError extends Error{constructor(code,message=code,meta=null){super(message);this.name="CommitError";this.code=code;this.meta=meta;}}
+function requireInt(value,code){if(!Number.isInteger(value)||value<0)throw new CommitError(code);return value;}
+function requireId(value,code){if(typeof value!=="string"||!/^[A-Za-z0-9_-]{1,200}$/.test(value))throw new CommitError(code);return value;}
+function makeCommitId(){return `cmt_${crypto.randomBytes(12).toString("hex")}`;}
+function runStatePath(runId){return `durable/run-state-v2/${requireId(runId,"RUN_ID_INVALID")}.json`;}
+function manifestPath(manifestId){return `durable/execution-manifest/${requireId(manifestId,"MANIFEST_ID_INVALID")}.json`;}
+function commitPath(commitId){return `durable/commit/${requireId(commitId,"COMMIT_ID_INVALID")}.json`;}
+
+class CommitProtocol{
+  constructor({io}){if(!io||typeof io.readRecord!=="function"||typeof io.writeImmutableRecord!=="function"||typeof io.replaceRecord!=="function")throw new CommitError("DURABLE_IO_REQUIRED");this.io=io;this.mutexes=new Map();}
+  _mutex(runId){let mutex=this.mutexes.get(runId);if(!mutex){mutex={locked:false,queue:[]};this.mutexes.set(runId,mutex);}return mutex;}
+  async _withRunMutex(runId,fn){const mutex=this._mutex(runId);if(mutex.locked)await new Promise(resolve=>mutex.queue.push(resolve));mutex.locked=true;try{return await fn();}finally{mutex.locked=false;const next=mutex.queue.shift();if(next)next();else this.mutexes.delete(runId);}}
+  loadRunState(runId,{allowMissing=false}={}){return this.io.readRecord(runStatePath(runId),{expectedSchema:"run-state/v2",allowMissing});}
+  loadManifest(manifestId){return this.io.readRecord(manifestPath(manifestId),{expectedSchema:"execution-manifest/v1"});}
+  readRecord(path,{expectedSchema=null,allowMissing=false}={}){return this.io.readRecord(path,{expectedSchema,allowMissing});}
+  async commit({runId,expected,manifest,runStatePatch={},immutableRecords=[],createIfMissing=false,initialState=null,commitId=null}){
+    requireId(runId,"RUN_ID_INVALID");if(!expected||typeof expected!=="object")throw new CommitError("EXPECTED_FENCE_REQUIRED");requireInt(expected.generation,"EXPECTED_GENERATION_REQUIRED");requireInt(expected.execution_epoch,"EXPECTED_EPOCH_REQUIRED");if(!manifest||manifest.run_id!==runId)throw new CommitError("MANIFEST_RUN_MISMATCH");validateExecutionManifest(manifest);if(!Array.isArray(immutableRecords))throw new CommitError("IMMUTABLE_RECORDS_INVALID");const effectiveCommitId=commitId===null?makeCommitId():requireId(commitId,"COMMIT_ID_INVALID");
+    return this._withRunMutex(runId,async()=>{const current=this.loadRunState(runId,{allowMissing:true});let base,created=false;if(current===null){if(!createIfMissing)throw new CommitError("RUN_NOT_FOUND");if(!initialState||initialState.run_id!==runId)throw new CommitError("INITIAL_STATE_REQUIRED");validateRunStateV2(initialState);if(initialState.generation!==expected.generation)throw new CommitError("GENERATION_CONFLICT","initial generation mismatch",{expected:expected.generation,current:initialState.generation});if(initialState.execution_epoch!==expected.execution_epoch)throw new CommitError("EPOCH_FENCED","initial epoch mismatch",{expected:expected.execution_epoch,current:initialState.execution_epoch});base=initialState;created=true;}else{validateRunStateV2(current);if(current.generation!==expected.generation)throw new CommitError("GENERATION_CONFLICT","stale generation",{expected:expected.generation,current:current.generation});if(current.execution_epoch!==expected.execution_epoch)throw new CommitError("EPOCH_FENCED","stale execution epoch",{expected:expected.execution_epoch,current:current.execution_epoch});if(current.job_status==="CANCELLED")throw new CommitError("RUN_CANCELLED");base=current;}
+      for(const item of immutableRecords){if(!item||typeof item!=="object"||typeof item.path!=="string"||!item.record||typeof item.record!=="object")throw new CommitError("IMMUTABLE_RECORD_INVALID");this.io.writeImmutableRecord(item.path,item.record);}this.io.writeImmutableRecord(manifestPath(manifest.manifest_id),manifest);
+      const nextGeneration=created?base.generation:base.generation+1;const nextState={...base,...runStatePatch,schema:"run-state/v2",run_id:runId,generation:nextGeneration,execution_epoch:base.execution_epoch,execution_ref:{manifest_id:manifest.manifest_id,digest:manifest.digest},last_commit_id:effectiveCommitId,updated_at:Date.now()};validateRunStateV2(nextState);
+      const commitRecord={schema:"debugai.commit/v1",commit_id:effectiveCommitId,run_id:runId,generation:nextGeneration,execution_epoch:nextState.execution_epoch,manifest_id:manifest.manifest_id,manifest_digest:manifest.digest,created_at:Date.now()};this.io.writeImmutableRecord(commitPath(effectiveCommitId),commitRecord);this.io.replaceRecord(runStatePath(runId),nextState);
+      return{commit_id:effectiveCommitId,run_id:runId,generation:nextGeneration,execution_epoch:nextState.execution_epoch,manifest_id:manifest.manifest_id,manifest_digest:manifest.digest,created,state:nextState};});
   }
+  async bumpEpoch({runId,expectedGeneration,expectedEpoch,manifest}){const current=this.loadRunState(runId);if(current.generation!==expectedGeneration)throw new CommitError("GENERATION_CONFLICT");if(current.execution_epoch!==expectedEpoch)throw new CommitError("EPOCH_FENCED");const nextEpoch=expectedEpoch+1;const patchedInitial={...current,execution_epoch:nextEpoch};validateRunStateV2(patchedInitial);return this._withRunMutex(runId,async()=>{const reloaded=this.loadRunState(runId);if(reloaded.generation!==expectedGeneration)throw new CommitError("GENERATION_CONFLICT");if(reloaded.execution_epoch!==expectedEpoch)throw new CommitError("EPOCH_FENCED");validateExecutionManifest(manifest);if(manifest.run_id!==runId)throw new CommitError("MANIFEST_RUN_MISMATCH");this.io.writeImmutableRecord(manifestPath(manifest.manifest_id),manifest);const commitId=makeCommitId();const next={...reloaded,generation:reloaded.generation+1,execution_epoch:nextEpoch,execution_ref:{manifest_id:manifest.manifest_id,digest:manifest.digest},last_commit_id:commitId,updated_at:Date.now()};validateRunStateV2(next);this.io.writeImmutableRecord(commitPath(commitId),{schema:"debugai.commit/v1",commit_id:commitId,run_id:runId,generation:next.generation,execution_epoch:nextEpoch,manifest_id:manifest.manifest_id,manifest_digest:manifest.digest,kind:"EPOCH_BUMP",created_at:Date.now()});this.io.replaceRecord(runStatePath(runId),next);return{commit_id:commitId,generation:next.generation,execution_epoch:nextEpoch,state:next};});}
 }
-
-function requireInt(value, code) {
-  if (!Number.isInteger(value) || value < 0) throw new CommitError(code);
-  return value;
-}
-
-function requireId(value, code) {
-  if (typeof value !== "string" || !/^[A-Za-z0-9_-]{1,200}$/.test(value)) throw new CommitError(code);
-  return value;
-}
-
-function runStatePath(runId) { return `durable/run-state-v2/${requireId(runId, "RUN_ID_INVALID")}.json`; }
-function manifestPath(manifestId) { return `durable/execution-manifest/${requireId(manifestId, "MANIFEST_ID_INVALID")}.json`; }
-function commitPath(commitId) { return `durable/commit/${requireId(commitId, "COMMIT_ID_INVALID")}.json`; }
-
-class CommitProtocol {
-  constructor({ io }) {
-    if (!io || typeof io.readRecord !== "function" || typeof io.writeImmutableRecord !== "function" || typeof io.replaceRecord !== "function") throw new CommitError("DURABLE_IO_REQUIRED");
-    this.io = io;
-    this.mutexes = new Map();
-  }
-
-  _mutex(runId) {
-    let mutex = this.mutexes.get(runId);
-    if (!mutex) { mutex = { locked: false, queue: [] }; this.mutexes.set(runId, mutex); }
-    return mutex;
-  }
-
-  async _withRunMutex(runId, fn) {
-    const mutex = this._mutex(runId);
-    if (mutex.locked) await new Promise(resolve => mutex.queue.push(resolve));
-    mutex.locked = true;
-    try { return await fn(); }
-    finally {
-      mutex.locked = false;
-      const next = mutex.queue.shift();
-      if (next) next(); else this.mutexes.delete(runId);
-    }
-  }
-
-  loadRunState(runId, { allowMissing = false } = {}) {
-    return this.io.readRecord(runStatePath(runId), { expectedSchema: "run-state/v2", allowMissing });
-  }
-
-  loadManifest(manifestId) {
-    return this.io.readRecord(manifestPath(manifestId), { expectedSchema: "execution-manifest/v1" });
-  }
-
-  async commit({ runId, expected, manifest, runStatePatch = {}, immutableRecords = [], createIfMissing = false, initialState = null }) {
-    requireId(runId, "RUN_ID_INVALID");
-    if (!expected || typeof expected !== "object") throw new CommitError("EXPECTED_FENCE_REQUIRED");
-    requireInt(expected.generation, "EXPECTED_GENERATION_REQUIRED");
-    requireInt(expected.execution_epoch, "EXPECTED_EPOCH_REQUIRED");
-    if (!manifest || manifest.run_id !== runId) throw new CommitError("MANIFEST_RUN_MISMATCH");
-    validateExecutionManifest(manifest);
-    if (!Array.isArray(immutableRecords)) throw new CommitError("IMMUTABLE_RECORDS_INVALID");
-
-    return this._withRunMutex(runId, async () => {
-      const current = this.loadRunState(runId, { allowMissing: true });
-      let base;
-      let created = false;
-      if (current === null) {
-        if (!createIfMissing) throw new CommitError("RUN_NOT_FOUND");
-        if (!initialState || initialState.run_id !== runId) throw new CommitError("INITIAL_STATE_REQUIRED");
-        validateRunStateV2(initialState);
-        if (initialState.generation !== expected.generation) throw new CommitError("GENERATION_CONFLICT", "initial generation mismatch", { expected: expected.generation, current: initialState.generation });
-        if (initialState.execution_epoch !== expected.execution_epoch) throw new CommitError("EPOCH_FENCED", "initial epoch mismatch", { expected: expected.execution_epoch, current: initialState.execution_epoch });
-        base = initialState;
-        created = true;
-      } else {
-        validateRunStateV2(current);
-        if (current.generation !== expected.generation) throw new CommitError("GENERATION_CONFLICT", "stale generation", { expected: expected.generation, current: current.generation });
-        if (current.execution_epoch !== expected.execution_epoch) throw new CommitError("EPOCH_FENCED", "stale execution epoch", { expected: expected.execution_epoch, current: current.execution_epoch });
-        if (current.job_status === "CANCELLED") throw new CommitError("RUN_CANCELLED");
-        base = current;
-      }
-
-      for (const item of immutableRecords) {
-        if (!item || typeof item !== "object" || typeof item.path !== "string" || !item.record || typeof item.record !== "object") throw new CommitError("IMMUTABLE_RECORD_INVALID");
-        this.io.writeImmutableRecord(item.path, item.record);
-      }
-      this.io.writeImmutableRecord(manifestPath(manifest.manifest_id), manifest);
-
-      const commitId = `cmt_${crypto.randomBytes(12).toString("hex")}`;
-      const nextGeneration = created ? base.generation : base.generation + 1;
-      const nextState = {
-        ...base,
-        ...runStatePatch,
-        schema: "run-state/v2",
-        run_id: runId,
-        generation: nextGeneration,
-        execution_epoch: base.execution_epoch,
-        execution_ref: { manifest_id: manifest.manifest_id, digest: manifest.digest },
-        last_commit_id: commitId,
-        updated_at: Date.now(),
-      };
-      validateRunStateV2(nextState);
-
-      const commitRecord = {
-        schema: "debugai.commit/v1",
-        commit_id: commitId,
-        run_id: runId,
-        generation: nextGeneration,
-        execution_epoch: nextState.execution_epoch,
-        manifest_id: manifest.manifest_id,
-        manifest_digest: manifest.digest,
-        created_at: Date.now(),
-      };
-      this.io.writeImmutableRecord(commitPath(commitId), commitRecord);
-      this.io.replaceRecord(runStatePath(runId), nextState);
-
-      return { commit_id: commitId, run_id: runId, generation: nextGeneration, execution_epoch: nextState.execution_epoch, manifest_id: manifest.manifest_id, manifest_digest: manifest.digest, created, state: nextState };
-    });
-  }
-
-  async bumpEpoch({ runId, expectedGeneration, expectedEpoch, manifest }) {
-    const current = this.loadRunState(runId);
-    if (current.generation !== expectedGeneration) throw new CommitError("GENERATION_CONFLICT");
-    if (current.execution_epoch !== expectedEpoch) throw new CommitError("EPOCH_FENCED");
-    const nextEpoch = expectedEpoch + 1;
-    const patchedInitial = { ...current, execution_epoch: nextEpoch };
-    validateRunStateV2(patchedInitial);
-    return this._withRunMutex(runId, async () => {
-      const reloaded = this.loadRunState(runId);
-      if (reloaded.generation !== expectedGeneration) throw new CommitError("GENERATION_CONFLICT");
-      if (reloaded.execution_epoch !== expectedEpoch) throw new CommitError("EPOCH_FENCED");
-      validateExecutionManifest(manifest);
-      if (manifest.run_id !== runId) throw new CommitError("MANIFEST_RUN_MISMATCH");
-      this.io.writeImmutableRecord(manifestPath(manifest.manifest_id), manifest);
-      const commitId = `cmt_${crypto.randomBytes(12).toString("hex")}`;
-      const next = { ...reloaded, generation: reloaded.generation + 1, execution_epoch: nextEpoch, execution_ref: { manifest_id: manifest.manifest_id, digest: manifest.digest }, last_commit_id: commitId, updated_at: Date.now() };
-      validateRunStateV2(next);
-      this.io.writeImmutableRecord(commitPath(commitId), { schema: "debugai.commit/v1", commit_id: commitId, run_id: runId, generation: next.generation, execution_epoch: nextEpoch, manifest_id: manifest.manifest_id, manifest_digest: manifest.digest, kind: "EPOCH_BUMP", created_at: Date.now() });
-      this.io.replaceRecord(runStatePath(runId), next);
-      return { commit_id: commitId, generation: next.generation, execution_epoch: nextEpoch, state: next };
-    });
-  }
-}
-
-module.exports = { CommitError, CommitProtocol, runStatePath, manifestPath, commitPath };
+module.exports={CommitError,CommitProtocol,makeCommitId,runStatePath,manifestPath,commitPath};
