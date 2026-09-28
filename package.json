@@ -17,6 +17,7 @@
     "benchmark:researcher-skill-effect":"node server/control/researcher-skill-effect-benchmark.js",
     "benchmark:diagnoser-skill-effect":"node server/control/diagnoser-skill-effect-benchmark.js",
     "benchmark:patch-engineer-skill-effect":"node server/control/patch-engineer-skill-effect-benchmark.js",
+    "audit:control-plane-gaps":"node server/control/control-plane-gap-audit.js",
     "start":"node server/main.js"
   }
 }

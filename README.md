@@ -238,6 +238,14 @@ npm run verify
 
 `npm run verify` performs syntax checks and the active server/orchestrator test suites.
 
+Inspect the current executable Skill procedure and runtime Tool gaps without invoking AI Core:
+
+```bash
+npm run audit:control-plane-gaps
+```
+
+Add `-- --strict` when the audit should exit non-zero until every declared gap is closed.
+
 Legacy PC authority regression tests are separate:
 
 ```bash
