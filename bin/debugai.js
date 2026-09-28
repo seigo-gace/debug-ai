@@ -11,7 +11,9 @@ const VERSION="debugai-cli/v1";
 function usage(){return [
   "debugai health",
   'debugai analyze "<request>" [--repo <server-visible-path>] [--run-id <id>]',
-  'debugai resume "<request>" [--run-id <id>]',
+  'debugai start "<request>" [--repo <server-visible-path>]',
+  'debugai resume [--run-id <id>]',
+  'debugai wait [<run-id>] [--interval-ms <n>] [--timeout-ms <n>]',
   'debugai patch "<purpose>" [--run-id <id>] [--paths <a,b>]',
   "debugai verify [--repo <server-visible-path>] [--paths <a,b>]",
   "debugai status <run-id>",
@@ -82,10 +84,10 @@ async function requestJson(base,route,{method="GET",body}={}){
 
 function summary(command,result){
   if(command==="health")return result.ok?"DebugAI health: PASS":"DebugAI health: FAIL";
-  if(command==="analyze"||command==="resume")return `DebugAI ${command}: ${result.state||"UNKNOWN"} run=${result.run_id||"UNKNOWN"}`;
+  if(command==="analyze"||command==="start"||command==="resume")return `DebugAI ${command}: ${result.state||"UNKNOWN"} run=${result.run_id||"UNKNOWN"}`;
   if(command==="patch")return `DebugAI patch candidate: ${result.state||"UNKNOWN"} run=${result.run_id||"UNKNOWN"}`;
   if(command==="verify")return `DebugAI verify: ${result.verdict||"UNKNOWN"}`;
-  if(command==="status")return `DebugAI status: ${result.state||"UNKNOWN"} run=${result.run_id||"UNKNOWN"}`;
+  if(command==="status"||command==="wait")return `DebugAI ${command}: ${result.durable?.job_status||result.state||"UNKNOWN"} run=${result.run_id||"UNKNOWN"}`;
   if(command==="inspect")return `DebugAI inspect: run=${result.run?.run_id||"UNKNOWN"}`;
   return "DebugAI command complete";
 }
@@ -93,20 +95,24 @@ function summary(command,result){
 async function execute(argv,{env=process.env,cwd=process.cwd()}={}){
   const parsed=parseArgs(argv),command=parsed.positional.shift();if(!command||command==="help"||parsed.flags.help)return{help:usage(),exitCode:command?0:2};const base=serverUrl(parsed.flags,env),sessionFile=stateFile(env),session=loadState(sessionFile);let result;
   if(command==="health")result=await requestJson(base,"/health");
-  else if(command==="analyze"||command==="resume"){
+  else if(command==="analyze"||command==="start"){
     const request=parsed.positional.join(" ").trim();if(!request)throw new Error("ANALYZE_REQUEST_REQUIRED");
-    const requestedRunId=String(parsed.flags["run-id"]||(command==="resume"?session?.run_id||"":""));
-    if(command==="resume"&&!requestedRunId)throw new Error("RESUME_RUN_ID_REQUIRED");
+    const requestedRunId=String(parsed.flags["run-id"]||"");
     const repo=serverRepo(parsed.flags.repo||session?.repo||cwd,env);
     const body={repo,projectId:path.basename(repo),failure:{message:request},localEvidence:[]};if(requestedRunId)body.runId=requestedRunId;
-    result=await requestJson(base,"/v1/analyze",{method:"POST",body});
+    result=await requestJson(base,command==="start"?"/v1/runs/start":"/v1/analyze",{method:"POST",body});
     saveState(sessionFile,{server:base,run_id:result.run_id,repo,updated_at:new Date().toISOString()});
+  }else if(command==="resume"){
+    const runId=String(parsed.flags["run-id"]||parsed.positional[0]||session?.run_id||"");if(!runId)throw new Error("RESUME_RUN_ID_REQUIRED");
+    result=await requestJson(base,"/v1/runs/resume",{method:"POST",body:{runId}});const repo=session?.repo||null;saveState(sessionFile,{server:base,run_id:runId,repo,updated_at:new Date().toISOString()});
   }else if(command==="patch"){
     const task=parsed.positional.join(" ").trim();if(!task)throw new Error("PATCH_PURPOSE_REQUIRED");const runId=String(parsed.flags["run-id"]||session?.run_id||"");if(!runId)throw new Error("PATCH_RUN_ID_REQUIRED");const [inspection,status]=await Promise.all([requestJson(base,`/v1/inspect/${encodeURIComponent(runId)}`),requestJson(base,`/v1/status/${encodeURIComponent(runId)}`)]);const analysis=inspection?.artifacts?.analysis?.payload;if(!analysis)throw new Error("PATCH_ANALYSIS_ARTIFACT_REQUIRED");result=await requestJson(base,"/v1/patch-candidate",{method:"POST",body:{runId,analysis,repo:status.project_dir,selectedPaths:splitList(parsed.flags.paths),context:task,task}});saveState(sessionFile,{server:base,run_id:runId,repo:status.project_dir,updated_at:new Date().toISOString()});
   }else if(command==="verify"){
     const repo=serverRepo(parsed.flags.repo||cwd,env);result=await requestJson(base,"/v1/verify",{method:"POST",body:{repo,selectedPaths:splitList(parsed.flags.paths),changeScope:splitList(parsed.flags["change-scope"]),task:parsed.positional.join(" ").trim()}});
   }else if(command==="status"||command==="inspect"){
     const runId=String(parsed.positional[0]||parsed.flags["run-id"]||session?.run_id||"");if(!runId)throw new Error("RUN_ID_REQUIRED");result=await requestJson(base,`/v1/${command}/${encodeURIComponent(runId)}`);
+  }else if(command==="wait"){
+    const runId=String(parsed.positional[0]||parsed.flags["run-id"]||session?.run_id||"");if(!runId)throw new Error("RUN_ID_REQUIRED");const interval=Number(parsed.flags["interval-ms"]||1000),timeout=Number(parsed.flags["timeout-ms"]||httpTimeoutMs(env));if(!Number.isFinite(interval)||interval<10||interval>60000)throw new Error("WAIT_INTERVAL_INVALID");if(!Number.isFinite(timeout)||timeout<1000||timeout>3600000)throw new Error("WAIT_TIMEOUT_INVALID");const deadline=Date.now()+timeout,terminal=new Set(["DONE","CANCELLED","BLOCKED","FAILED"]);for(;;){result=await requestJson(base,`/v1/status/${encodeURIComponent(runId)}`);if(terminal.has(result?.durable?.job_status)||["COMPLETE","BLOCKED"].includes(result?.state))break;if(Date.now()>=deadline)throw new Error("WAIT_TIMEOUT");await new Promise(resolve=>setTimeout(resolve,Math.min(interval,Math.max(0,deadline-Date.now()))));}
   }else throw new Error(`COMMAND_INVALID:${command}`);
   return{command,result,exitCode:command==="verify"&&result.verdict!=="PASS"?2:0};
 }

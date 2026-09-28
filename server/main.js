@@ -42,4 +42,5 @@ let shuttingDown=false;
 function shutdown(signal){if(shuttingDown)return;shuttingDown=true;server.close(()=>{try{writerLock.close();}finally{process.exit(0);}});setTimeout(()=>{try{writerLock.close();}finally{process.exit(1);}},5000).unref();if(signal)console.error(`DebugAI shutdown: ${signal}`);}
 process.once("SIGTERM",()=>shutdown("SIGTERM"));
 process.once("SIGINT",()=>shutdown("SIGINT"));
-server.listen(port,host,()=>console.log(`DebugAI listening on http://${host}:${port}`));
+async function start(){const recovery=await workflow.recoverStartup();if(recovery.claimed.length||recovery.incompatible.length)console.log(`DebugAI startup recovery: claimed=${recovery.claimed.length} incompatible=${recovery.incompatible.length}`);server.listen(port,host,()=>console.log(`DebugAI listening on http://${host}:${port}`));}
+void start().catch(error=>{console.error(`DebugAI startup failed: ${String(error?.message||error)}`);try{writerLock.close();}finally{process.exitCode=1;}});

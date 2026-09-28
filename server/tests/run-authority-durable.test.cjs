@@ -41,3 +41,49 @@ test("RunAuthority owns durable commit protocol without replacing legacy state m
     assert.equal(legacy.run_id,run.run_id);
   }finally{fs.rmSync(runtimeRoot,{recursive:true,force:true});}
 });
+
+test("RunAuthority classifies startup recovery candidates and atomically bumps their epoch",async()=>{
+  const runtimeRoot=fs.mkdtempSync(path.join(os.tmpdir(),"debugai-run-recovery-"));
+  try{
+    const io=new FakeDurableIo();const authority=new RunAuthority({runtimeRoot,durableIo:io});
+    const recoverable=authority.start({rawRequest:"recover me",repo:runtimeRoot,projectId:"P"});
+    await authority.initializeDurable(recoverable);
+    const terminal=authority.start({rawRequest:"already done",repo:runtimeRoot,projectId:"P"});
+    await authority.initializeDurable(terminal);
+    await authority.commitDurable({runId:terminal.run_id,manifestPatch:{job:{status:"DONE"}},runStatePatch:{job_status:"DONE"}});
+    const cancelled=authority.start({rawRequest:"cancelled",repo:runtimeRoot,projectId:"P"});
+    await authority.initializeDurable(cancelled);
+    await authority.commitDurable({runId:cancelled.run_id,manifestPatch:{job:{status:"CANCELLED"},cancellation:{reason:"user"}},runStatePatch:{job_status:"CANCELLED"}});
+
+    const scan=authority.inspectDurableRuns();
+    assert.deepEqual(scan.recoverable.map(x=>x.run_id),[recoverable.run_id]);
+    assert.deepEqual(new Set(scan.terminal.map(x=>x.run_id)),new Set([terminal.run_id,cancelled.run_id]));
+    assert.deepEqual(scan.incompatible,[]);
+
+    const claimed=await authority.claimRecoverableRun(recoverable.run_id,{claimedAt:1234});
+    assert.equal(claimed.state.execution_epoch,1);
+    assert.equal(claimed.state.job_status,"RUNNING");
+    assert.equal(claimed.manifest.job.status,"RUNNING");
+    assert.equal(claimed.manifest.policy_refs.startup_recovery_from_epoch,0);
+    assert.equal(claimed.manifest.policy_refs.startup_recovery_claimed_at,1234);
+    await assert.rejects(()=>authority.claimRecoverableRun(terminal.run_id),/RUN_NOT_RECOVERABLE:DONE/);
+    await assert.rejects(()=>authority.claimRecoverableRun(cancelled.run_id),/RUN_CANCELLED/);
+  }finally{fs.rmSync(runtimeRoot,{recursive:true,force:true});}
+});
+
+test("startup scan fails closed for an incompatible durable storage format",async()=>{
+  const runtimeRoot=fs.mkdtempSync(path.join(os.tmpdir(),"debugai-run-incompatible-"));
+  try{
+    const io=new FakeDurableIo();const authority=new RunAuthority({runtimeRoot,durableIo:io});
+    const run=authority.start({rawRequest:"future format",repo:runtimeRoot,projectId:"P"});
+    await authority.initializeDurable(run);
+    const key=`durable/run-state-v2/${run.run_id}.json`,future=io.records.get(key);
+    io.records.set(key,{...future,storage_format_version:999});
+    const scan=authority.inspectDurableRuns();
+    assert.deepEqual(scan.recoverable,[]);
+    assert.deepEqual(scan.terminal,[]);
+    assert.equal(scan.incompatible.length,1);
+    assert.equal(scan.incompatible[0].run_id,run.run_id);
+    assert.match(scan.incompatible[0].error,/incompatible storage_format_version=999/);
+  }finally{fs.rmSync(runtimeRoot,{recursive:true,force:true});}
+});
