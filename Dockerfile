@@ -6,6 +6,17 @@ WORKDIR /src
 COPY server/control/sandbox-exec.c ./sandbox-exec.c
 RUN cc -O2 -std=c11 -Wall -Wextra -Werror -o /debugai-sandbox-exec sandbox-exec.c
 
+FROM node:24.20.0-bookworm-slim AS durable-native-builder
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+COPY orchestrator/contracts.js ./orchestrator/contracts.js
+COPY server/native/durable-lock.c ./server/native/durable-lock.c
+COPY scripts/build-durable-native.cjs ./scripts/build-durable-native.cjs
+RUN node scripts/build-durable-native.cjs \
+    && test -s build/native/debugai-durable-lock.node
+
 FROM node:24.20.0-bookworm-slim AS debugmcp-builder
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates git \
@@ -30,6 +41,8 @@ COPY bin ./bin
 RUN chmod 0555 /app/bin/debugai.js && ln -s /app/bin/debugai.js /usr/local/bin/debugai
 COPY orchestrator ./orchestrator
 COPY server ./server
+COPY --from=durable-native-builder /src/build/native/debugai-durable-lock.node ./build/native/debugai-durable-lock.node
+RUN chmod 0555 /app/build/native/debugai-durable-lock.node
 ENV DEBUG_AI_SANDBOX_COMMAND=/usr/local/bin/debugai-sandbox-exec
 
 FROM app-base AS sandbox-runner
