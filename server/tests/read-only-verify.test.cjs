@@ -19,15 +19,15 @@ function fixture(scripts={lint:"node --check value.js",test:"node --test value.t
   return{workspace,repo,runtimeRoot,cleanup:()=>fs.rmSync(workspace,{recursive:true,force:true})};
 }
 
-function workflowFor(f,{failedAction=null}={}){
+function workflowFor(f,{failedAction=null,stdoutByAction={},aiCall=null}={}){
   const prepared=[];
   const sandboxVerification=createSandboxVerificationLane({
     jobRoot:"/sandbox-jobs",
     prepare(input){prepared.push(input);return{job_id:`JOB_${prepared.length}`};},
-    async wait({jobId}){const action=prepared[Number(jobId.slice(4))-1].action,pass=action!==failedAction;return{job_id:jobId,action,command:`fixture:${action}`,code:pass?0:1,pass,timed_out:false,duration_ms:4,stdout:pass?"ok":"",stderr:pass?"":"failed",isolation:{backend:"sidecar+landlock+seccomp",network:"DENY",workspace_mount:"ABSENT",secret_mounts:"ABSENT",docker_socket:"ABSENT"}};}
+    async wait({jobId}){const action=prepared[Number(jobId.slice(4))-1].action,pass=action!==failedAction;return{job_id:jobId,action,command:`fixture:${action}`,code:pass?0:1,pass,timed_out:false,duration_ms:4,stdout:stdoutByAction[action]??(pass?"ok":""),stderr:pass?"":"failed",isolation:{backend:"sidecar+landlock+seccomp",network:"DENY",workspace_mount:"ABSENT",secret_mounts:"ABSENT",docker_socket:"ABSENT"}};}
   });
   const repoPolicy=new RepoPolicy({workspaceRoot:f.workspace,allowlist:"repo"}),authority=new RunAuthority({runtimeRoot:f.runtimeRoot,repoPolicy}),runtimeEvidence=new RuntimeEvidenceStore(path.join(f.runtimeRoot,"evidence"));let patchCalls=0;
-  const workflow=createWorkflow({aiCore:{call:async role=>{assert.equal(role,"local_reviewer");return{content:JSON.stringify({verdict:"PASS",claims:[]})};}},sandboxVerification,repoPolicy,authority,runtimeEvidence,patchService:{create(){patchCalls++;throw new Error("PATCH_CREATE_FORBIDDEN");},apply(){patchCalls++;throw new Error("PATCH_APPLY_FORBIDDEN");}}});
+  const workflow=createWorkflow({aiCore:{call:async(role,options)=>{assert.equal(role,"local_reviewer");if(aiCall)return aiCall(role,options);return{content:JSON.stringify({verdict:"PASS",claims:[]})};}},sandboxVerification,repoPolicy,authority,runtimeEvidence,patchService:{create(){patchCalls++;throw new Error("PATCH_CREATE_FORBIDDEN");},apply(){patchCalls++;throw new Error("PATCH_APPLY_FORBIDDEN");}}});
   return{workflow,authority,runtimeEvidence,prepared,getPatchCalls:()=>patchCalls};
 }
 
@@ -40,6 +40,15 @@ test("POST /v1/verify runs sandbox checks and Local Reviewer without mutating or
 test("read-only verify returns FAIL for deterministic failure and INSUFFICIENT_EVIDENCE without checks",async t=>{
   const failed=fixture();t.after(failed.cleanup);const failHarness=workflowFor(failed,{failedAction:"package.test"});const fail=await failHarness.workflow.verifyReadOnly({repo:failed.repo,selectedPaths:["value.js"]});assert.equal(fail.verdict,"FAIL");assert.equal(fail.patch_applied,false);
   const empty=fixture({start:"node value.js"});t.after(empty.cleanup);const emptyHarness=workflowFor(empty);const insufficient=await emptyHarness.workflow.verifyReadOnly({repo:empty.repo});assert.equal(insufficient.verdict,"INSUFFICIENT_EVIDENCE");assert.equal(insufficient.patch_applied,false);assert.equal(emptyHarness.getPatchCalls(),0);
+});
+
+test("read-only verify compacts successful command output only for Local Reviewer input",async t=>{
+  const f=fixture();t.after(f.cleanup);const fullOutput="PASS_CASE_OUTPUT\n".repeat(4000);let invocation=null;
+  const h=workflowFor(f,{stdoutByAction:{"package.test":fullOutput},aiCall:async(_role,options)=>{invocation=options;return{content:JSON.stringify({verdict:"PASS",claims:[]})};}});
+  const result=await h.workflow.verifyReadOnly({repo:f.repo});assert.equal(result.verdict,"PASS");assert.equal(result.deterministic_verification.checks.find(x=>x.name==="sandbox:test").stdout,fullOutput);
+  assert.ok(invocation);assert.ok(Buffer.byteLength(invocation.user,"utf8")<12000);assert.equal(invocation.user.includes(fullOutput),false);
+  const evidence=JSON.parse(invocation.user).verification_evidence;const testCheck=evidence.find(x=>x.payload?.name==="sandbox:test").payload;
+  assert.equal(testCheck.stdout.bytes,Buffer.byteLength(fullOutput));assert.match(testCheck.stdout.sha256,/^[a-f0-9]{64}$/);assert.equal(testCheck.stdout.excerpt,null);
 });
 
 test("status and inspect expose only the existing authority checkpoint and scrubbed runtime artifacts",async t=>{

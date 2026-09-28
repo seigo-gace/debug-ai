@@ -45,3 +45,15 @@ test("workflow binds bounded read-only tool runtime to the authority-approved re
     assert.equal(calls.some(x=>x.role==="patch_engineer"||x.role==="local_reviewer"),false);
   }finally{f.cleanup();}
 });
+
+test("workflow compacts deterministic command output before analysis roles",async()=>{
+  const f=makeRepo();try{
+    const calls=[],fullOutput="ANALYSIS_PASS_OUTPUT\n".repeat(4000);
+    const aiCore={call:async(role,opts)=>{calls.push({role,opts});if(role==="code_scout")return{content:JSON.stringify({facts:[],decision:"HANDOFF"})};if(role==="causal_scout")return{content:JSON.stringify({candidates:[],decision:"HANDOFF"})};if(role==="researcher")return{content:JSON.stringify({selected_evidence:[],decision:"HANDOFF"})};if(role==="diagnoser")return{content:JSON.stringify({hypothesis:"bounded evidence",public_statement:"bounded evidence",cause_kind:"RUNTIME",decision:"HANDOFF"})};throw new Error(`UNEXPECTED_ROLE:${role}`);}};
+    const repoPolicy=new RepoPolicy({workspaceRoot:f.workspace}),sandboxVerification={collect:async()=>({status:"FINAL_VALID",checks:[{kind:"deterministic_sandbox_check",name:"sandbox:test",status:"PASS",stdout:fullOutput,stderr:"",code:0,timed_out:false}]})};
+    const workflow=createWorkflow({aiCore,repoPolicy,sandboxVerification,evidenceSearch:{search:async()=>[]}});await workflow.runAnalysis({failure:{message:"bounded evidence check"},localEvidence:[],repo:f.repo});
+    assert.ok(calls.length>=4);for(const call of calls)assert.equal(call.opts.user.includes(fullOutput),false);
+    const evidence=JSON.parse(calls.find(x=>x.role==="code_scout").opts.user).evidence;const check=evidence.find(x=>x.payload?.name==="sandbox:test").payload;
+    assert.equal(check.stdout.bytes,Buffer.byteLength(fullOutput));assert.match(check.stdout.sha256,/^[a-f0-9]{64}$/);assert.equal(check.stdout.excerpt,null);assert.equal(evidence[0].integrity,undefined);assert.match(evidence[0].evidence_id,/^EVI_/);
+  }finally{f.cleanup();}
+});

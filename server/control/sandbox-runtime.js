@@ -21,14 +21,14 @@ function copySnapshot(source,destination,{maxFiles=8000,maxBytes=256*1024*1024}=
       if(stat.isDirectory()){if(SKIP_DIRS.has(entry.name))continue;fs.mkdirSync(dstPath,{recursive:true});visit(srcPath,dstPath,rel);continue;}
       if(!stat.isFile())continue;
       files++;bytes+=stat.size;if(files>maxFiles)throw new Error(`SANDBOX_SNAPSHOT_FILE_LIMIT:${files}`);if(bytes>maxBytes)throw new Error(`SANDBOX_SNAPSHOT_BYTE_LIMIT:${bytes}`);
-      fs.copyFileSync(srcPath,dstPath);fs.chmodSync(dstPath,stat.mode&0o777);
+      fs.writeFileSync(dstPath, fs.readFileSync(srcPath), { mode: stat.mode & 0o777 });
     }
   }
   visit(root,destination);return {files,bytes,skipped_symlinks:skippedSymlinks};
 }
-function buildSandboxArgs({snapshotDir,tmpDir,timeoutMs,command,args=[]}={}){
+function buildSandboxArgs({snapshotDir,tmpDir,timeoutMs,command,args=[],nodeModules=null,allowLoopbackTcp=false}={}){
   if(!snapshotDir||!tmpDir||!command||!Number.isInteger(timeoutMs))throw new Error("SANDBOX_HELPER_ARGS_REQUIRED");
-  return ["--snapshot",snapshotDir,"--tmp",tmpDir,"--timeout-ms",String(timeoutMs),"--",command,...args];
+  const out=["--snapshot",snapshotDir,"--tmp",tmpDir,"--timeout-ms",String(timeoutMs)];if(nodeModules)out.push("--node-modules",nodeModules);if(allowLoopbackTcp)out.push("--allow-loopback-tcp");return [...out,"--",command,...args];
 }
 function probeSandboxHelper({command=process.env.DEBUG_AI_SANDBOX_COMMAND||"debugai-sandbox-exec",spawnSyncImpl=cp.spawnSync}={}){
   const r=spawnSyncImpl(command,["--probe"],{encoding:"utf8",shell:false,timeout:5000,windowsHide:true,env:{PATH:process.env.PATH||"/usr/local/bin:/usr/bin:/bin"}});
@@ -64,11 +64,11 @@ function readSandboxRequest(jobDir){
 function runPreparedSandboxJob({jobDir,sandboxCommand=process.env.DEBUG_AI_SANDBOX_COMMAND||"debugai-sandbox-exec",spawnSyncImpl=cp.spawnSync}={}){
   if(!jobDir)throw new Error("SANDBOX_JOB_DIR_REQUIRED");const request=readSandboxRequest(jobDir),snapshot=path.join(jobDir,"repo"),tmpDir=path.join(jobDir,"tmp"),probe=probeSandboxHelper({command:sandboxCommand,spawnSyncImpl});
   if(!probe.available)throw new Error(`SANDBOX_HELPER_UNAVAILABLE:${probe.error||probe.details||probe.code}`);fs.mkdirSync(tmpDir,{recursive:true});const homeDir=path.join(tmpDir,"home"),npmCache=path.join(tmpDir,"npm-cache");fs.mkdirSync(homeDir,{recursive:true});fs.mkdirSync(npmCache,{recursive:true});
-  const resolved=resolveAction(snapshot,request.action,request.args),helperArgs=buildSandboxArgs({snapshotDir:snapshot,tmpDir,timeoutMs:request.timeout_ms,command:resolved.command,args:resolved.args});
-  const env={PATH:process.env.PATH||"/usr/local/bin:/usr/bin:/bin",HOME:homeDir,TMPDIR:tmpDir,CI:"1",NO_COLOR:"1",npm_config_cache:npmCache};const started=Date.now();
+  const resolved=resolveAction(snapshot,request.action,request.args),isPackage=String(request.action).startsWith("package."),nodeModules=isPackage&&(process.env.DEBUG_AI_SANDBOX_NODE_MODULES||(fs.existsSync("/app/node_modules")?"/app/node_modules":null)),allowLoopbackTcp=request.action==="package.test",helperArgs=buildSandboxArgs({snapshotDir:snapshot,tmpDir,timeoutMs:request.timeout_ms,command:resolved.command,args:resolved.args,nodeModules,allowLoopbackTcp});
+  const env={PATH:process.env.PATH||"/usr/local/bin:/usr/bin:/bin",HOME:homeDir,TMPDIR:tmpDir,CI:"1",NO_COLOR:"1",npm_config_cache:npmCache};if(nodeModules)env.NODE_PATH=nodeModules;const started=Date.now();
   const r=spawnSyncImpl(sandboxCommand,helperArgs,{encoding:"utf8",shell:false,timeout:request.timeout_ms+5000,windowsHide:true,env}),durationMs=Date.now()-started;
   const code=Number.isInteger(r.status)?r.status:r?.error?.code==="ETIMEDOUT"?124:1,timedOut=code===124||r?.error?.code==="ETIMEDOUT";
-  const result={schema:"debugai.sandbox-result/v1",job_id:request.job_id,action:request.action,command:resolved.label,code,pass:code===0&&!timedOut,timed_out:timedOut,duration_ms:durationMs,stdout:String(r.stdout||"").slice(-12000),stderr:String(r.stderr||r.error?.message||"").slice(-12000),isolation:{backend:"sidecar+landlock+seccomp",landlock_abi:probe.landlock_abi,container_network:"NONE_REQUIRED",network:"LANDLOCK_TCP_DENY+SECCOMP_SOCKET_DENY",workspace_mount:"ABSENT",secret_mounts:"ABSENT",docker_socket:"ABSENT",environment:"CLEARED_ALLOWLIST_ONLY",job_child_write_scope:snapshot,signal_ptrace:"SECCOMP_DENY"},snapshot:request.source_snapshot};
+  const result={schema:"debugai.sandbox-result/v1",job_id:request.job_id,action:request.action,command:resolved.label,code,pass:code===0&&!timedOut,timed_out:timedOut,duration_ms:durationMs,stdout:String(r.stdout||"").slice(-12000),stderr:String(r.stderr||r.error?.message||"").slice(-12000),isolation:{backend:"sidecar+landlock+seccomp",landlock_abi:probe.landlock_abi,container_network:"NONE_REQUIRED",network:allowLoopbackTcp?"CONTAINER_NETWORK_NONE+SANDBOX_LOOPBACK_TCP_PROFILE":"LANDLOCK_TCP_DENY+SECCOMP_SOCKET_DENY",workspace_mount:"ABSENT",secret_mounts:"ABSENT",docker_socket:"ABSENT",environment:"CLEARED_ALLOWLIST_ONLY",job_child_write_scope:snapshot,signal_ptrace:"SECCOMP_DENY"},snapshot:request.source_snapshot};
   const tmpResult=path.join(jobDir,".result.json.tmp");fs.writeFileSync(tmpResult,JSON.stringify(result));fs.renameSync(tmpResult,path.join(jobDir,"result.json"));return result;
 }
 function readSandboxResult({jobRoot,jobId}={}){const file=path.join(normalizeJobRoot(jobRoot),"jobs",String(jobId||""),"result.json");if(!fs.existsSync(file))return null;const result=JSON.parse(fs.readFileSync(file,"utf8"));if(result?.schema!=="debugai.sandbox-result/v1"||result.job_id!==jobId)throw new Error("SANDBOX_RESULT_INVALID");return result;}

@@ -1,5 +1,21 @@
 services:
+  sandbox-init:
+    build:
+      context: .
+      target: sandbox-runner
+    user: "0:0"
+    network_mode: none
+    read_only: true
+    command: ["sh","-lc","mkdir -p /sandbox-jobs/jobs && chown -R 1000:1000 /sandbox-jobs && chmod 0750 /sandbox-jobs /sandbox-jobs/jobs"]
+    volumes:
+      - debug_ai_sandbox_jobs:/sandbox-jobs:rw
+    security_opt:
+      - no-new-privileges:true
+
   debug-ai:
+    depends_on:
+      sandbox-init:
+        condition: service_completed_successfully
     build:
       context: .
       target: debug-ai
@@ -40,6 +56,9 @@ services:
       - ALL
 
   sandbox-runner:
+    depends_on:
+      sandbox-init:
+        condition: service_completed_successfully
     build:
       context: .
       target: sandbox-runner

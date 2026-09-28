@@ -6,12 +6,15 @@ const {createProgressController}=require("../control/progress-controller.js");
 const {resolveEffectiveTimeoutMs}=require("../adapters/ai-core.js");
 const {runRoleWithReadOnlyTools}=require("../control/tool-loop.js");
 
-test("r25 role runtime budgets are restored and Local Reviewer has real benchmark qualification",()=>{
+test("role runtime budgets retain recovered bounds and real long-role qualifications",()=>{
   assert.equal(assertRoleRuntimeBudgets(),true);
   assert.deepEqual([ROLE_RUNTIME_BUDGETS.code_scout.max_tokens,ROLE_RUNTIME_BUDGETS.code_scout.turn_timeout_ms],[600,180000]);
-  assert.deepEqual([ROLE_RUNTIME_BUDGETS.causal_scout.max_tokens,ROLE_RUNTIME_BUDGETS.causal_scout.turn_timeout_ms],[600,180000]);
-  assert.deepEqual([ROLE_RUNTIME_BUDGETS.researcher.max_tokens,ROLE_RUNTIME_BUDGETS.researcher.turn_timeout_ms],[600,180000]);
-  assert.deepEqual([ROLE_RUNTIME_BUDGETS.diagnoser.max_tokens,ROLE_RUNTIME_BUDGETS.diagnoser.turn_timeout_ms],[800,240000]);
+  assert.deepEqual([ROLE_RUNTIME_BUDGETS.causal_scout.max_tokens,ROLE_RUNTIME_BUDGETS.causal_scout.turn_timeout_ms],[600,600000]);
+  assert.equal(ROLE_RUNTIME_BUDGETS.causal_scout.tool_loop_wall_ms,1200000);
+  assert.deepEqual([ROLE_RUNTIME_BUDGETS.researcher.max_tokens,ROLE_RUNTIME_BUDGETS.researcher.turn_timeout_ms],[600,600000]);
+  assert.equal(ROLE_RUNTIME_BUDGETS.researcher.tool_loop_wall_ms,1200000);
+  assert.deepEqual([ROLE_RUNTIME_BUDGETS.diagnoser.max_tokens,ROLE_RUNTIME_BUDGETS.diagnoser.turn_timeout_ms],[800,600000]);
+  assert.equal(ROLE_RUNTIME_BUDGETS.diagnoser.tool_loop_wall_ms,1200000);
   assert.deepEqual([ROLE_RUNTIME_BUDGETS.patch_engineer.max_tokens,ROLE_RUNTIME_BUDGETS.patch_engineer.turn_timeout_ms],[2048,360000]);
   assert.equal(ROLE_RUNTIME_BUDGETS.local_reviewer.turn_timeout_ms,600000);
   assert.equal(ROLE_RUNTIME_BUDGETS.local_reviewer.qualification,"REAL_ROLE_BENCHMARK_PASS");
@@ -20,9 +23,9 @@ test("r25 role runtime budgets are restored and Local Reviewer has real benchmar
 
 test("effective timeout is bounded by role override and remaining aggregate deadline",()=>{
   const now=1000000;
-  assert.equal(resolveEffectiveTimeoutMs("researcher",600000,{timeoutMsOverride:180000,now}),180000);
-  assert.equal(resolveEffectiveTimeoutMs("researcher",600000,{timeoutMsOverride:180000,deadlineAt:now+90000,now}),90000);
-  assert.throws(()=>resolveEffectiveTimeoutMs("researcher",600000,{timeoutMsOverride:180000,deadlineAt:now,now}),/AI Core role wall-time budget exhausted/);
+  assert.equal(resolveEffectiveTimeoutMs("researcher",600000,{timeoutMsOverride:600000,now}),600000);
+  assert.equal(resolveEffectiveTimeoutMs("researcher",600000,{timeoutMsOverride:600000,deadlineAt:now+90000,now}),90000);
+  assert.throws(()=>resolveEffectiveTimeoutMs("researcher",600000,{timeoutMsOverride:600000,deadlineAt:now,now}),/AI Core role wall-time budget exhausted/);
 });
 
 test("progress controller stops after consecutive rounds with zero new evidence",()=>{

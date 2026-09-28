@@ -38,9 +38,7 @@ test('runtime evidence redacts and rotates',()=>{
   const body=JSON.parse(fs.readFileSync(x.path,'utf8'));
   assert.equal(body.payload.authorization,'[REDACTED]');
   assert.equal(body.payload.text,'[REDACTED]');
-  const old=Date.now()-1000;
-  fs.utimesSync(x.path,old/1000,old/1000);
-  assert.equal(s.rotate().files,0);
+  assert.equal(s.rotate(Date.now()+1000).files,0);
 });
 
 test('asset promotion rejects hypotheses and accepts confirmed reusable asset',()=>{

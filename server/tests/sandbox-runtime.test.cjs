@@ -15,7 +15,7 @@ test("sandbox snapshot excludes protected files and symlinks",()=>{
 });
 
 test("native sandbox args expose only snapshot, private tmp, timeout, and command",()=>{
-  const args=buildSandboxArgs({snapshotDir:"/sandbox-jobs/jobs/JOB_1/repo",tmpDir:"/sandbox-jobs/jobs/JOB_1/tmp",timeoutMs:15000,command:"/usr/local/bin/node",args:["--check","a.js"]});const wire=args.join(" ");
+  const args=buildSandboxArgs({snapshotDir:"/sandbox-jobs/jobs/JOB_1/repo",tmpDir:"/sandbox-jobs/jobs/JOB_1/tmp",timeoutMs:15000,command:"/usr/local/bin/node",args:["--check","a.js"]});const wire=args.join(" ");const extended=buildSandboxArgs({snapshotDir:"/sandbox-jobs/jobs/JOB_1/repo",tmpDir:"/sandbox-jobs/jobs/JOB_1/tmp",timeoutMs:15000,command:"npm",args:["run","test"],nodeModules:"/app/node_modules",allowLoopbackTcp:true}).join(" ");assert.match(extended,/--node-modules \/app\/node_modules/);assert.match(extended,/--allow-loopback-tcp/);
   assert.match(wire,/--snapshot \/sandbox-jobs\/jobs\/JOB_1\/repo/);assert.match(wire,/--tmp \/sandbox-jobs\/jobs\/JOB_1\/tmp/);assert.match(wire,/--timeout-ms 15000/);assert.doesNotMatch(wire,/\/workspace/);assert.doesNotMatch(wire,/\/run\/secrets/);assert.doesNotMatch(wire,/docker\.sock/);
 });
 
