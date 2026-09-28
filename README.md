@@ -116,7 +116,9 @@ On branch `feat/durable-role-continuation-final-20260928`, the following foundat
 - `execution_epoch` fencing;
 - authoritative commit protocol;
 - durable `RoleCheckpoint`;
-- durable `RoleResult` separated from the overall run result.
+- durable `RoleResult` separated from the overall run result;
+- durable `Effect Ledger` contract and reuse policy;
+- `Researcher` Work Unit Registry for A/B/C/D/E continuation.
 
 Current implementation order is fixed by the design authority:
 
@@ -124,10 +126,10 @@ Current implementation order is fixed by the design authority:
 1. Durable storage / writer lock                     committed
 2. Generation / epoch / commit protocol             committed
 3. RoleCheckpoint / RoleResult                      committed
-4. Effect Ledger                                    next
-5. Work Unit Registry                               next
-6. Tool Loop / ProgressController durable hook
-7. Researcher continuation
+4. Effect Ledger                                    committed
+5. Work Unit Registry                               committed
+6. Tool Loop / ProgressController durable hook      next
+7. Researcher continuation                          next
 8. Workflow cursor / start-vs-resume
 9. Startup recovery
 10. Async HTTP API / CLI compatibility
@@ -146,11 +148,13 @@ Already observed during focused development before this README update:
 - durable focused contract/commit tests: `7/7 PASS`;
 - durable storage syntax gate: `PASS`.
 
+The Effect Ledger / Work Unit Registry source and focused test have now been committed, but their test result remains `NOT_VERIFIED` until executed on the branch after the commit.
+
 Not yet proven:
 
 - native writer-lock real runtime test in the required Node 24.20.0/native-addon build environment;
-- Effect Ledger;
-- Work Unit Registry;
+- Effect Ledger focused test execution after commit;
+- Work Unit Registry focused test execution after commit;
 - real Researcher continuation;
 - durable Tool Loop / ProgressController integration;
 - workflow cursor recovery;
@@ -255,11 +259,11 @@ A `RoleResult` is a durable result of one AI role execution. It is deliberately 
 
 ### Effect Ledger
 
-The planned Effect Ledger is responsible for preventing already committed deterministic/read-only tool effects from being rerun after restart. It must not grant replay authority to mutation-capable actions or weaken Tool Risk, RepoPolicy, Sandbox, PatchService, or Master approval boundaries.
+The `Effect Ledger` gives committed deterministic/read-only tool effects a stable logical identity and allows reuse only when the input binding, repository snapshot, tool contract, environment, referenced result, result digest, and freshness/reference policy still match. Mutation-capable actions never gain automatic replay authority.
 
 ### Work Unit Registry
 
-The planned Work Unit Registry will define stable resumable work units, their dependencies, completion rules, reuse policy, and next-work selection. It must integrate with the existing Tool Loop and ProgressController rather than becoming a second progress/orchestration system.
+The `Work Unit Registry` defines stable resumable Researcher work units, dependencies, completion rules, reuse policy, and next-work selection. Researcher currently uses A/B/C as independent evidence-gathering units, D for contradiction reconciliation after A/B/C, and E for final evidence-selection assembly. It must integrate with the existing Tool Loop and ProgressController rather than becoming a second progress/orchestration system.
 
 ## HTTP API
 
@@ -403,8 +407,6 @@ npm install
 npm run verify
 ```
 
-`npm run verify` performs syntax checks and the active server/orchestrator test suites.
-
 Run the deterministic HTTP closed-loop fixture before any live real-repository E2E:
 
 ```bash
@@ -444,27 +446,42 @@ Development must not claim completion until the following categories are execute
 ### Integration
 
 - start -> checkpoint -> resume;
-- partial Researcher -> restart -> continuation;
+- Researcher partial completion -> restart -> continuation;
 - Diagnoser consumes saved Researcher RoleResult;
 - async API start/status/result;
-- idempotent repeated start;
+- idempotent repeated client start;
 - legacy API/CLI compatibility;
-- explicit approval boundary unchanged.
+- PatchService approval boundary unchanged.
 
 ### Fault injection
 
 - kill after A;
 - kill after B;
-- timeout during C;
-- cancellation during C;
-- HTTP disconnect while work continues;
-- process restart during recoverable role;
-- stale old-epoch writer commit;
+- timeout/cancel during C;
+- HTTP client disconnect;
+- restart during recoverable role;
+- stale writer commit after epoch bump;
 - corrupt checkpoint;
-- missing/corrupt effect result;
-- duplicate resume request.
+- missing effect result;
+- effect hash mismatch;
+- duplicate resume.
 
-The final authority gate is the exact A/B -> C interruption -> restart -> C continuation -> durable RoleResult -> Diagnoser flow defined in the design document.
+### Final exact E2E
+
+```text
+A committed
+B committed
+C interrupted
+process restart
+same run_id
+same role_execution_id
+new attempt
+A reused, not executed
+B reused, not executed
+C continues
+RoleResult committed
+Diagnoser consumes restored result
+```
 
 ## Deployment rule
 
@@ -483,24 +500,51 @@ GitHub branch
  -> real E2E gate
 ```
 
-Current durable-continuation development is branch-only. No main merge, deploy, or production change is implied by README or design updates.
+Do not make production-only source edits on Contabo and then treat them as canonical.
 
 ## Safety boundaries
 
-The following are system boundaries, not optional conventions:
+The following are intentional system boundaries, not optional conventions:
 
-- **RunAuthority remains the single execution authority.** No second orchestrator/state engine.
+- **RunAuthority remains the execution authority.** Durable continuation does not create a second state engine.
 - **AI Core is a separate service.** DebugAI consumes it through the API and does not rewrite AI Core internals.
 - **External AI cannot apply code.** External providers review hypotheses/final results only.
 - **Patch Engineer cannot apply code.** It creates a candidate only.
 - **Patch application requires explicit approval.** A generated candidate is not authorization to write.
-- **Read-only verify remains read-only.**
+- **Durable replay never grants mutation authority.** Already-saved read-only/deterministic effects may be reused only when integrity/binding checks pass.
 - **Evidence Search is authoritative only when its result is final-valid.** Rejected/insufficient evidence remains uncertainty.
-- **TGserver is API-only.** Direct Telegram/Redis/Meilisearch access is outside the runtime contract.
+- **TGserver is API-only.** Direct Telegram/Redis/Meilisearch access is outside the DebugAI runtime contract.
 - **Secrets must never be emitted to logs or committed to this repository.**
-- **Hidden model reasoning must not be persisted.**
+- **Raw hidden chain-of-thought must not be persisted.**
 - **Repository writes must stay inside the workspace/allowlist boundary.**
-- **UNKNOWN / NOT_EXECUTED / NOT_VERIFIED must never be rewritten as success.**
+
+## Runtime validation status
+
+Real Contabo validation before the durable-continuation branch demonstrated major existing DebugAI runtime paths, including internal AI roles, Evidence Search, TGserver adapters, external-review reach, and `/v1/analyze` execution.
+
+The new durable-continuation branch must be judged separately. Existing runtime success is not proof that restart/resume is complete.
+
+Current durable status:
+
+```text
+storage foundation                implemented / partially focused-tested
+single-writer foundation           implemented / real native runtime gate pending
+generation + epoch fencing         implemented / focused-tested
+commit protocol                    implemented / focused-tested
+RoleCheckpoint                     implemented / focused-tested
+RoleResult                         implemented / focused-tested
+Effect Ledger                      implemented / post-commit test pending
+Work Unit Registry                 implemented / post-commit test pending
+Tool Loop durable integration      pending
+Researcher real continuation       pending
+workflow/startup recovery          pending
+async API/CLI continuation         pending
+migration/retention/GC             pending
+fault-injection suite              pending
+final restart E2E                  pending
+```
+
+The project must not be called durable-continuation complete while any required final gate remains pending.
 
 ## Non-goals
 
@@ -508,11 +552,9 @@ DebugAI is not:
 
 - an unrestricted autonomous code writer;
 - a replacement for AI Core routing/model residency;
-- a second orchestration engine layered beside RunAuthority;
 - a direct TGserver storage client;
 - a direct Evidence Search implementation;
 - a mechanism for bypassing explicit patch approval;
-- a mechanism for replaying mutation automatically after restart;
 - a reason to treat weak or missing evidence as authoritative fact.
 
-Its job is to make debugging faster while preserving evidence, verification, repository, approval, recovery, and security boundaries.
+Its job is to make debugging faster **without removing evidence, verification, repository, approval, recovery, and security boundaries**.
