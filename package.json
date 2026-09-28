@@ -22,6 +22,7 @@
     "benchmark:diagnoser-skill-effect":"node server/control/diagnoser-skill-effect-benchmark.js",
     "benchmark:patch-engineer-skill-effect":"node server/control/patch-engineer-skill-effect-benchmark.js",
     "audit:control-plane-gaps":"node server/control/control-plane-gap-audit.js",
+    "audit:docker-storage":"node scripts/docker-storage-audit.cjs",
     "start":"node server/main.js"
   }
 }
