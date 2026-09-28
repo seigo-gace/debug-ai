@@ -13,7 +13,7 @@ const {createServer}=require("./http.js");
 const {sourceGate}=require("./gates.js");
 const {createSandboxVerificationLane}=require("./control/sandbox-verification.js");
 const {createDapEvidenceLane}=require("./control/dap-evidence-runtime.js");
-const {archiveTerminalRuns}=require("./control/storage-retention.js");
+const {archiveTerminalRuns,gcArchivedTerminalRuns}=require("./control/storage-retention.js");
 const {DurableWriterLock}=require("../orchestrator/durable-writer-lock.js");
 const {DurableFileIO}=require("../orchestrator/durable-file-io.js");
 
@@ -49,7 +49,7 @@ const host=process.env.DEBUG_AI_HOST||"127.0.0.1",port=Number(process.env.DEBUG_
 const server=createServer({workflow,host,port});
 let shuttingDown=false,rotationTimer=null,archiveTimer=null,archiveSweepRunning=false;
 function rotateRuntimeEvidence(){try{const result=runtimeEvidence.rotate();if(result.orphans_removed>0)console.warn(`DebugAI runtime cache cleanup: files=${result.files} bytes=${result.bytes} orphans_removed=${result.orphans_removed}`);}catch(error){console.error(`DebugAI runtime cache cleanup failed: ${String(error?.message||error)}`);}}
-async function runArchiveSweep(){if(shuttingDown||archiveSweepRunning)return;archiveSweepRunning=true;try{const report=await archiveTerminalRuns({authority,tgserver,maxRuns:archiveMaxRuns});if(report.archived.length||report.errors.length)console.warn(`DebugAI durable archive sweep: archived=${report.archived.length} already=${report.already_archived.length} skipped=${report.skipped.length} errors=${report.errors.length}`);}catch(error){console.error(`DebugAI durable archive sweep failed: code=${String(error?.code||error?.name||"ERROR")}`);}finally{archiveSweepRunning=false;}}
+async function runArchiveSweep(){if(shuttingDown||archiveSweepRunning)return;archiveSweepRunning=true;try{const archive=await archiveTerminalRuns({authority,tgserver,maxRuns:archiveMaxRuns}),gc=gcArchivedTerminalRuns({authority,maxRuns:archiveMaxRuns});if(archive.archived.length||archive.errors.length||gc.deleted.length||gc.errors.length)console.warn(`DebugAI durable retention sweep: archived=${archive.archived.length} already=${archive.already_archived.length} archive_errors=${archive.errors.length} gc_deleted=${gc.deleted.length} gc_errors=${gc.errors.length}`);}catch(error){console.error(`DebugAI durable retention sweep failed: code=${String(error?.code||error?.name||"ERROR")}`);}finally{archiveSweepRunning=false;}}
 function scheduleArchiveSweep(delayMs){if(shuttingDown)return;archiveTimer=setTimeout(async()=>{await runArchiveSweep();scheduleArchiveSweep(archiveSweepMs);},delayMs);archiveTimer.unref();}
 function shutdown(signal){if(shuttingDown)return;shuttingDown=true;if(rotationTimer)clearInterval(rotationTimer);if(archiveTimer)clearTimeout(archiveTimer);server.close(()=>{try{writerLock.close();}finally{process.exit(0);}});setTimeout(()=>{try{writerLock.close();}finally{process.exit(1);}},5000).unref();if(signal)console.error(`DebugAI shutdown: ${signal}`);}
 process.once("SIGTERM",()=>shutdown("SIGTERM"));
