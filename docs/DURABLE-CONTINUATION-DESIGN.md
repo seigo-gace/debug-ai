@@ -418,3 +418,81 @@ Stop and report instead of forcing progress if any of the following occurs:
 - a test result is unknown or not executed.
 
 The correct status in those cases is `BLOCKED`, `UNKNOWN`, `NOT_EXECUTED`, or `NOT_VERIFIED`, never fabricated success.
+
+## 21. Server storage, retention, and TGserver authority policy
+
+This section is a required additional workstream and must not be treated as optional cleanup.
+
+### 21.1 Storage roles
+
+- TGserver is the long-term log/evidence archive authority for runtime logs and archived terminal-run summaries.
+- DebugAI server local storage is limited to authoritative durable continuation data plus bounded short-term operational cache.
+- Local storage must never become the long-term log warehouse.
+- Active or recoverable durable state is more important than cleanup and must not be removed by time-only GC.
+
+### 21.2 Runtime Evidence cache
+
+- Local Runtime Evidence is a cache, not the long-term authority.
+- Target retention: 12 hours.
+- Target local capacity ceiling: 32 MiB.
+- Rotation cadence: every 15 minutes and once at startup.
+- Age and capacity limits both apply; oldest eligible evidence is removed first.
+- Long-term evidence needed after the cache window must be sent to TGserver.
+
+### 21.3 Sandbox jobs
+
+Sandbox source snapshots are potentially the largest transient storage consumer and must be handled aggressively.
+
+- `repo/`, `tmp/`, and per-job package/cache working data are deleted immediately after a terminal sandbox result has been safely read and the required result/evidence has been persisted.
+- `request.json` / `result.json` may remain as bounded local cache for up to 6 hours when needed for local inspection.
+- orphan/incomplete sandbox jobs older than 30 minutes may be garbage-collected only after proving they are not active.
+- sandbox cleanup must never delete an active job.
+
+### 21.4 Durable runs
+
+- RUNNING, PAUSED, RETRYABLE, or otherwise recoverable durable runs: automatic age-based deletion is forbidden.
+- RoleCheckpoint, RoleResult, Effect Ledger, workflow-data, manifest, and run-state are deleted only as one validated run bundle; partial deletion is forbidden.
+- terminal durable runs may become GC candidates only after an archive/receipt confirms the required summary and evidence references were accepted by TGserver.
+- after successful archive receipt, keep a 72-hour safety window before local bundle deletion.
+- if TGserver archive confirmation is missing or ambiguous, local durable deletion is forbidden.
+
+### 21.5 Patch artifacts
+
+- unapproved patch candidates: retain 7 days by default.
+- applied patch backup with verification PASS: retain 72 hours.
+- applied patch backup with verification FAIL or incomplete verification: retain 7 days.
+- approval boundaries and rollback safety take precedence over storage cleanup.
+
+### 21.6 Docker logging and disposable DebugAI resources
+
+- Docker stdout/stderr is an immediate operational view only, not long-term storage.
+- use bounded Docker log rotation for DebugAI containers.
+- disposable isolated-test containers/volumes may be removed after 6 hours when confirmed unused.
+- active production/runtime named volumes are never automatically deleted.
+- broad `docker system prune -a --volumes` style cleanup is forbidden as an automated DebugAI policy.
+- DebugAI-owned dangling images/build cache may become cleanup candidates only when confirmed unused and at least 24 hours old.
+
+### 21.7 GC priority order
+
+Storage pressure work should proceed in this order because it yields the largest safe reduction first:
+
+1. delete completed sandbox source snapshots/work dirs;
+2. bound DebugAI Docker stdout/stderr logs;
+3. bound Runtime Evidence to 12h / 32 MiB;
+4. archive terminal durable runs to TGserver and GC only after receipt + 72h safety window;
+5. expire patch artifacts using the policy above;
+6. separately audit and clean confirmed-unused DebugAI Docker images/build cache.
+
+### 21.8 Required tests
+
+Retention/GC work is not complete until tests prove at minimum:
+
+- active/recoverable durable runs are never age-deleted;
+- terminal durable run deletion is blocked without TGserver archive receipt;
+- partial durable run bundle deletion is impossible;
+- sandbox terminal cleanup deletes heavy snapshot/work data but preserves required result/evidence;
+- active sandbox jobs survive GC;
+- orphan sandbox jobs older than the configured grace period are cleaned;
+- Runtime Evidence obeys both age and byte ceilings;
+- Docker log bounds are present in Compose;
+- cleanup failures are reported and never silently upgraded to success.
