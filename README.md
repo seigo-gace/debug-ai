@@ -229,6 +229,19 @@ Required Node.js runtime:
 24.20.0
 ```
 
+## VS Code / Cursor / Codex CLI
+
+The supported terminal entry point is documented in [DEBUGAI.md](DEBUGAI.md). Install the repository command and check the private local Server:
+
+```bash
+npm link
+debugai health
+debugai analyze "investigate the current failure"
+debugai verify --repo /workspace/my-repo
+```
+
+CLI stdout is formal JSON. `debugai verify` is read-only and is not an alias for `/v1/approve-apply-verify`; the CLI has no patch-apply command.
+
 Install dependencies and run the current server verification:
 
 ```bash

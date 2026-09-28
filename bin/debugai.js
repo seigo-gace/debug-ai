@@ -4,6 +4,7 @@
 const fs=require("node:fs");
 const os=require("node:os");
 const path=require("node:path");
+const {fetch,Agent}=require("undici");
 
 const VERSION="debugai-cli/v1";
 
@@ -41,8 +42,41 @@ function serverRepo(input,env=process.env){
   return path.join(serverRoot,path.basename(repo));
 }
 
+function httpTimeoutMs(env=process.env){
+  const value=Number(env.DEBUGAI_HTTP_TIMEOUT_MS||1800000);
+  if(!Number.isFinite(value)||value<1000||value>3600000)throw new Error("DEBUGAI_HTTP_TIMEOUT_INVALID");
+  return Math.trunc(value);
+}
+
 async function requestJson(base,route,{method="GET",body}={}){
-  const response=await fetch(`${base}${route}`,{method,headers:body?{"content-type":"application/json"}:undefined,body:body?JSON.stringify(body):undefined});const text=await response.text();let value;try{value=JSON.parse(text);}catch{throw new Error(`DEBUGAI_HTTP_NON_JSON:${response.status}`);}if(!response.ok){const error=new Error(String(value?.error||`DEBUGAI_HTTP_${response.status}`));error.status=response.status;error.response=value;throw error;}return value;
+  const timeoutMs=httpTimeoutMs();
+  const dispatcher=new Agent({
+    headersTimeout:timeoutMs,
+    bodyTimeout:timeoutMs,
+    connectTimeout:Math.min(timeoutMs,30000)
+  });
+  try{
+    const response=await fetch(`${base}${route}`,{
+      method,
+      headers:body?{"content-type":"application/json"}:undefined,
+      body:body?JSON.stringify(body):undefined,
+      dispatcher,
+      signal:AbortSignal.timeout(timeoutMs)
+    });
+    const text=await response.text();
+    let value;
+    try{value=JSON.parse(text);}
+    catch{throw new Error(`DEBUGAI_HTTP_NON_JSON:${response.status}`);}
+    if(!response.ok){
+      const error=new Error(String(value?.error||`DEBUGAI_HTTP_${response.status}`));
+      error.status=response.status;
+      error.response=value;
+      throw error;
+    }
+    return value;
+  }finally{
+    await dispatcher.close();
+  }
 }
 
 function summary(command,result){
@@ -77,4 +111,4 @@ async function main(){
 
 if(require.main===module)void main();
 
-module.exports={VERSION,usage,parseArgs,splitList,stateFile,loadState,saveState,serverUrl,serverRepo,requestJson,summary,execute};
+module.exports={VERSION,usage,parseArgs,splitList,stateFile,loadState,saveState,serverUrl,serverRepo,httpTimeoutMs,requestJson,summary,execute};
