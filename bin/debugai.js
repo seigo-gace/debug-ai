@@ -10,7 +10,8 @@ const VERSION="debugai-cli/v1";
 
 function usage(){return [
   "debugai health",
-  'debugai analyze "<request>" [--repo <server-visible-path>]',
+  'debugai analyze "<request>" [--repo <server-visible-path>] [--run-id <id>]',
+  'debugai resume "<request>" [--run-id <id>]',
   'debugai patch "<purpose>" [--run-id <id>] [--paths <a,b>]',
   "debugai verify [--repo <server-visible-path>] [--paths <a,b>]",
   "debugai status <run-id>",
@@ -81,7 +82,7 @@ async function requestJson(base,route,{method="GET",body}={}){
 
 function summary(command,result){
   if(command==="health")return result.ok?"DebugAI health: PASS":"DebugAI health: FAIL";
-  if(command==="analyze")return `DebugAI analyze: ${result.state||"UNKNOWN"} run=${result.run_id||"UNKNOWN"}`;
+  if(command==="analyze"||command==="resume")return `DebugAI ${command}: ${result.state||"UNKNOWN"} run=${result.run_id||"UNKNOWN"}`;
   if(command==="patch")return `DebugAI patch candidate: ${result.state||"UNKNOWN"} run=${result.run_id||"UNKNOWN"}`;
   if(command==="verify")return `DebugAI verify: ${result.verdict||"UNKNOWN"}`;
   if(command==="status")return `DebugAI status: ${result.state||"UNKNOWN"} run=${result.run_id||"UNKNOWN"}`;
@@ -92,8 +93,14 @@ function summary(command,result){
 async function execute(argv,{env=process.env,cwd=process.cwd()}={}){
   const parsed=parseArgs(argv),command=parsed.positional.shift();if(!command||command==="help"||parsed.flags.help)return{help:usage(),exitCode:command?0:2};const base=serverUrl(parsed.flags,env),sessionFile=stateFile(env),session=loadState(sessionFile);let result;
   if(command==="health")result=await requestJson(base,"/health");
-  else if(command==="analyze"){
-    const request=parsed.positional.join(" ").trim();if(!request)throw new Error("ANALYZE_REQUEST_REQUIRED");const repo=serverRepo(parsed.flags.repo||cwd,env);result=await requestJson(base,"/v1/analyze",{method:"POST",body:{repo,projectId:path.basename(repo),failure:{message:request},localEvidence:[]}});saveState(sessionFile,{server:base,run_id:result.run_id,repo,updated_at:new Date().toISOString()});
+  else if(command==="analyze"||command==="resume"){
+    const request=parsed.positional.join(" ").trim();if(!request)throw new Error("ANALYZE_REQUEST_REQUIRED");
+    const requestedRunId=String(parsed.flags["run-id"]||(command==="resume"?session?.run_id||"":""));
+    if(command==="resume"&&!requestedRunId)throw new Error("RESUME_RUN_ID_REQUIRED");
+    const repo=serverRepo(parsed.flags.repo||session?.repo||cwd,env);
+    const body={repo,projectId:path.basename(repo),failure:{message:request},localEvidence:[]};if(requestedRunId)body.runId=requestedRunId;
+    result=await requestJson(base,"/v1/analyze",{method:"POST",body});
+    saveState(sessionFile,{server:base,run_id:result.run_id,repo,updated_at:new Date().toISOString()});
   }else if(command==="patch"){
     const task=parsed.positional.join(" ").trim();if(!task)throw new Error("PATCH_PURPOSE_REQUIRED");const runId=String(parsed.flags["run-id"]||session?.run_id||"");if(!runId)throw new Error("PATCH_RUN_ID_REQUIRED");const [inspection,status]=await Promise.all([requestJson(base,`/v1/inspect/${encodeURIComponent(runId)}`),requestJson(base,`/v1/status/${encodeURIComponent(runId)}`)]);const analysis=inspection?.artifacts?.analysis?.payload;if(!analysis)throw new Error("PATCH_ANALYSIS_ARTIFACT_REQUIRED");result=await requestJson(base,"/v1/patch-candidate",{method:"POST",body:{runId,analysis,repo:status.project_dir,selectedPaths:splitList(parsed.flags.paths),context:task,task}});saveState(sessionFile,{server:base,run_id:runId,repo:status.project_dir,updated_at:new Date().toISOString()});
   }else if(command==="verify"){
