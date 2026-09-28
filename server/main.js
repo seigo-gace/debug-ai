@@ -13,6 +13,7 @@ const {createServer}=require("./http.js");
 const {sourceGate}=require("./gates.js");
 const {createSandboxVerificationLane}=require("./control/sandbox-verification.js");
 const {createDapEvidenceLane}=require("./control/dap-evidence-runtime.js");
+const {archiveTerminalRuns}=require("./control/storage-retention.js");
 const {DurableWriterLock}=require("../orchestrator/durable-writer-lock.js");
 const {DurableFileIO}=require("../orchestrator/durable-file-io.js");
 
@@ -34,6 +35,9 @@ const tgserver=createTgserverAdapter();
 const runtimeEvidenceRetentionMs=envInt("DEBUG_AI_RUNTIME_EVIDENCE_RETENTION_MS",12*3600e3,{min:5*60e3,max:7*24*3600e3});
 const runtimeEvidenceMaxBytes=envInt("DEBUG_AI_RUNTIME_EVIDENCE_MAX_BYTES",32*1024**2,{min:4*1024**2,max:1024**3});
 const runtimeEvidenceRotateMs=envInt("DEBUG_AI_RUNTIME_EVIDENCE_ROTATE_MS",15*60e3,{min:60e3,max:24*3600e3});
+const archiveSweepMs=envInt("DEBUG_AI_ARCHIVE_SWEEP_MS",30*60e3,{min:5*60e3,max:24*3600e3});
+const archiveInitialDelayMs=envInt("DEBUG_AI_ARCHIVE_INITIAL_DELAY_MS",60e3,{min:10e3,max:60*60e3});
+const archiveMaxRuns=envInt("DEBUG_AI_ARCHIVE_MAX_RUNS",4,{min:1,max:64});
 const runtimeEvidence=new RuntimeEvidenceStore(runtimeRoot,{retentionMs:runtimeEvidenceRetentionMs,maxBytes:runtimeEvidenceMaxBytes});
 const sandboxVerification=createSandboxVerificationLane();
 const dapEvidence=createDapEvidenceLane();
@@ -43,10 +47,12 @@ const patchService=new PatchService({runtimeRoot,repoPolicy});
 const workflow=createWorkflow({aiCore,externalReview,evidenceSearch,runtimeEvidence,tgserver,patchService,authority,repoPolicy,sandboxVerification,dapEvidence});
 const host=process.env.DEBUG_AI_HOST||"127.0.0.1",port=Number(process.env.DEBUG_AI_PORT||8787);
 const server=createServer({workflow,host,port});
-let shuttingDown=false,rotationTimer=null;
+let shuttingDown=false,rotationTimer=null,archiveTimer=null,archiveSweepRunning=false;
 function rotateRuntimeEvidence(){try{const result=runtimeEvidence.rotate();if(result.orphans_removed>0)console.warn(`DebugAI runtime cache cleanup: files=${result.files} bytes=${result.bytes} orphans_removed=${result.orphans_removed}`);}catch(error){console.error(`DebugAI runtime cache cleanup failed: ${String(error?.message||error)}`);}}
-function shutdown(signal){if(shuttingDown)return;shuttingDown=true;if(rotationTimer)clearInterval(rotationTimer);server.close(()=>{try{writerLock.close();}finally{process.exit(0);}});setTimeout(()=>{try{writerLock.close();}finally{process.exit(1);}},5000).unref();if(signal)console.error(`DebugAI shutdown: ${signal}`);}
+async function runArchiveSweep(){if(shuttingDown||archiveSweepRunning)return;archiveSweepRunning=true;try{const report=await archiveTerminalRuns({authority,tgserver,maxRuns:archiveMaxRuns});if(report.archived.length||report.errors.length)console.warn(`DebugAI durable archive sweep: archived=${report.archived.length} already=${report.already_archived.length} skipped=${report.skipped.length} errors=${report.errors.length}`);}catch(error){console.error(`DebugAI durable archive sweep failed: code=${String(error?.code||error?.name||"ERROR")}`);}finally{archiveSweepRunning=false;}}
+function scheduleArchiveSweep(delayMs){if(shuttingDown)return;archiveTimer=setTimeout(async()=>{await runArchiveSweep();scheduleArchiveSweep(archiveSweepMs);},delayMs);archiveTimer.unref();}
+function shutdown(signal){if(shuttingDown)return;shuttingDown=true;if(rotationTimer)clearInterval(rotationTimer);if(archiveTimer)clearTimeout(archiveTimer);server.close(()=>{try{writerLock.close();}finally{process.exit(0);}});setTimeout(()=>{try{writerLock.close();}finally{process.exit(1);}},5000).unref();if(signal)console.error(`DebugAI shutdown: ${signal}`);}
 process.once("SIGTERM",()=>shutdown("SIGTERM"));
 process.once("SIGINT",()=>shutdown("SIGINT"));
-async function start(){rotateRuntimeEvidence();rotationTimer=setInterval(rotateRuntimeEvidence,runtimeEvidenceRotateMs);rotationTimer.unref();const recovery=await workflow.recoverStartup();if(recovery.claimed.length||recovery.incompatible.length)console.log(`DebugAI startup recovery: claimed=${recovery.claimed.length} incompatible=${recovery.incompatible.length}`);server.listen(port,host,()=>console.log(`DebugAI listening on http://${host}:${port}; runtime-cache retention_ms=${runtimeEvidenceRetentionMs} max_bytes=${runtimeEvidenceMaxBytes} rotate_ms=${runtimeEvidenceRotateMs}`));}
+async function start(){rotateRuntimeEvidence();rotationTimer=setInterval(rotateRuntimeEvidence,runtimeEvidenceRotateMs);rotationTimer.unref();const recovery=await workflow.recoverStartup();if(recovery.claimed.length||recovery.incompatible.length)console.log(`DebugAI startup recovery: claimed=${recovery.claimed.length} incompatible=${recovery.incompatible.length}`);server.listen(port,host,()=>console.log(`DebugAI listening on http://${host}:${port}; runtime-cache retention_ms=${runtimeEvidenceRetentionMs} max_bytes=${runtimeEvidenceMaxBytes} rotate_ms=${runtimeEvidenceRotateMs}; archive_sweep_ms=${archiveSweepMs} archive_max_runs=${archiveMaxRuns}`));scheduleArchiveSweep(archiveInitialDelayMs);}
 void start().catch(error=>{console.error(`DebugAI startup failed: ${String(error?.message||error)}`);try{writerLock.close();}finally{process.exitCode=1;}});
