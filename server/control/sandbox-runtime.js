@@ -63,7 +63,7 @@ function readSandboxRequest(jobDir){
 }
 function cleanupTerminalSandboxArtifacts(jobDir){
   if(typeof jobDir!=="string"||!jobDir)throw new Error("SANDBOX_JOB_DIR_REQUIRED");
-  const resolved=path.resolve(jobDir),base=path.basename(resolved);if(!/^JOB_[a-f0-9]{24}$/.test(base))throw new Error("SANDBOX_JOB_DIR_INVALID");
+  const resolved=path.resolve(jobDir),base=path.basename(resolved);if(!/^(?:JOB|DAP)_[a-f0-9]{24}$/.test(base))throw new Error("SANDBOX_JOB_DIR_INVALID");
   for(const name of ["repo","tmp"]){const target=path.join(resolved,name);if(fs.existsSync(target))fs.rmSync(target,{recursive:true,force:true});}
   return {job_id:base,heavy_artifacts_removed:true};
 }
