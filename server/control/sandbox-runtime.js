@@ -61,6 +61,12 @@ function readSandboxRequest(jobDir){
   const raw=JSON.parse(fs.readFileSync(path.join(jobDir,"request.json"),"utf8"));
   if(raw?.schema!=="debugai.sandbox-job/v1"||raw.job_id!==path.basename(jobDir)||!ACTIONS.has(raw.action)||!Number.isInteger(raw.timeout_ms)||raw.timeout_ms<1000||raw.timeout_ms>300000||!raw.args||typeof raw.args!=="object"||Array.isArray(raw.args))throw new Error("SANDBOX_JOB_REQUEST_INVALID");return raw;
 }
+function cleanupTerminalSandboxArtifacts(jobDir){
+  if(typeof jobDir!=="string"||!jobDir)throw new Error("SANDBOX_JOB_DIR_REQUIRED");
+  const resolved=path.resolve(jobDir),base=path.basename(resolved);if(!/^JOB_[a-f0-9]{24}$/.test(base))throw new Error("SANDBOX_JOB_DIR_INVALID");
+  for(const name of ["repo","tmp"]){const target=path.join(resolved,name);if(fs.existsSync(target))fs.rmSync(target,{recursive:true,force:true});}
+  return {job_id:base,heavy_artifacts_removed:true};
+}
 function runPreparedSandboxJob({jobDir,sandboxCommand=process.env.DEBUG_AI_SANDBOX_COMMAND||"debugai-sandbox-exec",spawnSyncImpl=cp.spawnSync}={}){
   if(!jobDir)throw new Error("SANDBOX_JOB_DIR_REQUIRED");const request=readSandboxRequest(jobDir),snapshot=path.join(jobDir,"repo"),tmpDir=path.join(jobDir,"tmp"),probe=probeSandboxHelper({command:sandboxCommand,spawnSyncImpl});
   if(!probe.available)throw new Error(`SANDBOX_HELPER_UNAVAILABLE:${probe.error||probe.details||probe.code}`);fs.mkdirSync(tmpDir,{recursive:true});const homeDir=path.join(tmpDir,"home"),npmCache=path.join(tmpDir,"npm-cache");fs.mkdirSync(homeDir,{recursive:true});fs.mkdirSync(npmCache,{recursive:true});
@@ -69,8 +75,8 @@ function runPreparedSandboxJob({jobDir,sandboxCommand=process.env.DEBUG_AI_SANDB
   const r=spawnSyncImpl(sandboxCommand,helperArgs,{encoding:"utf8",shell:false,timeout:request.timeout_ms+5000,windowsHide:true,env}),durationMs=Date.now()-started;
   const code=Number.isInteger(r.status)?r.status:r?.error?.code==="ETIMEDOUT"?124:1,timedOut=code===124||r?.error?.code==="ETIMEDOUT";
   const result={schema:"debugai.sandbox-result/v1",job_id:request.job_id,action:request.action,command:resolved.label,code,pass:code===0&&!timedOut,timed_out:timedOut,duration_ms:durationMs,stdout:String(r.stdout||"").slice(-12000),stderr:String(r.stderr||r.error?.message||"").slice(-12000),isolation:{backend:"sidecar+landlock+seccomp",landlock_abi:probe.landlock_abi,container_network:"NONE_REQUIRED",network:allowLoopbackTcp?"CONTAINER_NETWORK_NONE+SANDBOX_LOOPBACK_TCP_PROFILE":"LANDLOCK_TCP_DENY+SECCOMP_SOCKET_DENY",workspace_mount:"ABSENT",secret_mounts:"ABSENT",docker_socket:"ABSENT",environment:"CLEARED_ALLOWLIST_ONLY",job_child_write_scope:snapshot,signal_ptrace:"SECCOMP_DENY"},snapshot:request.source_snapshot};
-  const tmpResult=path.join(jobDir,".result.json.tmp");fs.writeFileSync(tmpResult,JSON.stringify(result));fs.renameSync(tmpResult,path.join(jobDir,"result.json"));return result;
+  const tmpResult=path.join(jobDir,".result.json.tmp");fs.writeFileSync(tmpResult,JSON.stringify(result));fs.renameSync(tmpResult,path.join(jobDir,"result.json"));cleanupTerminalSandboxArtifacts(jobDir);return result;
 }
 function readSandboxResult({jobRoot,jobId}={}){const file=path.join(normalizeJobRoot(jobRoot),"jobs",String(jobId||""),"result.json");if(!fs.existsSync(file))return null;const result=JSON.parse(fs.readFileSync(file,"utf8"));if(result?.schema!=="debugai.sandbox-result/v1"||result.job_id!==jobId)throw new Error("SANDBOX_RESULT_INVALID");return result;}
 async function waitSandboxResult({jobRoot,jobId,timeoutMs=310000,pollMs=100}={}){const started=Date.now();for(;;){const result=readSandboxResult({jobRoot,jobId});if(result)return result;if(Date.now()-started>=timeoutMs)throw new Error(`SANDBOX_RESULT_TIMEOUT:${jobId}`);await new Promise(resolve=>setTimeout(resolve,pollMs));}}
-module.exports={ACTIONS,protectedRel,safeRel,copySnapshot,buildSandboxArgs,probeSandboxHelper,resolveAction,normalizeJobRoot,prepareSandboxJob,readSandboxRequest,runPreparedSandboxJob,readSandboxResult,waitSandboxResult};
+module.exports={ACTIONS,protectedRel,safeRel,copySnapshot,buildSandboxArgs,probeSandboxHelper,resolveAction,normalizeJobRoot,prepareSandboxJob,readSandboxRequest,cleanupTerminalSandboxArtifacts,runPreparedSandboxJob,readSandboxResult,waitSandboxResult};
