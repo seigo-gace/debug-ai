@@ -12,6 +12,7 @@ const ROLE_SEMANTIC_RULES=Object.freeze({
 
 const RESEARCH_STATUS=new Set(["SUPPORTED","CONTRADICTORY_EVIDENCE","INSUFFICIENT_EVIDENCE"]);
 const REVIEW_VERDICT=new Set(["PASS","FAIL","UNKNOWN","INSUFFICIENT_EVIDENCE","BLOCKED","APPROVED","REJECTED","ACCEPTED"]);
+const SEMANTIC_SHADOWS=new WeakMap();
 
 function parseJsonContent(content){
   if(typeof content!=="string")return content;
@@ -62,7 +63,12 @@ function evaluateRoleSemantics(role,value){
   }
   return Object.freeze({schema:"debugai.role-semantic-shadow/v1",role,status:violations.length?"WARN":"PASS",violations:Object.freeze(violations)});
 }
-function attachSemanticShadow(value,semantic){Object.defineProperty(value,"__role_semantic_shadow",{value:semantic,enumerable:false,configurable:false,writable:false});return value;}
+function attachSemanticShadow(value,semantic){
+  if(!value||typeof value!=="object"||Array.isArray(value))throw new Error("ROLE_SEMANTIC_SHADOW_TARGET_INVALID");
+  SEMANTIC_SHADOWS.set(value,semantic);
+  return value;
+}
+function getSemanticShadow(value){return value&&typeof value==="object"?SEMANTIC_SHADOWS.get(value)||null:null;}
 function parseAndValidateRoleOutput(role,content,{availableEvidenceIds=[],strictEvidenceRefs=false,roleSemantics="shadow"}={}){
   let value;
   try{value=parseJsonContent(content);}catch(error){const e=new Error(`ROLE_OUTPUT_JSON_INVALID:${role}`);e.cause=error;throw e;}
@@ -81,4 +87,4 @@ function parseAndValidateRoleOutput(role,content,{availableEvidenceIds=[],strict
   }
   return value;
 }
-module.exports={ROLE_SEMANTIC_RULES,parseJsonContent,validateEvidenceBindings,evaluateRoleSemantics,attachSemanticShadow,parseAndValidateRoleOutput};
+module.exports={ROLE_SEMANTIC_RULES,parseJsonContent,validateEvidenceBindings,evaluateRoleSemantics,attachSemanticShadow,getSemanticShadow,parseAndValidateRoleOutput};
