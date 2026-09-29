@@ -44,6 +44,7 @@ jobs:
             for m in ENV_NAME.finditer(data):
               key=m.group(1).decode('ascii','replace')
               value=m.group(2).strip().strip(b'"\'')
+              if key.endswith('_FILE'): continue
               if not value or value.startswith((b'${',b'$(',b'<',b'[REDACTED]')): continue
               if value.lower() in {b'test',b'dummy',b'example',b'placeholder',b'changeme'}: continue
               if len(value)>=16: findings.append((scope,path,f'NONEMPTY_SECRET_ASSIGNMENT:{key}'))
