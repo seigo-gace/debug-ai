@@ -55,13 +55,15 @@ test("transport timeout retries once and returns the first success",async()=>{
   const out=await ai.call("code_scout",{user:"x"});
   assert.equal(attempts,2);
   assert.equal(out.attempts,2);
+  assert.equal(out.telemetry.attempts,2);
+  assert.ok(out.telemetry.request_bytes>0);
 });
 
 test("repeated transport timeout fails closed after two attempts",async()=>{
   let attempts=0;
   const fetchImpl=async()=>{attempts++;const cause=new Error("Headers Timeout Error");cause.code="UND_ERR_HEADERS_TIMEOUT";throw new TypeError("fetch failed",{cause});};
   const ai=createAiCoreAdapter({baseUrl:"http://127.0.0.1:18080",apiKey:"test",fetchImpl,timeoutMs:600000,maxTransportTimeoutAttempts:2});
-  await assert.rejects(()=>ai.call("code_scout",{user:"x"}),e=>e?.code==="AI_CORE_TIMEOUT"&&e?.meta?.timeout_class===TIMEOUT_CLASS.TRANSPORT_TIMEOUT&&e?.meta?.attempts===2);
+  await assert.rejects(()=>ai.call("code_scout",{user:"x"}),e=>e?.code==="AI_CORE_TIMEOUT"&&e?.meta?.timeout_class===TIMEOUT_CLASS.TRANSPORT_TIMEOUT&&e?.meta?.attempts===2&&e?.meta?.telemetry?.attempts===2);
   assert.equal(attempts,2);
 });
 
@@ -73,8 +75,35 @@ test("non-timeout AI Core errors are not retried",async()=>{
   let attempts=0;
   const fetchImpl=async()=>{attempts++;return {ok:false,status:401,text:async()=>"unauthorized"};};
   const ai=createAiCoreAdapter({baseUrl:"http://127.0.0.1:18080",apiKey:"test",fetchImpl,timeoutMs:600000,maxTransportTimeoutAttempts:2});
-  await assert.rejects(()=>ai.call("researcher",{user:"x"}),e=>e?.code==="AI_CORE_HTTP");
+  await assert.rejects(()=>ai.call("researcher",{user:"x"}),e=>e?.code==="AI_CORE_HTTP"&&e?.meta?.telemetry?.attempts===1);
   assert.equal(attempts,1);
+});
+
+test("AI Core returns measured telemetry and does not invent unavailable provider metrics",async()=>{
+  const envelope={choices:[{message:{content:"{\"ok\":true}"},finish_reason:"stop"}],usage:{prompt_tokens:12,completion_tokens:4,total_tokens:16}};
+  const payload=JSON.stringify(envelope);
+  let sentBody="";
+  const fetchImpl=async(_url,opts)=>{sentBody=opts.body;return {ok:true,status:200,text:async()=>payload};};
+  const ai=createAiCoreAdapter({baseUrl:"http://127.0.0.1:18080",apiKey:"test",fetchImpl,timeoutMs:600000,maxTransportTimeoutAttempts:2});
+  const out=await ai.call("code_scout",{user:"telemetry"});
+  assert.equal(out.telemetry.prompt_tokens,12);
+  assert.equal(out.telemetry.completion_tokens,4);
+  assert.equal(out.telemetry.total_tokens,16);
+  assert.equal(out.telemetry.finish_reason,"stop");
+  assert.equal(out.telemetry.attempts,1);
+  assert.equal(out.telemetry.request_bytes,Buffer.byteLength(sentBody,"utf8"));
+  assert.equal(out.telemetry.response_bytes,Buffer.byteLength(payload,"utf8"));
+  for(const field of ["queue_wait_ms","prepare_ms","upstream_request_wall_ms","parse_validate_ms","role_wall_ms"])assert.ok(Number.isInteger(out.telemetry[field])&&out.telemetry[field]>=0,field);
+});
+
+test("AI Core keeps unavailable provider usage as null",async()=>{
+  const fetchImpl=async()=>({ok:true,status:200,text:async()=>JSON.stringify({choices:[{message:{content:"{\"ok\":true}"}}]})});
+  const ai=createAiCoreAdapter({baseUrl:"http://127.0.0.1:18080",apiKey:"test",fetchImpl,timeoutMs:600000,maxTransportTimeoutAttempts:2});
+  const out=await ai.call("code_scout",{user:"telemetry-null"});
+  assert.equal(out.telemetry.prompt_tokens,null);
+  assert.equal(out.telemetry.completion_tokens,null);
+  assert.equal(out.telemetry.total_tokens,null);
+  assert.equal(out.telemetry.finish_reason,null);
 });
 
 test("AI Core transport remains single-flight because current runtime has one effective slot",async()=>{
@@ -88,8 +117,10 @@ test("AI Core transport remains single-flight because current runtime has one ef
     return {ok:true,text:async()=>JSON.stringify({choices:[{message:{content:"{\"ok\":true}"}}]})};
   };
   const ai=createAiCoreAdapter({baseUrl:"http://127.0.0.1:18080",apiKey:"test",fetchImpl,timeoutMs:600000,maxTransportTimeoutAttempts:2});
-  await Promise.all([ai.call("code_scout",{user:"x"}),ai.call("causal_scout",{user:"y"})]);
+  const [first,second]=await Promise.all([ai.call("code_scout",{user:"x"}),ai.call("causal_scout",{user:"y"})]);
   assert.equal(maxActive,1);
   assert.equal(order.length,4);
   assert.match(order[0],/^start:/);assert.match(order[1],/^end:/);assert.match(order[2],/^start:/);assert.match(order[3],/^end:/);
+  assert.ok(first.telemetry.queue_wait_ms>=0);
+  assert.ok(second.telemetry.queue_wait_ms>=0);
 });
