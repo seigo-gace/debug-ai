@@ -8,7 +8,8 @@ const {runRoleWithReadOnlyTools}=require("../control/tool-loop.js");
 
 test("role runtime budgets retain recovered bounds and real long-role qualifications",()=>{
   assert.equal(assertRoleRuntimeBudgets(),true);
-  assert.deepEqual([ROLE_RUNTIME_BUDGETS.code_scout.max_tokens,ROLE_RUNTIME_BUDGETS.code_scout.turn_timeout_ms],[600,180000]);
+  assert.deepEqual([ROLE_RUNTIME_BUDGETS.code_scout.max_tokens,ROLE_RUNTIME_BUDGETS.code_scout.turn_timeout_ms],[600,600000]);
+  assert.equal(ROLE_RUNTIME_BUDGETS.code_scout.tool_loop_wall_ms,1200000);
   assert.deepEqual([ROLE_RUNTIME_BUDGETS.causal_scout.max_tokens,ROLE_RUNTIME_BUDGETS.causal_scout.turn_timeout_ms],[600,600000]);
   assert.equal(ROLE_RUNTIME_BUDGETS.causal_scout.tool_loop_wall_ms,1200000);
   assert.deepEqual([ROLE_RUNTIME_BUDGETS.researcher.max_tokens,ROLE_RUNTIME_BUDGETS.researcher.turn_timeout_ms],[600,600000]);
@@ -43,7 +44,7 @@ test("read-only role call applies recovered role token and timeout budget even w
   const aiCore={call:async(_role,o)=>{options=o;return{content:JSON.stringify({decision:"HANDOFF"}),control_plane:{selected_skill_ids:["failure-scope-reduction"]}};}};
   const out=await runRoleWithReadOnlyTools({aiCore,role:"code_scout",user:"x"});
   assert.equal(options.maxTokens,600);
-  assert.equal(options.timeoutMsOverride,180000);
+  assert.equal(options.timeoutMsOverride,600000);
   assert.ok(Number.isFinite(options.deadlineAt));
   assert.equal(out.validated_output.decision,"HANDOFF");
 });

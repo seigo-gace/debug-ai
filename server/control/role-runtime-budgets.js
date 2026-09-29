@@ -1,7 +1,7 @@
 "use strict";
 
 const ROLE_RUNTIME_BUDGETS=Object.freeze({
-  code_scout:Object.freeze({max_tokens:600,turn_timeout_ms:180000,tool_loop_wall_ms:360000,max_tool_rounds:2,max_tool_calls:4,source:"DebugAI r25 exact authority 2026-09-24"}),
+  code_scout:Object.freeze({max_tokens:600,turn_timeout_ms:600000,tool_loop_wall_ms:1200000,max_tool_rounds:2,max_tool_calls:4,source:"DebugAI real self-analysis 2026-09-29; Qwen2.5-Coder prompt processing exceeded the recovered three-minute budget"}),
   causal_scout:Object.freeze({max_tokens:600,turn_timeout_ms:600000,tool_loop_wall_ms:1200000,max_tool_rounds:2,max_tool_calls:4,source:"DebugAI real analyze 2026-09-28; Qwen3 cold prompt processing exceeded the recovered three-minute budget"}),
   researcher:Object.freeze({max_tokens:600,turn_timeout_ms:600000,tool_loop_wall_ms:1200000,max_tool_rounds:2,max_tool_calls:4,source:"DebugAI real analyze 2026-09-28; Granite prompt processing exceeded the recovered three-minute budget"}),
   diagnoser:Object.freeze({max_tokens:800,turn_timeout_ms:600000,tool_loop_wall_ms:1200000,max_tool_rounds:2,max_tool_calls:4,source:"DebugAI real analyze 2026-09-28; Qwen3 thinking prompt processing exceeded the recovered four-minute budget"}),
