@@ -1,498 +1,741 @@
-# DebugAI Durable Continuation Design Authority
+# DebugAI Architecture and Durable Continuation Design Authority
 
-Status: ACTIVE DESIGN AUTHORITY
+Status: **ACTIVE DESIGN AUTHORITY — CURRENT IMPLEMENTATION ALIGNED**
+
+Repository: `seigo-gace/debug-ai`
 
 Branch: `feat/durable-role-continuation-final-20260928`
 
-Baseline: `6b3fa3f6d632a0f578e4b6582c85120bca4e7903`
+Implementation snapshot reviewed for this revision: `926dda4d17d739452b06e07f23ea5de8a5b8b800`
 
-Purpose: prevent implementation drift while adding durable continuation, recovery, resumable AI execution, and replay-safe tool reuse to the existing DebugAI runtime.
+Base main snapshot: `9171102bee023e57e84f1f933b4405137e891a6d`
 
-## 1. Non-negotiable architecture rules
+PR: `#21` (`OPEN / DRAFT / UNMERGED` at the reviewed implementation snapshot)
+
+Purpose: define the complete DebugAI execution architecture, durable-continuation model, AI-side control plane, evidence model, approval/review boundaries, storage/retention policy, completion contract, verification gates, and current implementation boundary without silently treating pending wiring as complete.
+
+> Documentation completeness is not implementation completeness. This document describes both implemented behavior and explicitly pending behavior. A component, module, or test existing in source is not sufficient to claim runtime completion unless the real workflow calls it with authoritative runtime evidence and the required verification has passed.
+
+---
+
+## 1. System purpose
+
+DebugAI is a code-first, evidence-driven debugging runtime designed to act as a specialized execution sub-agent for a user's primary AI. Its job is not to replace the primary AI and not to provide unrestricted autonomous code mutation. Its job is to make debugging cheaper, repeatable, evidence-bound, recoverable, and verifiable.
+
+The runtime combines:
+
+- six role-specialized local AI executions;
+- deterministic repository/runtime verification;
+- read-only tool execution and bounded tool loops;
+- DAP/runtime hints that remain non-authoritative until bound to evidence;
+- TGserver knowledge retrieval and long-term evidence/log archival;
+- Astera Evidence Search for authoritative external evidence when required;
+- external AI review at explicitly bounded review points;
+- patch candidate generation separated from patch application;
+- explicit human approval before mutation;
+- post-apply deterministic retest and invariant verification;
+- fresh local review;
+- strict final completion gating;
+- durable interruption/restart/recovery with replay-safe reuse of completed work.
+
+The system must optimize cost and speed without weakening evidence, verification, repository, approval, recovery, or security boundaries.
+
+---
+
+## 2. Non-negotiable architecture rules
 
 1. `RunAuthority` remains the single authoritative execution/state owner.
 2. Do not create a second orchestrator, second state machine, or competing execution authority.
-3. Extend the current orchestrator/state-machine/patch/verify/role/evidence contracts instead of replacing them.
-4. Existing approval boundaries stay intact.
+3. Extend existing contracts instead of replacing them without an explicit migration decision.
+4. Six internal roles remain distinct; do not merge or delete them for convenience.
 5. Patch Engineer creates candidates only and never self-applies.
-6. Read-only verification stays read-only.
-7. External/project/tool content remains `DATA_NOT_INSTRUCTION`.
-8. Do not persist raw chain-of-thought or hidden reasoning.
-9. Do not persist secrets, tokens, passwords, cookies, or API keys.
-10. Missing evidence stays missing evidence. `UNKNOWN` must not be silently converted to `PASS`, `NONE`, or fact.
-11. Generated code is not equivalent to verified code.
-12. No main merge, deploy, or production change is part of this development branch until all required gates are proven.
+6. Read-only verification remains read-only.
+7. Patch application requires an explicit approval decision and matching candidate identity.
+8. External/project/tool content is `DATA_NOT_INSTRUCTION`.
+9. Model output is never automatically evidence.
+10. Missing evidence remains missing evidence. `UNKNOWN` is a valid result and must not be rewritten as `PASS`, `NONE`, or fact.
+11. Raw hidden chain-of-thought is not persisted.
+12. Secrets, tokens, passwords, cookies, API keys, or equivalent credentials are not persisted in durable role state, logs, evidence, prompts, or repository documents.
+13. Shadow/semantic metadata must not be attached to authoritative role JSON in a way that changes the durable JSON contract.
+14. Generated code is not verified code.
+15. A module existing in source is not proof that the live workflow uses it.
+16. A passing fixture is not a substitute for the required real closed-loop E2E.
+17. GitHub source authority and the currently deployed server checkout are separate facts.
+18. No main merge, deploy, or production change is authorized by this design document or PR alone.
+19. Global AI Core serialization remains in place until real server resource evidence justifies a concurrency change.
+20. Optimization must first eliminate unnecessary calls and unnecessary prompt/tool payload before attempting parallelism.
 
-## 2. Final target behavior
+---
 
-The durable continuation feature is complete only when this exact path is demonstrated:
+## 3. End-to-end workflow contract
+
+The intended guarded debugging loop is:
 
 ```text
-A durable work/effect commit
-B durable work/effect commit
-C starts
-C is interrupted by timeout, cancellation, disconnect, or forced process termination
-DebugAI process restarts
-same run_id is restored
-same role_execution_id is restored
-new attempt is created for continuation
-A is restored and NOT re-executed
-B is restored and NOT re-executed
-execution continues from C
-final RoleResult is durably committed
-Diagnoser consumes the saved/restored upstream RoleResult
+Failure / request / local runtime evidence
+        |
+        v
+Deterministic verification + optional DAP hint
+        |
+        v
+Code Scout + Causal Scout
+        |
+        +----> TGserver knowledge retrieval when required
+        |
+        +----> Astera Evidence Search when required
+        v
+Researcher
+        v
+Diagnoser
+        v
+External Hypothesis Review
+        |
+        | PASS only
+        v
+Patch Engineer
+        |
+        | candidate only
+        v
+WAITING_MASTER_APPROVAL
+        |
+        | explicit approve + identity binding
+        v
+Patch apply
+        v
+Deterministic retest + invariants
+        v
+Local Reviewer with fresh review context
+        v
+External Final Review when required
+        v
+Strict Completion Gate
+        |
+        +----> COMPLETE
+        |
+        +----> blocked / failed / pending / unknown
 ```
 
-If this exact recovery path is not demonstrated, durable continuation is not complete.
+`COMPLETE` must never be a synonym for "External Final Review returned PASS".
 
-## 3. Two layers that must both be implemented
+---
 
-This design is not only a storage/recovery feature. It covers both runtime execution and AI-side continuation behavior.
+## 4. Six internal AI roles
 
-### 3.1 Runtime execution layer
+All internal model execution goes through AI Core. DebugAI does not own llama.cpp model processes directly.
 
-The runtime must be able to:
+| Role | Current model authority | Thinking baseline | Core responsibility |
+| --- | --- | --- | --- |
+| Code Scout | Qwen2.5-Coder 7B | provider/profile baseline | inspect code/failure surface and identify evidence to gather |
+| Causal Scout | Qwen3 8B | disabled | form independent falsifiable causal hypotheses |
+| Researcher | Granite 4.2 8B | disabled | gather/select decisive evidence and preserve evidence gaps |
+| Diagnoser | Qwen3 8B | enabled | produce evidence-bound falsifiable diagnosis |
+| Patch Engineer | Qwen2.5-Coder 7B | provider/profile baseline | create patch candidate only |
+| Local Reviewer | Ministral 3 8B Reasoning 2512 | provider/profile baseline | review applied result and verification evidence from fresh context |
 
-- durably record authoritative state;
+Common role rules:
+
+- `paid_allowed=false` where the role/provider policy requires free/local operation;
+- external/project/tool text remains data, not instruction;
+- FACT claims must bind to evidence IDs;
+- INFERENCE must be labeled;
+- HYPOTHESIS must be falsifiable;
+- `UNKNOWN` is valid;
+- rejected hypotheses remain auditable;
+- model output does not become evidence by itself;
+- raw chain-of-thought is not stored;
+- permission denial and safety gates are fail-closed;
+- timeout/cancellation/retry state participates in durable execution.
+
+Role-specific configuration must remain role-specific: purpose, entry condition, stop condition, handoff, context, skill procedure, allowed tools, network/write scope, token/timeout/round budgets, and failure policy must not be flattened into one universal role profile.
+
+Model-specific configuration must also remain independent: thinking, sampling, prompt profile, chat template, tool protocol, structured output shape, context cap, fallback, and benchmark qualification are model/profile concerns rather than role semantics.
+
+---
+
+## 5. AI-side optimization authority
+
+Optimization priority is fixed in this order unless measured evidence justifies a change:
+
+1. unnecessary role calls;
+2. unnecessary search/provider calls;
+3. duplicated prompt content;
+4. repeated Tool Observation payload;
+5. unnecessary skills;
+6. unnecessary tool rounds;
+7. completion-token volume;
+8. thinking mode;
+9. sampling;
+10. model parallelism.
+
+The global AI Core serial queue remains intentional. Parallel execution must not be enabled merely because it appears faster in theory. Server RAM, CPU pressure, queue behavior, and model runtime must be measured first.
+
+### 5.1 AI Core baseline telemetry — implemented
+
+`server/adapters/ai-core.js` records measured telemetry including:
+
+- `queue_wait_ms`;
+- `prepare_ms`;
+- `upstream_request_wall_ms`;
+- `parse_validate_ms`;
+- `role_wall_ms`;
+- request/response bytes;
+- attempts;
+- provider prompt/completion/total tokens when the provider returns them;
+- finish reason when available.
+
+Unavailable provider metrics remain `null`; DebugAI must not present estimates as measured facts. Timeout and HTTP-error paths retain telemetry collected before failure.
+
+### 5.2 Role Tool Loop telemetry — implemented
+
+`server/control/tool-loop.js` emits role-runtime telemetry covering LLM calls, queue/prepare/upstream/parse/role wall time, byte counts, token completeness, tool wall time, and executed/reused tool calls.
+
+Do not create a duplicate telemetry plane for the same responsibility.
+
+---
+
+## 6. Skill, tool, and semantic control plane
+
+The control plane distinguishes at least these responsibilities:
+
+- role contract;
+- model profile;
+- invocation compilation;
+- skill registry/procedures;
+- read-only tool runtime;
+- tool risk;
+- progress/no-progress control;
+- claim/evidence binding;
+- role output validation;
+- role disposition / shadow skip logic;
+- runtime packets;
+- repository revision gating;
+- capability gap audit.
+
+### 6.1 Production skill isolation — implemented
+
+Production skill procedures must not contain benchmark fixture answers, fixed runtime versions, hard-coded benchmark paths, or model answers designed only to satisfy tests. Benchmark-specific knowledge belongs in benchmark/test code.
+
+### 6.2 Capability gaps — still open
+
+The gap audit currently retains 11 capabilities as `NOT_IMPLEMENTED`, classified by responsibility such as `MODEL_TOOL`, `RUNTIME_PACKET`, or `DETERMINISTIC_CORE`.
+
+Classification is not implementation. Do not convert all gaps mechanically into Model Tools. Each gap must be closed by the responsibility that actually owns the capability.
+
+### 6.3 Role/Search gates — shadow partial
+
+Role-disposition/search-gate components exist, but broad production skip activation is not complete. Shadow decisions must be compared with real outcomes first, with false-skip risk treated as a blocking safety issue. Search necessity should be gated before invoking TGserver/official search when the evidence need can be decided safely.
+
+---
+
+## 7. Evidence model
+
+Evidence is an explicit runtime object, not free-form model confidence.
+
+Core rules:
+
+- local deterministic evidence, tool evidence, TGserver evidence, and authoritative external evidence remain distinguishable;
+- DAP data can guide investigation but is `HINT_ONLY` until converted into registered evidence through an allowed path;
+- evidence IDs bind claims to concrete evidence records;
+- evidence integrity is validated before reuse;
+- tool errors do not become supporting evidence;
+- missing authoritative evidence results in an evidence gap rather than fabricated support.
+
+### 7.1 Astera Evidence Search
+
+Evidence Search is accessed only through its internal API and configured internal-service authentication. Its adapter enforces the expected result contract, free-only policy, `ai_used === false`, `payment_executed === false`, and the required final-valid state.
+
+A non-final result such as `REJECTED_INITIAL_QUALITY` remains an evidence gap and cannot be promoted to authoritative evidence.
+
+### 7.2 TGserver
+
+TGserver is accessed through HTTP APIs rather than direct Telegram/Redis/Meilisearch access. Runtime-log archival and knowledge-base retrieval/promotion remain separate responsibilities.
+
+---
+
+## 8. Evidence Projection and Active Evidence Window
+
+This optimization is **implemented and connected to the Tool Loop**.
+
+Before this connection, historical Tool Observations could be serialized repeatedly into subsequent model calls. Large read results could therefore multiply prompt size and prefill cost.
+
+The current rule is:
+
+- original observations are preserved;
+- durable evidence is preserved;
+- continuation state is preserved;
+- only the prompt view is bounded.
+
+Current prompt-view limits:
+
+```text
+max chars per projected evidence = 2400
+max active evidence items        = 12
+max projected evidence chars     = 12000
+```
+
+Tool errors remain bounded `DATA_ONLY` summaries and must not be upgraded to evidence.
+
+This layer is a projection/view optimization, not evidence deletion or retention policy.
+
+---
+
+## 9. Durable continuation architecture
+
+Durable continuation has two layers that must both work: runtime recovery and AI-side continuation.
+
+### 9.1 Runtime execution layer
+
+The runtime must durably:
+
+- record authoritative state;
 - reject stale writers;
-- survive process restart;
-- restore the exact run and role execution identity;
-- resume from the exact workflow position;
-- preserve retry, budget, cancellation, and no-progress state;
+- preserve `run_id`, `role_execution_id`, attempt, generation, and execution epoch;
+- survive process termination/restart;
+- restore checkpoints/results;
+- restore the correct workflow cursor;
+- preserve retry/timeout/cancellation/budget/no-progress state;
 - expose recoverable state through status/inspection interfaces.
 
-### 3.2 AI execution layer
+### 9.2 AI execution layer
 
-AI roles must be able to:
+Roles must:
 
-- know which work units are already complete;
-- reuse previously committed read-only/deterministic tool results;
-- avoid repeating completed searches/reads/tool effects;
+- know which work units are complete;
+- reuse committed deterministic/read-only effects when identity and freshness still match;
+- avoid repeating completed reads/searches/effects;
 - continue from the next unfinished work unit;
-- preserve role-level progress without persisting hidden chain-of-thought;
-- save a durable RoleResult;
-- let downstream roles consume saved upstream RoleResults without rerunning completed upstream roles.
+- persist explicit structured progress without hidden reasoning;
+- commit durable `RoleResult` objects;
+- allow downstream roles to consume saved upstream results without rerunning completed upstream work.
 
-This applies first and most explicitly to `Researcher`, and then to the broader role workflow.
+---
 
-## 4. Durable storage authority
+## 10. Durable storage and execution identity
 
-The durable storage foundation is based on the current durable primitives implemented on this branch.
+Authoritative durable state uses one writer authority and one commit protocol.
 
-### 4.1 Single writer
-
-Initial implementation uses an OS-level single-writer boundary.
-
-Requirements:
-
-- one active writer owns the durable authority at a time;
-- stale process ownership is fenced;
-- no alternate Store/lock implementation is allowed to bypass the durable writer lock;
-- authoritative writes must go through the durable storage layer.
-
-### 4.2 Commit protocol
-
-Every authoritative mutation must follow one commit protocol using:
-
-- monotonic `generation`;
-- `execution_epoch` fencing;
-- stale generation rejection;
-- stale epoch rejection;
-- manifest/root publication through the durable file layer;
-- integrity validation before state is accepted.
-
-The implementation must fail closed on incompatible or stale writes.
-
-## 5. Durable execution identity
-
-The runtime must keep these identifiers distinct:
-
-- `run_id`: logical DebugAI run;
-- `role_execution_id`: stable identity of one logical role execution;
-- `attempt`: one concrete attempt within the same role execution;
-- `generation`: monotonic authoritative commit generation;
-- `execution_epoch`: active process ownership/fencing generation.
-
-A restart or retry must not silently create a new logical role execution when it is continuing the same role.
-
-## 6. RoleCheckpoint
-
-A durable RoleCheckpoint records resumable role progress.
-
-It must contain enough information to restore at minimum:
-
-- `run_id`;
-- role;
-- `role_execution_id`;
-- attempt;
-- generation;
-- execution epoch;
-- workflow cursor;
-- role input needed for continuation;
-- completed work units;
-- next/pending work unit;
-- evidence/tool references required for continuation;
-- retry/cancellation/progress state;
-- timestamps and integrity metadata.
-
-A checkpoint must represent explicit structured execution state only. It must never persist private model reasoning.
-
-## 7. RoleResult
-
-`RoleResult` is a durable role-level result and is intentionally separate from the existing overall `result/v1` run result.
-
-Required responsibilities:
-
-- identify the run, role, role execution, and producing attempt;
-- preserve structured role output;
-- preserve referenced evidence/tool results;
-- carry generation/commit metadata;
-- carry timestamps and integrity metadata;
-- be consumable by downstream roles without rerunning the producer;
-- never directly claim that the whole DebugAI run is `COMPLETE`.
-
-## 8. Effect Ledger
-
-The Effect Ledger prevents re-execution of already committed tool effects.
-
-It must:
-
-- create a stable logical effect key/fingerprint;
-- record the inputs relevant to effect identity;
-- record the committed Tool Result reference/integrity;
-- allow compatible deterministic/read-only results to be reused after restart;
-- reject corrupted or incompatible saved effects;
-- prevent mutation-capable operations from gaining autonomous replay authority;
-- preserve existing Tool Risk, RepoPolicy, Sandbox, approval, and PatchService boundaries.
-
-The required behavior is that completed A/B effects are restored and reused instead of being run again after restart.
-
-## 9. Work Unit Registry
-
-A resumable role must operate on explicit work units rather than opaque whole-role execution.
-
-The registry must define:
-
-- stable work-unit IDs;
-- order/dependency rules;
-- replay/reuse/resume policy;
-- what completion means;
-- how completion is durably recorded;
-- how the next pending work unit is selected;
-- what counts as actual progress.
-
-The Work Unit Registry must integrate with the existing Tool Loop and ProgressController. It must not become a duplicate parallel progress engine.
-
-## 10. Researcher continuation
-
-Researcher is the first mandatory end-to-end durable continuation role.
-
-Researcher must be able to:
-
-1. load prior RoleCheckpoint and durable effect state;
-2. restore completed work units;
-3. restore workflow cursor and evidence/tool observations needed for continuation;
-4. avoid repeating committed searches/reads/effects;
-5. continue from the next unfinished work unit;
-6. preserve the same `role_execution_id`;
-7. create a new attempt when resuming after interruption;
-8. commit a durable final RoleResult;
-9. let Diagnoser consume that saved RoleResult.
-
-## 11. Tool Loop / ProgressController integration
-
-Current process-local progress state is not enough for restart recovery.
-
-The durable integration must preserve:
-
-- completed tool-effect identities;
-- evidence IDs that count as progress;
-- no-progress counters/history needed for correct continuation;
-- tool budget consumption as required by policy;
-- current/next work unit.
-
-Restart must not reset progress blindly and thereby allow repeated loops that would have been blocked before restart.
-
-## 12. Workflow cursor and resume path
-
-`runAnalysis()` must stop assuming every invocation starts a fresh run.
-
-The workflow needs explicit start vs resume behavior.
-
-Recovery must be able to:
-
-- load an existing run;
-- validate generation/epoch/contract compatibility;
-- restore checkpoint/result/effect state;
-- determine the exact next workflow action;
-- continue without replaying completed durable work;
-- avoid duplicate logical executions.
-
-## 13. Retry, timeout, cancellation, budget, and no-progress
-
-Durably represent and enforce:
-
-- retry attempt counts;
-- role/tool budgets;
-- timeout classification;
-- no-progress state/counters;
-- cancellation state;
-- resumable vs terminal failure classification.
-
-A transport timeout, HTTP disconnect, process exit, or restart is not automatically proof that the logical role failed.
-
-## 14. Startup recovery
-
-On DebugAI server startup:
-
-- acquire/fence the new writer epoch;
-- inspect durable runs;
-- distinguish terminal from recoverable runs;
-- restore only compatible recoverable runs;
-- reject stale writers;
-- prevent duplicate ownership;
-- expose recovery state through status/inspection;
-- never auto-apply patches or bypass approval.
-
-## 15. HTTP API and CLI direction
-
-Durable continuation requires asynchronous run semantics so client lifetime is not the execution lifetime.
-
-Required API capabilities:
-
-- start/create a run and return a run identifier without holding the HTTP connection for the full role execution;
-- idempotent logical start behavior;
-- query status;
-- inspect durable progress/checkpoints/results;
-- resume/retry only where contractually allowed;
-- preserve legacy `/v1` compatibility where required.
-
-CLI must support the resulting start/status/wait/resume flow while preserving:
-
-- machine-readable stdout;
-- repository safety mapping;
-- no apply command;
-- explicit approval boundary.
-
-## 16. Migration, rollback guard, retention, and GC
-
-The durable format must be versioned and fail closed.
-
-Requirements:
-
-- existing stored runs must migrate safely or be marked incompatible;
-- older code must not silently reinterpret newer durable records;
-- rollback to an incompatible runtime must be guarded;
-- retention/GC must preserve active/recoverable checkpoints, effect entries, and RoleResults;
-- recovery correctness has priority over cleanup aggressiveness.
-
-## 17. Test authority
-
-Completion requires tests in all of these groups.
-
-### Unit
-
-- generation monotonicity;
-- stale generation rejection;
-- epoch fencing;
-- stable `role_execution_id`;
-- attempt increment behavior;
-- checkpoint validation;
-- RoleResult validation;
-- Effect Ledger key/reuse/integrity;
-- work-unit progression;
-- restored no-progress state;
-- retry/cancellation classification;
-- migration/rollback guard;
-- retention/GC safety.
-
-### Integration
-
-- start -> checkpoint -> resume;
-- partial Researcher -> restart -> continuation;
-- Diagnoser consumes saved Researcher RoleResult;
-- async API start/status/result;
-- idempotent repeated client start;
-- legacy API/CLI compatibility;
-- explicit approval boundary unchanged.
-
-### Fault injection
-
-- kill after A;
-- kill after B;
-- timeout during C;
-- cancel during C;
-- HTTP client disconnect while server work continues;
-- process restart during recoverable role;
-- stale writer commit attempt after new epoch;
-- corrupt/incompatible checkpoint;
-- missing effect result;
-- effect hash mismatch;
-- duplicate resume request.
-
-### Regression
-
-Existing behavior must remain green for:
-
-- state-machine contract;
-- Store behavior still in public contract;
-- read-only verify;
-- Tool Risk / RepoPolicy / Sandbox boundaries;
-- Evidence/Claim validation;
-- Role Output validation;
-- six-role routing;
-- Patch Candidate -> explicit approval -> retest path;
-- current server tests;
-- deterministic closed-loop fixture.
-
-## 18. Current implementation status on this branch
-
-Already committed on this branch:
-
-- RuntimeEvidence retention/security boundary;
-- durable canonical primitives;
-- `DurableFileIO`;
-- Linux native writer-lock foundation;
-- run-state/execution-manifest durable contracts;
-- monotonic generation;
-- execution epoch fencing;
-- commit protocol;
-- RoleCheckpoint;
-- RoleResult.
-
-Current committed branch head before this design document: `c880004afdceff7b5ef98c56b9db91c35636dce8`.
-
-Already observed in focused development tests before this document was committed:
-
-- RuntimeEvidence boundary tests: 8/8 PASS;
-- durable focused contract/commit tests: 7/7 PASS;
-- syntax gate for the durable storage foundation: PASS.
-
-Not yet proven:
-
-- native writer-lock real runtime test in the required Node 24.20.0/native-addon build environment;
-- Effect Ledger;
-- Work Unit Registry;
-- Researcher real continuation;
-- Tool Loop / ProgressController durable integration;
-- workflow cursor resume;
-- startup recovery;
-- async API/CLI continuation behavior;
-- migration/retention/GC completion;
-- required fault-injection suite;
-- final A/B -> C interruption -> restart -> C continuation -> RoleResult -> Diagnoser E2E.
-
-These must remain `NOT_VERIFIED` until actually executed.
-
-## 19. Implementation order
-
-Development must follow this order unless a discovered code dependency requires a documented change:
+Distinct identities:
 
 ```text
-1. Durable storage / writer lock                     DONE on branch
-2. Generation / epoch / commit protocol             DONE on branch
-3. RoleCheckpoint / RoleResult                      DONE on branch
-4. Effect Ledger                                    NEXT
-5. Work Unit Registry                               NEXT
-6. Tool Loop / ProgressController durable hook
-7. Researcher continuation
-8. Workflow cursor / start-vs-resume
-9. Startup recovery
-10. Async HTTP API / CLI compatibility
-11. Migration / rollback guard / retention / GC
-12. Unit + integration + fault injection regression
-13. Exact A/B -> C restart acceptance E2E
+run_id
+role_execution_id
+attempt
+generation
+execution_epoch
 ```
 
-Do not skip ahead and declare later stages complete because earlier foundations exist.
+A continuation of the same logical role retains `role_execution_id` and creates a new attempt when required.
 
-## 20. Development stop conditions
+### 10.1 Writer/commit safety — implemented
 
-Stop and report instead of forcing progress if any of the following occurs:
+The branch contains:
 
-- a required contract conflicts with the current repository implementation;
-- a proposed change would create a second authority/state engine;
-- a test requires weakening approval, repository, sandbox, or evidence boundaries;
-- a durable record would require storing hidden model reasoning or secrets;
+- durable canonical primitives/envelopes;
+- `DurableFileIO`;
+- native Linux writer lock;
+- generation monotonicity;
+- execution-epoch fencing;
+- stale generation/epoch rejection;
+- durable run-state and execution manifest;
+- authoritative commit protocol.
+
+### 10.2 RoleCheckpoint — implemented
+
+RoleCheckpoint stores explicit resumable state such as role identity, attempt, cursor/progress, work-unit state, evidence/effect references, retry/cancellation/progress metadata, and integrity metadata. It must not store hidden model reasoning.
+
+### 10.3 RoleResult — implemented
+
+RoleResult is a durable role-level result separate from the overall run result. It can be consumed downstream without rerunning the producing role, but it cannot claim whole-run completion.
+
+### 10.4 Effect Ledger — implemented
+
+The Effect Ledger assigns stable logical identity to committed reusable effects. Reuse is allowed only when the input binding, repository snapshot/revision requirements, tool contract/environment, referenced result, digest, and freshness/reference policy still match. Mutation-capable operations do not gain autonomous replay authority.
+
+### 10.5 Work Unit Registry — implemented
+
+Researcher continuation uses explicit A/B/C/D/E work units. A/B/C gather evidence, D reconciles contradictions after dependencies, and E assembles final evidence selection. The registry integrates with the existing Tool Loop/ProgressController rather than creating a second orchestrator.
+
+---
+
+## 11. Real interruption/restart acceptance
+
+The required durable behavior is:
+
+```text
+A commits
+B commits
+C starts
+C is interrupted
+process is killed/restarted
+same run_id is restored
+same role_execution_id is restored
+new continuation attempt is created
+A is reused and NOT rerun
+B is reused and NOT rerun
+C continues
+RoleResult is committed
+Diagnoser consumes the restored Researcher result
+```
+
+At the reviewed implementation snapshot, real SIGKILL restart regression coverage has been restored and is passing in repository verification. A previously discovered regression was caused by semantic-shadow metadata being attached as a non-enumerable own property to authoritative role output. Standard JSON serialization hid it, while durable canonical JSON correctly rejected it. The fix moved semantic shadow state outside authoritative role JSON via WeakMap and added canonical-JSON regression coverage.
+
+Required rule:
+
+> Shadow/audit metadata must not mutate the durable role-output object contract.
+
+Durable continuation, retention, sandbox boundaries, restart acceptance, terminal GC safety, writer locking, generation/epoch fencing, and replay-safe tool effects are established areas and should not be reimplemented during later AI-side optimization.
+
+---
+
+## 12. Storage, retention, archive, and GC authority
+
+### 12.1 Authority split
+
+- TGserver is the long-term log/evidence archive authority for archived terminal-run summaries and long-lived log/evidence material.
+- DebugAI local server storage holds authoritative durable continuation state and bounded operational cache.
+- Local storage is not the long-term log warehouse.
+
+### 12.2 Runtime Evidence cache
+
+Target policy:
+
+```text
+retention window     = 12 hours
+local byte ceiling   = 32 MiB
+rotation cadence     = 15 minutes + startup
+```
+
+Age and capacity limits both apply. Active/recoverable durable state is not removed by this cache policy.
+
+### 12.3 Sandbox jobs
+
+Completed sandbox source snapshots/work directories should be removed as soon as terminal results are safely consumed and required result/evidence is persisted. Orphan cleanup must prove a job is not active before deletion.
+
+### 12.4 Durable run bundle deletion
+
+Recoverable runs are not age-deleted. Durable run state, manifest, RoleCheckpoint, RoleResult, Effect Ledger, and workflow data are treated as one validated bundle for deletion safety.
+
+A terminal run becomes a GC candidate only after required archive/receipt acceptance. Missing or ambiguous archive confirmation blocks durable deletion. A post-archive safety window is preserved.
+
+### 12.5 Patch retention
+
+Default safety targets:
+
+- unapproved patch candidates: 7 days;
+- applied backup with verification PASS: 72 hours;
+- applied backup with verification FAIL/incomplete: 7 days.
+
+Rollback and approval safety outrank cleanup aggressiveness.
+
+### 12.6 Docker/disposable resources
+
+Docker stdout/stderr is bounded operational output, not the long-term log authority. Broad automatic `docker system prune -a --volumes` behavior is forbidden. Active named volumes are not automatically removed.
+
+---
+
+## 13. Repository revision authority
+
+Repository revision binding is part of correctness, not metadata decoration.
+
+Rules:
+
+- a patch candidate is bound to repository state;
+- approval/apply must validate candidate identity and hash;
+- post-apply repository revision/snapshot must be captured;
+- final review/completion must bind to the current revision rather than a stale pre-review state;
+- restart/resume must reject incompatible repository snapshots when required by the durable contract.
+
+The existing repository snapshot/revision machinery must be reused; do not introduce an unrelated second revision system.
+
+---
+
+## 14. Patch and review packet boundaries
+
+Runtime packet components exist, but full Patch Engineer / Local Reviewer packet wiring is still a pending workstream.
+
+Required direction:
+
+- Patch Engineer receives candidate-generation context only and never apply authority;
+- patch packet contains the minimum authoritative evidence/diagnosis/revision context required to produce a candidate;
+- Local Reviewer runs from fresh review context and does not treat producer reasoning as authority;
+- review packet binds applied candidate, revision, deterministic verification, invariants, and required evidence;
+- do not add a second large autonomous Tool Loop to Patch Engineer or Local Reviewer merely to compensate for missing packet design.
+
+---
+
+## 15. Strict Completion Gate
+
+### 15.1 Completion is a conjunction
+
+A DebugAI run may become `COMPLETE` only when all required conditions are true from runtime evidence:
+
+```text
+candidate identity valid
+AND approval receipt valid
+AND apply receipt valid
+AND current repository revision bound
+AND required verification actually executed
+AND deterministic verification PASS
+AND invariants PASS
+AND Local Reviewer PASS
+AND required External Final Review PASS
+AND no blocking evidence gap
+AND final run contract valid
+```
+
+Missing mandatory evidence must fail closed.
+
+### 15.2 Completion Gate module/input — implemented
+
+`server/control/completion-gate.js` defines the required conjunction and provides runtime-input construction/evaluation. The current implementation explicitly blocks cases including:
+
+- missing analysis evidence-gap record;
+- missing repository revision evidence;
+- repository revision mismatch;
+- verification not executed;
+- deterministic verification failure;
+- invariant failure;
+- reviewer non-PASS/UNKNOWN;
+- external final non-PASS when required;
+- candidate/receipt mismatch.
+
+Focused regression coverage exists for the gate and runtime input builder.
+
+### 15.3 Workflow wiring — pending and highest priority
+
+At the reviewed implementation snapshot, `server/workflow.js` still reaches final completion through an older path centered on final-review PASS. Therefore:
+
+> Strict Completion is **not complete** until `approveAndVerify()` constructs the gate input from actual runtime evidence, evaluates/asserts the gate, and only then transitions to `COMPLETE`.
+
+The wiring must use actual values, not guessed booleans:
+
+- candidate ID/hash from the selected candidate and application receipt;
+- explicit approval decision;
+- patch application receipt;
+- post-apply repository snapshot and final-review/current snapshot comparison;
+- executed deterministic checks and gates;
+- invariant results;
+- fresh local-review verdict;
+- required external-final verdict;
+- latest authoritative analysis evidence record for `evidence_gap`;
+- real final-contract validation.
+
+The current input builder's `run_final_contract_valid` derivation is not by itself sufficient proof of a fully validated final contract. Workflow wiring must not turn this field true unless the runtime's actual final-contract condition is proven.
+
+---
+
+## 16. External review boundaries
+
+External AI is restricted to review boundaries rather than owning the debugging loop.
+
+1. Hypothesis Review — after diagnosis and before patch generation.
+2. Final Review — after apply/retest/local review when required by policy.
+
+Normalized decision contract:
+
+```text
+PASS | FAIL | PENDING
+```
+
+Unknown provider decision shapes fail closed. External review cannot apply code, bypass Master approval, override deterministic verification, or substitute for missing evidence.
+
+---
+
+## 17. HTTP API and CLI direction
+
+Current runtime includes routes for health/status/inspection, analysis, patch candidate generation, read-only verification, explicit approve/apply/verify, and knowledge promotion.
+
+Durable execution direction requires client lifetime to be separable from logical run lifetime. Start/status/inspect/resume semantics must preserve:
+
+- stable run identity;
+- idempotence where defined;
+- durable cursor recovery;
+- approval boundary;
+- repository safety;
+- machine-readable CLI output;
+- no CLI patch-apply shortcut.
+
+Do not describe an API behavior as complete merely because durable state exists underneath it.
+
+---
+
+## 18. Model A/B authority
+
+Current measured generation profile recorded for the active server/model setup:
+
+```text
+Qwen2.5-Coder 7B   14.66 tok/s
+Qwen3 8B            4.18 tok/s
+Granite 4.2 8B      5.82 tok/s
+Ministral 3 8B      7.98 tok/s
+```
+
+Current sampling baseline is `temperature=0`.
+
+Model optimization remains pending. A/B procedure must use the exact GGUF and current llama.cpp/llama-swap environment and vary one dimension at a time:
+
+1. thinking mode;
+2. sampling;
+3. token cap.
+
+Official recommended settings are reference information, not automatic production settings. Unmeasured values must not be reported as PASS.
+
+Qwen Coder parallel-use/environment experimentation is separate and currently on hold; it must not block core DebugAI work.
+
+---
+
+## 19. Verification authority
+
+Repository runtime requires Node.js `24.20.0`.
+
+Primary repository verification:
+
+```bash
+npm install
+npm run verify
+```
+
+`npm run verify` builds the durable native component, runs syntax checks, and runs the repository/server tests.
+
+Additional explicit gates include deterministic fixture E2E, legacy authority tests, control-plane gap audit, benchmarks, storage audit, public readiness, Core Verify, and CodeQL as applicable.
+
+### 19.1 Current verified implementation snapshot
+
+At implementation snapshot `926dda4d17d739452b06e07f23ea5de8a5b8b800`:
+
+```text
+Verify                 = SUCCESS
+Core Verify            = SUCCESS
+Public Readiness Audit = SUCCESS
+CodeQL                  = SUCCESS
+```
+
+This CI evidence belongs to that exact implementation SHA. Documentation-only commits after that SHA require their own new CI readback and must not inherit the old SHA's CI status automatically.
+
+### 19.2 Required real closed-loop E2E — still pending
+
+Final DebugAI completion still requires a real full closed-loop test covering, at minimum:
+
+- unknown fixture/unknown failure handling;
+- real repository defect;
+- prompt-injection resistance;
+- stale repository revision rejection;
+- evidence insufficiency path;
+- SIGKILL resume;
+- patch candidate;
+- explicit approval boundary;
+- deterministic retest;
+- fresh local review;
+- required external final review;
+- strict completion gate.
+
+A fixture-only path does not satisfy this final gate.
+
+---
+
+## 20. Current implementation status matrix
+
+Implementation snapshot: `926dda4d17d739452b06e07f23ea5de8a5b8b800`.
+
+| Area | Status | Notes |
+| --- | --- | --- |
+| Durable primitives / writer lock / commit fencing | IMPLEMENTED + VERIFIED | do not rebuild |
+| RoleCheckpoint / RoleResult | IMPLEMENTED + VERIFIED | durable role boundary established |
+| Effect Ledger / replay-safe reuse | IMPLEMENTED + VERIFIED | reuse remains identity/freshness bound |
+| Researcher A/B/C/D/E continuation | IMPLEMENTED + VERIFIED | restart acceptance restored |
+| Real SIGKILL restart regression | VERIFIED PASS | semantic-shadow durable regression fixed |
+| Runtime Evidence retention/security | IMPLEMENTED + VERIFIED | bounded local cache policy |
+| Durable archive / terminal GC safety | IMPLEMENTED + VERIFIED boundary | archive receipt required before eligible deletion |
+| AI Core baseline telemetry | IMPLEMENTED | measured/null semantics required |
+| Role Tool Loop telemetry | IMPLEMENTED | includes executed/reused tool work |
+| Production skill/benchmark isolation | IMPLEMENTED | benchmark leakage removed |
+| Evidence Projection + Active Evidence Window | IMPLEMENTED + TOOL LOOP CONNECTED | prompt view only; original evidence preserved |
+| Strict Completion Gate module | IMPLEMENTED | 11-condition AND gate |
+| Strict Completion runtime-input builder | IMPLEMENTED + TESTED | missing mandatory evidence fail-closed |
+| Strict Completion workflow wiring | **PENDING** | highest-priority next implementation |
+| Patch / Review Packet workflow wiring | PENDING | reuse existing runtime-packet components |
+| Role/Search Gate | SHADOW PARTIAL | validate false-skip risk before activation |
+| Capability gaps | 11 NOT_IMPLEMENTED | close by responsibility |
+| Model A/B | PENDING | exact environment, one variable at a time |
+| Real full closed-loop E2E | PENDING | required before final completion claim |
+| Main merge | NOT AUTHORIZED / NOT DONE | PR remains draft/unmerged at snapshot |
+| Deploy / production change | NOT DONE | source authority remains separate from live server |
+
+---
+
+## 21. Current next-work order
+
+Do not revert to older branch status documents that listed already completed durable work as `NEXT`.
+
+Current required order:
+
+```text
+1. Strict COMPLETE workflow wiring
+2. Focused regression + exact-SHA CI
+3. Patch / Review Packet workflow wiring
+4. Role / Search Gate shadow verification
+5. limited gate activation only after shadow safety proof
+6. close remaining 11 capability gaps by responsibility
+7. model A/B
+8. real full closed-loop E2E
+9. PR final audit
+10. wait for Master approval before merge/deploy
+```
+
+---
+
+## 22. Production/source separation
+
+At the reviewed snapshot:
+
+- GitHub branch head: `926dda4d17d739452b06e07f23ea5de8a5b8b800`;
+- PR #21: open, draft, unmerged;
+- main merge: not done;
+- deploy: not done;
+- production change: none from this branch;
+- known server live checkout recorded separately as older source and must not be treated as equal to the GitHub branch.
+
+Never run an implicit server pull/reset/sync merely because GitHub source advanced. Server Runtime remains Docker/Compose based; do not install persistent host Node/npm as a shortcut.
+
+---
+
+## 23. Stop conditions
+
+Stop and report rather than forcing success when:
+
+- a required contract conflicts with current repository behavior;
+- a proposed change creates a second execution authority;
+- a test would require weakening approval/repository/sandbox/evidence safety;
+- a durable record would need hidden model reasoning or credentials;
+- repository revision or required evidence is unavailable;
 - a stale/unknown durable format cannot be proven compatible;
-- a test result is unknown or not executed.
+- a required check was not executed;
+- a review result is UNKNOWN/PENDING when PASS is required;
+- archive/receipt state is missing for a destructive GC action;
+- CI/runtime evidence belongs to a different SHA/environment.
 
-The correct status in those cases is `BLOCKED`, `UNKNOWN`, `NOT_EXECUTED`, or `NOT_VERIFIED`, never fabricated success.
+Valid outcomes include `BLOCKED`, `UNKNOWN`, `NOT_EXECUTED`, and `NOT_VERIFIED`. They must never be rewritten into success.
 
-## 21. Server storage, retention, and TGserver authority policy
+---
 
-This section is a required additional workstream and must not be treated as optional cleanup.
+## 24. Definition of DebugAI complete
 
-### 21.1 Storage roles
+The whole DebugAI project is not complete merely because durable continuation or individual modules pass.
 
-- TGserver is the long-term log/evidence archive authority for runtime logs and archived terminal-run summaries.
-- DebugAI server local storage is limited to authoritative durable continuation data plus bounded short-term operational cache.
-- Local storage must never become the long-term log warehouse.
-- Active or recoverable durable state is more important than cleanup and must not be removed by time-only GC.
+A final completion claim requires all of the following to be closed with evidence:
 
-### 21.2 Runtime Evidence cache
+1. six-role execution contracts and required role/tool/skill behavior;
+2. deterministic verification and invariants;
+3. authoritative evidence behavior with explicit evidence gaps;
+4. durable restart/continuation and replay-safe work reuse;
+5. patch candidate / explicit approval / apply receipt boundary;
+6. repository revision binding;
+7. fresh local review;
+8. required external review boundaries;
+9. Strict Completion Gate connected to real workflow evidence;
+10. remaining capability gaps closed or explicitly removed by an approved design change;
+11. real closed-loop E2E on the intended runtime path;
+12. exact-SHA CI and final audit;
+13. any required production rollout verification after explicit Master approval.
 
-- Local Runtime Evidence is a cache, not the long-term authority.
-- Target retention: 12 hours.
-- Target local capacity ceiling: 32 MiB.
-- Rotation cadence: every 15 minutes and once at startup.
-- Age and capacity limits both apply; oldest eligible evidence is removed first.
-- Long-term evidence needed after the cache window must be sent to TGserver.
-
-### 21.3 Sandbox jobs
-
-Sandbox source snapshots are potentially the largest transient storage consumer and must be handled aggressively.
-
-- `repo/`, `tmp/`, and per-job package/cache working data are deleted immediately after a terminal sandbox result has been safely read and the required result/evidence has been persisted.
-- `request.json` / `result.json` may remain as bounded local cache for up to 6 hours when needed for local inspection.
-- orphan/incomplete sandbox jobs older than 30 minutes may be garbage-collected only after proving they are not active.
-- sandbox cleanup must never delete an active job.
-
-### 21.4 Durable runs
-
-- RUNNING, PAUSED, RETRYABLE, or otherwise recoverable durable runs: automatic age-based deletion is forbidden.
-- RoleCheckpoint, RoleResult, Effect Ledger, workflow-data, manifest, and run-state are deleted only as one validated run bundle; partial deletion is forbidden.
-- terminal durable runs may become GC candidates only after an archive/receipt confirms the required summary and evidence references were accepted by TGserver.
-- after successful archive receipt, keep a 72-hour safety window before local bundle deletion.
-- if TGserver archive confirmation is missing or ambiguous, local durable deletion is forbidden.
-
-### 21.5 Patch artifacts
-
-- unapproved patch candidates: retain 7 days by default.
-- applied patch backup with verification PASS: retain 72 hours.
-- applied patch backup with verification FAIL or incomplete verification: retain 7 days.
-- approval boundaries and rollback safety take precedence over storage cleanup.
-
-### 21.6 Docker logging and disposable DebugAI resources
-
-- Docker stdout/stderr is an immediate operational view only, not long-term storage.
-- use bounded Docker log rotation for DebugAI containers.
-- disposable isolated-test containers/volumes may be removed after 6 hours when confirmed unused.
-- active production/runtime named volumes are never automatically deleted.
-- broad `docker system prune -a --volumes` style cleanup is forbidden as an automated DebugAI policy.
-- DebugAI-owned dangling images/build cache may become cleanup candidates only when confirmed unused and at least 24 hours old.
-
-### 21.7 GC priority order
-
-Storage pressure work should proceed in this order because it yields the largest safe reduction first:
-
-1. delete completed sandbox source snapshots/work dirs;
-2. bound DebugAI Docker stdout/stderr logs;
-3. bound Runtime Evidence to 12h / 32 MiB;
-4. archive terminal durable runs to TGserver and GC only after receipt + 72h safety window;
-5. expire patch artifacts using the policy above;
-6. separately audit and clean confirmed-unused DebugAI Docker images/build cache.
-
-### 21.8 Required tests
-
-Retention/GC work is not complete until tests prove at minimum:
-
-- active/recoverable durable runs are never age-deleted;
-- terminal durable run deletion is blocked without TGserver archive receipt;
-- partial durable run bundle deletion is impossible;
-- sandbox terminal cleanup deletes heavy snapshot/work data but preserves required result/evidence;
-- active sandbox jobs survive GC;
-- orphan sandbox jobs older than the configured grace period are cleaned;
-- Runtime Evidence obeys both age and byte ceilings;
-- Docker log bounds are present in Compose;
-- cleanup failures are reported and never silently upgraded to success.
+Until those conditions are satisfied, the correct project-level state remains **not fully complete**, even when individual subsystems are verified.
