@@ -18,18 +18,34 @@ function startChild(args){
   return{child,events,exited,getStderr:()=>stderr};
 }
 function childExited(handle){return handle?.child?.exitCode!==null||handle?.child?.signalCode!==null;}
-async function waitFor(handle,predicate,{timeoutMs=45000,label="event"}={}){
+function durableFileInventory(root,{maxEntries=80}={}){
+  const out=[];
+  function walk(dir){
+    if(out.length>=maxEntries||!fs.existsSync(dir))return;
+    for(const entry of fs.readdirSync(dir,{withFileTypes:true})){
+      if(out.length>=maxEntries)break;
+      const full=path.join(dir,entry.name),rel=path.relative(root,full).replace(/\\/g,"/");
+      if(entry.isDirectory())walk(full);
+      else if(entry.isFile())out.push({path:rel,size:fs.statSync(full).size});
+      else out.push({path:rel,type:"non-file"});
+    }
+  }
+  try{walk(root);}catch(error){return[{inventory_error:String(error?.code||error?.message||error)}];}
+  return out;
+}
+async function waitFor(handle,predicate,{timeoutMs=20000,label="event",diagnostic=null}={}){
   const deadline=Date.now()+timeoutMs;
   while(Date.now()<deadline){
     const found=handle.events.find(predicate);if(found)return found;
     if(childExited(handle)){const exited=await handle.exited;throw new Error(`CHILD_EXITED_BEFORE_${label}:${JSON.stringify({code:exited.code,signal:exited.signal,events:exited.events,stderr:exited.stderr})}`);}
     await new Promise(resolve=>setTimeout(resolve,20));
   }
-  throw new Error(`TIMEOUT_WAITING_FOR_${label}:${JSON.stringify(handle.events)}`);
+  const details=typeof diagnostic==="function"?diagnostic():null;
+  throw new Error(`TIMEOUT_WAITING_FOR_${label}:${JSON.stringify({events:handle.events,diagnostic:details})}`);
 }
 function killIfRunning(handle){if(handle&&!childExited(handle))handle.child.kill("SIGKILL");}
 
-test("real SIGKILL restart restores A/B and resumes C with same role execution and new attempt",{timeout:120000},async t=>{
+test("real SIGKILL restart restores A/B and resumes C with same role execution and new attempt",{timeout:90000},async t=>{
   if(process.platform!=="linux")return t.skip("native durable writer acceptance is Linux-only");
   const root=fs.mkdtempSync(path.join(os.tmpdir(),"debugai-real-restart-"));
   const runtimeRoot=path.join(root,"runtime"),repo=path.join(root,"repo");
@@ -39,7 +55,7 @@ test("real SIGKILL restart restores A/B and resumes C with same role execution a
 
   first=startChild(["initial",runtimeRoot,root,repo]);
   const started=await waitFor(first,event=>event.type==="STARTED",{label:"STARTED"});
-  const interrupt=await waitFor(first,event=>event.type==="INTERRUPT_POINT",{label:"INTERRUPT_POINT"});
+  const interrupt=await waitFor(first,event=>event.type==="INTERRUPT_POINT",{timeoutMs:20000,label:"INTERRUPT_POINT",diagnostic:()=>durableFileInventory(runtimeRoot)});
   const firstA=first.events.filter(event=>event.type==="WORK"&&event.unit==="researcher.A");
   const firstB=first.events.filter(event=>event.type==="WORK"&&event.unit==="researcher.B");
   assert.equal(firstA.length,1);assert.equal(firstB.length,1);assert.equal(interrupt.unit,"researcher.C");assert.equal(interrupt.attempt_no,1);
@@ -49,7 +65,7 @@ test("real SIGKILL restart restores A/B and resumes C with same role execution a
   assert.equal(killed.signal,"SIGKILL");
 
   second=startChild(["recover",runtimeRoot,root,repo,started.run_id]);
-  const recovered=await waitFor(second,event=>event.type==="RECOVERY",{timeoutMs:45000,label:"RECOVERY"});
+  const recovered=await waitFor(second,event=>event.type==="RECOVERY",{timeoutMs:30000,label:"RECOVERY",diagnostic:()=>durableFileInventory(runtimeRoot)});
   const finished=await second.exited;
   assert.equal(finished.code,0,`recovery child failed: ${finished.stderr} ${JSON.stringify(finished.events)}`);
 
