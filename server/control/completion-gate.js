@@ -15,6 +15,53 @@ const REQUIRED_TRUE=Object.freeze([
 ]);
 
 function bool(value){return value===true;}
+function upper(value){return String(value||"").toUpperCase();}
+function reviewVerdict(value){return upper(value?.verdict??value?.decision??value?.review_status??value?.json?.verdict);}
+function nonEmptyString(value){return typeof value==="string"&&value.length>0;}
+function completionChecksPass(checks){return Array.isArray(checks)&&checks.length>0&&checks.every(check=>upper(check?.status)==="PASS");}
+function completionGatesPass(gates){const values=gates&&typeof gates==="object"&&!Array.isArray(gates)?Object.values(gates):[];return values.length>0&&values.every(gate=>upper(gate?.status)==="PASS");}
+
+function buildCompletionGateInput({
+  runId=null,
+  runState=null,
+  candidateId=null,
+  candidateHash=null,
+  decision=null,
+  patchResult=null,
+  postApplyRepositoryRevision=null,
+  currentRepositoryRevision=null,
+  localReview=null,
+  externalFinal=null,
+  analysisEvidenceRecord=null
+}={}){
+  const candidate=patchResult?.candidate||null,receipt=patchResult?.applied?.receipt||null;
+  const candidateIdentityValid=Boolean(candidate&&nonEmptyString(candidateId)&&nonEmptyString(candidateHash)&&candidate.id===candidateId&&candidate.candidate_hash===candidateHash);
+  const approvalReceiptValid=decision==="approve"&&candidateIdentityValid;
+  const applyReceiptValid=Boolean(receipt&&receipt.schema==="patch-application/v2"&&receipt.candidate_id===candidateId&&receipt.candidate_hash===candidateHash);
+  const revisionKnown=nonEmptyString(postApplyRepositoryRevision)&&nonEmptyString(currentRepositoryRevision);
+  const requiredVerificationExecuted=Array.isArray(patchResult?.checks)&&patchResult.checks.length>0;
+  const deterministicVerificationPass=requiredVerificationExecuted&&completionChecksPass(patchResult.checks)&&completionGatesPass(patchResult?.gates)&&patchResult?.pass===true;
+  const analysisPayload=analysisEvidenceRecord?.type==="analysis"&&analysisEvidenceRecord?.payload&&typeof analysisEvidenceRecord.payload==="object"?analysisEvidenceRecord.payload:null;
+  const evidenceGapKnown=typeof analysisPayload?.evidence_gap==="boolean";
+  const mandatoryUnknowns=[];
+  if(!revisionKnown)mandatoryUnknowns.push("repository_revision");
+  if(!evidenceGapKnown)mandatoryUnknowns.push("analysis_evidence_gap");
+  return Object.freeze({
+    candidate_identity_valid:candidateIdentityValid,
+    approval_receipt_valid:approvalReceiptValid,
+    apply_receipt_valid:applyReceiptValid,
+    current_revision_bound:revisionKnown&&postApplyRepositoryRevision===currentRepositoryRevision,
+    required_verification_executed:requiredVerificationExecuted,
+    deterministic_verification_pass:deterministicVerificationPass,
+    invariants_pass:patchResult?.invariants?.pass===true,
+    local_review_pass:reviewVerdict(localReview)==="PASS",
+    required_external_final_pass:reviewVerdict(externalFinal)==="PASS",
+    no_blocking_evidence_gap:evidenceGapKnown&&analysisPayload.evidence_gap===false,
+    run_final_contract_valid:nonEmptyString(runId)&&runState==="RETESTING",
+    mandatory_unknowns:Object.freeze(mandatoryUnknowns)
+  });
+}
+
 function evaluateCompletionGate(input={}){
   const checks={};
   for(const key of REQUIRED_TRUE)checks[key]=bool(input[key]);
@@ -36,4 +83,4 @@ function assertCompletionGate(input={}){
   return result;
 }
 
-module.exports={REQUIRED_TRUE,evaluateCompletionGate,assertCompletionGate};
+module.exports={REQUIRED_TRUE,reviewVerdict,completionChecksPass,completionGatesPass,buildCompletionGateInput,evaluateCompletionGate,assertCompletionGate};
