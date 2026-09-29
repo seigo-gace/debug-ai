@@ -110,7 +110,7 @@ test("HTTP entry points complete the deterministic analyze-to-approved-patch clo
     decision:"approve",
     repo
   });
-  assert.equal(completed.state,"COMPLETE");
+  assert.equal(completed.state,"COMPLETE",JSON.stringify(completed.completion_gate));
   assert.equal(completed.pass,true);
   assert.equal(completed.local_review.verdict,"PASS");
   assert.equal(completed.external_final_review.json.verdict,"PASS");
