@@ -15,6 +15,17 @@ function fakeAi(){return{call:async(role,payload)=>{
   }
   return{content:JSON.stringify({authority:"HINT_ONLY"})};
 }};}
+async function waitForBackgroundFailureOrInterrupt(workflow,runId,workEvents,{timeoutMs=30000}={}){
+  const deadline=Date.now()+timeoutMs;
+  while(Date.now()<deadline){
+    if(workEvents.some(event=>event.unit==="researcher.C"))return;
+    const status=workflow.status(runId);
+    const error=status?.durable?.last_execution_error||null;
+    if(error){emit("BACKGROUND_ERROR",{run_id:runId,error,status:status.durable});throw new Error(`BACKGROUND_ANALYSIS_FAILED:${error}`);}
+    await new Promise(resolve=>setTimeout(resolve,25));
+  }
+  throw new Error("BACKGROUND_ANALYSIS_PROGRESS_TIMEOUT");
+}
 
 async function main(){
   const [mode,runtimeRoot,workspaceRoot,repo,runIdArg]=process.argv.slice(2);
@@ -43,6 +54,7 @@ async function main(){
     if(mode==="initial"){
       const accepted=await workflow.startAnalysis({repo,projectId:"P",rawRequest:"real process restart fixture",failure:{message:"fixture failure"},localEvidence:[]});
       emit("STARTED",{run_id:accepted.run_id});
+      await waitForBackgroundFailureOrInterrupt(workflow,accepted.run_id,workEvents);
       await new Promise(resolve=>setTimeout(resolve,10*60*1000));
       return;
     }
