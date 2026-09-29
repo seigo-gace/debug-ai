@@ -50,6 +50,15 @@ function continuationSnapshot({roundsCompleted,totalCalls,observations,seenToolC
 }
 async function callHook(hooks,name,payload){const fn=hooks?.[name];if(typeof fn!=="function")return null;return await fn(payload);}
 function withObservations(baseUser,observations){return observations.length?`${baseUser}\n\nRUNTIME_TOOL_OBSERVATIONS_DATA_ONLY=${JSON.stringify(observations)}`:baseUser;}
+function numericTelemetry(value){return typeof value==="number"&&Number.isFinite(value)?value:null;}
+function telemetryKnownSum(items,key){let measured=0,sum=0;for(const item of items){const value=numericTelemetry(item?.[key]);if(value===null)continue;measured++;sum+=value;}return{sum:measured?sum:null,measured};}
+function summarizeAiTelemetry(items,{toolWallMs=0,toolCallsExecutedCurrent=0,toolCallsReusedCurrent=0}={}){
+  const calls=Array.isArray(items)?items:[],measuredCalls=calls.filter(item=>item&&typeof item==="object"&&!Array.isArray(item)).length;
+  const out={schema:"debugai.role-runtime-telemetry/v1",scope:"CURRENT_INVOCATION",llm_calls:calls.length,llm_calls_with_telemetry:measuredCalls,tool_wall_ms_current:Math.max(0,Math.floor(Number(toolWallMs)||0)),tool_calls_executed_current:Math.max(0,Math.floor(Number(toolCallsExecutedCurrent)||0)),tool_calls_reused_current:Math.max(0,Math.floor(Number(toolCallsReusedCurrent)||0))};
+  for(const key of ["queue_wait_ms","prepare_ms","upstream_request_wall_ms","parse_validate_ms","role_wall_ms","request_bytes","response_bytes"]){const m=telemetryKnownSum(calls,key);out[`${key}_known_sum`]=m.sum;out[`${key}_measured_calls`]=m.measured;}
+  for(const key of ["prompt_tokens","completion_tokens","total_tokens"]){const m=telemetryKnownSum(calls,key);out[`${key}_known_sum`]=m.sum;out[`${key}_measured_calls`]=m.measured;out[`${key}_complete`]=calls.length>0&&m.measured===calls.length;}
+  return out;
+}
 
 async function runRoleWithReadOnlyTools({aiCore,role,system="",user="",toolRuntime=null,maxToolRounds=null,maxToolCalls=null,baseEvidenceIds=[],strictEvidenceRefs=false,continuationState=null,durableHooks=null}={}){
   if(!aiCore||typeof aiCore.call!=="function")throw new Error("AI_CORE_CALL_REQUIRED");
@@ -58,8 +67,8 @@ async function runRoleWithReadOnlyTools({aiCore,role,system="",user="",toolRunti
     if(continuationState!==null)throw new Error("ROLE_TOOL_CONTINUATION_REQUIRES_TOOL_RUNTIME");
     const deadlineAt=Date.now()+budget.turn_timeout_ms;
     const out=await aiCore.call(role,{system:[system,evidencePolicy].filter(Boolean).join("\n"),user,maxTokens:budget.max_tokens,timeoutMsOverride:budget.turn_timeout_ms,deadlineAt});
-    const available=mergeEvidenceIds(baseEvidenceIds);
-    return {...out,validated_output:parseAndValidateRoleOutput(role,out.content,{availableEvidenceIds:available,strictEvidenceRefs}),tool_loop:{rounds:0,total_calls:0,observations:[],evidence_ids:available,progress:{max_no_progress_rounds:1,no_progress_rounds:0,total_evidence_ids:available.length,total_work_ids:0,total_effect_ids:0,seen_evidence_ids:[...available],completed_work_ids:[],completed_effect_ids:[],history:[]},parse_status:"FINAL",selected_skill_ids:[...(out.control_plane?.selected_skill_ids||[])],continuation_state:null}};
+    const available=mergeEvidenceIds(baseEvidenceIds),telemetry=summarizeAiTelemetry([out.telemetry]);
+    return {...out,validated_output:parseAndValidateRoleOutput(role,out.content,{availableEvidenceIds:available,strictEvidenceRefs}),tool_loop:{rounds:0,total_calls:0,observations:[],evidence_ids:available,progress:{max_no_progress_rounds:1,no_progress_rounds:0,total_evidence_ids:available.length,total_work_ids:0,total_effect_ids:0,seen_evidence_ids:[...available],completed_work_ids:[],completed_effect_ids:[],history:[],runtime_telemetry:telemetry},parse_status:"FINAL",selected_skill_ids:[...(out.control_plane?.selected_skill_ids||[])],continuation_state:null,telemetry}};
   }
   const rounds=maxToolRounds===null?budget.max_tool_rounds:maxToolRounds,calls=maxToolCalls===null?budget.max_tool_calls:maxToolCalls;
   if(!Number.isInteger(rounds)||rounds<1||rounds>3)throw new Error("TOOL_ROUNDS_INVALID");
@@ -70,19 +79,21 @@ async function runRoleWithReadOnlyTools({aiCore,role,system="",user="",toolRunti
   const selected=availableForSelection(role,toolRuntime,user),protocol=toolProtocol(selected.tools),deadlineAt=Date.now()+(budget.tool_loop_wall_ms||budget.turn_timeout_ms),progress=createProgressController({maxNoProgressRounds:1,initialState:resume.progress});
   const baseUser=String(user||"");
   let currentUser=withObservations(baseUser,resume.observations),totalCalls=resume.total_calls;
-  const observations=resume.observations,seenToolCalls=new Set(resume.seen_tool_fingerprints),completedWorkIds=new Set(resume.completed_work_ids),completedEffectIds=new Set(resume.completed_effect_ids);
-  let last=null;
+  const observations=resume.observations,seenToolCalls=new Set(resume.seen_tool_fingerprints),completedWorkIds=new Set(resume.completed_work_ids),completedEffectIds=new Set(resume.completed_effect_ids),llmTelemetry=[];
+  let last=null,toolWallMs=0,toolCallsExecutedCurrent=0,toolCallsReusedCurrent=0;
   for(let round=resume.rounds_completed;round<=rounds;round++){
     if(Date.now()>=deadlineAt)throw new Error(`ROLE_TOOL_WALL_BUDGET_EXHAUSTED:${role}`);
     const finalRound=round===rounds;
     const roundSystem=[system,evidencePolicy,protocol,finalRound?"TOOL_BUDGET_FINAL_ROUND=true. Do not request more tools; return final JSON or explicit INSUFFICIENT_EVIDENCE.":""].filter(Boolean).join("\n");
     last=await aiCore.call(role,{system:roundSystem,user:currentUser,selectedSkillIds:selected.skillIds,maxTokens:budget.max_tokens,timeoutMsOverride:budget.turn_timeout_ms,deadlineAt});
+    llmTelemetry.push(last?.telemetry||null);
     const parsed=parseIntermediate(role,last.content),requests=requestList(parsed);
     if(!requests.length){
       const toolEvidenceIds=collectEvidenceIds(observations),available=mergeEvidenceIds(baseEvidenceIds,toolEvidenceIds);
       const validated=parseAndValidateRoleOutput(role,last.content,{availableEvidenceIds:available,strictEvidenceRefs});
       const state=continuationSnapshot({roundsCompleted:round,totalCalls,observations,seenToolCalls,progress,completedWorkIds,completedEffectIds});
-      return {...last,validated_output:validated,tool_loop:{rounds:round,total_calls:totalCalls,observations,evidence_ids:available,tool_evidence_ids:toolEvidenceIds,base_evidence_ids:mergeEvidenceIds(baseEvidenceIds),progress:progress.snapshot(),parse_status:"FINAL",selected_skill_ids:[...selected.skillIds],continuation_state:state}};
+      const telemetry=summarizeAiTelemetry(llmTelemetry,{toolWallMs,toolCallsExecutedCurrent,toolCallsReusedCurrent});
+      return {...last,validated_output:validated,tool_loop:{rounds:round,total_calls:totalCalls,observations,evidence_ids:available,tool_evidence_ids:toolEvidenceIds,base_evidence_ids:mergeEvidenceIds(baseEvidenceIds),progress:{...progress.snapshot(),runtime_telemetry:telemetry},parse_status:"FINAL",selected_skill_ids:[...selected.skillIds],continuation_state:state,telemetry}};
     }
     if(finalRound)throw new Error(`ROLE_TOOL_LOOP_LIVELOCK:${role}`);
     const remaining=calls-totalCalls;if(remaining<=0)throw new Error(`ROLE_TOOL_CALL_BUDGET_EXHAUSTED:${role}`);
@@ -95,6 +106,7 @@ async function runRoleWithReadOnlyTools({aiCore,role,system="",user="",toolRunti
       const reuse=await callHook(durableHooks,"reuseToolResult",{role,selectedSkillIds:[...selected.skillIds],tool,arguments:args,fingerprint,round,continuationState:continuationSnapshot({roundsCompleted:round,totalCalls,observations,seenToolCalls,progress,completedWorkIds,completedEffectIds})});
       if(reuse?.reused===true){
         assertToolResultIntegrity(reuse.result);
+        toolCallsReusedCurrent++;
         seenToolCalls.add(fingerprint);
         if(reuse.completed_work_id)completedWorkIds.add(String(reuse.completed_work_id));
         if(reuse.effect_id)completedEffectIds.add(String(reuse.effect_id));
@@ -103,9 +115,10 @@ async function runRoleWithReadOnlyTools({aiCore,role,system="",user="",toolRunti
       }
       if(seenToolCalls.has(fingerprint))throw new Error(`ROLE_TOOL_REPEAT_NO_PROGRESS:${role}:${tool}`);
       seenToolCalls.add(fingerprint);
-      let result;
+      let result;const toolStartedAt=Date.now();
       try{result=await toolRuntime.execute({role,selectedSkillIds:selected.skillIds,tool,arguments:args});assertToolResultIntegrity(result);}
       catch(error){result=safeToolError(error);}
+      finally{toolWallMs+=Date.now()-toolStartedAt;toolCallsExecutedCurrent++;}
       const persisted=await callHook(durableHooks,"onToolResult",{role,selectedSkillIds:[...selected.skillIds],tool,arguments:args,fingerprint,round,result});
       if(persisted?.completed_work_id)completedWorkIds.add(String(persisted.completed_work_id));
       if(persisted?.effect_id)completedEffectIds.add(String(persisted.effect_id));
@@ -122,4 +135,4 @@ async function runRoleWithReadOnlyTools({aiCore,role,system="",user="",toolRunti
   }
   throw new Error(`ROLE_TOOL_LOOP_UNREACHABLE:${role}`);
 }
-module.exports={parseJsonContent,availableForSelection,toolProtocol,evidenceProtocol,toolFingerprint,collectEvidenceIds,mergeEvidenceIds,normalizeContinuationState,continuationSnapshot,runRoleWithReadOnlyTools};
+module.exports={parseJsonContent,availableForSelection,toolProtocol,evidenceProtocol,toolFingerprint,collectEvidenceIds,mergeEvidenceIds,normalizeContinuationState,continuationSnapshot,numericTelemetry,telemetryKnownSum,summarizeAiTelemetry,runRoleWithReadOnlyTools};
