@@ -5,6 +5,12 @@ const {assertToolResultIntegrity}=require("./read-only-tool-runtime.js");
 const {parseAndValidateRoleOutput}=require("./role-output-validator.js");
 const {getRoleRuntimeBudget}=require("./role-runtime-budgets.js");
 const {createProgressController}=require("./progress-controller.js");
+const {makeEvidenceProjection}=require("./evidence-projection.js");
+const {buildActiveEvidenceWindow}=require("./active-evidence-window.js");
+
+const TOOL_OBSERVATION_MAX_EXCERPT_CHARS=2400;
+const TOOL_OBSERVATION_MAX_ITEMS=12;
+const TOOL_OBSERVATION_MAX_CHARS=12000;
 
 function parseJsonContent(content){if(typeof content!=="string")return content;const text=content.trim().replace(/^```json\s*/i,"").replace(/```$/i,"").trim();return JSON.parse(text);}
 function availableForSelection(role,toolRuntime,task){const roleContract=getRoleContract(role);const skills=selectSkills(role,{task,maxSkills:3});const runtime=new Set(toolRuntime?.availableTools||[]);const allowed=new Set();for(const skill of skills)for(const tool of skill.allowed_tools)if(runtime.has(tool)&&roleContract.allowed_tools.includes(tool))allowed.add(tool);return {skillIds:skills.map(s=>s.id),tools:[...allowed].sort()};}
@@ -12,7 +18,7 @@ function toolProtocol(tools){if(!tools.length)return "RUNTIME_TOOLS=NONE. Use su
 function evidenceProtocol(ids,strict){const list=[...new Set((ids||[]).map(String).filter(Boolean))];if(!strict&&!list.length)return "";return `REGISTERED_EVIDENCE_IDS=${list.join(",")||"NONE"}. ${strict?"Claims that require evidence must cite only registered EVI_/TRE_ evidence IDs supplied by Runtime. Unregistered evidence references are invalid.":"Runtime-prefixed evidence references must be registered."}`;}
 function requestList(parsed){return Array.isArray(parsed?.tool_requests)?parsed.tool_requests:[];}
 function safeToolError(error){return {schema:"debugai.tool-result/v1",status:"ERROR",error_code:String(error?.message||"TOOL_ERROR").split(":")[0].slice(0,80)};}
-function stableJson(value){if(value===null||typeof value!=="object")return JSON.stringify(value);if(Array.isArray(value))return `[${value.map(stableJson).join(",")}]`;const keys=Object.keys(value).sort();return `{${keys.map(k=>`${JSON.stringify(k)}:${stableJson(value[k])}`).join(",")}}`;}
+function stableJson(value){if(value===undefined)return '"__DEBUGAI_UNDEFINED__"';if(value===null||typeof value!=="object")return JSON.stringify(value);if(Array.isArray(value))return `[${value.map(stableJson).join(",")}]`;const keys=Object.keys(value).sort();return `{${keys.map(k=>`${JSON.stringify(k)}:${stableJson(value[k])}`).join(",")}}`;}
 function toolFingerprint(tool,args){return `${tool}:${stableJson(args)}`;}
 function parseIntermediate(role,content){try{const parsed=parseJsonContent(content);if(!parsed||typeof parsed!=="object"||Array.isArray(parsed))throw new Error("OBJECT_REQUIRED");return parsed;}catch(error){const e=new Error(`ROLE_OUTPUT_JSON_INVALID:${role}`);e.cause=error;throw e;}}
 function collectEvidenceIds(observations){const out=[];for(const observation of observations)for(const item of observation.results||[]){const result=item?.result;if(result?.status==="OK"){assertToolResultIntegrity(result);const id=result.evidence_id;if(typeof id==="string"&&id&&!out.includes(id))out.push(id);}}return out;}
@@ -49,7 +55,41 @@ function continuationSnapshot({roundsCompleted,totalCalls,observations,seenToolC
   };
 }
 async function callHook(hooks,name,payload){const fn=hooks?.[name];if(typeof fn!=="function")return null;return await fn(payload);}
-function withObservations(baseUser,observations){return observations.length?`${baseUser}\n\nRUNTIME_TOOL_OBSERVATIONS_DATA_ONLY=${JSON.stringify(observations)}`:baseUser;}
+function observationPromptView(observations){
+  const projections=[],toolErrors=[];
+  for(const observation of Array.isArray(observations)?observations:[]){
+    const round=Number(observation?.round||0);
+    for(const item of observation?.results||[]){
+      const result=item?.result,tool=String(result?.tool||item?.request?.tool||"");
+      if(result?.status==="OK"){
+        assertToolResultIntegrity(result);
+        const content=stableJson(result.data),truncated=content.length>TOOL_OBSERVATION_MAX_EXCERPT_CHARS;
+        projections.push(makeEvidenceProjection({
+          parentEvidenceId:result.evidence_id,
+          parentDigest:result.integrity.result_sha256,
+          evidenceKind:`TOOL_RESULT:${tool||"UNKNOWN"}`,
+          source:tool||null,
+          content,
+          maxExcerptChars:TOOL_OBSERVATION_MAX_EXCERPT_CHARS,
+          provenanceStatus:"VERIFIED",
+          applicabilityStatus:"UNKNOWN",
+          executionStatus:"EXECUTED",
+          observedOutcome:"UNKNOWN",
+          claimSupportStatus:"UNKNOWN",
+          projectionCompleteness:truncated?"PARTIAL":"COMPLETE",
+          omittedCount:truncated?1:0,
+          omissionReason:truncated?"BOUNDED_TOOL_OBSERVATION":null
+        }));
+      }else if(result?.status==="ERROR"){
+        toolErrors.push({round,tool:tool||"UNKNOWN",status:"ERROR",error_code:String(result.error_code||"TOOL_ERROR").slice(0,80)});
+      }
+    }
+  }
+  const requiredEvidenceIds=projections.map(item=>item.parent_evidence_id);
+  const evidenceWindow=buildActiveEvidenceWindow(projections,{requiredEvidenceIds,maxItems:TOOL_OBSERVATION_MAX_ITEMS,maxChars:TOOL_OBSERVATION_MAX_CHARS});
+  return Object.freeze({schema:"debugai.tool-observation-window/v1",evidence_window:evidenceWindow,tool_errors:Object.freeze(toolErrors)});
+}
+function withObservations(baseUser,observations){return observations.length?`${baseUser}\n\nRUNTIME_TOOL_OBSERVATIONS_DATA_ONLY=${JSON.stringify(observationPromptView(observations))}`:baseUser;}
 function numericTelemetry(value){return typeof value==="number"&&Number.isFinite(value)?value:null;}
 function telemetryKnownSum(items,key){let measured=0,sum=0;for(const item of items){const value=numericTelemetry(item?.[key]);if(value===null)continue;measured++;sum+=value;}return{sum:measured?sum:null,measured};}
 function summarizeAiTelemetry(items,{toolWallMs=0,toolCallsExecutedCurrent=0,toolCallsReusedCurrent=0}={}){
@@ -135,4 +175,4 @@ async function runRoleWithReadOnlyTools({aiCore,role,system="",user="",toolRunti
   }
   throw new Error(`ROLE_TOOL_LOOP_UNREACHABLE:${role}`);
 }
-module.exports={parseJsonContent,availableForSelection,toolProtocol,evidenceProtocol,toolFingerprint,collectEvidenceIds,mergeEvidenceIds,normalizeContinuationState,continuationSnapshot,numericTelemetry,telemetryKnownSum,summarizeAiTelemetry,runRoleWithReadOnlyTools};
+module.exports={TOOL_OBSERVATION_MAX_EXCERPT_CHARS,TOOL_OBSERVATION_MAX_ITEMS,TOOL_OBSERVATION_MAX_CHARS,parseJsonContent,availableForSelection,toolProtocol,evidenceProtocol,toolFingerprint,collectEvidenceIds,mergeEvidenceIds,normalizeContinuationState,continuationSnapshot,observationPromptView,withObservations,numericTelemetry,telemetryKnownSum,summarizeAiTelemetry,runRoleWithReadOnlyTools};
