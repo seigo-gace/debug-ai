@@ -14,9 +14,9 @@ function authorityFixture(){
 function patchFixture(repo="/repo"){
   return {
     apply(){return {
-      candidate:{id:"cand_1",candidate_hash:"hash_1",repo},
-      applied:{receipt:{schema:"patch-application/v2",candidate_id:"cand_1",candidate_hash:"hash_1"}},
-      checks:[{name:"test",status:"PASS"}],
+      candidate:{id:"cand_1",candidate_hash:"hash_1",repo,files:["src/a.js"],diff:"--- a/src/a.js\n+++ b/src/a.js\n+x",preconditions:[{path:"src/a.js",sha256:"before"}]},
+      applied:{receipt:{schema:"patch-application/v2",transaction_id:"tx_1",candidate_id:"cand_1",candidate_hash:"hash_1",files:[{path:"src/a.js",sha256:"after"}]}},
+      checks:[{name:"test",status:"PASS",configured:true,executed:true}],
       invariants:{pass:true},
       gates:[
         {name:"deterministic-retest",status:"PASS"},

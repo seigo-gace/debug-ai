@@ -1,6 +1,9 @@
 "use strict";
 const test=require("node:test");
 const assert=require("node:assert/strict");
+const fs=require("node:fs");
+const os=require("node:os");
+const path=require("node:path");
 const {makeToolResult,assertToolResultIntegrity}=require("../control/read-only-tool-runtime.js");
 const {parseAndValidateRoleOutput}=require("../control/role-output-validator.js");
 const {runRoleWithReadOnlyTools}=require("../control/tool-loop.js");
@@ -54,7 +57,10 @@ test("bounded tool loop rejects a final claim that cites an unissued TRE evidenc
 });
 
 test("patch engineer output is semantic-gated before patch candidate construction",async()=>{
+  const repo=fs.mkdtempSync(path.join(os.tmpdir(),"debugai-packet-gate-"));
+  fs.writeFileSync(path.join(repo,"a.js"),"x");
+  fs.writeFileSync(path.join(repo,"package.json"),JSON.stringify({scripts:{test:"node --test"}}));
   const aiCore={call:async()=>({content:JSON.stringify({claims:[{type:"FACT",text:"fixed"}],operations:[{type:"replace",path:"a.js",old:"x",new:"y"}]})})};
-  const workflow=createWorkflow({aiCore});
-  await assert.rejects(()=>workflow.patchCandidate({runId:"r1",analysis:{external_hypothesis_review:{json:{verdict:"PASS"}},diagnosis:{}},repo:"/tmp/noop",selectedPaths:["a.js"],context:"",task:"fix"}),/ROLE_CLAIM_EVIDENCE_INVALID/);
+  const workflow=createWorkflow({aiCore,repositorySnapshot:()=>"git_fixture"});
+  await assert.rejects(()=>workflow.patchCandidate({runId:"r1",analysis:{external_hypothesis_review:{json:{verdict:"PASS"}},diagnosis:{}},repo,selectedPaths:["a.js"],context:"",task:"fix"}),/ROLE_CLAIM_EVIDENCE_INVALID/);
 });

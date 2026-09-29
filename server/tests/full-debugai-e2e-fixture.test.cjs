@@ -5,7 +5,6 @@ const assert=require("node:assert/strict");
 const fs=require("node:fs");
 const os=require("node:os");
 const path=require("node:path");
-const {execFileSync}=require("node:child_process");
 
 const {createServer}=require("../http.js");
 const {createWorkflow}=require("../workflow.js");
@@ -29,11 +28,7 @@ function fixture(){
     'test("patched value",()=>assert.equal(require("./value.js"),2));',
     ""
   ].join("\n"));
-  execFileSync("git",["init","-q"],{cwd:repo,stdio:"ignore"});
-  execFileSync("git",["config","user.email","debugai-fixture@example.invalid"],{cwd:repo,stdio:"ignore"});
-  execFileSync("git",["config","user.name","DebugAI Fixture"],{cwd:repo,stdio:"ignore"});
-  execFileSync("git",["add","value.js","package.json","value.test.cjs"],{cwd:repo,stdio:"ignore"});
-  execFileSync("git",["commit","-qm","fixture baseline"],{cwd:repo,stdio:"ignore"});
+  fs.mkdirSync(path.join(repo,".git"));
   return {root,repo,runtimeRoot};
 }
 
@@ -53,8 +48,8 @@ test("HTTP entry points complete the deterministic analyze-to-approved-patch clo
   t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
 
   const roleCalls=[];
-  const aiCore={call:async role=>{
-    roleCalls.push(role);
+  const aiCore={call:async(role,options)=>{
+    roleCalls.push({role,user:JSON.parse(options.user)});
     const outputs={
       code_scout:{files:["value.js"],finding:"exported value is stale"},
       causal_scout:{hypotheses:[{cause:"literal is 1",falsifier:"read value.js"}]},
@@ -100,6 +95,10 @@ test("HTTP entry points complete the deterministic analyze-to-approved-patch clo
     task:"make the reproduced test pass with the smallest source change"
   });
   assert.equal(patch.state,"WAITING_MASTER_APPROVAL");
+  assert.equal(patch.patch_packet.schema,"debugai.patch-packet/v1");
+  const patchEngineerInput=roleCalls.find(call=>call.role==="patch_engineer").user;
+  assert.equal(patchEngineerInput.patch_packet.schema,"debugai.patch-packet/v1");
+  assert.deepEqual(patchEngineerInput.patch_packet.payload.paths,["value.js"]);
   assert.equal(authority.load(analysis.run_id).state,"WAITING_APPROVAL");
   assert.equal(fs.readFileSync(path.join(repo,"value.js"),"utf8"),"module.exports=1;\n");
 
@@ -113,11 +112,23 @@ test("HTTP entry points complete the deterministic analyze-to-approved-patch clo
   assert.equal(completed.state,"COMPLETE",JSON.stringify(completed.completion_gate));
   assert.equal(completed.pass,true);
   assert.equal(completed.local_review.verdict,"PASS");
+  assert.equal(completed.review_packet.schema,"debugai.review-packet/v1");
   assert.equal(completed.external_final_review.json.verdict,"PASS");
   assert.equal(completed.completion_gate.complete,true);
   assert.equal(completed.post_apply_repository_revision,completed.current_repository_revision);
   assert.equal(authority.load(analysis.run_id).state,"COMPLETE");
   assert.equal(fs.readFileSync(path.join(repo,"value.js"),"utf8"),"module.exports=2;\n");
-  assert.deepEqual(roleCalls,["code_scout","causal_scout","researcher","diagnoser","patch_engineer","local_reviewer"]);
+  assert.deepEqual(roleCalls.map(call=>call.role),["code_scout","causal_scout","researcher","diagnoser","patch_engineer","local_reviewer"]);
+  const localReviewInput=roleCalls.find(call=>call.role==="local_reviewer").user;
+  assert.equal(localReviewInput.review_packet.schema,"debugai.review-packet/v1");
+  assert.match(localReviewInput.review_packet.payload.diff,/module\.exports=2/);
   assert.deepEqual(externalCalls.map(call=>call.stage),["hypothesis","final"]);
+  const externalSummary=externalCalls.find(call=>call.stage==="final").payload.summary;
+  assert.equal(externalSummary.schema,"debugai.review-packet-public-summary/v1");
+  assert.equal(externalSummary.packet_digest,completed.review_packet.packet_digest);
+  assert.equal(externalSummary.executed_test_count,1);
+  assert.equal(externalSummary.invariants_pass,true);
+  assert.equal(externalSummary.local_verdict,"PASS");
+  assert.equal(JSON.stringify(externalSummary).includes("value.js"),false);
+  assert.equal(JSON.stringify(externalSummary).includes("module.exports=2"),false);
 });
