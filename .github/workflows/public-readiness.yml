@@ -14,7 +14,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Scan current tree and reachable history without printing secret values
+      - name: Scan current tree and all refs without printing secret values
         shell: bash
         run: |
           set -euo pipefail
@@ -34,8 +34,6 @@ jobs:
             ('TELEGRAM_BOT_TOKEN',re.compile(rb'\b\d{8,12}:[A-Za-z0-9_-]{30,}\b')),
             ('BEARER_TOKEN',re.compile(rb'Bearer\s+[A-Za-z0-9._~+/=-]{24,}')),
           ]
-          # Environment-style secret assignments must use canonical uppercase names.
-          # Do not case-fold ordinary source variables such as constructor token = Symbol(...).
           ENV_NAME=re.compile(rb'(?m)^[ \t]*([A-Z0-9_]*(?:API_KEY|TOKEN|SECRET|PASSWORD|PRIVATE_KEY|CLIENT_SECRET)[A-Z0-9_]*)[ \t]*=[ \t]*([^\r\n#]*)')
           HOME_PATH=re.compile(rb'/home/admin1(?:/|\b)')
 
@@ -58,7 +56,7 @@ jobs:
             except OSError: continue
             if len(data)<=2_000_000: scan_bytes('CURRENT',p.as_posix(),data)
 
-          rows=subprocess.check_output(['git','rev-list','--objects','HEAD'],text=True).splitlines(); seen=set()
+          rows=subprocess.check_output(['git','rev-list','--objects','--all'],text=True).splitlines(); seen=set()
           for row in rows:
             parts=row.split(' ',1); oid=parts[0]; path=parts[1] if len(parts)>1 else '<unknown>'
             if oid in seen: continue
