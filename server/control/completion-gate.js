@@ -19,7 +19,14 @@ function upper(value){return String(value||"").toUpperCase();}
 function reviewVerdict(value){return upper(value?.verdict??value?.decision??value?.review_status??value?.json?.verdict);}
 function nonEmptyString(value){return typeof value==="string"&&value.length>0;}
 function completionChecksPass(checks){return Array.isArray(checks)&&checks.length>0&&checks.every(check=>upper(check?.status)==="PASS");}
-function completionGatesPass(gates){const values=gates&&typeof gates==="object"&&!Array.isArray(gates)?Object.values(gates):[];return values.length>0&&values.every(gate=>upper(gate?.status)==="PASS");}
+function completionGatesPass(gates){
+  const values=Array.isArray(gates)
+    ? gates
+    : gates&&typeof gates==="object"
+      ? Object.values(gates)
+      : [];
+  return values.length>0&&values.every(gate=>upper(gate?.status)==="PASS");
+}
 
 function buildCompletionGateInput({
   runId=null,
