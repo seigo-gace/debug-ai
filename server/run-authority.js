@@ -1,11 +1,12 @@
 "use strict";
 const fs=require("node:fs");
 const path=require("node:path");
+const {execFileSync}=require("node:child_process");
 const C=require("../orchestrator/contracts.js");
 const {Store}=require("../orchestrator/store.js");
 const {StateMachine}=require("../orchestrator/state-machine.js");
 const {CommitProtocol,makeCommitId}=require("../orchestrator/commit-protocol.js");
-const {makeRunStateV2,validateRunStateV2,validateExecutionManifest}=require("../orchestrator/durable-contracts.js");
+const {contentHash,makeRunStateV2,validateRunStateV2,validateExecutionManifest}=require("../orchestrator/durable-contracts.js");
 const {makeInitialManifest,evolveManifest}=require("../orchestrator/execution-manifest.js");
 const {assertRepositoryRevisionGate}=require("./control/repository-revision-gate.js");
 
@@ -14,6 +15,15 @@ const TERMINAL_JOB_STATUSES=new Set(["DONE","CANCELLED","BLOCKED","FAILED"]);
 const GC_PLAN_SCHEMA="debugai.durable-gc-plan/v1";
 function gcPlanPath(runId){const id=String(runId||"");if(!/^[A-Za-z0-9._-]{1,200}$/.test(id))throw new Error("RUN_ID_INVALID");return`gc-plan/${id}.json`;}
 function normalizeRepositorySnapshotId(value){if(value===null||value===undefined)return null;const text=String(value).trim();if(!text||text.length>200)throw new Error("DURABLE_REPOSITORY_SNAPSHOT_ID_INVALID");return text;}
+function tryRepositorySnapshotId(projectDir){
+  try{
+    const root=path.resolve(String(projectDir||""));
+    const head=execFileSync("git",["-C",root,"rev-parse","HEAD"],{encoding:"utf8",timeout:10000,stdio:["ignore","pipe","pipe"]}).trim();
+    const status=execFileSync("git",["-C",root,"status","--porcelain=v1","--untracked-files=no"],{encoding:"utf8",timeout:10000,stdio:["ignore","pipe","pipe"]});
+    if(!/^[a-f0-9]{40}$/i.test(head))return null;
+    return `git_${contentHash({head,status})}`;
+  }catch{return null;}
+}
 
 class RunAuthority{
   constructor({runtimeRoot,repoPolicy=null,durableIo=null}={}){if(!runtimeRoot)throw new Error("RUNTIME_ROOT_REQUIRED");this.store=new Store(path.join(runtimeRoot,"authority"));this.machine=new StateMachine({store:this.store});this.repoPolicy=repoPolicy;this.commitProtocol=durableIo?new CommitProtocol({io:durableIo}):null;}
@@ -32,12 +42,13 @@ class RunAuthority{
   removeLegacyRunIndex(runId){const id=String(runId||"");if(!/^[A-Za-z0-9_-]{1,200}$/.test(id))throw new Error("RUN_ID_INVALID");const file=path.join(this.store.dirs.run,`${id}.json`);let stat;try{stat=fs.lstatSync(file);}catch(error){if(error?.code==="ENOENT")return false;throw error;}if(!stat.isFile()||stat.isSymbolicLink())throw new Error("LEGACY_RUN_INDEX_UNSAFE");fs.unlinkSync(file);return true;}
   async initializeDurable(runOrId,{repositorySnapshotId=null,requireRepositoryBinding=false}={}){
     const protocol=this._requireDurable();const run=typeof runOrId==="string"?this.load(runOrId):runOrId;if(!run||typeof run!=="object"||typeof run.run_id!=="string")throw new Error("RUN_REQUIRED");
-    const currentSnapshot=normalizeRepositorySnapshotId(repositorySnapshotId);if(requireRepositoryBinding&&!currentSnapshot)throw new Error("DURABLE_REPOSITORY_SNAPSHOT_CURRENT_REQUIRED");
+    const explicitSnapshot=normalizeRepositorySnapshotId(repositorySnapshotId),currentSnapshot=explicitSnapshot||tryRepositorySnapshotId(run.project_dir);if(requireRepositoryBinding&&!currentSnapshot)throw new Error("DURABLE_REPOSITORY_SNAPSHOT_CURRENT_REQUIRED");
     const existing=protocol.loadRunState(run.run_id,{allowMissing:true});
     if(existing!==null){
       validateRunStateV2(existing);const manifest=protocol.loadManifest(existing.execution_ref.manifest_id);validateExecutionManifest(manifest);
       const expectedSnapshot=normalizeRepositorySnapshotId(manifest.snapshot_refs?.repository_snapshot_id||null);
-      if(requireRepositoryBinding||currentSnapshot!==null){assertRepositoryRevisionGate({expected_snapshot_id:expectedSnapshot,current_snapshot_id:currentSnapshot});}
+      if(expectedSnapshot!==null&&currentSnapshot!==null)assertRepositoryRevisionGate({expected_snapshot_id:expectedSnapshot,current_snapshot_id:currentSnapshot});
+      else if(requireRepositoryBinding)assertRepositoryRevisionGate({expected_snapshot_id:expectedSnapshot,current_snapshot_id:currentSnapshot});
       return{created:false,state:existing,manifest};
     }
     const initial=makeRunStateV2({request_hash:run.request_hash,project_dir:run.project_dir,project_id:run.project_id,generation:0,execution_epoch:0});initial.run_id=run.run_id;validateRunStateV2(initial);
@@ -51,4 +62,4 @@ class RunAuthority{
   async bumpDurableEpoch({runId,manifestPatch={},runStatePatch={}}={}){const protocol=this._requireDurable();const {state,manifest}=this.loadDurable(runId);const nextManifest=evolveManifest(manifest,manifestPatch);const committed=await protocol.bumpEpoch({runId:state.run_id,expectedGeneration:state.generation,expectedEpoch:state.execution_epoch,manifest:nextManifest,runStatePatch});return{state:committed.state,manifest:nextManifest,commit:committed};}
   async claimRecoverableRun(runId,{claimedAt=Date.now()}={}){const {state,manifest}=this.loadDurable(runId);if(manifest.cancellation!==null||state.job_status==="CANCELLED")throw new Error("RUN_CANCELLED");if(!RECOVERABLE_JOB_STATUSES.has(state.job_status))throw new Error(`RUN_NOT_RECOVERABLE:${state.job_status}`);return this.bumpDurableEpoch({runId,manifestPatch:{job:{status:"RUNNING"},policy_refs:{startup_recovery_claimed_at:claimedAt,startup_recovery_from_epoch:state.execution_epoch}},runStatePatch:{job_status:"RUNNING"}});}
 }
-module.exports={RunAuthority,RECOVERABLE_JOB_STATUSES,TERMINAL_JOB_STATUSES,GC_PLAN_SCHEMA,gcPlanPath,normalizeRepositorySnapshotId};
+module.exports={RunAuthority,RECOVERABLE_JOB_STATUSES,TERMINAL_JOB_STATUSES,GC_PLAN_SCHEMA,gcPlanPath,normalizeRepositorySnapshotId,tryRepositorySnapshotId};
