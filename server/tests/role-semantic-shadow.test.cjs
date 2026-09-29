@@ -26,9 +26,15 @@ test("role semantic shadow detects responsibility leaks and invalid terminal val
   assert.ok(review.violations.includes("REVIEW_VERDICT_INVALID:COMPLETE"));
 });
 
-test("semantic enforcement remains opt-in while shadow policy is calibrated",()=>{
+test("semantic shadow runs by default but stays out of serialized role JSON",()=>{
   const content=JSON.stringify({facts:[],operations:[{path:"a.js"}]});
-  assert.deepEqual(parseAndValidateRoleOutput("code_scout",content),{facts:[],operations:[{path:"a.js"}]});
-  assert.deepEqual(parseAndValidateRoleOutput("code_scout",content,{roleSemantics:"shadow"}),{facts:[],operations:[{path:"a.js"}]});
+  const value=parseAndValidateRoleOutput("code_scout",content);
+  assert.equal(value.__role_semantic_shadow.status,"WARN");
+  assert.ok(value.__role_semantic_shadow.violations.includes("ROLE_MUTATION_OUTPUT_FORBIDDEN:operations"));
+  assert.equal(Object.prototype.propertyIsEnumerable.call(value,"__role_semantic_shadow"),false);
+  assert.equal(JSON.stringify(value),content);
+  assert.deepEqual(value,{facts:[],operations:[{path:"a.js"}]});
   assert.throws(()=>parseAndValidateRoleOutput("code_scout",content,{roleSemantics:"enforce"}),/ROLE_SEMANTIC_INVALID:code_scout/);
+  const off=parseAndValidateRoleOutput("code_scout",JSON.stringify({facts:[]}),{roleSemantics:"off"});
+  assert.equal(Object.prototype.hasOwnProperty.call(off,"__role_semantic_shadow"),false);
 });
