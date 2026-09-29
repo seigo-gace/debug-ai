@@ -63,17 +63,18 @@ test("selected Causal Scout skills compile bounded causal procedures within the 
   assert.equal(correlation.skill_selection_mode,"RUNTIME_FIXED");
   assert.deepEqual(correlation.selected_skill_ids,["failure-taxonomy-router","source-runtime-correlation","causal-chain-builder"]);
   assert.match(correlation.system,/procedure=failure-taxonomy-router:/);
-  assert.match(correlation.system,/runtime:cache_hit.*state:stale_timestamp.*symptom:stale_object/i);
-  assert.match(correlation.system,/source:database_corruption/i);
-  assert.match(correlation.system,/one-evidence-to-one-bucket/i);
-  assert.match(correlation.system,/no canonical array item may contain spaces or copied prose/i);
+  assert.match(correlation.system,/Classify the failure family only from supplied observations/i);
+  assert.match(correlation.system,/Preserve observed chronological order/i);
+  assert.match(correlation.system,/Build the causal chain only from supplied positive source, runtime, state, and symptom observations in chronological order/i);
+  assert.match(correlation.system,/Never promote correlation to causation/i);
+  assert.doesNotMatch(correlation.system,/runtime:cache_hit|state:stale_timestamp|symptom:stale_object|source:database_corruption/i);
 
   const alternate=compileInvocation("causal_scout",{task:"retain an alternate causal hypothesis",selectedSkillIds:["failure-taxonomy-router","causal-chain-builder","alternate-hypothesis-seed"]});
   assert.equal(alternate.selected_skill_ids.length,3);
   assert.match(alternate.system,/procedure=alternate-hypothesis-seed:/);
-  assert.match(alternate.system,/runtime:upstream_stale_response.*runtime:consumer_reordered_event.*runtime:network_path_stall/i);
-  assert.match(alternate.system,/Preserve causal-chain-builder output exactly/i);
-  assert.match(alternate.system,/hypothesis, not a fact/i);
+  assert.match(alternate.system,/Retain each materially distinct alternative/i);
+  assert.match(alternate.system,/Emit alternatives as hypotheses, not facts/i);
+  assert.doesNotMatch(alternate.system,/runtime:upstream_stale_response|runtime:consumer_reordered_event|runtime:network_path_stall/i);
 });
 
 test("unknown procedure identifiers do not invent procedure text",()=>{
