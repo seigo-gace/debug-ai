@@ -5,6 +5,7 @@ const assert=require("node:assert/strict");
 const fs=require("node:fs");
 const os=require("node:os");
 const path=require("node:path");
+const {execFileSync}=require("node:child_process");
 
 const {createServer}=require("../http.js");
 const {createWorkflow}=require("../workflow.js");
@@ -28,6 +29,11 @@ function fixture(){
     'test("patched value",()=>assert.equal(require("./value.js"),2));',
     ""
   ].join("\n"));
+  execFileSync("git",["init","-q"],{cwd:repo,stdio:"ignore"});
+  execFileSync("git",["config","user.email","debugai-fixture@example.invalid"],{cwd:repo,stdio:"ignore"});
+  execFileSync("git",["config","user.name","DebugAI Fixture"],{cwd:repo,stdio:"ignore"});
+  execFileSync("git",["add","value.js","package.json","value.test.cjs"],{cwd:repo,stdio:"ignore"});
+  execFileSync("git",["commit","-qm","fixture baseline"],{cwd:repo,stdio:"ignore"});
   return {root,repo,runtimeRoot};
 }
 
@@ -108,6 +114,8 @@ test("HTTP entry points complete the deterministic analyze-to-approved-patch clo
   assert.equal(completed.pass,true);
   assert.equal(completed.local_review.verdict,"PASS");
   assert.equal(completed.external_final_review.json.verdict,"PASS");
+  assert.equal(completed.completion_gate.complete,true);
+  assert.equal(completed.post_apply_repository_revision,completed.current_repository_revision);
   assert.equal(authority.load(analysis.run_id).state,"COMPLETE");
   assert.equal(fs.readFileSync(path.join(repo,"value.js"),"utf8"),"module.exports=2;\n");
   assert.deepEqual(roleCalls,["code_scout","causal_scout","researcher","diagnoser","patch_engineer","local_reviewer"]);
