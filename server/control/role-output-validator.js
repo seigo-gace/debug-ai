@@ -60,9 +60,10 @@ function evaluateRoleSemantics(role,value){
     const verdict=value.verdict??value.decision??value.review_status;
     if(verdict!==undefined&&!REVIEW_VERDICT.has(String(verdict).toUpperCase()))violations.push(`REVIEW_VERDICT_INVALID:${String(verdict)}`);
   }
-  return{schema:"debugai.role-semantic-shadow/v1",role,status:violations.length?"WARN":"PASS",violations};
+  return Object.freeze({schema:"debugai.role-semantic-shadow/v1",role,status:violations.length?"WARN":"PASS",violations:Object.freeze(violations)});
 }
-function parseAndValidateRoleOutput(role,content,{availableEvidenceIds=[],strictEvidenceRefs=false,roleSemantics="off"}={}){
+function attachSemanticShadow(value,semantic){Object.defineProperty(value,"__role_semantic_shadow",{value:semantic,enumerable:false,configurable:false,writable:false});return value;}
+function parseAndValidateRoleOutput(role,content,{availableEvidenceIds=[],strictEvidenceRefs=false,roleSemantics="shadow"}={}){
   let value;
   try{value=parseJsonContent(content);}catch(error){const e=new Error(`ROLE_OUTPUT_JSON_INVALID:${role}`);e.cause=error;throw e;}
   if(!value||typeof value!=="object"||Array.isArray(value))throw new Error(`ROLE_OUTPUT_OBJECT_REQUIRED:${role}`);
@@ -76,7 +77,8 @@ function parseAndValidateRoleOutput(role,content,{availableEvidenceIds=[],strict
   if(roleSemantics!=="off"){
     const semantic=evaluateRoleSemantics(role,value);
     if(roleSemantics==="enforce"&&semantic.violations.length)throw new Error(`ROLE_SEMANTIC_INVALID:${role}:${semantic.violations.join("|")}`);
+    attachSemanticShadow(value,semantic);
   }
   return value;
 }
-module.exports={ROLE_SEMANTIC_RULES,parseJsonContent,validateEvidenceBindings,evaluateRoleSemantics,parseAndValidateRoleOutput};
+module.exports={ROLE_SEMANTIC_RULES,parseJsonContent,validateEvidenceBindings,evaluateRoleSemantics,attachSemanticShadow,parseAndValidateRoleOutput};
