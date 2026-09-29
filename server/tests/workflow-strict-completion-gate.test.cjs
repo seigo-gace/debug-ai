@@ -18,7 +18,11 @@ function patchFixture(repo="/repo"){
       applied:{receipt:{schema:"patch-application/v2",candidate_id:"cand_1",candidate_hash:"hash_1"}},
       checks:[{name:"test",status:"PASS"}],
       invariants:{pass:true},
-      gates:{source:{status:"PASS"}},
+      gates:[
+        {name:"deterministic-retest",status:"PASS"},
+        {name:"deterministic-regression",status:"PASS"},
+        {name:"deterministic-invariant",status:"PASS"}
+      ],
       pass:true
     };}
   };
