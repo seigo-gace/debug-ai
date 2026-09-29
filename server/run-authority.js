@@ -1,28 +1,22 @@
 "use strict";
 const fs=require("node:fs");
 const path=require("node:path");
-const {execFileSync}=require("node:child_process");
 const C=require("../orchestrator/contracts.js");
 const {Store}=require("../orchestrator/store.js");
 const {StateMachine}=require("../orchestrator/state-machine.js");
 const {CommitProtocol,makeCommitId}=require("../orchestrator/commit-protocol.js");
-const {contentHash,makeRunStateV2,validateRunStateV2,validateExecutionManifest}=require("../orchestrator/durable-contracts.js");
+const {makeRunStateV2,validateRunStateV2,validateExecutionManifest}=require("../orchestrator/durable-contracts.js");
 const {makeInitialManifest,evolveManifest}=require("../orchestrator/execution-manifest.js");
 const {assertRepositoryRevisionGate}=require("./control/repository-revision-gate.js");
+const {repositorySnapshotId}=require("./control/repository-snapshot.js");
 
 const RECOVERABLE_JOB_STATUSES=new Set(["QUEUED","RUNNING","RETRY_WAIT","PAUSED"]);
 const TERMINAL_JOB_STATUSES=new Set(["DONE","CANCELLED","BLOCKED","FAILED"]);
 const GC_PLAN_SCHEMA="debugai.durable-gc-plan/v1";
 function gcPlanPath(runId){const id=String(runId||"");if(!/^[A-Za-z0-9._-]{1,200}$/.test(id))throw new Error("RUN_ID_INVALID");return`gc-plan/${id}.json`;}
 function normalizeRepositorySnapshotId(value){if(value===null||value===undefined)return null;const text=String(value).trim();if(!text||text.length>200)throw new Error("DURABLE_REPOSITORY_SNAPSHOT_ID_INVALID");return text;}
-function tryRepositorySnapshotId(projectDir){
-  try{
-    const root=path.resolve(String(projectDir||""));
-    const head=execFileSync("git",["-C",root,"rev-parse","HEAD"],{encoding:"utf8",timeout:10000,stdio:["ignore","pipe","pipe"]}).trim();
-    const status=execFileSync("git",["-C",root,"status","--porcelain=v1","--untracked-files=no"],{encoding:"utf8",timeout:10000,stdio:["ignore","pipe","pipe"]});
-    if(!/^[a-f0-9]{40}$/i.test(head))return null;
-    return `git_${contentHash({head,status})}`;
-  }catch{return null;}
+function tryRepositorySnapshotId(projectDir,options={}){
+  try{return repositorySnapshotId(path.resolve(String(projectDir||"")),options);}catch{return null;}
 }
 
 class RunAuthority{
