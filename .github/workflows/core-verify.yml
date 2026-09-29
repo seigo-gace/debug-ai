@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: '24.20.0'
       - run: npm install --ignore-scripts --no-audit --no-fund
       - name: Syntax and source gate
         run: npm run check
@@ -40,6 +40,43 @@ jobs:
         run: DEBUG_AI_REQUIRE_TS7_REAL=1 node --test server/tests/typescript7-real.test.cjs
       - name: Debug AI image build
         run: docker build --target debug-ai -t debug-ai-app-ci .
+      - name: Debug AI real-container health smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          name=debug-ai-health-ci
+          cleanup() { docker rm -f "$name" >/dev/null 2>&1 || true; }
+          cleanup
+          trap cleanup EXIT
+          docker run -d --name "$name" \
+            --tmpfs /tmp:rw,nosuid,nodev,size=128m,mode=1777 \
+            -e DEBUG_AI_RUNTIME_ROOT=/tmp/debug-ai-runtime \
+            -e DEBUG_AI_CORE_URL=http://127.0.0.1:18080 \
+            -e AI_CORE_API_KEY=ci-test-key \
+            -e DEBUG_AI_EVIDENCE_SEARCH_URL=http://127.0.0.1:7376 \
+            -e DEBUG_AI_EVIDENCE_SEARCH_SECRET=ci-evidence-secret-0123456789abcdef \
+            -e DEBUG_AI_TGSERVER_URL=http://127.0.0.1:3000 \
+            -e DEBUG_AI_TGSERVER_LOG_PROJECT_ID=P004 \
+            -e DEBUG_AI_TGSERVER_KB_PROJECT_ID=P005 \
+            -e DEBUG_AI_REPO_ALLOWLIST=debug-ai \
+            -e GROQ_API_KEY=ci-test-key \
+            debug-ai-app-ci >/dev/null
+          if ! docker exec "$name" node -e '
+            const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+            (async()=>{
+              for(let i=0;i<40;i++){
+                try{
+                  const r=await fetch("http://127.0.0.1:8787/health");
+                  const j=await r.json();
+                  if(r.ok&&j.ok===true&&j.service==="debug-ai"&&j.patch_apply_requires_master_approval===true&&j.read_only_verify===true&&j.durable_async_runs===true&&j.startup_recovery===true){console.log("DEBUG_AI_HEALTH_SMOKE=PASS");return;}
+                }catch{}
+                await sleep(250);
+              }
+              process.exit(1);
+            })();'; then
+            docker logs "$name" || true
+            exit 1
+          fi
       - name: Sandbox sidecar image build
         run: docker build --target sandbox-runner -t debug-ai-sandbox-ci .
       - name: Landlock seccomp sidecar real isolation gate
