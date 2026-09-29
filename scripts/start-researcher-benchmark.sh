@@ -10,7 +10,7 @@ repo_root=$(git rev-parse --show-toplevel)
 container=${DEBUG_AI_BENCHMARK_CONTAINER:-debug-ai-debug-ai-1}
 workspace_host=$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/workspace"}}{{.Source}}{{end}}{{end}}' "$container")
 test -n "$workspace_host" || { echo "WORKSPACE_MOUNT_NOT_FOUND" >&2; exit 1; }
-run_root=${DEBUG_AI_BENCHMARK_RUN_ROOT:-"$(dirname "$repo_root")/debug-ai-benchmark-runs"}
+run_root=${DEBUG_AI_BENCHMARK_RUN_ROOT:-"$repo_root/artifacts/benchmark-runs"}
 
 if test "$#" -eq 0; then
   exact_sha=$(git -C "$repo_root" rev-parse HEAD)
