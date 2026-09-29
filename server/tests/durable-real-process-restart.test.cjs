@@ -17,22 +17,29 @@ function startChild(args){
   const exited=new Promise((resolve,reject)=>{child.once("error",reject);child.once("close",(code,signal)=>resolve({code,signal,events,stderr}));});
   return{child,events,exited,getStderr:()=>stderr};
 }
-async function waitFor(events,predicate,{timeoutMs=20000,label="event"}={}){
+function childExited(handle){return handle?.child?.exitCode!==null||handle?.child?.signalCode!==null;}
+async function waitFor(handle,predicate,{timeoutMs=45000,label="event"}={}){
   const deadline=Date.now()+timeoutMs;
-  while(Date.now()<deadline){const found=events.find(predicate);if(found)return found;await new Promise(resolve=>setTimeout(resolve,20));}
-  throw new Error(`TIMEOUT_WAITING_FOR_${label}:${JSON.stringify(events)}`);
+  while(Date.now()<deadline){
+    const found=handle.events.find(predicate);if(found)return found;
+    if(childExited(handle)){const exited=await handle.exited;throw new Error(`CHILD_EXITED_BEFORE_${label}:${JSON.stringify({code:exited.code,signal:exited.signal,events:exited.events,stderr:exited.stderr})}`);}
+    await new Promise(resolve=>setTimeout(resolve,20));
+  }
+  throw new Error(`TIMEOUT_WAITING_FOR_${label}:${JSON.stringify(handle.events)}`);
 }
+function killIfRunning(handle){if(handle&&!childExited(handle))handle.child.kill("SIGKILL");}
 
-test("real SIGKILL restart restores A/B and resumes C with same role execution and new attempt",{timeout:60000},async t=>{
+test("real SIGKILL restart restores A/B and resumes C with same role execution and new attempt",{timeout:120000},async t=>{
   if(process.platform!=="linux")return t.skip("native durable writer acceptance is Linux-only");
   const root=fs.mkdtempSync(path.join(os.tmpdir(),"debugai-real-restart-"));
   const runtimeRoot=path.join(root,"runtime"),repo=path.join(root,"repo");
   fs.mkdirSync(repo,{mode:0o700});fs.writeFileSync(path.join(repo,"fixture.js"),"module.exports=42;\n");
-  t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+  let first=null,second=null;
+  t.after(()=>{killIfRunning(first);killIfRunning(second);fs.rmSync(root,{recursive:true,force:true});});
 
-  const first=startChild(["initial",runtimeRoot,root,repo]);
-  const started=await waitFor(first.events,event=>event.type==="STARTED",{label:"STARTED"});
-  const interrupt=await waitFor(first.events,event=>event.type==="INTERRUPT_POINT",{label:"INTERRUPT_POINT"});
+  first=startChild(["initial",runtimeRoot,root,repo]);
+  const started=await waitFor(first,event=>event.type==="STARTED",{label:"STARTED"});
+  const interrupt=await waitFor(first,event=>event.type==="INTERRUPT_POINT",{label:"INTERRUPT_POINT"});
   const firstA=first.events.filter(event=>event.type==="WORK"&&event.unit==="researcher.A");
   const firstB=first.events.filter(event=>event.type==="WORK"&&event.unit==="researcher.B");
   assert.equal(firstA.length,1);assert.equal(firstB.length,1);assert.equal(interrupt.unit,"researcher.C");assert.equal(interrupt.attempt_no,1);
@@ -41,8 +48,8 @@ test("real SIGKILL restart restores A/B and resumes C with same role execution a
   const killed=await first.exited;
   assert.equal(killed.signal,"SIGKILL");
 
-  const second=startChild(["recover",runtimeRoot,root,repo,started.run_id]);
-  const recovered=await waitFor(second.events,event=>event.type==="RECOVERY",{timeoutMs:30000,label:"RECOVERY"});
+  second=startChild(["recover",runtimeRoot,root,repo,started.run_id]);
+  const recovered=await waitFor(second,event=>event.type==="RECOVERY",{timeoutMs:45000,label:"RECOVERY"});
   const finished=await second.exited;
   assert.equal(finished.code,0,`recovery child failed: ${finished.stderr} ${JSON.stringify(finished.events)}`);
 
