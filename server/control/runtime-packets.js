@@ -46,4 +46,18 @@ function makeReviewPacket({candidateRef,applyReceiptRef,repositoryRevision,chang
   return freezePacket("debugai.review-packet/v1",payload);
 }
 
-module.exports={REVIEW_EXCLUDED_FIELDS,makePatchPacket,makeReviewPacket};
+function publicReviewPacketSummary(packet,{localVerdict="UNKNOWN"}={}){
+  if(!packet||packet.schema!=="debugai.review-packet/v1"||!packet.payload||typeof packet.payload!=="object")throw new Error("REVIEW_PACKET_INVALID");
+  const invariants=Array.isArray(packet.payload.invariants)?packet.payload.invariants:[];
+  return Object.freeze({
+    schema:"debugai.review-packet-public-summary/v1",
+    packet_digest:nonEmpty(packet.packet_digest,"REVIEW_PACKET_DIGEST"),
+    changed_path_count:Array.isArray(packet.payload.changed_paths)?packet.payload.changed_paths.length:0,
+    executed_test_count:Array.isArray(packet.payload.executed_tests)?packet.payload.executed_tests.length:0,
+    test_result_count:Array.isArray(packet.payload.test_results)?packet.payload.test_results.length:0,
+    invariants_pass:invariants.length>0&&invariants.every(item=>String(item?.status||"").toUpperCase()==="PASS"||item?.pass===true),
+    local_verdict:String(localVerdict||"UNKNOWN").toUpperCase()
+  });
+}
+
+module.exports={REVIEW_EXCLUDED_FIELDS,makePatchPacket,makeReviewPacket,publicReviewPacketSummary};
