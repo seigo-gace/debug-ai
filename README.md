@@ -4,25 +4,25 @@ DebugAI is a code-first, evidence-driven debugging runtime for G-ACE development
 
 > **Source authority:** this GitHub repository is the canonical source. The currently deployed Contabo checkout is a separate runtime fact and must never be assumed to match the active GitHub branch without explicit readback.
 
-> **Completion rule:** a module existing in source, a fixture passing, or an external reviewer returning PASS is not enough to claim the DebugAI run or project complete. Completion must be proven by the actual workflow using real runtime evidence and the required gates.
+> **Completion rule:** a module existing in source, a fixture passing, a CI run succeeding, or an external reviewer returning PASS is not enough to claim the DebugAI project complete. Project completion still requires the intended real runtime closed loop with current evidence and the required gates.
 
 ## Active design authority
 
-The current system design, durable-continuation architecture, AI-side optimization rules, Strict Completion contract, storage/retention policy, and current implementation boundary are defined in:
+The current system design, durable-continuation architecture, AI-side optimization rules, Strict Completion contract, storage/retention policy, and implementation boundary are defined in:
 
 - [`docs/DURABLE-CONTINUATION-DESIGN.md`](docs/DURABLE-CONTINUATION-DESIGN.md)
 
-The design authority is aligned to implementation snapshot:
+Current repository authority at this README update:
 
 ```text
 repository = seigo-gace/debug-ai
 branch     = feat/durable-role-continuation-final-20260928
 base main  = 9171102bee023e57e84f1f933b4405137e891a6d
-reviewed implementation snapshot = 926dda4d17d739452b06e07f23ea5de8a5b8b800
-PR         = #21 / OPEN / DRAFT / UNMERGED at that snapshot
+current implementation before this README-only commit = df261bdae3b6f259ac428a173b798fae2fb68bdf
+PR         = #21 / OPEN / DRAFT / UNMERGED
 ```
 
-Documentation commits after that implementation snapshot do not change the runtime facts described below. New documentation SHAs require their own CI readback rather than inheriting CI status from `926dda4d...`.
+The implementation state below is based on current source and tests at `df261bdae3b6f259ac428a173b798fae2fb68bdf`. README-only commits after that source snapshot require their own exact-SHA CI readback and do not change runtime behavior by themselves.
 
 ---
 
@@ -157,7 +157,7 @@ TGserver is consumed via HTTP APIs rather than direct Telegram, Redis, or Meilis
 
 ## Evidence Projection + Active Evidence Window
 
-This is now **implemented and connected to the Tool Loop**.
+This is **implemented and connected to the Tool Loop**.
 
 Original observations and durable evidence are preserved. Only the prompt view is bounded to prevent historical Tool Observations from being re-sent in full on every LLM call.
 
@@ -220,7 +220,7 @@ RoleResult committed
 Diagnoser consumes restored Researcher result
 ```
 
-Real SIGKILL restart regression is restored at the reviewed implementation snapshot.
+Real SIGKILL restart regression is covered by the current regression suite.
 
 A durable regression discovered during this work was caused by semantic-shadow metadata being attached as a non-enumerable own property to authoritative role JSON. Durable canonical JSON correctly rejected it. The fix moved semantic-shadow state outside the authoritative role object and added regression coverage.
 
@@ -245,8 +245,8 @@ Recoverable durable runs are not deleted by age alone. Durable run state, manife
 Default patch-retention safety targets:
 
 ```text
-unapproved candidate                         7 days
-applied backup + verification PASS           72 hours
+unapproved candidate                          7 days
+applied backup + verification PASS            72 hours
 applied backup + verification FAIL/incomplete 7 days
 ```
 
@@ -254,7 +254,7 @@ Broad automatic `docker system prune -a --volumes` behavior is forbidden. Active
 
 ---
 
-## Patch, approval, and repository revision boundaries
+## Patch, approval, runtime packets, and repository revision boundaries
 
 Patch generation and patch application are separate operations.
 
@@ -267,7 +267,7 @@ Patch Engineer produces a candidate only. Application requires:
 
 Repository revision is part of correctness. Final review/completion must refer to the current post-apply repository state rather than a stale revision.
 
-Patch/Review runtime-packet components exist, but full workflow wiring for Patch Engineer and Local Reviewer remains a pending workstream. The intended design is to pass bounded authoritative packets rather than creating another large autonomous Tool Loop for those roles.
+Patch and Review runtime packets are **implemented and wired into the workflow**. Patch Engineer receives a bounded authoritative `debugai.patch-packet/v1`; Local Reviewer receives a fresh `debugai.review-packet/v1`. The required External Final Review receives only a bounded public summary rather than raw repository content. The full deterministic fixture asserts these packet and privacy boundaries.
 
 ---
 
@@ -291,19 +291,19 @@ AND no blocking evidence gap
 AND final run contract valid
 ```
 
-### Implemented now
+### Implemented and wired
 
-`server/control/completion-gate.js` contains the 11-condition gate plus runtime-input construction/evaluation. Focused tests cover missing evidence, missing/mismatched repository revision, unexecuted verification, reviewer UNKNOWN/non-PASS, receipt/candidate mismatch, and related fail-closed cases.
+`server/control/completion-gate.js` contains the 11-condition gate plus runtime-input construction/evaluation, and `server/workflow.js` wires that gate into `approveAndVerify()` using runtime-derived inputs.
 
-### Still pending
+Focused tests cover missing evidence, missing/mismatched repository revision, unexecuted verification, reviewer UNKNOWN/non-PASS, receipt/candidate mismatch, and related fail-closed cases.
 
-At implementation snapshot `926dda4d...`, `server/workflow.js` has **not yet fully wired this gate into `approveAndVerify()` using actual runtime evidence**.
+Workflow-level regression additionally proves that:
 
-This is the highest-priority remaining workflow task.
+- both Local Reviewer and External Final PASS are insufficient when a blocking evidence gap exists;
+- repository revision drift after apply blocks `COMPLETE`;
+- `COMPLETE` is reached only when the strict runtime conjunction passes.
 
 The runtime must not manufacture booleans to satisfy the gate. Candidate identity, receipts, revision snapshots, executed deterministic checks/gates, invariants, reviews, evidence gap, and final-contract validity must come from their authoritative runtime sources.
-
-The presence of the gate module is therefore **not** enough to claim Strict Completion is active end-to-end.
 
 ---
 
@@ -321,20 +321,21 @@ The presence of the gate module is therefore **not** enough to claim Strict Comp
 - runtime telemetry;
 - Evidence Projection / Active Evidence Window;
 - durable tool effects and Researcher continuation;
-- runtime packet components;
-- repository revision gate components;
-- completion gate module/input builder.
+- Patch / Review runtime packets and workflow wiring;
+- repository revision gate components and workflow binding;
+- Strict Completion module, runtime-input builder, and workflow wiring;
+- deterministic HTTP analyze-to-approved-patch closed-loop fixture;
+- external-final public-summary privacy boundary.
 
 ### Partial / pending
 
 - Role/Search Gate: shadow partial; production skip activation requires shadow validation first;
 - capability gap audit: 11 capabilities remain `NOT_IMPLEMENTED` and must be closed by the owning responsibility;
-- Patch/Review Packet workflow wiring: pending;
-- Strict Completion workflow wiring: pending;
 - model A/B: pending;
-- final real full closed-loop E2E: pending.
+- fresh real current-runtime self-development/self-debug run: pending;
+- final real production-equivalent closed-loop E2E: pending.
 
-Do not mechanically turn every gap into an AI tool. Some gaps belong to deterministic core or runtime-packet responsibilities.
+Do not mechanically turn every gap into an AI tool. Some gaps belong to deterministic core, runtime packets, repository/runtime policy, or other non-AI responsibilities.
 
 ---
 
@@ -369,12 +370,44 @@ Current runtime routes include:
 | GET | `/v1/status/:run_id` | current run status |
 | GET | `/v1/inspect/:run_id` | retained/redacted run inspection |
 | POST | `/v1/analyze` | analysis workflow |
+| POST | `/v1/runs/start` | start durable async analysis |
+| POST | `/v1/runs/resume` | resume a recoverable durable analysis run |
 | POST | `/v1/patch-candidate` | create patch candidate after allowed hypothesis-review state |
 | POST | `/v1/verify` | read-only verification |
-| POST | `/v1/approve-apply-verify` | explicit approval, apply, deterministic retest, review path |
+| POST | `/v1/approve-apply-verify` | explicit approval, apply, deterministic retest, review, Strict Completion path |
 | POST | `/v1/assets/promote` | promote validated knowledge asset |
 
-Durable state underneath an endpoint does not automatically prove every async/resume client semantic is complete. API behavior must be verified separately.
+Durable state underneath an endpoint does not automatically prove every real async/resume client scenario. API behavior must still be verified in the runtime scenario being claimed.
+
+---
+
+## CLI / external parent-agent integration
+
+DebugAI is callable from VS Code, Cursor, Codex, ChatGPT-driven terminal work, or another parent developer agent through `bin/debugai.js` / the `debugai` CLI.
+
+Current commands include:
+
+```text
+health
+analyze
+start
+resume
+wait
+patch
+verify
+status
+inspect
+```
+
+Important boundaries:
+
+- `debugai patch` creates a candidate only;
+- `debugai verify` is read-only;
+- CLI stdout is machine-readable JSON;
+- the CLI intentionally exposes no shortcut that silently approves/applies a patch;
+- mutation remains behind explicit approval using the exact candidate identity.
+
+CLI usage is documented in [`DEBUGAI.md`](DEBUGAI.md).
 
 ---
 
@@ -387,6 +420,7 @@ Durable state underneath an endpoint does not automatically prove every async/re
 - `tests/` — repository-level contract/integration tests.
 - `legacy/pc-authority/` — preserved PC/Windows authority and regression material; not the current server runtime.
 - `docs/` — active design authority and supporting documentation.
+- `artifacts/benchmark-runs/` — canonical ignored location for benchmark-run evidence generated by the repository benchmark tooling.
 - `Dockerfile` / `compose.yaml` — server image/residency/security/runtime configuration.
 
 ---
@@ -453,7 +487,9 @@ External providers are review services, not patch-application authorities.
 
 The current server design uses Docker/Compose with:
 
-- loopback application binding;
+- loopback application binding (`127.0.0.1:8787`);
+- `debug-ai` as the application Compose service;
+- host workspace mounted to `/workspace`;
 - no-new-privileges/capability reduction;
 - controlled durable storage;
 - repository policy/allowlist boundaries;
@@ -491,24 +527,27 @@ npm run audit:docker-storage
 npm run test:legacy
 ```
 
-CLI usage is documented in [`DEBUGAI.md`](DEBUGAI.md). CLI stdout is intended to be machine-readable. `debugai verify` is read-only and the CLI intentionally does not expose a patch-apply shortcut.
+`debugai verify` is read-only and the CLI intentionally does not expose a patch-apply shortcut.
 
 ---
 
 ## Current verified snapshot and CI boundary
 
-For exact implementation SHA `926dda4d17d739452b06e07f23ea5de8a5b8b800`:
+For exact implementation SHA `df261bdae3b6f259ac428a173b798fae2fb68bdf`, GitHub check-runs were read back as:
 
 ```text
-Verify                 = SUCCESS
-Core Verify            = SUCCESS
-Public Readiness Audit = SUCCESS
-CodeQL                  = SUCCESS
+CodeQL                 = SUCCESS
+analyze                 = SUCCESS
+dependency-review       = SUCCESS
+verify                  = SUCCESS
+core-verify             = SUCCESS
+legacy-authority        = SUCCESS
+public-readiness        = SUCCESS
 ```
 
-These results belong to that exact SHA only.
+That is `7/7 SUCCESS` for the exact source SHA. These results belong to that SHA only and do not prove a later README-only commit until that later SHA gets its own CI readback.
 
-The current branch is far beyond the older README/design state that described Effect Ledger, Tool Loop durable hooks, Researcher continuation, startup recovery, and retention as merely `NEXT`. Those old status statements are obsolete and must not be used as Current State authority.
+The current branch is far beyond the older state that described Effect Ledger, Tool Loop durable hooks, Researcher continuation, Patch/Review Packet wiring, or Strict Completion workflow wiring as pending. Those old status statements are obsolete and must not be used as Current State authority.
 
 ---
 
@@ -527,14 +566,19 @@ The current branch is far beyond the older README/design state that described Ef
 | Role Tool Loop telemetry | IMPLEMENTED |
 | Production skill/benchmark isolation | IMPLEMENTED |
 | Evidence Projection + Active Evidence Window | IMPLEMENTED + CONNECTED |
+| Repository revision fallback/binding | IMPLEMENTED + TESTED |
+| Patch / Review Packet workflow wiring | IMPLEMENTED + TESTED |
 | Strict Completion Gate module | IMPLEMENTED |
 | Strict Completion runtime-input builder | IMPLEMENTED + TESTED |
-| **Strict Completion workflow wiring** | **PENDING** |
-| Patch / Review Packet workflow wiring | PENDING |
+| Strict Completion workflow wiring | IMPLEMENTED + TESTED |
+| Deterministic full analyze→approved patch fixture | PASS |
+| External final public-summary privacy boundary | TESTED |
+| CLI start/resume/wait/patch/verify/status/inspect contract | IMPLEMENTED + TESTED |
 | Role/Search Gate | SHADOW PARTIAL |
 | Remaining capability gaps | 11 NOT_IMPLEMENTED |
 | Model A/B | PENDING |
-| Real full closed-loop E2E | PENDING |
+| Fresh real current-runtime self-development run | NOT EXECUTED |
+| Real production-equivalent full closed-loop E2E | PENDING |
 | Main merge | NOT DONE / NOT AUTHORIZED |
 | Deploy / production change | NOT DONE |
 
@@ -547,34 +591,36 @@ DebugAI as a whole is therefore **not yet fully complete**.
 Current order is:
 
 ```text
-1. Strict COMPLETE workflow wiring
-2. focused regression + exact-SHA CI
-3. Patch / Review Packet workflow wiring
-4. Role / Search Gate shadow verification
-5. limited activation after false-skip safety proof
-6. close the remaining 11 capability gaps by responsibility
-7. model A/B
-8. real full closed-loop E2E
-9. PR final audit
-10. wait for explicit Master approval before merge/deploy
+1. fresh real current-runtime DebugAI self-development/self-debug run
+2. bind the fresh run to current repository/runtime evidence and identify any real blocking defect
+3. fix confirmed source defects without weakening approval/evidence/revision gates
+4. focused regression + repository verification + exact-SHA CI
+5. DebugAI read-only verify against the corrected current source
+6. Role / Search Gate shadow verification
+7. limited activation only after false-skip safety proof
+8. close the remaining 11 capability gaps by responsibility
+9. model A/B
+10. final real production-equivalent closed-loop E2E
+11. PR final audit
+12. wait for explicit Master approval before merge/deploy
 ```
 
-Do not return to older status documents that list already completed durable foundations as pending work.
+Do not return to older status documents that list already completed durable, packet, or Strict Completion workflow foundations as pending work.
 
 ---
 
 ## Final real closed-loop acceptance
 
-Project-level completion still requires a real run covering the intended production path, including at minimum:
+Project-level completion still requires a real current-runtime run covering the intended production path, including at minimum:
 
 - unknown/insufficient evidence handling;
-- real repository defect;
+- real repository defect or an explicitly verified no-defect outcome for the chosen target;
 - prompt-injection resistance;
 - stale revision rejection;
 - durable SIGKILL resume;
-- patch candidate generation;
+- patch candidate generation when a confirmed defect requires a patch;
 - explicit approval boundary;
-- application receipt;
+- application receipt when mutation is approved;
 - deterministic retest;
 - invariants;
 - fresh Local Reviewer;
@@ -590,7 +636,7 @@ A deterministic fixture alone is not enough.
 Server source changes follow this order:
 
 ```text
-GitHub branch
+GitHub feature branch
  -> focused tests
  -> repository verification / exact-SHA CI
  -> PR audit
@@ -604,6 +650,14 @@ GitHub branch
 ```
 
 Do not silently pull/reset/sync the live server because GitHub advanced. Do not treat an older server checkout as current branch source.
+
+---
+
+## README synchronization rule
+
+README is part of the development handoff contract, not an archival snapshot. When a development step changes the implemented/pending boundary, verification boundary, runtime entry point, role/tool responsibility, safety gate, or required next-work order, README must be updated in the same development sequence after the implementation/test state is known.
+
+Do not intentionally leave already-completed work listed as pending and rely on readers to ignore it. Historical implementation snapshots may be mentioned as history, but the Current State sections must track the latest verified branch state.
 
 ---
 
