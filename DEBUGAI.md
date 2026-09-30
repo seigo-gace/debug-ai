@@ -99,7 +99,32 @@ Run-scoped MCP tools require an explicit `run_id`. Repository-scoped analysis an
 
 MCP design/verification boundaries are documented in [`docs/MCP_ADAPTER.md`](docs/MCP_ADAPTER.md).
 
-Source implementation or CI PASS does not prove that an external MCP host has successfully connected. Until real stdio handshake/tool discovery/call verification is complete, runtime MCP status remains `NOT_VERIFIED`.
+Verified source/protocol boundary before this documentation-only update:
+
+```text
+implementation SHA       = 078203e61073be99a48444ba0c3467a7143102f4
+repository tests         = 286/286 PASS
+MCP stdio handshake      = PASS
+MCP tools/list           = PASS (9 tools)
+approve/apply absent     = PASS
+MCP debugai_health call  = PASS
+Verify workflow          = SUCCESS
+Core Verify workflow     = SUCCESS
+Public Readiness Audit   = SUCCESS
+```
+
+The stdio protocol regression used an official MCP client and a controlled loopback HTTP fixture. It proves the MCP transport/adapter/delegation boundary, not a deployed Contabo DebugAI runtime.
+
+Current separation:
+
+```text
+MCP_SOURCE=PASS
+MCP_STDIO_PROTOCOL=PASS
+MCP_CI=PASS
+MCP_LIVE_DEBUGAI_RUNTIME=NOT_VERIFIED
+WORKSPACE_REGISTRATION=NOT_EXECUTED
+SERVER_DEPLOY=NOT_EXECUTED
+```
 
 ## Output contract
 
