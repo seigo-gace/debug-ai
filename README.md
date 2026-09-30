@@ -11,6 +11,7 @@ DebugAI is a code-first, evidence-driven debugging runtime for G-ACE development
 **Before development, debugging, verification, refactoring, continuation, or implementation planning, read the design authority below first. Do not start from README status alone.**
 
 - **Design authority:** [`docs/DURABLE-CONTINUATION-DESIGN.md`](docs/DURABLE-CONTINUATION-DESIGN.md)
+- **MCP integration contract:** [`docs/MCP_ADAPTER.md`](docs/MCP_ADAPTER.md)
 
 Use the documents and history with these distinct responsibilities:
 
@@ -52,17 +53,49 @@ The system design, durable-continuation architecture, AI-side optimization rules
 
 - [`docs/DURABLE-CONTINUATION-DESIGN.md`](docs/DURABLE-CONTINUATION-DESIGN.md)
 
+The MCP adapter is a compatible parent-agent transport/integration layer and does not replace or rewrite that baseline. Its integration boundary is defined in:
+
+- [`docs/MCP_ADAPTER.md`](docs/MCP_ADAPTER.md)
+
 Current repository authority at this README update:
 
 ```text
-repository = seigo-gace/debug-ai
-branch     = feat/durable-role-continuation-final-20260928
-base main  = 9171102bee023e57e84f1f933b4405137e891a6d
-current implementation before this README-only commit = df261bdae3b6f259ac428a173b798fae2fb68bdf
-PR         = #21 / OPEN / DRAFT / UNMERGED
+repository                     = seigo-gace/debug-ai
+branch                         = feat/mcp-adapter-20260930
+base branch                    = feat/durable-role-continuation-final-20260928
+base SHA                       = 095193835fae19d5b63198d9c584e0b7079c9656
+MCP verified implementation SHA = 078203e61073be99a48444ba0c3467a7143102f4
+previous docs HEAD             = 8e1922d0b02414c6666a538634cdd0a25078f3ef
+PR                             = #22 / OPEN / DRAFT / UNMERGED
+main merge                     = NOT_EXECUTED
+server deploy                  = NOT_EXECUTED
 ```
 
-The implementation state below is based on current source and tests at `df261bdae3b6f259ac428a173b798fae2fb68bdf`. README-only commits after that source snapshot require their own exact-SHA CI readback and do not change runtime behavior by themselves.
+Exact MCP implementation verification at `078203e61073be99a48444ba0c3467a7143102f4`:
+
+```text
+Verify                 = SUCCESS
+Core Verify            = SUCCESS
+Public Readiness Audit = SUCCESS
+repository tests        = 286/286 PASS
+MCP stdio handshake     = PASS
+MCP tools/list          = PASS / 9 expected tools
+MCP health call         = PASS
+approve/apply MCP tool  = ABSENT
+```
+
+The later documentation-only HEAD `8e1922d0b02414c6666a538634cdd0a25078f3ef` also has Verify / Core Verify / Public Readiness Audit SUCCESS. These results do **not** prove a live Contabo MCP deployment.
+
+Current MCP state separation:
+
+```text
+MCP_SOURCE=PASS
+MCP_UNIT_CONTRACT=PASS
+MCP_STDIO_PROTOCOL=PASS
+MCP_CI=PASS
+MCP_LIVE_DEBUGAI_RUNTIME=NOT_VERIFIED
+WORKSPACE_REGISTRATION=NOT_EXECUTED
+```
 
 ---
 
@@ -365,7 +398,8 @@ The runtime must not manufacture booleans to satisfy the gate. Candidate identit
 - repository revision gate components and workflow binding;
 - Strict Completion module, runtime-input builder, and workflow wiring;
 - deterministic HTTP analyze-to-approved-patch closed-loop fixture;
-- external-final public-summary privacy boundary.
+- external-final public-summary privacy boundary;
+- guarded MCP stdio adapter delegating to the existing CLI/HTTP contract.
 
 ### Partial / pending
 
@@ -373,7 +407,8 @@ The runtime must not manufacture booleans to satisfy the gate. Candidate identit
 - capability gap audit: 11 capabilities remain `NOT_IMPLEMENTED` and must be closed by the owning responsibility;
 - model A/B: pending;
 - fresh real current-runtime self-development/self-debug run: pending;
-- final real production-equivalent closed-loop E2E: pending.
+- final real production-equivalent closed-loop E2E: pending;
+- MCP live Contabo runtime connection and Workspace registration: pending.
 
 Do not mechanically turn every gap into an AI tool. Some gaps belong to deterministic core, runtime packets, repository/runtime policy, or other non-AI responsibilities.
 
@@ -421,11 +456,11 @@ Durable state underneath an endpoint does not automatically prove every real asy
 
 ---
 
-## CLI / external parent-agent integration
+## CLI / MCP / external parent-agent integration
 
-DebugAI is callable from VS Code, Cursor, Codex, ChatGPT-driven terminal work, or another parent developer agent through `bin/debugai.js` / the `debugai` CLI.
+DebugAI is callable from VS Code, Cursor, Codex, ChatGPT-driven terminal work, or another parent developer agent through the existing CLI/HTTP interface and the guarded MCP stdio adapter.
 
-Current commands include:
+Current CLI commands include:
 
 ```text
 health
@@ -439,15 +474,44 @@ status
 inspect
 ```
 
+Current MCP tools:
+
+```text
+debugai_health
+debugai_analyze
+debugai_start
+debugai_resume
+debugai_wait
+debugai_patch_candidate
+debugai_verify
+debugai_status
+debugai_inspect
+```
+
 Important boundaries:
 
-- `debugai patch` creates a candidate only;
-- `debugai verify` is read-only;
+- `debugai patch` and `debugai_patch_candidate` create a candidate only;
+- `debugai verify` / `debugai_verify` are read-only;
 - CLI stdout is machine-readable JSON;
-- the CLI intentionally exposes no shortcut that silently approves/applies a patch;
+- the MCP adapter delegates to the existing `bin/debugai.js` execution contract;
+- neither CLI nor MCP exposes a shortcut that silently approves/applies a patch;
 - mutation remains behind explicit approval using the exact candidate identity.
 
-CLI usage is documented in [`DEBUGAI.md`](DEBUGAI.md).
+CLI/MCP usage is documented in [`DEBUGAI.md`](DEBUGAI.md), and the MCP-specific design/verification boundary is documented in [`docs/MCP_ADAPTER.md`](docs/MCP_ADAPTER.md).
+
+Run the MCP stdio entry with:
+
+```bash
+npm run debugai:mcp
+```
+
+or after linking:
+
+```bash
+debugai-mcp
+```
+
+The MCP stdio protocol has been verified in CI with the official MCP client, but live Contabo DebugAI runtime connection and Workspace registration remain `NOT_VERIFIED / NOT_EXECUTED`.
 
 ---
 
@@ -458,8 +522,11 @@ CLI usage is documented in [`DEBUGAI.md`](DEBUGAI.md).
 - `server/tests/` — adapter, workflow, security, durable, benchmark, fault, completion, storage, and regression tests.
 - `orchestrator/` — platform-neutral canonical cores and durable contracts/primitives.
 - `tests/` — repository-level contract/integration tests.
+- `mcp/` — guarded MCP adapter, module map, and MCP protocol/contract tests; does not own workflow or mutation authority.
+- `bin/debugai.js` — existing CLI/HTTP client integration.
+- `bin/debugai-mcp.mjs` — MCP stdio entrypoint.
 - `legacy/pc-authority/` — preserved PC/Windows authority and regression material; not the current server runtime.
-- `docs/` — active design authority and supporting documentation.
+- `docs/` — active design authority and supporting documentation, including MCP adapter contract.
 - `artifacts/benchmark-runs/` — canonical ignored location for benchmark-run evidence generated by the repository benchmark tooling.
 - `Dockerfile` / `compose.yaml` — server image/residency/security/runtime configuration.
 
@@ -556,7 +623,7 @@ npm install
 npm run verify
 ```
 
-`npm run verify` performs the durable native build, JavaScript syntax checks, and repository/server tests.
+`npm run verify` performs the durable native build, JavaScript syntax checks, and repository/server/MCP tests.
 
 Useful explicit commands:
 
@@ -565,29 +632,50 @@ npm run test:e2e-fixture
 npm run audit:control-plane-gaps
 npm run audit:docker-storage
 npm run test:legacy
+npm run debugai:mcp
 ```
 
-`debugai verify` is read-only and the CLI intentionally does not expose a patch-apply shortcut.
+`debugai verify` is read-only and the CLI/MCP surfaces intentionally do not expose a patch-apply shortcut.
 
 ---
 
 ## Current verified snapshot and CI boundary
 
-For exact implementation SHA `df261bdae3b6f259ac428a173b798fae2fb68bdf`, GitHub check-runs were read back as:
+### MCP branch exact implementation snapshot
+
+For exact MCP implementation SHA `078203e61073be99a48444ba0c3467a7143102f4`, GitHub workflows were read back as:
 
 ```text
-CodeQL                 = SUCCESS
-analyze                 = SUCCESS
-dependency-review       = SUCCESS
-verify                  = SUCCESS
-core-verify             = SUCCESS
-legacy-authority        = SUCCESS
-public-readiness        = SUCCESS
+Verify                 = SUCCESS
+Core Verify            = SUCCESS
+Public Readiness Audit = SUCCESS
 ```
 
-That is `7/7 SUCCESS` for the exact source SHA. These results belong to that SHA only and do not prove a later README-only commit until that later SHA gets its own CI readback.
+The `Verify` workflow executed the complete test suite:
 
-The current branch is far beyond the older state that described Effect Ledger, Tool Loop durable hooks, Researcher continuation, Patch/Review Packet wiring, or Strict Completion workflow wiring as pending. Those old status statements are obsolete and must not be used as Current State authority.
+```text
+tests = 286
+pass  = 286
+fail  = 0
+```
+
+MCP protocol regression additionally verified:
+
+```text
+stdio initialize/handshake = PASS
+tools/list                 = PASS
+exact exposed tools        = 9
+approve/apply tool absent  = PASS
+debugai_health tool call   = PASS
+```
+
+The later documentation-only HEAD `8e1922d0b02414c6666a538634cdd0a25078f3ef` also has Verify / Core Verify / Public Readiness Audit SUCCESS.
+
+The stdio regression used a controlled loopback HTTP fixture downstream. It proves the MCP protocol/delegation boundary but does not prove a deployed Contabo MCP runtime.
+
+### Previous durable implementation snapshot
+
+For exact durable implementation SHA `df261bdae3b6f259ac428a173b798fae2fb68bdf`, the prior seven-check source boundary was verified SUCCESS. Those results remain historical evidence for that SHA and are not reused as proof for later source without later exact-SHA checks.
 
 ---
 
@@ -614,6 +702,10 @@ The current branch is far beyond the older state that described Effect Ledger, T
 | Deterministic full analyze→approved patch fixture | PASS |
 | External final public-summary privacy boundary | TESTED |
 | CLI start/resume/wait/patch/verify/status/inspect contract | IMPLEMENTED + TESTED |
+| MCP adapter source / unit contract | IMPLEMENTED + VERIFIED |
+| MCP real stdio protocol / tools/list / health call | VERIFIED PASS IN CI |
+| MCP live Contabo DebugAI runtime | NOT VERIFIED |
+| Workspace MCP registration | NOT EXECUTED |
 | Role/Search Gate | SHADOW PARTIAL |
 | Remaining capability gaps | 11 NOT_IMPLEMENTED |
 | Model A/B | PENDING |
@@ -631,21 +723,22 @@ DebugAI as a whole is therefore **not yet fully complete**.
 Current order is:
 
 ```text
-1. fresh real current-runtime DebugAI self-development/self-debug run
-2. bind the fresh run to current repository/runtime evidence and identify any real blocking defect
-3. fix confirmed source defects without weakening approval/evidence/revision gates
-4. focused regression + repository verification + exact-SHA CI
-5. DebugAI read-only verify against the corrected current source
-6. Role / Search Gate shadow verification
-7. limited activation only after false-skip safety proof
-8. close the remaining 11 capability gaps by responsibility
-9. model A/B
-10. final real production-equivalent closed-loop E2E
-11. PR final audit
-12. wait for explicit Master approval before merge/deploy
+1. keep MCP live-runtime/Workspace registration separate from source/CI verification
+2. fresh real current-runtime DebugAI self-development/self-debug run
+3. bind the fresh run to current repository/runtime evidence and identify any real blocking defect
+4. fix confirmed source defects without weakening approval/evidence/revision gates
+5. focused regression + repository verification + exact-SHA CI
+6. DebugAI read-only verify against the corrected current source
+7. Role / Search Gate shadow verification
+8. limited activation only after false-skip safety proof
+9. close the remaining 11 capability gaps by responsibility
+10. model A/B
+11. final real production-equivalent closed-loop E2E
+12. PR final audit
+13. wait for explicit Master approval before merge/deploy
 ```
 
-Do not return to older status documents that list already completed durable, packet, or Strict Completion workflow foundations as pending work.
+Do not return to older status documents that list already completed durable, packet, Strict Completion, or MCP source/protocol foundations as pending work.
 
 ---
 
@@ -667,7 +760,7 @@ Project-level completion still requires a real current-runtime run covering the 
 - required External Final Review;
 - Strict Completion Gate using actual runtime evidence.
 
-A deterministic fixture alone is not enough.
+A deterministic fixture or MCP transport test alone is not enough.
 
 ---
 
