@@ -1,0 +1,46 @@
+"use strict";
+const {performance}=require("node:perf_hooks");
+const {fetch:undiciFetch,Agent}=require("undici");
+const {ROLES}=require("../roles.js");
+const {compileInvocation}=require("./invocation-compiler.js");
+
+const SCHEMA="debugai.causal-scout-skill-effect-benchmark/v1";
+const ROLE="causal_scout";
+const OUTPUT_POLICY="Return JSON only with exactly these top-level keys: failure_family, causal_chain, unsupported_links, alternate_hypotheses, confidence. failure_family must be a short string. causal_chain/unsupported_links/alternate_hypotheses must be arrays of strings. confidence must be one of LOW, MEDIUM, HIGH. Use only supplied evidence. Do not claim a confirmed root cause.";
+
+const CASES=Object.freeze([
+  Object.freeze({id:"failure_taxonomy",skills:Object.freeze(["failure-taxonomy-router","source-runtime-correlation","causal-chain-builder"]),expected:Object.freeze({family:"state_staleness",chain:["runtime:cache_hit","state:stale_timestamp","symptom:stale_object"],unsupported:"source:serializer_bug",alternate:"runtime:upstream_stale_response"}),input:Object.freeze({symptom:"GET /item returns a stale object",evidence:Object.freeze(["runtime:cache_hit occurred before response","state:cached object timestamp is older than request","symptom:returned object matches cached stale value","source:serializer code path not observed","runtime:upstream freshness not measured"])})}),
+  Object.freeze({id:"source_runtime_correlation",skills:Object.freeze(["failure-taxonomy-router","source-runtime-correlation","causal-chain-builder"]),expected:Object.freeze({family:"ordering_race",chain:["source:save_then_emit","runtime:event_emitted_before_commit","state:reader_observed_old_value"],unsupported:"source:database_corruption",alternate:"runtime:consumer_reordered_event"}),input:Object.freeze({symptom:"consumer reads old value after update event",evidence:Object.freeze(["source:save() is called before emit(update)","runtime trace: emit(update) timestamp precedes durable commit timestamp","state trace: consumer read happened between emit and commit","no evidence of database corruption","consumer internal ordering not traced"])})}),
+  Object.freeze({id:"alternate_hypothesis",skills:Object.freeze(["failure-taxonomy-router","causal-chain-builder","alternate-hypothesis-seed"]),expected:Object.freeze({family:"timeout_family",chain:["runtime:request_started","runtime:downstream_no_response","symptom:deadline_exceeded"],unsupported:"source:retry_loop_confirmed",alternate:"runtime:network_path_stall"}),input:Object.freeze({symptom:"request exceeds deadline",evidence:Object.freeze(["runtime:request started","runtime:no downstream response before deadline","symptom:deadline exceeded","source:retry configuration exists but retry execution was not observed","network path telemetry unavailable"])})}),
+]);
+
+function parseJson(content){const text=String(content||"").trim().replace(/^```json\s*/i,"").replace(/```$/i,"").trim();return JSON.parse(text);}
+function withoutSkillDirectives(system){return String(system).split("\n").filter(line=>!line.startsWith("SKILL_SELECTION=")&&!line.startsWith("SELECTED_SKILLS=")&&!line.includes(" procedure=")).join("\n");}
+function buildSystemsForCase(testCase){const compiled=compileInvocation(ROLE,{task:"classify bounded causal family correlate source/runtime build supported causal chain seed distinct alternative",extraSystem:OUTPUT_POLICY,selectedSkillIds:[...testCase.skills]});return {on:compiled.system,off:withoutSkillDirectives(compiled.system),selected_skill_ids:[...compiled.selected_skill_ids]};}
+function sameArray(a,b){return Array.isArray(a)&&Array.isArray(b)&&a.length===b.length&&a.every((x,i)=>x===b[i]);}
+function scoreCase(testCase,value){
+  const family=String(value?.failure_family||"");
+  const chain=Array.isArray(value?.causal_chain)?value.causal_chain.map(String):[];
+  const unsupported=Array.isArray(value?.unsupported_links)?value.unsupported_links.map(String):[];
+  const alternates=Array.isArray(value?.alternate_hypotheses)?value.alternate_hypotheses.map(String):[];
+  let score=0;const checks={};
+  checks.family=family===testCase.expected.family;if(checks.family)score+=1;
+  checks.chain=sameArray(chain,testCase.expected.chain);if(checks.chain)score+=1;
+  checks.unsupported=unsupported.includes(testCase.expected.unsupported);if(checks.unsupported)score+=1;
+  checks.alternate=alternates.includes(testCase.expected.alternate);if(checks.alternate)score+=1;
+  const text=JSON.stringify(value||{}).toLowerCase();checks.no_overclaim=!text.includes("confirmed root cause")&&!text.includes("root cause confirmed")&&!text.includes("definitive root cause");if(checks.no_overclaim)score+=1;
+  return {score,max_score:5,checks,failure_family:family,causal_chain:chain,unsupported_links:unsupported,alternate_hypotheses:alternates,confidence:String(value?.confidence||"")};
+}
+function defaultClient({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=process.env.AI_CORE_API_KEY,fetchImpl=undiciFetch,timeoutMs=600000}={}){
+  if(!baseUrl)throw new Error("AI_CORE_URL_REQUIRED");if(!apiKey)throw new Error("AI_CORE_API_KEY_REQUIRED");
+  const endpoint=new URL("/v1/chat/completions",baseUrl).toString();const dispatcher=new Agent({headersTimeout:timeoutMs+5000,bodyTimeout:timeoutMs+5000});
+  return async function callModel({system,user}){const ctl=new AbortController();const timer=setTimeout(()=>ctl.abort(),timeoutMs);try{const r=await fetchImpl(endpoint,{method:"POST",headers:{authorization:`Bearer ${apiKey}`,"content-type":"application/json"},body:JSON.stringify({model:ROLES[ROLE].backend_model,messages:[{role:"system",content:system},{role:"user",content:user}],max_tokens:700,temperature:0,stream:false,response_format:{type:"json_object"},chat_template_kwargs:{enable_thinking:ROLES[ROLE].thinking}}),signal:ctl.signal,dispatcher});const text=await r.text();if(!r.ok)throw new Error(`AI_CORE_HTTP_${r.status}:${text.slice(0,300)}`);const envelope=JSON.parse(text);const content=envelope?.choices?.[0]?.message?.content;if(typeof content!=="string"||!content.trim())throw new Error("AI_CORE_EMPTY");return {content};}finally{clearTimeout(timer);}};
+}
+async function runCausalScoutSkillEffectBenchmark({callModel=defaultClient(),clock=performance}={}){
+  const results=[],totals={on:0,off:0,max:CASES.length*5};const started=clock.now();
+  for(const testCase of CASES){const systems=buildSystemsForCase(testCase);const user=JSON.stringify({benchmark_case:testCase.id,...testCase.input});const pair={case_id:testCase.id,selected_skill_ids:systems.selected_skill_ids};for(const mode of ["off","on"]){const t0=clock.now();const reply=await callModel({mode,system:systems[mode],user,case:testCase});const parsed=parseJson(reply.content);const scored=scoreCase(testCase,parsed);pair[mode]={...scored,elapsed_ms:Math.max(0,Math.round(clock.now()-t0)),output:parsed};totals[mode]+=scored.score;}results.push(pair);}
+  const delta=totals.on-totals.off;return {schema:SCHEMA,authority:"MEASUREMENT_ONLY",completed:true,role:ROLE,model:ROLES[ROLE].backend_model,temperature:0,skill_selection_boundary:"MAX_3_PER_INVOCATION",cases:results,score:{skill_on:totals.on,skill_off:totals.off,max:totals.max,delta,winner:delta>0?"SKILL_ON":delta<0?"SKILL_OFF":"TIE",effect_demonstrated:delta>0},elapsed_ms:Math.max(0,Math.round(clock.now()-started))};
+}
+async function cli(){try{process.stdout.write(`${JSON.stringify(await runCausalScoutSkillEffectBenchmark(),null,2)}\n`);}catch(error){process.stdout.write(`${JSON.stringify({schema:SCHEMA,authority:"MEASUREMENT_ONLY",completed:false,error:String(error?.message||error)},null,2)}\n`);process.exitCode=1;}}
+if(require.main===module)void cli();
+module.exports={SCHEMA,ROLE,CASES,OUTPUT_POLICY,parseJson,withoutSkillDirectives,buildSystemsForCase,scoreCase,defaultClient,runCausalScoutSkillEffectBenchmark};

@@ -15,6 +15,6 @@ class TypeScript7LspClient{
   documentSymbols(file){return this.request("textDocument/documentSymbol",{textDocument:{uri:pathToFileURL(path.resolve(file)).href}});}
   async definition(file,symbol){const p=findPosition(file,symbol);if(!p)return [];return normalizeLocations(await this.request("textDocument/definition",{textDocument:{uri:pathToFileURL(path.resolve(file)).href},position:p}));}
   async references(file,symbol){const p=findPosition(file,symbol);if(!p)return [];return normalizeLocations(await this.request("textDocument/references",{textDocument:{uri:pathToFileURL(path.resolve(file)).href},position:p,context:{includeDeclaration:true}}));}
-  async stop(){if(!this.proc)return;try{await this.request("shutdown",{},4000)}catch{}try{this.notify("exit",{})}catch{}try{this.proc.kill()}catch{}this.proc=null;}
+  async stop(){if(!this.proc)return;const proc=this.proc;try{await this.request("shutdown",{},4000)}catch{}try{this.notify("exit",{})}catch{}try{proc.stdin?.end()}catch{}if(proc.exitCode===null)await new Promise(resolve=>{const done=()=>resolve();proc.once("close",done);proc.once("exit",done)});this.proc=null;}
 }
 module.exports={TypeScript7LspClient,normalizeLocations,findPosition};

@@ -1,0 +1,47 @@
+"use strict";
+const test=require("node:test");
+const assert=require("node:assert/strict");
+const {MAX_TOKENS,CASES,buildSystemsForCase,scoreCase,runResearcherSkillEffectBenchmark}=require("../control/researcher-skill-effect-benchmark.js");
+
+test("Researcher benchmark fixes five evidence capabilities within the three-skill boundary",()=>{
+  assert.equal(MAX_TOKENS,400);
+  assert.deepEqual(CASES.map(x=>x.id),["authoritative_source_priority","exact_version_binding","contradictory_evidence_retention","no_evidence","unsupported_source_rejection"]);
+  for(const c of CASES){
+    const systems=buildSystemsForCase(c);
+    assert.ok(systems.selected_skill_ids.length>=1&&systems.selected_skill_ids.length<=3);
+    assert.deepEqual(systems.selected_skill_ids,[...c.skills]);
+    assert.match(systems.on,/SELECTED_SKILLS=/);
+    assert.match(systems.on,/procedure=/);
+    assert.doesNotMatch(systems.off,/SELECTED_SKILLS=|procedure=/);
+    assert.match(systems.off,/ROLE=researcher/);
+    assert.match(systems.off,/Preserve contradictory evidence and never invent support/i);
+  }
+});
+
+test("Researcher deterministic scorer requires exact authority, version, contradiction, and evidence-gap outputs",()=>{
+  for(const c of CASES){
+    const good={research_status:c.expected.status,answer:c.expected.answer,evidence_refs:[...c.expected.evidence],rejected_source_refs:[...c.expected.rejected],contradictions:[...c.expected.contradictions],bound_version:c.expected.version};
+    assert.equal(scoreCase(c,good).score,5,c.id);
+  }
+  const authority=CASES[0];
+  const fabricated={research_status:authority.expected.status,answer:authority.expected.answer,evidence_refs:["INVENTED_SOURCE"],rejected_source_refs:[...authority.expected.rejected],contradictions:[...authority.expected.contradictions],bound_version:authority.expected.version};
+  assert.ok(scoreCase(authority,fabricated).score<5);
+  const noEvidence=CASES[3];
+  const overclaim={research_status:"SUPPORTED",answer:"retries=3",evidence_refs:[],rejected_source_refs:[],contradictions:[],bound_version:"1.4"};
+  assert.ok(scoreCase(noEvidence,overclaim).score<5);
+});
+
+test("Researcher benchmark keeps paired inputs identical and derives the measured winner",async()=>{
+  const calls=[];
+  const outputs=new Map();
+  for(const c of CASES){
+    outputs.set(`off:${c.id}`,JSON.stringify({research_status:"INSUFFICIENT_EVIDENCE",answer:"UNKNOWN",evidence_refs:[],rejected_source_refs:[],contradictions:[],bound_version:null}));
+    outputs.set(`on:${c.id}`,JSON.stringify({research_status:c.expected.status,answer:c.expected.answer,evidence_refs:[...c.expected.evidence],rejected_source_refs:[...c.expected.rejected],contradictions:[...c.expected.contradictions],bound_version:c.expected.version}));
+  }
+  const result=await runResearcherSkillEffectBenchmark({callModel:async({mode,user})=>{const parsed=JSON.parse(user);calls.push({mode,user});return {content:outputs.get(`${mode}:${parsed.benchmark_case}`)};},clock:{now:(()=>{let n=0;return()=>++n;})()}});
+  assert.equal(result.skill_selection_boundary,"MAX_3_PER_INVOCATION");
+  assert.equal(result.score.skill_on,25);
+  assert.ok(result.score.skill_off<25);
+  assert.equal(result.score.winner,"SKILL_ON");
+  for(let i=0;i<calls.length;i+=2)assert.equal(calls[i].user,calls[i+1].user);
+});

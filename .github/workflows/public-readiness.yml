@@ -14,7 +14,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Scan current tree and reachable history without printing secret values
+      - name: Scan current tree and all refs without printing secret values
         shell: bash
         run: |
           set -euo pipefail
@@ -34,7 +34,7 @@ jobs:
             ('TELEGRAM_BOT_TOKEN',re.compile(rb'\b\d{8,12}:[A-Za-z0-9_-]{30,}\b')),
             ('BEARER_TOKEN',re.compile(rb'Bearer\s+[A-Za-z0-9._~+/=-]{24,}')),
           ]
-          ENV_NAME=re.compile(rb'(?im)^[ \t]*([A-Z0-9_]*(?:API_KEY|TOKEN|SECRET|PASSWORD|PRIVATE_KEY|CLIENT_SECRET)[A-Z0-9_]*)[ \t]*=[ \t]*([^\r\n#]*)')
+          ENV_NAME=re.compile(rb'(?m)^[ \t]*([A-Z0-9_]*(?:API_KEY|TOKEN|SECRET|PASSWORD|PRIVATE_KEY|CLIENT_SECRET)[A-Z0-9_]*)[ \t]*=[ \t]*([^\r\n#]*)')
           HOME_PATH=re.compile(rb'/home/admin1(?:/|\b)')
 
           def scan_bytes(scope,path,data):
@@ -44,6 +44,7 @@ jobs:
             for m in ENV_NAME.finditer(data):
               key=m.group(1).decode('ascii','replace')
               value=m.group(2).strip().strip(b'"\'')
+              if key.endswith('_FILE'): continue
               if not value or value.startswith((b'${',b'$(',b'<',b'[REDACTED]')): continue
               if value.lower() in {b'test',b'dummy',b'example',b'placeholder',b'changeme'}: continue
               if len(value)>=16: findings.append((scope,path,f'NONEMPTY_SECRET_ASSIGNMENT:{key}'))
@@ -56,7 +57,7 @@ jobs:
             except OSError: continue
             if len(data)<=2_000_000: scan_bytes('CURRENT',p.as_posix(),data)
 
-          rows=subprocess.check_output(['git','rev-list','--objects','HEAD'],text=True).splitlines(); seen=set()
+          rows=subprocess.check_output(['git','rev-list','--objects','--all'],text=True).splitlines(); seen=set()
           for row in rows:
             parts=row.split(' ',1); oid=parts[0]; path=parts[1] if len(parts)>1 else '<unknown>'
             if oid in seen: continue

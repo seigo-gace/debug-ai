@@ -34,3 +34,11 @@
 ## Patch safety
 - Applying a patch requires explicit approval.
 - No dummy implementations, fake PASS, temporary bypasses, hidden fallbacks, or fabricated evidence.
+
+## VS Code / Cursor / Codex entry point
+- Use the repository `debugai` CLI described in `DEBUGAI.md`.
+- Investigation: `debugai analyze "<request>"`.
+- Read-only validation after an external Agent edits files: `debugai verify --repo <server-visible-path> [--paths <changed-files>]`.
+- Treat stdout JSON as the formal result; summaries on stderr are informational.
+- `debugai patch` creates a candidate only. Do not confuse read-only `debugai verify` with mutation-capable `/v1/approve-apply-verify`.
+- The CLI deliberately has no apply command. Never infer approval from an analyze, patch, or verify command.

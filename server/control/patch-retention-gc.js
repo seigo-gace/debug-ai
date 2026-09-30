@@ -1,0 +1,34 @@
+"use strict";
+const fs=require("node:fs");
+const path=require("node:path");
+const {assertCandidateIntegrity}=require("../../orchestrator/patch-core.js");
+const {CANDIDATE_RETENTION_MS,PASS_BACKUP_RETENTION_MS,FAIL_BACKUP_RETENTION_MS}=require("../patch-service.js");
+
+function fsyncDir(dir){let fd;try{fd=fs.openSync(dir,"r");fs.fsyncSync(fd);}catch(error){if(!["EINVAL","ENOTSUP","EPERM","EISDIR"].includes(error?.code))throw error;}finally{if(fd!==undefined)try{fs.closeSync(fd);}catch{}}}
+function safeName(name){return typeof name==="string"&&/^[A-Za-z0-9._-]{1,255}$/.test(name)&&name!=="."&&name!=="..";}
+function listEntries(dir){if(!fs.existsSync(dir))return[];const stat=fs.lstatSync(dir);if(!stat.isDirectory()||stat.isSymbolicLink())throw new Error(`PATCH_GC_ROOT_UNSAFE:${dir}`);return fs.readdirSync(dir,{withFileTypes:true}).sort((a,b)=>a.name.localeCompare(b.name));}
+function readJsonFile(file,label){const stat=fs.lstatSync(file);if(!stat.isFile()||stat.isSymbolicLink())throw new Error(`${label}_UNSAFE`);let parsed;try{parsed=JSON.parse(fs.readFileSync(file,"utf8"));}catch{throw new Error(`${label}_INVALID_JSON`);}return parsed;}
+function validateBackupMetadata(dir){
+  const retention=readJsonFile(path.join(dir,"retention.json"),"PATCH_BACKUP_RETENTION"),receipt=readJsonFile(path.join(dir,"receipt.json"),"PATCH_BACKUP_RECEIPT");
+  if(retention?.schema!=="debugai.patch-backup-retention/v1"||typeof retention.verification_pass!=="boolean"||!Number.isFinite(retention.verified_at)||retention.verified_at<0||!Number.isFinite(retention.retain_until)||!Number.isFinite(retention.retention_ms))throw new Error("PATCH_BACKUP_RETENTION_INVALID");
+  const expectedMs=retention.verification_pass?PASS_BACKUP_RETENTION_MS:FAIL_BACKUP_RETENTION_MS;if(retention.retention_ms!==expectedMs||retention.retain_until!==retention.verified_at+expectedMs)throw new Error("PATCH_BACKUP_RETENTION_WINDOW_INVALID");
+  if(receipt?.schema!=="patch-application/v2"||typeof receipt.candidate_id!=="string"||!/^patch_[a-f0-9]{24}$/.test(receipt.candidate_id)||typeof receipt.candidate_hash!=="string"||!/^[a-f0-9]{64}$/.test(receipt.candidate_hash)||path.resolve(String(receipt.backup_dir||""))!==path.resolve(dir))throw new Error("PATCH_BACKUP_RECEIPT_INVALID");
+  return{retention,receipt};
+}
+function validateCandidate(candidate,file){assertCandidateIntegrity(candidate);if(!Number.isFinite(candidate.created_at)||candidate.created_at<0||candidate.retention_ms!==CANDIDATE_RETENTION_MS||candidate.retain_until!==candidate.created_at+CANDIDATE_RETENTION_MS)throw new Error("PATCH_CANDIDATE_RETENTION_INVALID");if(path.basename(file)!==`${candidate.id}.json`)throw new Error("PATCH_CANDIDATE_FILENAME_MISMATCH");return candidate;}
+function quarantineAndDelete({backupDir,backupRoot,quarantineRoot}){const name=path.basename(backupDir);if(!safeName(name)||path.dirname(backupDir)!==backupRoot)throw new Error("PATCH_BACKUP_PATH_UNSAFE");fs.mkdirSync(quarantineRoot,{recursive:true,mode:0o700});const target=path.join(quarantineRoot,name);if(fs.existsSync(target))throw new Error(`PATCH_BACKUP_QUARANTINE_CONFLICT:${name}`);fs.renameSync(backupDir,target);fsyncDir(backupRoot);fsyncDir(quarantineRoot);fs.rmSync(target,{recursive:true,force:false});fsyncDir(quarantineRoot);return name;}
+function recoverQuarantine(quarantineRoot,report){for(const entry of listEntries(quarantineRoot)){try{if(!safeName(entry.name)||!entry.isDirectory()||entry.isSymbolicLink())throw new Error(`PATCH_GC_QUARANTINE_ENTRY_UNSAFE:${entry.name}`);fs.rmSync(path.join(quarantineRoot,entry.name),{recursive:true,force:false});fsyncDir(quarantineRoot);report.quarantine_recovered.push(entry.name);}catch(error){report.errors.push({kind:"quarantine",id:entry.name,error:String(error?.code||error?.message||error)});}}}
+function sweepPatchRetention({runtimeRoot,now=Date.now(),maxDeletes=16}={}){
+  if(typeof runtimeRoot!=="string"||!runtimeRoot)throw new Error("PATCH_GC_RUNTIME_ROOT_REQUIRED");if(!Number.isFinite(now)||now<0)throw new Error("PATCH_GC_TIME_INVALID");if(!Number.isInteger(maxDeletes)||maxDeletes<1||maxDeletes>1000)throw new Error("PATCH_GC_MAX_DELETES_INVALID");
+  const root=path.resolve(runtimeRoot),candidates=path.join(root,"patch-candidates"),backups=path.join(root,"patch-backups"),quarantine=path.join(root,"patch-backups-gc-quarantine"),report={schema:"debugai.patch-retention-gc/v1",backup_deleted:[],candidate_deleted:[],quarantine_recovered:[],skipped:[],errors:[]};fs.mkdirSync(candidates,{recursive:true});fs.mkdirSync(backups,{recursive:true});fs.mkdirSync(quarantine,{recursive:true,mode:0o700});recoverQuarantine(quarantine,report);
+  let remaining=maxDeletes,candidateReferenceScanSafe=report.errors.length===0;const liveCandidateRefs=new Set();
+  for(const entry of listEntries(backups)){
+    const id=entry.name;try{if(!safeName(id)||!entry.isDirectory()||entry.isSymbolicLink())throw new Error(`PATCH_BACKUP_ENTRY_UNSAFE:${id}`);const dir=path.join(backups,id),meta=validateBackupMetadata(dir);if(now>=meta.retention.retain_until&&remaining>0){quarantineAndDelete({backupDir:dir,backupRoot:backups,quarantineRoot:quarantine});report.backup_deleted.push({transaction_id:id,candidate_id:meta.receipt.candidate_id,verification_pass:meta.retention.verification_pass});remaining--;}else{liveCandidateRefs.add(meta.receipt.candidate_id);report.skipped.push({kind:"backup",id,reason:now<meta.retention.retain_until?"RETENTION_WINDOW":"CYCLE_LIMIT"});}}catch(error){candidateReferenceScanSafe=false;report.errors.push({kind:"backup",id,error:String(error?.code||error?.message||error)});}
+  }
+  if(listEntries(quarantine).length>0)candidateReferenceScanSafe=false;
+  for(const entry of listEntries(candidates)){
+    const id=entry.name;try{if(!safeName(id)||!entry.isFile()||entry.isSymbolicLink()||!id.endsWith(".json"))throw new Error(`PATCH_CANDIDATE_ENTRY_UNSAFE:${id}`);const file=path.join(candidates,id),candidate=validateCandidate(readJsonFile(file,"PATCH_CANDIDATE"),file);if(now<candidate.retain_until){report.skipped.push({kind:"candidate",id:candidate.id,reason:"RETENTION_WINDOW"});continue;}if(!candidateReferenceScanSafe){report.skipped.push({kind:"candidate",id:candidate.id,reason:"BACKUP_REFERENCE_SCAN_UNSAFE"});continue;}if(liveCandidateRefs.has(candidate.id)){report.skipped.push({kind:"candidate",id:candidate.id,reason:"BACKUP_REFERENCE_ACTIVE"});continue;}if(remaining<=0){report.skipped.push({kind:"candidate",id:candidate.id,reason:"CYCLE_LIMIT"});continue;}fs.unlinkSync(file);fsyncDir(candidates);report.candidate_deleted.push(candidate.id);remaining--;}catch(error){report.errors.push({kind:"candidate",id,error:String(error?.code||error?.message||error)});}
+  }
+  return report;
+}
+module.exports={fsyncDir,safeName,validateBackupMetadata,validateCandidate,quarantineAndDelete,recoverQuarantine,sweepPatchRetention};
