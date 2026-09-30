@@ -1,6 +1,6 @@
 # DebugAI MCP Adapter
 
-Status: SOURCE IMPLEMENTATION — RUNTIME HANDSHAKE NOT YET VERIFIED
+Status: SOURCE + CI STDIO PROTOCOL VERIFIED — LIVE DEBUGAI RUNTIME NOT DEPLOYED / NOT VERIFIED
 
 ## Purpose
 
@@ -21,7 +21,8 @@ MCP Host
 - MCP factory: `mcp/server.mjs`
 - stdio entry: `bin/debugai-mcp.mjs`
 - existing delegated client: `bin/debugai.js`
-- tests: `mcp/tests/mcp-adapter.test.mjs`
+- unit/contract tests: `mcp/tests/mcp-adapter.test.mjs`
+- real stdio protocol regression: `mcp/tests/mcp-stdio.test.mjs`
 
 The adapter is a dedicated ESM entry because the MCP TypeScript SDK v2 is ESM. The existing DebugAI runtime/CLI remains CommonJS and is not converted merely to support MCP.
 
@@ -67,32 +68,64 @@ A DebugAI verification verdict other than PASS remains a valid DebugAI result an
 ## Dependencies
 
 - `@modelcontextprotocol/server` 2.2.0
+- `@modelcontextprotocol/client` 2.2.0 (protocol regression test only)
 - `zod` 4.6.5
 
 Node runtime remains the repository authority version.
 
-## Verification boundary
+## Verified source / protocol boundary
 
-Source-level verification requires:
-- syntax check for MCP `.mjs` files;
-- adapter mapping tests;
-- no approve/apply tool exposure;
-- delegated `execute()` call verification;
-- error fail-closed behavior;
-- MCP server factory construction;
-- full existing repository verification / CI regression.
-
-Source/CI PASS is not runtime MCP PASS.
-
-Runtime MCP availability additionally requires an actual host/stdio handshake, tool discovery, and at least representative tool calls against the intended DebugAI runtime. Until that closes, report:
+Exact implementation SHA verified before this documentation-only update:
 
 ```text
-MCP_SOURCE=IMPLEMENTED
-MCP_CI=PASS only when exact-SHA CI passes
-MCP_RUNTIME=NOT_VERIFIED
-WORKSPACE_REGISTRATION=NOT_EXECUTED
+078203e61073be99a48444ba0c3467a7143102f4
 ```
+
+GitHub Actions for that exact SHA:
+
+```text
+Verify                 = SUCCESS
+Public Readiness Audit = SUCCESS
+Core Verify            = SUCCESS
+```
+
+`Verify` executed the complete repository suite with:
+
+```text
+tests = 286
+pass  = 286
+fail  = 0
+```
+
+The MCP-specific real-protocol regression executed an official MCP client over stdio and verified:
+
+```text
+stdio initialize/handshake = PASS
+tools/list                 = PASS
+exact exposed tools        = 9
+approve/apply tool absent  = PASS
+debugai_health tool call   = PASS
+```
+
+The health call used a controlled loopback HTTP fixture as the downstream DebugAI endpoint. This proves the MCP stdio transport -> adapter -> existing CLI/HTTP client boundary without claiming a Contabo/live DebugAI deployment.
+
+## Current state separation
+
+```text
+MCP_SOURCE=PASS
+MCP_UNIT_CONTRACT=PASS
+MCP_STDIO_PROTOCOL=PASS
+MCP_CI=PASS
+MCP_LIVE_DEBUGAI_RUNTIME=NOT_VERIFIED
+WORKSPACE_REGISTRATION=NOT_EXECUTED
+SERVER_DEPLOY=NOT_EXECUTED
+MAIN_MERGE=NOT_EXECUTED
+```
+
+Source/CI/stdio protocol PASS is not production/runtime deployment PASS.
 
 ## Workspace registration
 
-Do not register DebugAI as `AVAILABLE_VERIFIED` in server-core/Workspace merely because these files exist. Update the Workspace registry only after source/CI and actual MCP runtime verification are complete.
+Do not register DebugAI as `AVAILABLE_VERIFIED` in server-core/Workspace until the intended runtime is deployed and a Workspace MCP host successfully performs discovery and representative calls against that real DebugAI runtime.
+
+Before that point, server-core may record the narrower state `SOURCE_CI_STDIO_VERIFIED / LIVE_RUNTIME_NOT_VERIFIED` if useful for discovery.
