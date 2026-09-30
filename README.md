@@ -6,9 +6,49 @@ DebugAI is a code-first, evidence-driven debugging runtime for G-ACE development
 
 > **Completion rule:** a module existing in source, a fixture passing, a CI run succeeding, or an external reviewer returning PASS is not enough to claim the DebugAI project complete. Project completion still requires the intended real runtime closed loop with current evidence and the required gates.
 
+## Required first read: design authority
+
+**Before development, debugging, verification, refactoring, continuation, or implementation planning, read the design authority below first. Do not start from README status alone.**
+
+- **Design authority:** [`docs/DURABLE-CONTINUATION-DESIGN.md`](docs/DURABLE-CONTINUATION-DESIGN.md)
+
+Use the documents and history with these distinct responsibilities:
+
+```text
+DESIGN
+= the design baseline, architecture, intended responsibilities, constraints, and original decisions
+= do not silently overwrite it merely to match later implementation
+
+COMMITS
+= the chronological work report and implementation/change history
+= use commit history and diffs to determine what actually changed from the design and when
+
+DESIGN DELTA / CHANGE RATIONALE
+= when implementation intentionally differs from the design, preserve what differed, why it changed,
+  what evidence caused the change, and which commit implemented it
+= do not erase the old design baseline by rewriting it as though the later implementation had always been the design
+
+README
+= the current completed/verified operating state and the current entry point for users, developers, and AI agents
+= update completed areas as development closes them so new work does not get pulled back to obsolete pending states
+```
+
+Required repository-reading loop:
+
+```text
+README current state
+ -> open and read the linked design authority
+ -> inspect relevant commits/diffs for implementation history
+ -> inspect recorded design delta/change rationale when implementation differs
+ -> confirm current source/tests/runtime evidence
+ -> continue work from the actual current boundary
+```
+
+If design and implementation differ, do not automatically treat either side as disposable. Preserve the design baseline, identify the delta and rationale from evidence/history, and only revise the design itself when an explicit architecture/design decision actually changes the design authority.
+
 ## Active design authority
 
-The current system design, durable-continuation architecture, AI-side optimization rules, Strict Completion contract, storage/retention policy, and implementation boundary are defined in:
+The system design, durable-continuation architecture, AI-side optimization rules, Strict Completion contract, storage/retention policy, and design baseline are defined in:
 
 - [`docs/DURABLE-CONTINUATION-DESIGN.md`](docs/DURABLE-CONTINUATION-DESIGN.md)
 
