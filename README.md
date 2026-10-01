@@ -64,12 +64,14 @@ repository                      = seigo-gace/debug-ai
 branch                          = feat/search-gate-shadow-audit-cli-20261001
 base branch                     = feat/source-verify-boundary-20261001
 base SHA                        = db9394548dd1ab34aecf8f0a7d780683831f584a
-current verified source HEAD    = de79e37044cad2721a91ae494887b6ffe666a1f7
+verified implementation HEAD    = 1cbb0684ecf79d7946ba1c346949c90983c7f9cd
 PR                              = #33 / OPEN / DRAFT / UNMERGED
-Public Readiness Audit          = SUCCESS (#305)
-Verify                          = SUCCESS (#340 / 343 of 343 PASS)
-Core Verify                     = SUCCESS (#341)
+Public Readiness Audit          = SUCCESS (#318)
+Verify                          = SUCCESS (#353 / 352 of 352 PASS)
+Core Verify                     = SUCCESS (#354)
 control-plane capabilities      = 18/18 IMPLEMENTED / 0 UNRESOLVED
+live-runtime readback source    = IMPLEMENTED + SOURCE/CI VERIFIED
+real Server readback            = NOT_EXECUTED
 real Search Gate measurement    = NOT_EXECUTED
 false-skip zero proof           = NOT_PROVEN
 Search Gate skip activation     = NOT_EXECUTED
@@ -79,7 +81,7 @@ server restart                  = NOT_EXECUTED
 production change               = NONE
 ```
 
-These source/CI results do **not** prove that the live Contabo checkout is on this revision. The live repository/container/revision must be read back before any real-runtime claim or Search Gate measurement.
+These source/CI results do **not** prove that the live Contabo checkout is on this revision. The live repository/container/revision must be read back before any real-runtime claim or Search Gate measurement. If the live checkout/container is behind, preserve that fact as `RUNTIME_SOURCE_BEHIND`; do not silently sync, deploy, or restart it.
 
 Historical MCP source/protocol verification remains valid for its exact implementation SHA `078203e61073be99a48444ba0c3467a7143102f4`:
 
@@ -429,7 +431,9 @@ The runtime must not manufacture booleans to satisfy the gate. Candidate identit
 - guarded MCP stdio adapter delegating to the existing CLI/HTTP contract;
 - Search Gate provider-preserving shadow measurement;
 - conservative candidate-skip policy in shadow only;
-- read-only Search Gate Shadow Audit CLI.
+- read-only Search Gate Shadow Audit CLI;
+- bounded read-only live-runtime readback with exact repository identity, fixed source tracking probes, running-container source proof, and exact DebugAI health identity;
+- gated one-command live shadow measurement that executes only after all read-only runtime prerequisites pass and can never authorize activation.
 
 Current control-plane capability audit:
 
@@ -446,7 +450,7 @@ This means each declared capability has an implemented owning provider/boundary.
 
 ### Partial / pending
 
-- Search Gate: source/CI shadow instrumentation, candidate policy, and read-only audit are verified; **real live-runtime candidate/false-skip measurement is still pending**;
+- Search Gate: source/CI shadow instrumentation, candidate policy, read-only store audit, and live-runtime readback/measurement gate are verified in source/CI; **actual Contabo readback and candidate/false-skip measurement are still NOT EXECUTED**;
 - Search Gate production skip activation: NOT EXECUTED and requires real compatible shadow observations plus a separate approval/activation decision;
 - model A/B: pending;
 - fresh real current-runtime self-development/self-debug run: pending;
@@ -675,11 +679,14 @@ npm run test:e2e-fixture
 npm run audit:control-plane-gaps
 npm run audit:docker-storage
 npm run audit:search-gate-shadow
+npm run audit:live-runtime
 npm run test:legacy
 npm run debugai:mcp
 ```
 
 `audit:search-gate-shadow` is read-only. It does not call search providers, mutate RuntimeEvidence, deploy/restart services, or authorize Search Gate activation.
+
+`audit:live-runtime` is also read-only. It verifies exact repository identity, bounded tracked-source state, running-container Search Gate source, and the exact DebugAI loopback health identity. Only when every prerequisite passes does it invoke the container's existing read-only shadow audit against `/app/runtime`; otherwise measurement is not executed. It never pulls, resets, merges, deploys, restarts/recreates a service, changes a Secret, calls a search provider, or authorizes Search Gate activation.
 
 `debugai verify` is read-only and the CLI/MCP surfaces intentionally do not expose a patch-apply shortcut.
 
@@ -687,30 +694,32 @@ npm run debugai:mcp
 
 ## Current verified snapshot and CI boundary
 
-### Current stacked branch exact snapshot
+### Current stacked branch exact implementation snapshot
 
-For exact current source HEAD `de79e37044cad2721a91ae494887b6ffe666a1f7`, GitHub workflows were read back as:
+For exact implementation HEAD `1cbb0684ecf79d7946ba1c346949c90983c7f9cd`, GitHub workflows were read back as:
 
 ```text
-Public Readiness Audit = SUCCESS (#305)
-Verify                 = SUCCESS (#340)
-Core Verify            = SUCCESS (#341)
+Public Readiness Audit = SUCCESS (#318)
+Verify                 = SUCCESS (#353)
+Core Verify            = SUCCESS (#354)
 ```
 
 The `Verify` workflow executed:
 
 ```text
-tests     = 343
-pass      = 343
+tests     = 352
+pass      = 352
 fail      = 0
 cancelled = 0
 skipped   = 0
 todo      = 0
 ```
 
+The live-readback regressions specifically prove wrong-repository rejection, fixed-path tracking probes without untracked enumeration, required container audit source, exact DebugAI health identity, gated live shadow measurement, and fail-closed rejection of an audit result that attempts to claim activation.
+
 Core Verify additionally passed the current real CI gates for DebugAI image build/container health, Landlock+seccomp isolation, loopback-only/managed Node and Python DAP, main-to-sidecar queue round trip, and Compose sandbox boundary.
 
-PR #33 is still OPEN / DRAFT / UNMERGED. These source/CI results do not prove a live server deployment or a real Search Gate false-skip measurement.
+PR #33 is still OPEN / DRAFT / UNMERGED. These source/CI results do not prove a live server deployment, live checkout identity, or a real Search Gate false-skip measurement.
 
 ### Historical MCP implementation snapshot
 
@@ -786,6 +795,7 @@ For exact durable implementation SHA `df261bdae3b6f259ac428a173b798fae2fb68bdf`,
 | Search Gate provider-preserving shadow | SOURCE + CI VERIFIED |
 | Search Gate candidate-skip policy | SHADOW ONLY / SOURCE + CI VERIFIED |
 | Search Gate read-only audit CLI | SOURCE + CI VERIFIED |
+| Live-runtime readback + gated shadow measurement | SOURCE + CI VERIFIED / LIVE NOT EXECUTED |
 | Real live Search Gate candidate/false-skip measurement | NOT EXECUTED |
 | Search Gate skip activation | NOT EXECUTED / NOT AUTHORIZED BY SHADOW AUDIT |
 | Model A/B | PENDING |
@@ -803,21 +813,22 @@ DebugAI as a whole is therefore **not yet fully complete**. The current source/C
 Current order is:
 
 ```text
-1. read back the actual live DebugAI checkout/container/revision without mutation
-2. keep any live revision mismatch separate from current GitHub source/CI state
-3. run Search Gate Shadow Audit only when a compatible candidate-policy shadow runtime is actually present
-4. classify the real shadow window: no candidates / incompatible policy / non-evaluable / false-skip detected / zero observed
-5. do not activate search skipping from the audit alone; limited activation requires a separate safety decision and explicit approval boundary
-6. fresh real current-runtime DebugAI self-development/self-debug run
-7. bind the fresh run to current repository/runtime evidence and identify any real blocking defect
-8. fix confirmed source defects without weakening approval/evidence/revision gates
-9. focused regression + repository verification + exact-SHA CI
-10. DebugAI read-only verify against the corrected current source
-11. model A/B
-12. final real production-equivalent closed-loop E2E
-13. MCP live-runtime/Workspace registration remains a separate availability task
-14. PR final audit
-15. wait for explicit Master approval before merge/deploy
+1. discover the actual live DebugAI checkout path read-only; do not guess it from historical paths or test fixtures
+2. read back the live repository identity / branch / HEAD / tracked dirty state plus the running debug-ai container and loopback health without mutation
+3. if the live checkout/runtime does not contain the verified live-readback/Search Gate source, record RUNTIME_SOURCE_BEHIND and stop before sync/deploy/restart
+4. only if the live source/runtime prerequisites are already compatible, run the gated read-only Search Gate Shadow Audit and record the actual observation window
+5. classify the real shadow window: no candidates / incompatible policy / non-evaluable / false-skip detected / zero observed
+6. do not activate search skipping from the audit alone; limited activation requires a separate safety decision and explicit approval boundary
+7. fresh real current-runtime DebugAI self-development/self-debug run
+8. bind the fresh run to current repository/runtime evidence and identify any real blocking defect
+9. fix confirmed source defects without weakening approval/evidence/revision gates
+10. focused regression + repository verification + exact-SHA CI
+11. DebugAI read-only verify against the corrected current source
+12. model A/B
+13. final real production-equivalent closed-loop E2E
+14. MCP live-runtime/Workspace registration remains a separate availability task
+15. PR final audit
+16. wait for explicit Master approval before merge/deploy
 ```
 
 Do not return to older status documents that list already completed durable, packet, Strict Completion, MCP source/protocol, or the closed 18/18 control-plane capability boundary as pending work.
