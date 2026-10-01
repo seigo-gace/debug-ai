@@ -3,6 +3,7 @@
 
 const path=require("node:path");
 const fs=require("node:fs");
+const {ROLES}=require("../server/roles.js");
 const {ROLE_ORDER:SKILL_ROLES,runSkillEffectSuite}=require("../server/control/skill-effect-suite.js");
 const {ROLE_ORDER:MODEL_ROLES,AXES,SAMPLING_SCOPE,OFFICIAL_SAMPLING_CANDIDATES,runModelAbBenchmark}=require("../server/control/model-ab-benchmark.js");
 const {runLocalReviewerBenchmark}=require("../server/control/local-reviewer-benchmark.js");
@@ -18,7 +19,7 @@ const REQUIRED_DOCS=Object.freeze(["docs/PRE_SERVER_QUALIFICATION.md","docs/CODE
 function sameArray(a,b){return Array.isArray(a)&&Array.isArray(b)&&a.length===b.length&&a.every((x,i)=>x===b[i]);}
 function sameJson(a,b){return JSON.stringify(a)===JSON.stringify(b);}
 function extractMcpTools(source){const match=String(source||"").match(/export const EXPOSED_TOOLS\s*=\s*Object\.freeze\(\[([\s\S]*?)\]\);/);if(!match)return[];return[...match[1].matchAll(/["']([^"']+)["']/g)].map(x=>x[1]);}
-function officialCandidatesCovered(){return EXPECTED_ROLES.every(role=>{const value=OFFICIAL_SAMPLING_CANDIDATES?.[role];return value&&Number.isFinite(value.temperature)&&Number.isFinite(value.top_p)&&Object.prototype.hasOwnProperty.call(value,"top_k")&&typeof value.authority==="string"&&value.authority.length>0;});}
+function officialCandidatesCovered(){return EXPECTED_ROLES.every(role=>{const value=OFFICIAL_SAMPLING_CANDIDATES?.[role],current=ROLES?.[role];return value&&current&&value.model===current.backend_model&&Number.isFinite(value.temperature)&&Number.isFinite(value.top_p)&&Object.prototype.hasOwnProperty.call(value,"top_k")&&typeof value.authority==="string"&&value.authority.length>0&&typeof value.source_url==="string"&&/^https:\/\//.test(value.source_url);});}
 function auditPreServerQualification({root=path.resolve(__dirname,".."),packageJson=null,fileExists=fs.existsSync,readFile=fs.readFileSync}={}){
   const pkg=packageJson||JSON.parse(readFile(path.join(root,"package.json"),"utf8"));
   const scripts=Object.fromEntries(REQUIRED_SCRIPTS.map(name=>[name,typeof pkg?.scripts?.[name]==="string"&&pkg.scripts[name].trim().length>0]));
