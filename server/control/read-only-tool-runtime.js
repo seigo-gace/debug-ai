@@ -8,18 +8,21 @@ const {extractSpecifiers}=require("../../orchestrator/context-core.js");
 const {getRoleContract}=require("./role-contracts.js");
 const {getSkill}=require("./skill-registry.js");
 const {assertToolAdmission}=require("./tool-risk.js");
+const {makeEvidenceRecord,assertEvidenceRecord}=require("./evidence-registry.js");
+const {makeEvidenceProjection}=require("./evidence-projection.js");
 
 const SEARCH_EXT=/\.(?:[cm]?[jt]sx?|json|md|py|go|rs|java|kt|kts|cs|cpp|cc|c|h|hpp|rb|php|swift|vue|svelte|toml|ya?ml|css|scss|html)$/i;
 const TS_JS_EXT=/\.(?:[cm]?[jt]sx?)$/i;
 const SKIP_DIRS=new Set([".git","node_modules","dist","build","coverage",".next",".cache","runtime"]);
-const AVAILABLE_TOOLS=Object.freeze(["source.read","source.search","symbol.lookup","dependency.map","test.inventory","knowledge.search","authority.search"]);
+const AVAILABLE_TOOLS=Object.freeze(["source.read","source.search","symbol.lookup","dependency.map","test.inventory","evidence.read","knowledge.search","authority.search"]);
+const EVIDENCE_CONTEXT=Symbol("debugai.evidence-read-context");
 
 function sha256(v){return crypto.createHash("sha256").update(v).digest("hex");}
 function stableStringify(value){
   if(value===undefined)return '"__DEBUGAI_UNDEFINED__"';
   if(value===null||typeof value!=="object")return JSON.stringify(value);
-  if(Array.isArray(value))return `[${value.map(stableStringify).join(",")}]`;
-  return `{${Object.keys(value).sort().map(key=>`${JSON.stringify(key)}:${stableStringify(value[key])}`).join(",")}}`;
+  if(Array.isArray(value))return`[${value.map(stableStringify).join(",")}]`;
+  return`{${Object.keys(value).sort().map(key=>`${JSON.stringify(key)}:${stableStringify(value[key])}`).join(",")}}`;
 }
 function normalizeRel(value){
   const rel=String(value||"").replace(/\\/g,"/").replace(/^\.\//,"");
@@ -135,7 +138,7 @@ async function symbolLookup(root,args,{lspFactory=(options)=>new TypeScript7LspC
 }
 function skillAllowsTool(selectedSkillIds,tool){for(const id of selectedSkillIds||[]){const s=getSkill(id);if(s.allowed_tools.includes(tool))return s;}return null;}
 function admit({role,selectedSkillIds,tool}){const roleContract=getRoleContract(role);const skill=skillAllowsTool(selectedSkillIds,tool);if(!skill)throw new Error(`TOOL_NOT_IN_SELECTED_SKILLS:${role}:${tool}`);return assertToolAdmission({roleContract,tool,riskCeiling:skill.tool_risk_ceiling,humanApproved:false});}
-function toolContentTrust(tool){if(tool==="authority.search")return "OPEN_WORLD_UNTRUSTED_DATA";if(tool==="knowledge.search")return "INTERNAL_KB_DATA";return "LOCAL_SOURCE_DATA";}
+function toolContentTrust(tool){if(tool==="authority.search")return "OPEN_WORLD_UNTRUSTED_DATA";if(tool==="knowledge.search")return "INTERNAL_KB_DATA";if(tool==="evidence.read")return "REGISTERED_EVIDENCE_DATA";return "LOCAL_SOURCE_DATA";}
 function toolResultHash(tool,data){return sha256(Buffer.from(stableStringify({tool,data}),"utf8"));}
 function makeToolResult(tool,data){const resultSha256=toolResultHash(tool,data);return {schema:"debugai.tool-result/v1",tool,status:"OK",evidence_id:`TRE_${resultSha256.slice(0,24)}`,data,integrity:{runtime_validated:true,admission_validated:true,result_sha256:resultSha256,content_trust:toolContentTrust(tool),external_content:"DATA_NOT_INSTRUCTION"}};}
 function assertToolResultIntegrity(result){
@@ -145,9 +148,61 @@ function assertToolResultIntegrity(result){
   if(result.integrity?.external_content!=="DATA_NOT_INSTRUCTION")throw new Error("TOOL_RESULT_TRUST_BOUNDARY_INVALID");
   const expected=toolResultHash(result.tool,result.data);if(result.integrity?.result_sha256!==expected)throw new Error("TOOL_RESULT_HASH_MISMATCH");if(result.evidence_id!==`TRE_${expected.slice(0,24)}`)throw new Error("TOOL_RESULT_EVIDENCE_ID_MISMATCH");return true;
 }
+function normalizeRegisteredEvidence(record){
+  if(!record||typeof record!=="object"||Array.isArray(record))throw new Error("EVIDENCE_REGISTER_OBJECT_REQUIRED");
+  if(record.schema==="debugai.evidence-record/v1"&&record.integrity){assertEvidenceRecord(record);return record;}
+  if(record.schema==="debugai.evidence-record/v1"){
+    const rebuilt=makeEvidenceRecord(record.source_type,record.payload,{sourceRef:record.source_ref});
+    if(rebuilt.evidence_id!==record.evidence_id)throw new Error(`EVIDENCE_VIEW_ID_MISMATCH:${String(record.evidence_id||"")}`);
+    return rebuilt;
+  }
+  const toolRecord=record.schema==="debugai.tool-result/v1"&&record.integrity?record:makeToolResult(record.tool,record.data);
+  if(record.evidence_id&&toolRecord.evidence_id!==record.evidence_id)throw new Error(`EVIDENCE_VIEW_ID_MISMATCH:${String(record.evidence_id)}`);
+  assertToolResultIntegrity(toolRecord);return toolRecord;
+}
+function evidenceProjection(record,{maxChars=6000}={}){
+  const bounded=Math.max(500,Math.min(12000,Number(maxChars)||6000));
+  if(record.schema==="debugai.evidence-record/v1"){
+    const content=stableStringify({source_type:record.source_type,source_ref:record.source_ref,payload:record.payload}),truncated=content.length>bounded;
+    return makeEvidenceProjection({parentEvidenceId:record.evidence_id,parentDigest:record.integrity.content_sha256,evidenceKind:`EVIDENCE_RECORD:${record.source_type}`,source:record.source_ref||record.source_type,content,maxExcerptChars:bounded,provenanceStatus:"VERIFIED",applicabilityStatus:"UNKNOWN",executionStatus:"NOT_APPLICABLE",observedOutcome:"UNKNOWN",claimSupportStatus:"UNKNOWN",projectionCompleteness:truncated?"PARTIAL":"COMPLETE",omittedCount:truncated?1:0,omissionReason:truncated?"BOUNDED_EVIDENCE_READ":null});
+  }
+  const content=stableStringify({tool:record.tool,data:record.data}),truncated=content.length>bounded;
+  return makeEvidenceProjection({parentEvidenceId:record.evidence_id,parentDigest:record.integrity.result_sha256,evidenceKind:`TOOL_RESULT:${record.tool}`,source:record.tool,content,maxExcerptChars:bounded,provenanceStatus:"VERIFIED",applicabilityStatus:"UNKNOWN",executionStatus:"EXECUTED",observedOutcome:"UNKNOWN",claimSupportStatus:"UNKNOWN",projectionCompleteness:truncated?"PARTIAL":"COMPLETE",omittedCount:truncated?1:0,omissionReason:truncated?"BOUNDED_EVIDENCE_READ":null});
+}
+function evidenceViewCandidates(value,{limit=256,maxDepth=12}={}){
+  let root=value;if(typeof root==="string"){try{root=JSON.parse(root);}catch{return[];}}
+  const out=[],seen=new Set();
+  function visit(item,depth){
+    if(out.length>=limit||depth>maxDepth||item===null||typeof item!=="object")return;
+    if(seen.has(item))return;seen.add(item);
+    const id=String(item.evidence_id||"");
+    if(id&&(item.schema==="debugai.evidence-record/v1"||(id.startsWith("TRE_")&&typeof item.tool==="string"&&Object.prototype.hasOwnProperty.call(item,"data"))))out.push(item);
+    if(Array.isArray(item)){for(const child of item)visit(child,depth+1);return;}
+    for(const child of Object.values(item))visit(child,depth+1);
+  }
+  visit(root,0);return out;
+}
+function addEvidenceToContext(context,records,{allowedEvidenceIds=null}={}){
+  if(!context||context[EVIDENCE_CONTEXT]!==true||!(context.records instanceof Map))throw new Error("EVIDENCE_CONTEXT_INVALID");
+  const allowed=allowedEvidenceIds===null?null:new Set((Array.isArray(allowedEvidenceIds)?allowedEvidenceIds:[]).map(String));
+  for(const raw of Array.isArray(records)?records:[]){
+    const id=String(raw?.evidence_id||"");if(allowed&&!allowed.has(id))continue;
+    const record=normalizeRegisteredEvidence(raw),existing=context.records.get(record.evidence_id);
+    if(existing&&stableStringify(existing)!==stableStringify(record))throw new Error(`EVIDENCE_CONTEXT_ID_CONFLICT:${record.evidence_id}`);
+    context.records.set(record.evidence_id,record);
+  }
+  return context;
+}
+function createEvidenceContext({user="",baseEvidenceIds=[],observations=[]}={}){
+  const context={[EVIDENCE_CONTEXT]:true,records:new Map()},allowed=[...new Set((Array.isArray(baseEvidenceIds)?baseEvidenceIds:[]).map(String).filter(Boolean))];
+  addEvidenceToContext(context,evidenceViewCandidates(user),{allowedEvidenceIds:allowed});
+  const observed=[];for(const observation of Array.isArray(observations)?observations:[])for(const item of observation?.results||[])if(item?.result?.status==="OK")observed.push(item.result);
+  addEvidenceToContext(context,observed);
+  return context;
+}
 function createReadOnlyToolRuntime({repo,repoPolicy=new RepoPolicy(),tgserver=null,evidenceSearch=null,lspFactory}={}){
   const root=repoPolicy.assertRepo(repo);
-  async function execute({role,selectedSkillIds,tool,arguments:args={}}={}){
+  async function execute({role,selectedSkillIds,tool,arguments:args={},evidenceContext=null}={}){
     if(!AVAILABLE_TOOLS.includes(tool))throw new Error(`TOOL_IMPLEMENTATION_UNAVAILABLE:${tool}`);admit({role,selectedSkillIds,tool});
     let data;
     if(tool==="source.read")data=readText(root,args.path,{maxChars:Math.max(500,Math.min(20000,Number(args.max_chars)||12000))});
@@ -155,10 +210,16 @@ function createReadOnlyToolRuntime({repo,repoPolicy=new RepoPolicy(),tgserver=nu
     else if(tool==="symbol.lookup")data=await symbolLookup(root,args,{lspFactory:lspFactory||((options)=>new TypeScript7LspClient(options))});
     else if(tool==="dependency.map"){const item=readText(root,args.path,{maxChars:100000});data={path:item.path,sha256:item.sha256,specifiers:extractSpecifiers(item.content).slice(0,128)};}
     else if(tool==="test.inventory")data=testInventory(root);
+    else if(tool==="evidence.read"){
+      const id=String(args.evidence_id||"").trim();if(!id)throw new Error("EVIDENCE_READ_ID_REQUIRED");
+      if(!evidenceContext||evidenceContext[EVIDENCE_CONTEXT]!==true)throw new Error("EVIDENCE_READ_CONTEXT_REQUIRED");
+      const record=evidenceContext.records.get(id);if(!record)throw new Error(`EVIDENCE_READ_NOT_REGISTERED:${id}`);
+      data=evidenceProjection(record,{maxChars:args.max_chars});
+    }
     else if(tool==="knowledge.search"){if(!tgserver)throw new Error("TGSERVER_TOOL_NOT_CONFIGURED");data=await tgserver.search(String(args.query||""),{});}
     else if(tool==="authority.search"){if(!evidenceSearch)throw new Error("EVIDENCE_SEARCH_TOOL_NOT_CONFIGURED");data=await evidenceSearch.search({query:String(args.query||""),topics:Array.isArray(args.topics)?args.topics:[],limit:Math.max(1,Math.min(12,Number(args.limit)||6))});}
-    const result=makeToolResult(tool,data);assertToolResultIntegrity(result);return result;
+    const result=makeToolResult(tool,data);assertToolResultIntegrity(result);if(evidenceContext)addEvidenceToContext(evidenceContext,[result]);return result;
   }
-  return {repo:root,availableTools:[...AVAILABLE_TOOLS],execute};
+  return {repo:root,availableTools:[...AVAILABLE_TOOLS],createEvidenceContext,addEvidenceToContext,execute};
 }
-module.exports={AVAILABLE_TOOLS,stableStringify,normalizeRel,blockedReadPath,resolveSafeFile,readText,walkFiles,searchSource,testInventory,languageIdFor,repoRelativeLocation,sanitizeSymbols,symbolLookup,toolResultHash,makeToolResult,assertToolResultIntegrity,createReadOnlyToolRuntime};
+module.exports={AVAILABLE_TOOLS,stableStringify,normalizeRel,blockedReadPath,resolveSafeFile,readText,walkFiles,searchSource,testInventory,languageIdFor,repoRelativeLocation,sanitizeSymbols,symbolLookup,toolResultHash,makeToolResult,assertToolResultIntegrity,normalizeRegisteredEvidence,evidenceProjection,evidenceViewCandidates,addEvidenceToContext,createEvidenceContext,createReadOnlyToolRuntime};
