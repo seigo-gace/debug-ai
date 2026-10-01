@@ -7,11 +7,16 @@
 - TGserver is consumed through its API only.
 
 ## Server
+- Before live Server work, read the current `G-ACE-inc/server-core` authority in the mandatory order: `README.md` -> `docs/LOAD_SCOPE.md` -> task-required authority (`SERVER_CORE_PROTOCOL.md`; `docs/DEPLOY_RUNBOOK.md` only when deploy/runtime mutation is actually in scope) -> DebugAI authority.
+- Do not reuse a recorded server-core SHA as future-current authority; read current server-core at execution time.
 - Production/server residency is Docker Compose only.
 - Do not run DebugAI as a permanent host Node/Python/systemd/PM2 process.
 - DebugAI APIs must not be exposed publicly by default.
 - The canonical live checkout previously recorded for server verification is `/home/admin1/projects/debug-ai`; read back the actual server state before treating it as current.
-- Do not pull, reset, merge, deploy, restart, recreate, or change production/server state merely to make a verification pass unless Master explicitly authorizes that mutation.
+- GitHub source revision and live Server runtime are separate states. Registry/README history does not prove current runtime state.
+- Do not pull, reset, merge, deploy, restart, recreate, discard local-only server changes, or change production/server state merely to make a verification pass unless Master explicitly authorizes that mutation.
+- Container start, HTTP 200, build success, or green CI alone is not Runtime PASS; verify the required endpoint/output/state/side-effect boundary.
+- Keep unexecuted/unverified states as `NOT_EXECUTED / UNKNOWN / NOT_VERIFIED`.
 
 ## Evidence
 - Current-run logs, tool outputs, test results, diffs, and temporary evidence remain local runtime data.
@@ -40,7 +45,7 @@
 ## VS Code / Cursor / Codex entry point
 - CLI contract: read `DEBUGAI.md`.
 - MCP contract: read `docs/MCP_ADAPTER.md` before registering or calling DebugAI as an MCP server.
-- Before any live Server qualification, read `docs/PRE_SERVER_QUALIFICATION.md` and `docs/CODEX_MCP_LIVE_HANDOFF.md`.
+- Before any live Server qualification, read current server-core authority, then `docs/PRE_SERVER_QUALIFICATION.md` and `docs/CODEX_MCP_LIVE_HANDOFF.md`.
 - `npm run audit:pre-server-qualification` is a read-only **source readiness** audit. `READY` never means Local Reviewer, six-role Skill ON/OFF, Model A/B, live integration E2E, MCP live calls, or Search Gate shadow measurement have passed on the real Server.
 - DebugAI MCP is an stdio adapter over the existing CLI/HTTP/runtime; it is not a second orchestrator.
 - The MCP surface exposes exactly nine guarded tools: health, analyze, durable start, resume, wait, patch-candidate, verify, status, inspect.
