@@ -11,6 +11,7 @@ const {RuntimeEvidenceStore}=require("../runtime-evidence.js");
 const {bindCurrentRun}=require("../control/run-observation-context.js");
 const {createSearchGateShadowAdapter}=require("../control/search-gate-shadow-runtime.js");
 const {summarizeSearchGateShadow}=require("../control/search-gate-shadow-audit.js");
+const {candidatePolicy,evaluateFalseSkip}=require("../control/search-gate-candidate-policy.js");
 const {createWorkflow}=require("../workflow-observed.js");
 
 function fixture(){
@@ -28,8 +29,30 @@ test("search shadow always executes provider and records non-activatable RUN com
     const adapter=createSearchGateShadowAdapter({searchKind:"OFFICIAL_EXTERNAL",adapter:{search:async input=>{calls.push(input);return[{source_ref:"O1"},{source_ref:"O2"}];}},authority,runtimeEvidence,repositorySnapshot:()=>"git_fixture"});
     const out=await adapter.search({query:"boom"});
     assert.equal(calls.length,1);assert.equal(out.length,2);assert.equal(records.length,1);assert.equal(records[0].type,"search_gate_shadow");
-    const record=records[0].payload;assert.equal(record.shadow_disposition.decision,"RUN");assert.equal(record.shadow_disposition.reason_code,"NO_SAFE_SKIP_RULE");assert.equal(record.actual_search_executed,true);assert.equal(record.actual_status,"SUCCESS");assert.equal(record.result_count,2);assert.equal(record.candidate_skip,false);assert.equal(record.false_skip_evaluable,false);assert.equal(record.false_skip,null);assert.equal(record.activation_eligible,false);assert.equal(record.activation_blocker,"NO_SAFE_SKIP_RULE");assert.match(record.input_digest,/^[a-f0-9]{64}$/);
+    const record=records[0].payload;assert.equal(record.shadow_disposition.decision,"RUN");assert.equal(record.shadow_disposition.reason_code,"NO_SAFE_SKIP_RULE");assert.equal(record.actual_search_executed,true);assert.equal(record.actual_status,"SUCCESS");assert.equal(record.result_count,2);assert.equal(record.candidate_skip,false);assert.equal(record.false_skip_evaluable,false);assert.equal(record.false_skip,null);assert.equal(record.activation_eligible,false);assert.equal(record.activation_blocker,"NO_SAFE_SKIP_RULE");assert.equal(record.query_class,"SPECIFIC");assert.match(record.input_digest,/^[a-f0-9]{64}$/);
   }finally{f.cleanup();}
+});
+
+test("generic fallback is only a shadow candidate and actual results determine conservative false-skip",async()=>{
+  const f=fixture();try{
+    const authority=fakeAuthority(f.repo),records=[],runtimeEvidence={write:(runId,type,payload)=>{records.push({runId,type,payload});return{id:`r${records.length}`};}},calls=[];
+    bindCurrentRun({runId:"run_candidate",authority,runtimeEvidence});
+    const empty=createSearchGateShadowAdapter({searchKind:"OFFICIAL_EXTERNAL",adapter:{search:async input=>{calls.push(input);return[];}},authority,runtimeEvidence,repositorySnapshot:()=>"git_fixture"});
+    const hit=createSearchGateShadowAdapter({searchKind:"INTERNAL_KB",adapter:{search:async input=>{calls.push(input);return[{id:"K1"}];}},authority,runtimeEvidence,repositorySnapshot:()=>"git_fixture"});
+    assert.deepEqual(await empty.search({query:"debug failure"}),[]);
+    assert.deepEqual(await hit.search("debug failure"),[{id:"K1"}]);
+    assert.equal(calls.length,2);assert.equal(records.length,2);
+    const zero=records[0].payload,detected=records[1].payload;
+    assert.equal(zero.shadow_disposition.decision,"NOT_APPLICABLE");assert.equal(zero.shadow_disposition.reason_code,"QUERY_CONTEXT_UNAVAILABLE");assert.equal(zero.query_class,"GENERIC_OR_MISSING");assert.equal(zero.candidate_skip,true);assert.equal(zero.actual_search_executed,true);assert.equal(zero.false_skip_evaluable,true);assert.equal(zero.false_skip,false);assert.equal(zero.activation_eligible,false);assert.equal(zero.activation_blocker,"SHADOW_ONLY_NOT_AUTHORIZED");
+    assert.equal(detected.candidate_skip,true);assert.equal(detected.actual_search_executed,true);assert.equal(detected.result_count,1);assert.equal(detected.false_skip_evaluable,true);assert.equal(detected.false_skip,true);assert.equal(detected.activation_eligible,false);assert.equal(detected.activation_blocker,"FALSE_SKIP_DETECTED");
+  }finally{f.cleanup();}
+});
+
+test("candidate policy never treats provider error as false-skip evidence",()=>{
+  const candidate=candidatePolicy({searchKind:"INTERNAL_KB",args:["debug failure"],runId:"run_policy",repositoryRevision:"git_fixture",inputDigest:"a".repeat(64)});
+  assert.equal(candidate.candidate_skip,true);assert.equal(candidate.disposition.decision,"NOT_APPLICABLE");
+  assert.deepEqual(evaluateFalseSkip(candidate,{actualStatus:"ERROR",resultCount:null}),{evaluable:false,false_skip:null});
+  assert.deepEqual(evaluateFalseSkip(candidate,{actualStatus:"NOT_FINAL",resultCount:null}),{evaluable:false,false_skip:null});
 });
 
 test("search shadow preserves NOT_FINAL and ordinary provider errors while recording bounded error class",async()=>{
@@ -73,6 +96,27 @@ test("production workflow executes both searches and stores shadow comparisons w
     const records=runtimeEvidence.list(out.run_id,{types:["search_gate_shadow"],limit:8});assert.equal(records.length,2);
     const kinds=records.map(record=>record.payload.search_kind).sort();assert.deepEqual(kinds,["INTERNAL_KB","OFFICIAL_EXTERNAL"]);
     for(const record of records){assert.equal(record.payload.shadow_disposition.decision,"RUN");assert.equal(record.payload.actual_search_executed,true);assert.equal(record.payload.candidate_skip,false);assert.equal(record.payload.false_skip_evaluable,false);assert.equal(record.payload.activation_eligible,false);}
+  }finally{f.cleanup();}
+});
+
+test("production fallback query creates candidates but still executes both searches",async()=>{
+  const f=fixture();try{
+    const repoPolicy=new RepoPolicy({workspaceRoot:f.root}),runtimeRoot=path.join(f.root,"runtime"),authority=new RunAuthority({runtimeRoot,repoPolicy}),runtimeEvidence=new RuntimeEvidenceStore(runtimeRoot,{requirePrivateRoot:false});let kbCalls=0,officialCalls=0;
+    const tgserver={log:async()=>({}),search:async()=>{kbCalls++;return[];}};
+    const evidenceSearch={search:async()=>{officialCalls++;return[];}};
+    const aiCore={call:async role=>{
+      if(role==="code_scout")return{content:JSON.stringify({facts:[],decision:"HANDOFF"})};
+      if(role==="causal_scout")return{content:JSON.stringify({candidates:[],decision:"HANDOFF"})};
+      if(role==="researcher")return{content:JSON.stringify({research_status:"INSUFFICIENT_EVIDENCE",answer:"UNKNOWN",evidence_refs:[],rejected_source_refs:[],contradictions:[],bound_version:null})};
+      if(role==="diagnoser")return{content:JSON.stringify({hypothesis:"unknown",decision:"HANDOFF"})};
+      throw new Error(`UNEXPECTED_ROLE:${role}`);
+    }};
+    const workflow=createWorkflow({aiCore,tgserver,evidenceSearch,runtimeEvidence,authority,repoPolicy,repositorySnapshot:()=>"git_fixture"});
+    const out=await workflow.runAnalysis({rawRequest:"inspect generic failure",failure:{},localEvidence:[],repo:f.repo});
+    assert.equal(kbCalls,1);assert.equal(officialCalls,1);
+    const records=runtimeEvidence.list(out.run_id,{types:["search_gate_shadow"],limit:8});assert.equal(records.length,2);
+    for(const record of records){assert.equal(record.payload.shadow_disposition.decision,"NOT_APPLICABLE");assert.equal(record.payload.candidate_skip,true);assert.equal(record.payload.actual_search_executed,true);assert.equal(record.payload.false_skip_evaluable,true);assert.equal(record.payload.false_skip,false);assert.equal(record.payload.activation_eligible,false);}
+    const summary=summarizeSearchGateShadow(records.map(x=>x.payload));assert.equal(summary.candidate_skip_observations,2);assert.equal(summary.evaluable_candidate_skip_observations,2);assert.equal(summary.false_skip_observations,0);assert.equal(summary.false_skip_assessment,"ZERO_OBSERVED");assert.equal(summary.activation_decision,"NOT_AUTHORIZED_BY_SHADOW_AUDIT");
   }finally{f.cleanup();}
 });
 
