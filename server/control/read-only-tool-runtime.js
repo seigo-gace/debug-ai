@@ -26,6 +26,12 @@ function assertToolResultIntegrity(result){
   const expected=base.toolResultHash(result.tool,result.data);if(result.integrity?.result_sha256!==expected)throw new Error("TOOL_RESULT_HASH_MISMATCH");if(result.evidence_id!==`TRE_${expected.slice(0,24)}`)throw new Error("TOOL_RESULT_EVIDENCE_ID_MISMATCH");return true;
 }
 function extraMap(context){let map=EXTRA_EVIDENCE.get(context);if(!map){map=new Map();EXTRA_EVIDENCE.set(context,map);}return map;}
+function currentEvidenceIds(context){
+  if(!context)return[];const ids=[];
+  if(context.records instanceof Map)for(const id of context.records.keys())if(!ids.includes(id))ids.push(id);
+  for(const record of extraMap(context).values())if(record?.tool!=="history.read"&&typeof record?.evidence_id==="string"&&!ids.includes(record.evidence_id))ids.push(record.evidence_id);
+  return ids;
+}
 function filterBaseObservations(observations){return(Array.isArray(observations)?observations:[]).map(observation=>({...observation,results:(observation?.results||[]).filter(item=>!EXTENDED_TOOL_SET.has(String(item?.result?.tool||"")))}));}
 function addExtendedView(map,raw,allowed){
   const id=String(raw?.evidence_id||"");if(!id||!EXTENDED_TOOL_SET.has(String(raw?.tool||""))||!Object.prototype.hasOwnProperty.call(raw||{},"data"))return;
@@ -61,11 +67,11 @@ function createReadOnlyToolRuntime(options={}){
     }
     admit({role,selectedSkillIds,tool});
     let data;
-    if(tool==="history.read")data=currentRejectedHistoryProvider().read(args);
+    if(tool==="history.read")data=currentRejectedHistoryProvider().read(args,currentEvidenceIds(evidenceContext));
     else{const provider=currentRunObservationProvider();data=tool==="state.read"?provider.readState(args):provider.readTrace(args);}
     const result=makeToolResult(tool,data);assertToolResultIntegrity(result);if(evidenceContext)addEvidenceToContext(evidenceContext,[result]);return result;
   }
   return{...runtime,availableTools:[...AVAILABLE_TOOLS],createEvidenceContext,addEvidenceToContext,execute};
 }
 
-module.exports={...base,RUN_OBSERVATION_TOOLS,HISTORY_TOOLS,EXTENDED_TOOLS,AVAILABLE_TOOLS,makeToolResult,assertToolResultIntegrity,createEvidenceContext,addEvidenceToContext,createReadOnlyToolRuntime};
+module.exports={...base,RUN_OBSERVATION_TOOLS,HISTORY_TOOLS,EXTENDED_TOOLS,AVAILABLE_TOOLS,makeToolResult,assertToolResultIntegrity,currentEvidenceIds,createEvidenceContext,addEvidenceToContext,createReadOnlyToolRuntime};
