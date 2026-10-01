@@ -3,6 +3,7 @@
 const {AsyncLocalStorage}=require("node:async_hooks");
 const {ensureHistoryIndex}=require("../../orchestrator/performance-retention-core.js");
 const {failureFingerprints,makeRejectedDiagnosisHistory,validateRejectedDiagnosisHistory,matchesRejectedDiagnosisHistory}=require("../../orchestrator/diagnosis-history.js");
+const {currentRunObservationProvider}=require("./run-observation-context.js");
 
 const STORAGE=new AsyncLocalStorage();
 const MAX_HISTORY_READ=8;
@@ -12,6 +13,8 @@ function strings(values,{max=MAX_CURRENT_EVIDENCE}={}){const out=[...new Set((Ar
 function storeOf(authority){const store=authority?.store;if(!store||typeof store.appendHistory!=="function"||typeof store.historyFile!=="string")throw new Error("REJECTED_HISTORY_STORE_REQUIRED");return store;}
 function currentKey(authority,runId,failure){const run=authority.load(runId),fp=failureFingerprints(failure);return{run,match:{project_id:run.project_id,exact_fingerprint:fp.exact,family_fingerprint:fp.family}};}
 function existingById(store,id){const ensured=ensureHistoryIndex(store.historyFile);return ensured.index.entries.find(entry=>entry?.id===id)||null;}
+function latestFailure(runtimeEvidence,runId){if(!runtimeEvidence||typeof runtimeEvidence.list!=="function")return null;const records=runtimeEvidence.list(runId,{types:["failure"],limit:1});return records[0]?.payload||null;}
+function resolveRunId(explicit){if(typeof explicit==="string"&&explicit)return explicit;return currentRunObservationProvider().run_id;}
 function appendRejectedHistory({authority,runId,failure,hypothesis,evidenceSnapshotRefs=[],repositoryRevision=null}={}){
   const store=storeOf(authority),run=authority.load(runId),entry=makeRejectedDiagnosisHistory({runId,projectId:run.project_id,failure,hypothesis,evidenceSnapshotRefs,repositoryRevision});
   const existing=existingById(store,entry.id);
@@ -31,7 +34,13 @@ function readRejectedHistory({authority,runId,failure,currentEvidenceRefs=[],all
   }
   return Object.freeze({schema:"debugai.rejected-history-read/v1",match_mode:allowFamily?"EXACT_OR_FAMILY":"EXACT",records:Object.freeze(out),count:out.length,current_evidence_count:currentRefs.length,reopen_policy:"REJECTED remains rejected unless new_evidence=true AND cited new evidence directly answers rejection evidence"});
 }
-function historyReadProvider(config){return Object.freeze({read:(args={})=>readRejectedHistory({...config,limit:args.limit,hypothesisId:args.hypothesis_id??null,allowFamily:false})});}
+function historyReadProvider({authority,runtimeEvidence=null,runId=null,failure=null}={}){
+  return Object.freeze({read:(args={},currentEvidenceRefs=[])=>{
+    const activeRunId=resolveRunId(runId),activeFailure=failure||latestFailure(runtimeEvidence,activeRunId);
+    if(!activeFailure)throw new Error("REJECTED_HISTORY_FAILURE_CONTEXT_REQUIRED");
+    return readRejectedHistory({authority,runId:activeRunId,failure:activeFailure,currentEvidenceRefs,limit:args.limit,hypothesisId:args.hypothesis_id??null,allowFamily:false});
+  }});
+}
 function withRejectedHistoryContext(config,fn){if(typeof fn!=="function")throw new Error("REJECTED_HISTORY_CONTEXT_FN_REQUIRED");return STORAGE.run(historyReadProvider(config),fn);}
 function currentRejectedHistoryProvider(){const provider=STORAGE.getStore();if(!provider)throw new Error("REJECTED_HISTORY_CONTEXT_REQUIRED");return provider;}
 function persistRejectedFromDiagnosis({authority,runId,failure,diagnosis,evidenceSnapshotRefs=[],repositoryRevision=null}={}){
@@ -40,4 +49,4 @@ function persistRejectedFromDiagnosis({authority,runId,failure,diagnosis,evidenc
   return Object.freeze(ids);
 }
 
-module.exports={MAX_HISTORY_READ,MAX_CURRENT_EVIDENCE,appendRejectedHistory,readRejectedHistory,historyReadProvider,withRejectedHistoryContext,currentRejectedHistoryProvider,persistRejectedFromDiagnosis};
+module.exports={MAX_HISTORY_READ,MAX_CURRENT_EVIDENCE,latestFailure,appendRejectedHistory,readRejectedHistory,historyReadProvider,withRejectedHistoryContext,currentRejectedHistoryProvider,persistRejectedFromDiagnosis};
