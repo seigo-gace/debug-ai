@@ -2,6 +2,7 @@
 
 const test=require("node:test");
 const assert=require("node:assert/strict");
+const {ROLES}=require("../roles.js");
 const {SAMPLING_SCOPE,OFFICIAL_SAMPLING_CANDIDATES,baselineConfig,officialCandidate,buildVariant,assertSingleAxisDifference,requestBody,executionOrder,validateScored,runModelAbBenchmark}=require("../control/model-ab-benchmark.js");
 
 function perfectLocal(testCase){const expected=testCase.expected;return{benchmark_verdict:expected,evidence_refs:[...(testCase.decisive_refs||[])],unsupported_claims:expected==="REJECTED"?["completion claim contradicted"]:[],false_completions:expected==="REJECTED"?["Fix is complete"]:[]};}
@@ -21,11 +22,21 @@ test("thinking AB is allowed only for roles with an explicit boolean thinking ba
   const diagnoser=buildVariant("diagnoser","thinking","false");assert.equal(diagnoser.baseline.thinking,true);assert.equal(diagnoser.candidate.thinking,false);assert.equal(diagnoser.baseline.model,diagnoser.candidate.model);
 });
 
+test("official sampling candidates stay bound to the exact current backend model authority",()=>{
+  for(const [role,profile] of Object.entries(OFFICIAL_SAMPLING_CANDIDATES)){
+    assert.equal(profile.model,ROLES[role].backend_model,role);
+    assert.match(profile.source_url,/^https:\/\//,role);
+    assert.ok(profile.authority.length>0,role);
+  }
+});
+
 test("sampling AB supports temperature top_p and top_k without changing production defaults",()=>{
   assert.deepEqual(SAMPLING_SCOPE,{authority:"DEBUGAI_BENCHMARK_AI_CORE_REQUEST_CONTRACT",temperature:"SUPPORTED_EXPLICIT_A_B_ONLY",top_p:"SUPPORTED_EXPLICIT_A_B_ONLY",top_k:"SUPPORTED_EXPLICIT_A_B_ONLY",production_defaults_changed:false,complete_sampling_sweep:false});
   const p=buildVariant("diagnoser","top_p","official"),k=buildVariant("diagnoser","top_k","official");
-  assert.equal(p.baseline.top_p,null);assert.equal(p.candidate.top_p,0.95);assert.match(p.candidate_authority,/Qwen3/);
-  assert.equal(k.baseline.top_k,null);assert.equal(k.candidate.top_k,20);
+  assert.equal(p.baseline.top_p,null);assert.equal(p.candidate.top_p,0.95);
+  assert.deepEqual(p.candidate_authority,{authority:"Qwen3-8B thinking guidance",source_url:"https://huggingface.co/Qwen/Qwen3-8B",model:ROLES.diagnoser.backend_model});
+  assert.equal(p.candidate_authority.model,p.baseline.model);
+  assert.equal(k.baseline.top_k,null);assert.equal(k.candidate.top_k,20);assert.equal(k.candidate_authority.model,k.baseline.model);
   assert.equal(OFFICIAL_SAMPLING_CANDIDATES.causal_scout.top_p,0.8);
   assert.equal(officialCandidate("local_reviewer","top_p"),0.95);
   assert.throws(()=>officialCandidate("researcher","top_k"),/OFFICIAL_CANDIDATE_UNAVAILABLE/);
