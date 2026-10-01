@@ -10,8 +10,14 @@ const MAX_CAPTURE_BYTES=64*1024;
 const DEFAULT_TIMEOUT_MS=4000;
 const SOURCE_REQUIREMENTS=Object.freeze([
   "server/control/search-gate-candidate-policy.js",
+  "server/control/search-gate-shadow-runtime.js",
   "server/control/search-gate-shadow-store-audit.js",
   "scripts/search-gate-shadow-audit.cjs",
+]);
+const CONTAINER_SOURCE_REQUIREMENTS=Object.freeze([
+  "/app/server/control/search-gate-candidate-policy.js",
+  "/app/server/control/search-gate-shadow-runtime.js",
+  "/app/server/control/search-gate-shadow-store-audit.js",
 ]);
 
 function bounded(value,limit=512){
@@ -56,6 +62,7 @@ function gitReadback(cwd,runner=runReadOnly){
     untracked_state:"NOT_SCANNED_TO_AVOID_UNBOUNDED_FILE_ENUMERATION",
   });
 }
+function policyVersion(text){return String(text||"").match(/const POLICY_VERSION="([^"]+)"/)?.[1]||null;}
 function sourceReadback(root){
   const presence={};
   for(const rel of SOURCE_REQUIREMENTS)presence[rel]=fs.existsSync(path.join(root,rel));
@@ -65,15 +72,15 @@ function sourceReadback(root){
     packageAuditScript=pkg?.scripts?.["audit:search-gate-shadow"]==="node scripts/search-gate-shadow-audit.cjs";
   }catch{}
   let candidatePolicyVersion=null;
-  try{
-    const text=fs.readFileSync(path.join(root,"server/control/search-gate-candidate-policy.js"),"utf8");
-    candidatePolicyVersion=text.match(/const POLICY_VERSION="([^"]+)"/)?.[1]||null;
-  }catch{}
+  let shadowRuntimeVersion=null;
+  try{candidatePolicyVersion=policyVersion(fs.readFileSync(path.join(root,"server/control/search-gate-candidate-policy.js"),"utf8"));}catch{}
+  try{shadowRuntimeVersion=policyVersion(fs.readFileSync(path.join(root,"server/control/search-gate-shadow-runtime.js"),"utf8"));}catch{}
   return Object.freeze({
     required_files:presence,
     package_audit_script:packageAuditScript,
     candidate_policy_version:candidatePolicyVersion,
-    search_shadow_source_compatible:Object.values(presence).every(Boolean)&&packageAuditScript&&Boolean(candidatePolicyVersion),
+    shadow_runtime_policy_version:shadowRuntimeVersion,
+    search_shadow_source_compatible:Object.values(presence).every(Boolean)&&packageAuditScript&&Boolean(candidatePolicyVersion)&&Boolean(shadowRuntimeVersion),
   });
 }
 function dockerReadback(runner=runReadOnly){
@@ -89,6 +96,30 @@ function dockerReadback(runner=runReadOnly){
   });
   return Object.freeze({available:true,container_count:containers.length,containers,error_code:null});
 }
+function containerSourceReadback(docker,runner=runReadOnly){
+  if(!docker.available||docker.container_count!==1)return Object.freeze({checked:false,compatible:false,reason:"SINGLE_RUNNING_DEBUG_AI_CONTAINER_REQUIRED",required_files:{},candidate_policy_version:null,shadow_runtime_policy_version:null});
+  const id=docker.containers[0].id;
+  const probe=[
+    "const fs=require('fs');",
+    `const paths=${JSON.stringify(CONTAINER_SOURCE_REQUIREMENTS)};`,
+    "const presence=Object.fromEntries(paths.map(p=>[p,fs.existsSync(p)]));",
+    "const read=p=>presence[p]?fs.readFileSync(p,'utf8'):'';",
+    "const version=t=>String(t||'').match(/const POLICY_VERSION=\"([^\"]+)\"/)?.[1]||null;",
+    "console.log(JSON.stringify({required_files:presence,candidate_policy_version:version(read(paths[0])),shadow_runtime_policy_version:version(read(paths[1]))}));",
+  ].join("");
+  const result=runner("docker",["exec",id,"node","-e",probe],{timeout:DEFAULT_TIMEOUT_MS});
+  if(!result.ok)return Object.freeze({checked:true,compatible:false,reason:result.error_code||`EXIT_${result.status}`,required_files:{},candidate_policy_version:null,shadow_runtime_policy_version:null});
+  try{
+    const parsed=JSON.parse(result.stdout.trim());
+    const requiredFiles=parsed?.required_files&&typeof parsed.required_files==="object"?parsed.required_files:{};
+    const candidatePolicyVersion=typeof parsed?.candidate_policy_version==="string"?bounded(parsed.candidate_policy_version,128):null;
+    const shadowRuntimeVersion=typeof parsed?.shadow_runtime_policy_version==="string"?bounded(parsed.shadow_runtime_policy_version,128):null;
+    const compatible=CONTAINER_SOURCE_REQUIREMENTS.every(p=>requiredFiles[p]===true)&&Boolean(candidatePolicyVersion)&&Boolean(shadowRuntimeVersion);
+    return Object.freeze({checked:true,compatible,reason:compatible?"SOURCE_COMPATIBLE":"SOURCE_BEHIND_OR_INCOMPLETE",required_files:requiredFiles,candidate_policy_version:candidatePolicyVersion,shadow_runtime_policy_version:shadowRuntimeVersion});
+  }catch{
+    return Object.freeze({checked:true,compatible:false,reason:"INVALID_CONTAINER_SOURCE_PROBE_OUTPUT",required_files:{},candidate_policy_version:null,shadow_runtime_policy_version:null});
+  }
+}
 function healthReadback({host="127.0.0.1",port=8787,pathName="/health",timeout=3000}={}){
   return new Promise(resolve=>{
     let settled=false;
@@ -101,23 +132,27 @@ function healthReadback({host="127.0.0.1",port=8787,pathName="/health",timeout=3
     req.on("error",error=>finish({reachable:false,status_code:null,error_code:error?.code||"HTTP_ERROR"}));
   });
 }
+function healthOk(value){return value?.reachable===true&&Number.isInteger(value.status_code)&&value.status_code>=200&&value.status_code<300;}
 async function collectReadback({cwd=process.cwd(),runner=runReadOnly,health=healthReadback}={}){
   const git=gitReadback(cwd,runner);
   const root=git.repository_detected?git.root:cwd;
   const source=sourceReadback(root);
   const docker=dockerReadback(runner);
+  const containerSource=containerSourceReadback(docker,runner);
   const healthResult=await health();
-  const runtimeSourceState=source.search_shadow_source_compatible?"SOURCE_COMPATIBLE":"RUNTIME_SOURCE_BEHIND_OR_UNKNOWN";
+  const runtimeSourceState=containerSource.compatible?"RUNNING_CONTAINER_SOURCE_COMPATIBLE":"RUNTIME_SOURCE_BEHIND_OR_UNKNOWN";
+  const measurementAuthorized=source.search_shadow_source_compatible&&containerSource.compatible&&healthOk(healthResult);
   return Object.freeze({
     schema:"debugai.live-runtime-readback/v1",
     read_only:true,
     mutation_attempted:false,
     git,
-    source,
+    checkout_source:source,
     docker,
+    running_container_source:containerSource,
     health:healthResult,
     runtime_source_state:runtimeSourceState,
-    search_shadow_measurement_authorized:source.search_shadow_source_compatible,
+    search_shadow_measurement_authorized:measurementAuthorized,
     search_skip_activation_authorized:false,
   });
 }
@@ -135,4 +170,4 @@ if(require.main===module){
   });
 }
 
-module.exports={MAX_CAPTURE_BYTES,DEFAULT_TIMEOUT_MS,SOURCE_REQUIREMENTS,bounded,boundedRaw,sanitizeRemote,runReadOnly,gitReadback,sourceReadback,dockerReadback,healthReadback,collectReadback};
+module.exports={MAX_CAPTURE_BYTES,DEFAULT_TIMEOUT_MS,SOURCE_REQUIREMENTS,CONTAINER_SOURCE_REQUIREMENTS,bounded,boundedRaw,sanitizeRemote,runReadOnly,gitReadback,policyVersion,sourceReadback,dockerReadback,containerSourceReadback,healthReadback,healthOk,collectReadback};
