@@ -2,9 +2,11 @@
 
 ## Purpose
 
-This document starts **after** DebugAI source/CI/stdio MCP verification is complete and covers only the live VS Codex verification boundary.
+This document starts **after** DebugAI source/CI/stdio MCP verification is complete and covers the live VS Codex verification boundary.
 
-It does not authorize deployment, restart, pull, reset, merge, or production mutation.
+It does not authorize deployment, restart, pull, reset, merge, production mutation, Search Gate activation, or automatic model-profile promotion.
+
+Before using this handoff, read `docs/PRE_SERVER_QUALIFICATION.md`. Source readiness and real Server measurements are separate facts.
 
 ## Current source-side expectation
 
@@ -102,13 +104,78 @@ docker ps filtered to the Compose debug-ai service
 curl loopback /health
 ```
 
-Prefer the repository-provided gate when the live checkout already contains it:
+Prefer the repository-provided gates when the live checkout already contains them:
 
 ```bash
+npm run audit:pre-server-qualification
 npm run audit:live-runtime
 ```
 
-That command is designed as a read-only gate. It must not deploy/restart/sync the server. If source/runtime is behind or incompatible, report `RUNTIME_SOURCE_BEHIND_OR_UNKNOWN` and stop the live measurement path.
+`audit:pre-server-qualification` proves only that the expected source-side benchmark/MCP/live-readback harnesses are present and internally coherent. It deliberately reports all real measurements as not executed.
+
+`audit:live-runtime` is a read-only live-source/runtime gate. It must not deploy/restart/sync the server. If source/runtime is behind or incompatible, report `RUNTIME_SOURCE_BEHIND_OR_UNKNOWN` and stop the live measurement path.
+
+## Required real benchmark phase
+
+Only after the live runtime is already source-compatible may Codex run real-model qualification.
+
+### Local Reviewer
+
+```bash
+npm run benchmark:local-reviewer
+```
+
+Do not replace this with a unit-test result.
+
+### Six-role Skill ON/OFF
+
+```bash
+npm run benchmark:skill-effect-all
+```
+
+Report the measured result exactly. `SKILL_OFF` or `TIE` is valid evidence and must not be rewritten as a Skill-ON PASS.
+
+The suite must cover all six roles. If any role is missing or fails to measure, report `INCOMPLETE`.
+
+### Model A/B
+
+Use `docs/PRE_SERVER_QUALIFICATION.md` and change one axis at a time:
+
+```bash
+npm run benchmark:model-ab -- \
+  --role <role> \
+  --axis <thinking|temperature|max_tokens> \
+  --candidate <explicit-value> \
+  --repeats <1..5>
+```
+
+The harness keeps the backend model, fixed benchmark case, input, and Skill-ON system constant inside each pair.
+
+A real measurement may report:
+
+```text
+QUALITY_REGRESSION
+NO_QUALITY_GAIN
+QUALITY_IMPROVEMENT_MEASURED
+```
+
+Even an improvement is measurement only. Do not change production role/model profiles merely because the benchmark measured a gain.
+
+## Real integration boundary
+
+After the benchmark phase, execute one bounded real DebugAI run against an explicitly allowed repository and preserve actual use/non-use of:
+
+```text
+AI Core
+TGserver search/retrieval when the run requires it
+Astera Evidence Search when the run requires it
+Durable continuation
+current repository/runtime evidence
+```
+
+Do not manufacture TGserver/Evidence Search traffic solely to mark them PASS. If a provider is not applicable to the chosen run, report that accurately and use a separate representative case if its real path must be qualified.
+
+Unknown or insufficient evidence must remain unknown/insufficient. Do not fabricate support to force a complete run.
 
 ## MCP live verification sequence
 
@@ -141,11 +208,30 @@ same run_id -> inspect
 
 The purpose is to prove that the parent AI can continue a DebugAI job across multiple MCP calls instead of treating one LLM/tool invocation as the whole debugging job.
 
+## Search Gate shadow measurement
+
+Only after `audit:live-runtime` proves source/runtime compatibility may Codex inspect the real read-only Shadow Audit result.
+
+Preserve these distinctions:
+
+```text
+no candidate skips       != false-skip zero
+NOT_EVALUABLE            != ZERO_OBSERVED
+shadow measurement       != activation authority
+```
+
+Do not activate search skipping from this audit.
+
 ## Pass / fail states
 
 Use these exact states in the report:
 
 ```text
+PRE_SERVER_HARNESS_SOURCE=PASS|FAIL
+LOCAL_REVIEWER_REAL=PASS|FAIL|NOT_EXECUTED
+SKILL_EFFECT_ALL_REAL=PASS|FAIL|INCOMPLETE|NOT_EXECUTED
+MODEL_AB_REAL=MEASURED|INCOMPLETE|NOT_EXECUTED
+REAL_INTEGRATION_E2E=PASS|FAIL|NOT_EXECUTED
 MCP_TOOL_DISCOVERY=PASS|FAIL
 MCP_HEALTH=PASS|FAIL
 MCP_DURABLE_START=PASS|FAIL|NOT_EXECUTED
@@ -156,7 +242,9 @@ MCP_INSPECT=PASS|FAIL|NOT_EXECUTED
 MCP_VERIFY=PASS|FAIL|NOT_EXECUTED
 MCP_APPROVE_APPLY_SHORTCUT=ABSENT|PRESENT_INVALID
 LIVE_RUNTIME_SOURCE_STATE=EXACT_COMPATIBLE|RUNTIME_SOURCE_BEHIND_OR_UNKNOWN
-SERVER_MUTATION=NONE|UNAUTHORIZED_CHANGE_DETECTED
+SEARCH_GATE_SHADOW_REAL=MEASURED|NOT_EVALUABLE|NOT_EXECUTED
+PRODUCTION_PROFILE_CHANGE=NONE|MASTER_AUTHORIZED
+SERVER_MUTATION=NONE|MASTER_AUTHORIZED
 ```
 
 Do not report `AVAILABLE_VERIFIED` unless representative real-runtime calls pass.
@@ -170,16 +258,21 @@ Without explicit Master authorization, do not:
 - change `.env`, secrets, API keys, Cloudflare, TGserver, AI Core, Astera, or server-core;
 - expose port 8787 publicly;
 - create an MCP approve/apply tool;
+- change production model/profile settings merely because one A/B measurement looked better;
 - modify production data merely to make a verification pass.
 
 If the live runtime is older than the source under verification, report the mismatch and stop. Sync/deploy is a separate explicitly authorized phase.
 
 ## Source references
 
+- `docs/PRE_SERVER_QUALIFICATION.md`
 - `docs/MCP_ADAPTER.md`
 - `mcp/server.mjs`
 - `bin/debugai-mcp.mjs`
 - `bin/debugai.js`
+- `server/control/skill-effect-suite.js`
+- `server/control/model-ab-benchmark.js`
+- `scripts/pre-server-qualification-audit.cjs`
 - `compose.yaml`
 - `scripts/live-runtime-readback.cjs`
 
