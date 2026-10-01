@@ -51,7 +51,7 @@ Before a live Server result is interpreted, the repository must provide determin
 5. live-runtime source parity/readback gate;
 6. MCP durable-continuation live handoff.
 
-Source availability is not a real measurement PASS.
+`npm run verify` and `npm run verify:core` execute `audit:pre-server-qualification`, so a green exact-head CI also proves that these source-side entry points remain internally coherent. Source availability is still not a real measurement PASS.
 
 ## Existing Local Reviewer benchmark
 
@@ -103,7 +103,7 @@ production_promotion_authorized=false
 
 Model A/B changes exactly one variable at a time.
 
-Order from the current design authority:
+Design order:
 
 ```text
 Thinking
@@ -111,24 +111,19 @@ Thinking
 -> Token cap
 ```
 
-The current DebugAI AI Core request contract can vary these benchmark axes:
+The current benchmark harness supports these explicit axes:
 
 ```text
 thinking
- temperature
- max_tokens
+temperature
+top_p
+top_k
+max_tokens
 ```
 
-Current Sampling scope is deliberately narrower than the model vendors' complete recommended Sampling set:
+The **production DebugAI defaults are not changed** by adding these benchmark axes. Baseline requests continue to omit `top_p` and `top_k`; a candidate request includes either value only when that one A/B axis is explicitly selected.
 
-```text
-temperature = SUPPORTED
-top_p       = NOT_SUPPORTED_BY_CURRENT_DEBUGAI_ADAPTER_CONTRACT
-top_k       = NOT_SUPPORTED_BY_CURRENT_DEBUGAI_ADAPTER_CONTRACT
-complete Sampling sweep = NO
-```
-
-Do **not** call a temperature-only result a complete Sampling optimization. Official model cards may recommend `top_p`/`top_k`, but those values must not be claimed as measured until the DebugAI/AI Core adapter contract actually supports and verifies them.
+The underlying llama.cpp server supports `temperature`, `top_p`, and `top_k` sampling parameters. The harness nevertheless labels its scope as incomplete because other llama.cpp samplers exist and are not part of the current DebugAI qualification plan.
 
 Do not execute the next axis merely because the prior axis produced a higher score. Record every measured result and review it first.
 
@@ -137,8 +132,8 @@ Command shape:
 ```bash
 npm run benchmark:model-ab -- \
   --role <role> \
-  --axis <thinking|temperature|max_tokens> \
-  --candidate <explicit-value> \
+  --axis <thinking|temperature|top_p|top_k|max_tokens> \
+  --candidate <explicit-value|official> \
   --repeats <1..5>
 ```
 
@@ -150,30 +145,36 @@ same fixed benchmark case
 same input
 same Skill-ON system
 exactly one changed axis
+counterbalanced baseline/candidate execution order
+dynamic score ceiling from the role scorer
 ```
+
+Counterbalancing prevents every candidate call from receiving the same second-call/warm-up position. The score ceiling is read from each deterministic role scorer rather than assumed to be five forever.
 
 Baseline values come from current DebugAI runtime authority:
 
 ```text
 thinking    = current role contract
 temperature = 0
+top_p       = unspecified / provider baseline
+top_k       = unspecified / provider baseline
 max_tokens  = current role runtime budget
 ```
 
 A Thinking A/B is rejected for a role whose current thinking mode is not an explicit boolean. Do not reinterpret `null` as true or false.
 
-### Official temperature candidates
+### Official first Sampling candidates
 
-The candidate temperature is no longer left to ad-hoc operator choice. For the current six role/model mappings, use the current official model guidance as the first temperature candidate against the DebugAI baseline `temperature=0`:
+`--candidate official` is accepted only when the repository has a current official first candidate for that role and axis. Missing candidates fail closed instead of inventing a number.
 
-| Role | Current model authority | Current thinking contract | First temperature candidate | Official authority |
-| --- | --- | ---: | ---: | --- |
-| `code_scout` | Qwen2.5-Coder 7B Instruct | `null` / provider-profile baseline | `0.7` | Qwen generation config |
-| `causal_scout` | Qwen3 8B | `false` | `0.7` | Qwen3 non-thinking guidance |
-| `researcher` | Granite 4.2 8B | `false` | `1.0` | IBM Granite generation guidance |
-| `diagnoser` | Qwen3 8B | `true` | `0.6` | Qwen3 thinking guidance |
-| `patch_engineer` | Qwen2.5-Coder 7B Instruct | `null` / provider-profile baseline | `0.7` | Qwen generation config |
-| `local_reviewer` | Ministral 3 8B Reasoning 2512 | `null` / model reasoning profile | `0.7` | Mistral model card |
+| Role | Current model authority | Thinking | Temperature | top_p | top_k | Authority |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| `code_scout` | Qwen2.5-Coder 7B Instruct | `null` | `0.7` | `0.8` | `20` | Qwen generation config |
+| `causal_scout` | Qwen3 8B | `false` | `0.7` | `0.8` | `20` | Qwen3 non-thinking guidance |
+| `researcher` | Granite 4.2 8B | `false` | `1.0` | `0.95` | none fixed | IBM Granite generation guidance |
+| `diagnoser` | Qwen3 8B | `true` | `0.6` | `0.95` | `20` | Qwen3 thinking guidance |
+| `patch_engineer` | Qwen2.5-Coder 7B Instruct | `null` | `0.7` | `0.8` | `20` | Qwen generation config |
+| `local_reviewer` | Ministral 3 8B Reasoning 2512 | `null` | `0.7` | `0.95` | none fixed | Mistral model card |
 
 Official sources current at this documentation update:
 
@@ -181,14 +182,15 @@ Official sources current at this documentation update:
 - Qwen3-8B model card: https://huggingface.co/Qwen/Qwen3-8B
 - IBM Granite 4.2 8B model card: https://huggingface.co/ibm-granite/granite-4.2-8b
 - Ministral-3-8B-Reasoning-2512 model card: https://huggingface.co/mistralai/Ministral-3-8B-Reasoning-2512
+- llama.cpp server sampling contract: https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md
 
-For Qwen3 specifically, the official guidance couples Sampling with thinking mode: thinking recommends temperature `0.6`; non-thinking recommends `0.7`. A Thinking-only A/B at the current DebugAI `temperature=0` is therefore a measurement of the **current DebugAI configuration**, not proof of the globally best Qwen3 thinking/non-thinking configuration. Do not over-generalize that result.
+For Qwen3, thinking and non-thinking guidance differs. A Thinking-only A/B at DebugAI's current `temperature=0` is a measurement of the current DebugAI baseline, not proof of the globally best Qwen3 configuration.
 
-Official cards also recommend additional Sampling values such as Qwen `top_p/top_k` and Granite/Mistral `top_p`; those are recorded as references only and remain unmeasured by this current harness.
+For Granite and Ministral `top_k`, the table intentionally has no fixed official candidate. `--candidate official` must fail for those role/axis pairs. If a later measurement intentionally explores `top_k`, the candidate must be separately justified and recorded rather than silently invented.
 
 ### Token-cap sequence
 
-Do not invent a reduced token cap before the preceding real measurements are available. The current role runtime budget is the baseline. After Thinking and supported temperature measurements are recorded, reduce `max_tokens` one explicit candidate at a time and retain a smaller cap only when quality does not regress and the measured cost/latency benefit is real.
+Do not invent a reduced token cap before the preceding real measurements are available. The current role runtime budget is the baseline. After Thinking and supported Sampling measurements are recorded, reduce `max_tokens` one explicit candidate at a time and retain a smaller cap only when quality does not regress and the measured cost/latency benefit is real.
 
 A lower token cap is not automatically better simply because it is cheaper.
 
@@ -249,7 +251,7 @@ read current server-core routing / operation authority
 -> Local Reviewer measurement where current qualification must be re-confirmed
 -> six-role Skill ON/OFF measurement
 -> Thinking A/B only where the current role contract is explicitly boolean
--> temperature A/B using the role/model official candidate above
+-> temperature/top_p/top_k A/B where a justified candidate exists
 -> token-cap A/B using explicit candidates derived after prior measurement
 -> real AI Core/TGserver/Evidence Search/real-repo DebugAI run
 -> MCP start/status/resume-if-applicable/wait/inspect verification
@@ -268,8 +270,7 @@ PRE_SERVER_HARNESS_SOURCE=PASS|FAIL
 LOCAL_REVIEWER_REAL=PASS|FAIL|NOT_EXECUTED
 SKILL_EFFECT_ALL_REAL=PASS|FAIL|INCOMPLETE|NOT_EXECUTED
 MODEL_AB_THINKING_REAL=MEASURED|PARTIAL|NOT_APPLICABLE|NOT_EXECUTED
-MODEL_AB_TEMPERATURE_REAL=MEASURED|INCOMPLETE|NOT_EXECUTED
-MODEL_AB_FULL_SAMPLING_REAL=NOT_SUPPORTED_BY_CURRENT_DEBUGAI_ADAPTER_CONTRACT
+MODEL_AB_SAMPLING_REAL=MEASURED|PARTIAL|INCOMPLETE|NOT_EXECUTED
 MODEL_AB_TOKEN_CAP_REAL=MEASURED|INCOMPLETE|NOT_EXECUTED
 REAL_INTEGRATION_E2E=PASS|FAIL|NOT_EXECUTED
 MCP_LIVE=PASS|FAIL|NOT_EXECUTED
