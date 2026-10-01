@@ -59,6 +59,27 @@ function baseGitResult({root,origin="git@github.com:seigo-gace/debug-ai.git",hea
   };
 }
 
+function sourceProbeOutput({auditCli=true}={}){
+  const required_files=Object.fromEntries(CONTAINER_SOURCE_REQUIREMENTS.map(p=>[p,true]));
+  if(!auditCli)required_files["/app/scripts/search-gate-shadow-audit.cjs"]=false;
+  return JSON.stringify({required_files,candidate_policy_version:"debugai.search-gate-candidate-policy/v1",shadow_runtime_policy_version:"debugai.search-gate-shadow-runtime/v2"});
+}
+
+function auditOutput(overrides={}){
+  return JSON.stringify({
+    schema:"debugai.search-gate-shadow-store-audit/v1",
+    read_only:true,
+    activation_authorized:false,
+    activation_decision:"NOT_AUTHORIZED_BY_SHADOW_AUDIT",
+    window_status:"NO_CANDIDATE_OBSERVATIONS",
+    false_skip_assessment:"NOT_EVALUABLE",
+    candidate_skip_observations:0,
+    evaluable_candidate_skip_observations:0,
+    false_skip_observations:0,
+    ...overrides,
+  });
+}
+
 test("live readback redacts HTTPS remote credentials and normalizes repository identity",()=>{
   assert.equal(sanitizeRemote("https://secret-token@github.com/seigo-gace/debug-ai.git\n"),"https://***@github.com/seigo-gace/debug-ai.git");
   assert.equal(sanitizeRemote("git@github.com:seigo-gace/debug-ai.git"),"git@github.com:seigo-gace/debug-ai.git");
@@ -130,18 +151,20 @@ test("running container source proof requires exactly one container and every me
     assert.equal(command,"docker");
     assert.equal(args[0],"exec");
     assert.equal(args[1],"abc123");
-    const required_files=Object.fromEntries(CONTAINER_SOURCE_REQUIREMENTS.map(p=>[p,true]));
-    return{ok:true,status:0,stdout:JSON.stringify({required_files,candidate_policy_version:"debugai.search-gate-candidate-policy/v1",shadow_runtime_policy_version:"debugai.search-gate-shadow-runtime/v2"}),error_code:null};
+    return{ok:true,status:0,stdout:sourceProbeOutput(),error_code:null};
   };
   const out=containerSourceReadback(docker,runner);
   assert.equal(out.checked,true);
   assert.equal(out.compatible,true);
   assert.equal(out.reason,"SOURCE_COMPATIBLE");
   assert.equal(out.required_files["/app/scripts/search-gate-shadow-audit.cjs"],true);
+  const missingCli=containerSourceReadback(docker,()=>({ok:true,status:0,stdout:sourceProbeOutput({auditCli:false}),error_code:null}));
+  assert.equal(missingCli.compatible,false);
+  assert.equal(missingCli.reason,"SOURCE_BEHIND_OR_INCOMPLETE");
   assert.equal(containerSourceReadback({...docker,container_count:2,containers:[docker.containers[0],docker.containers[0]]},runner).compatible,false);
 });
 
-test("combined live readback never authorizes search skip and fails closed on incompatible source",async()=>{
+test("combined live readback never authorizes search skip and never measures when source is incompatible",async()=>{
   const f=tempRepo();
   try{
     write(f.root,"package.json",JSON.stringify({scripts:{}}));
@@ -158,6 +181,10 @@ test("combined live readback never authorizes search skip and fails closed on in
     assert.equal(out.checkout_source_proven,false);
     assert.equal(out.runtime_source_state,"RUNTIME_SOURCE_BEHIND_OR_UNKNOWN");
     assert.equal(out.search_shadow_measurement_authorized,false);
+    assert.equal(out.search_shadow_measurement_executed,false);
+    assert.equal(out.search_shadow_measurement_pass,false);
+    assert.equal(out.shadow_audit,null);
+    assert.equal(out.shadow_audit_error_code,"MEASUREMENT_NOT_AUTHORIZED");
     assert.equal(out.search_skip_activation_authorized,false);
   }finally{f.cleanup();}
 });
@@ -167,9 +194,11 @@ test("wrong repository identity cannot become a proven compatible checkout",asyn
   try{
     makeCompatibleCheckout(f.root);
     const git=baseGitResult({root:f.root,origin:"git@github.com:other/debug-ai.git"});
+    let auditCalls=0;
     const runner=(command,args)=>{
       const result=git(command,args);if(result)return result;
-      if(command==="docker")return{ok:true,status:0,stdout:"",error_code:null};
+      if(command==="docker"&&args[0]==="ps")return{ok:true,status:0,stdout:"abc123\tdebug-ai\tdebug-ai:test\tUp\n",error_code:null};
+      if(command==="docker"&&args[0]==="exec"){auditCalls++;return{ok:true,status:0,stdout:sourceProbeOutput(),error_code:null};}
       throw new Error(`UNEXPECTED:${command}:${args.join(" ")}`);
     };
     const out=await collectReadback({cwd:f.root,runner,health:async()=>({reachable:true,status_code:200,ok:true,service:"debug-ai",error_code:null})});
@@ -177,31 +206,68 @@ test("wrong repository identity cannot become a proven compatible checkout",asyn
     assert.equal(out.git.repository_identity_match,false);
     assert.equal(out.checkout_source_proven,false);
     assert.equal(out.search_shadow_measurement_authorized,false);
+    assert.equal(out.search_shadow_measurement_executed,false);
+    assert.equal(auditCalls,1);
   }finally{f.cleanup();}
 });
 
-test("measurement authorization needs compatible checkout, compatible running container and exact DebugAI health identity",async()=>{
+test("measurement authorization gates and executes the read-only live shadow audit",async()=>{
   const f=tempRepo();
   try{
     makeCompatibleCheckout(f.root);
-    const required_files=Object.fromEntries(CONTAINER_SOURCE_REQUIREMENTS.map(p=>[p,true]));
     const git=baseGitResult({root:f.root});
+    let auditCalls=0;
     const runner=(command,args)=>{
       const result=git(command,args);if(result)return result;
       if(command==="docker"&&args[0]==="ps")return{ok:true,status:0,stdout:"abc123\tdebug-ai\tdebug-ai:test\tUp 1 minute (healthy)\n",error_code:null};
-      if(command==="docker"&&args[0]==="exec")return{ok:true,status:0,stdout:JSON.stringify({required_files,candidate_policy_version:"debugai.search-gate-candidate-policy/v1",shadow_runtime_policy_version:"debugai.search-gate-shadow-runtime/v2"}),error_code:null};
+      if(command==="docker"&&args[0]==="exec"&&args[3]==="-e")return{ok:true,status:0,stdout:sourceProbeOutput(),error_code:null};
+      if(command==="docker"&&args[0]==="exec"&&args[3]==="/app/scripts/search-gate-shadow-audit.cjs"){
+        auditCalls++;
+        assert.deepEqual(args.slice(4),["--runtime-root","/app/runtime","--max-managed-records","10000"]);
+        return{ok:true,status:0,stdout:auditOutput(),error_code:null};
+      }
       throw new Error(`UNEXPECTED:${command}:${args.join(" ")}`);
     };
     const healthy=async()=>({reachable:true,status_code:200,ok:true,service:"debug-ai",error_code:null});
     const out=await collectReadback({cwd:f.root,runner,health:healthy});
+    assert.equal(out.schema,"debugai.live-runtime-readback/v2");
     assert.equal(out.checkout_source_proven,true);
     assert.equal(out.runtime_source_state,"RUNNING_CONTAINER_SOURCE_COMPATIBLE");
     assert.equal(out.search_shadow_measurement_authorized,true);
+    assert.equal(out.search_shadow_measurement_executed,true);
+    assert.equal(out.search_shadow_measurement_pass,true);
+    assert.equal(out.shadow_audit.window_status,"NO_CANDIDATE_OBSERVATIONS");
+    assert.equal(out.shadow_audit.false_skip_assessment,"NOT_EVALUABLE");
     assert.equal(out.search_skip_activation_authorized,false);
+    assert.equal(auditCalls,1);
     assert.equal(healthOk({reachable:true,status_code:200,ok:true,service:"other"}),false);
     assert.equal(healthOk({reachable:true,status_code:503,ok:true,service:"debug-ai"}),false);
     assert.equal(healthOk({reachable:true,status_code:200,ok:false,service:"debug-ai"}),false);
     const wrongService=await collectReadback({cwd:f.root,runner,health:async()=>({reachable:true,status_code:200,ok:true,service:"other",error_code:null})});
     assert.equal(wrongService.search_shadow_measurement_authorized,false);
+    assert.equal(wrongService.search_shadow_measurement_executed,false);
+    assert.equal(auditCalls,1);
+  }finally{f.cleanup();}
+});
+
+test("invalid live shadow audit output fails closed without ever authorizing activation",async()=>{
+  const f=tempRepo();
+  try{
+    makeCompatibleCheckout(f.root);
+    const git=baseGitResult({root:f.root});
+    const runner=(command,args)=>{
+      const result=git(command,args);if(result)return result;
+      if(command==="docker"&&args[0]==="ps")return{ok:true,status:0,stdout:"abc123\tdebug-ai\tdebug-ai:test\tUp\n",error_code:null};
+      if(command==="docker"&&args[0]==="exec"&&args[3]==="-e")return{ok:true,status:0,stdout:sourceProbeOutput(),error_code:null};
+      if(command==="docker"&&args[0]==="exec")return{ok:true,status:0,stdout:auditOutput({activation_authorized:true}),error_code:null};
+      throw new Error(`UNEXPECTED:${command}:${args.join(" ")}`);
+    };
+    const out=await collectReadback({cwd:f.root,runner,health:async()=>({reachable:true,status_code:200,ok:true,service:"debug-ai",error_code:null})});
+    assert.equal(out.search_shadow_measurement_authorized,true);
+    assert.equal(out.search_shadow_measurement_executed,true);
+    assert.equal(out.search_shadow_measurement_pass,false);
+    assert.equal(out.shadow_audit,null);
+    assert.equal(out.shadow_audit_error_code,"SHADOW_AUDIT_RESULT_INVALID");
+    assert.equal(out.search_skip_activation_authorized,false);
   }finally{f.cleanup();}
 });
