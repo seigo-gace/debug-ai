@@ -66,11 +66,11 @@ repository                       = seigo-gace/debug-ai
 branch                           = feat/pre-server-benchmark-gates-20261001
 base branch                      = feat/search-gate-shadow-audit-cli-20261001
 base SHA                         = cfbe2908bb6190bc5f5c894779c4d0f08f51b80e
-verified implementation HEAD     = a7006347952808fe4ba017c51120fad436b8a6bc
+verified implementation HEAD     = bb09a11d0017f1da9440fdf531e1d1f18cb12b1a
 PR                               = #34 / OPEN / DRAFT / UNMERGED
-Public Readiness Audit           = SUCCESS (#352)
-Verify                           = SUCCESS (#387 / 370 of 370 PASS)
-Core Verify                      = SUCCESS (#388)
+Public Readiness Audit           = SUCCESS (#357)
+Verify                           = SUCCESS (#392 / 371 of 371 PASS)
+Core Verify                      = SUCCESS (#393)
 control-plane capabilities       = 18/18 IMPLEMENTED / 0 UNRESOLVED
 pre-server source qualification  = READY / CI-EXECUTED / REAL MEASUREMENTS NOT EXECUTED
 six-role Skill A/B source        = READY / REAL MEASUREMENT NOT EXECUTED
@@ -92,13 +92,13 @@ production change                = NONE
 
 These source/CI results do **not** prove that the live Contabo checkout is on this revision. The live repository/container/revision must be read back before any real-runtime claim, real-model benchmark, MCP live claim, or Search Gate measurement. Master has assigned that live-server check to VS Codex. If the live checkout/container is behind, preserve that fact as `RUNTIME_SOURCE_BEHIND_OR_UNKNOWN`; do not silently sync, deploy, or restart it.
 
-Current source/protocol/pre-server verification at exact implementation SHA `a7006347952808fe4ba017c51120fad436b8a6bc`:
+Current source/protocol/pre-server verification at exact implementation SHA `bb09a11d0017f1da9440fdf531e1d1f18cb12b1a`:
 
 ```text
-Verify                          = SUCCESS (#387)
-Core Verify                     = SUCCESS (#388)
-Public Readiness Audit          = SUCCESS (#352)
-repository tests                = 370/370 PASS
+Verify                          = SUCCESS (#392)
+Core Verify                     = SUCCESS (#393)
+Public Readiness Audit          = SUCCESS (#357)
+repository tests                = 371/371 PASS
 pre-server qualification audit  = source_ready=true
 six-role benchmark suite        = SOURCE READY
 Model A/B five-axis harness     = SOURCE READY
@@ -755,19 +755,19 @@ npm run debugai:mcp
 
 ### Current pre-server source snapshot
 
-For exact implementation/documentation HEAD `a7006347952808fe4ba017c51120fad436b8a6bc`, GitHub workflows were read back as:
+For exact implementation/documentation HEAD `bb09a11d0017f1da9440fdf531e1d1f18cb12b1a`, GitHub workflows were read back as:
 
 ```text
-Public Readiness Audit = SUCCESS (#352)
-Verify                 = SUCCESS (#387)
-Core Verify            = SUCCESS (#388)
+Public Readiness Audit = SUCCESS (#357)
+Verify                 = SUCCESS (#392)
+Core Verify            = SUCCESS (#393)
 ```
 
 The `Verify` workflow executed:
 
 ```text
-tests     = 370
-pass      = 370
+tests     = 371
+pass      = 371
 fail      = 0
 cancelled = 0
 skipped   = 0
