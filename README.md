@@ -60,18 +60,28 @@ The MCP adapter is a compatible parent-agent transport/integration layer and doe
 Current repository authority at this README update:
 
 ```text
-repository                     = seigo-gace/debug-ai
-branch                         = feat/mcp-adapter-20260930
-base branch                    = feat/durable-role-continuation-final-20260928
-base SHA                       = 095193835fae19d5b63198d9c584e0b7079c9656
-MCP verified implementation SHA = 078203e61073be99a48444ba0c3467a7143102f4
-previous docs HEAD             = 8e1922d0b02414c6666a538634cdd0a25078f3ef
-PR                             = #22 / OPEN / DRAFT / UNMERGED
-main merge                     = NOT_EXECUTED
-server deploy                  = NOT_EXECUTED
+repository                      = seigo-gace/debug-ai
+branch                          = feat/search-gate-shadow-audit-cli-20261001
+base branch                     = feat/source-verify-boundary-20261001
+base SHA                        = db9394548dd1ab34aecf8f0a7d780683831f584a
+current verified source HEAD    = de79e37044cad2721a91ae494887b6ffe666a1f7
+PR                              = #33 / OPEN / DRAFT / UNMERGED
+Public Readiness Audit          = SUCCESS (#305)
+Verify                          = SUCCESS (#340 / 343 of 343 PASS)
+Core Verify                     = SUCCESS (#341)
+control-plane capabilities      = 18/18 IMPLEMENTED / 0 UNRESOLVED
+real Search Gate measurement    = NOT_EXECUTED
+false-skip zero proof           = NOT_PROVEN
+Search Gate skip activation     = NOT_EXECUTED
+main merge                      = NOT_EXECUTED
+server deploy                   = NOT_EXECUTED
+server restart                  = NOT_EXECUTED
+production change               = NONE
 ```
 
-Exact MCP implementation verification at `078203e61073be99a48444ba0c3467a7143102f4`:
+These source/CI results do **not** prove that the live Contabo checkout is on this revision. The live repository/container/revision must be read back before any real-runtime claim or Search Gate measurement.
+
+Historical MCP source/protocol verification remains valid for its exact implementation SHA `078203e61073be99a48444ba0c3467a7143102f4`:
 
 ```text
 Verify                 = SUCCESS
@@ -84,7 +94,7 @@ MCP health call         = PASS
 approve/apply MCP tool  = ABSENT
 ```
 
-The later documentation-only HEAD `8e1922d0b02414c6666a538634cdd0a25078f3ef` also has Verify / Core Verify / Public Readiness Audit SUCCESS. These results do **not** prove a live Contabo MCP deployment.
+The later documentation-only HEAD `8e1922d0b02414c6666a538634cdd0a25078f3ef` also had Verify / Core Verify / Public Readiness Audit SUCCESS. These historical results do **not** prove a live Contabo MCP deployment.
 
 Current MCP state separation:
 
@@ -225,6 +235,18 @@ A non-final response such as `REJECTED_INITIAL_QUALITY` remains an evidence gap.
 ### TGserver
 
 TGserver is consumed via HTTP APIs rather than direct Telegram, Redis, or Meilisearch access. Runtime logging/archival and knowledge-base retrieval/promotion remain separate responsibilities.
+
+### Evidence reads and source verification
+
+The read-only evidence/control-plane boundary now includes:
+
+- `evidence.read` — bounded projection of runtime-authentic evidence;
+- `runtime.trace.read` / `state.read` — current-run-bound runtime observation;
+- `history.read` — bounded rejected-hypothesis history from the canonical `history.jsonl` authority;
+- `invariant.read` — immutable Master source-span authority plus separately reported runtime-verified invariants;
+- `source.verify` — fail-closed source identity/version/quote/claim-support verification over already admitted evidence.
+
+`source.verify` deliberately does **not** relabel integrity as semantic support. `SUPPORTED` is limited to exact normalized direct text from an official evidence excerpt or `source.read` content. Internal-KB claim metadata and ordinary non-matches remain `UNKNOWN`; explicit structured official contradiction can yield `UNSUPPORTED`. Missing or ambiguous version applicability remains an evidence gap.
 
 ---
 
@@ -393,24 +415,45 @@ The runtime must not manufacture booleans to satisfy the gate. Candidate identit
 - claim/evidence binding and role-output validation;
 - runtime telemetry;
 - Evidence Projection / Active Evidence Window;
+- bounded `evidence.read`;
+- current-run `runtime.trace.read` and `state.read`;
+- canonical rejected-hypothesis `history.read` without a second history database;
+- immutable Master-authority `invariant.read` with runtime-verified invariants kept separate;
+- fail-closed deterministic `source.verify`;
 - durable tool effects and Researcher continuation;
 - Patch / Review runtime packets and workflow wiring;
 - repository revision gate components and workflow binding;
 - Strict Completion module, runtime-input builder, and workflow wiring;
 - deterministic HTTP analyze-to-approved-patch closed-loop fixture;
 - external-final public-summary privacy boundary;
-- guarded MCP stdio adapter delegating to the existing CLI/HTTP contract.
+- guarded MCP stdio adapter delegating to the existing CLI/HTTP contract;
+- Search Gate provider-preserving shadow measurement;
+- conservative candidate-skip policy in shadow only;
+- read-only Search Gate Shadow Audit CLI.
+
+Current control-plane capability audit:
+
+```text
+skill contracts                  = 25
+skill procedures                 = 25
+declared capability requirements = 18
+implemented                      = 18
+unresolved                       = 0
+isGapFree                        = true
+```
+
+This means each declared capability has an implemented owning provider/boundary. It does not mean unknown evidence can be turned into a supported fact; `UNKNOWN` and `INSUFFICIENT_*` remain valid fail-closed results.
 
 ### Partial / pending
 
-- Role/Search Gate: shadow partial; production skip activation requires shadow validation first;
-- capability gap audit: 11 capabilities remain `NOT_IMPLEMENTED` and must be closed by the owning responsibility;
+- Search Gate: source/CI shadow instrumentation, candidate policy, and read-only audit are verified; **real live-runtime candidate/false-skip measurement is still pending**;
+- Search Gate production skip activation: NOT EXECUTED and requires real compatible shadow observations plus a separate approval/activation decision;
 - model A/B: pending;
 - fresh real current-runtime self-development/self-debug run: pending;
 - final real production-equivalent closed-loop E2E: pending;
 - MCP live Contabo runtime connection and Workspace registration: pending.
 
-Do not mechanically turn every gap into an AI tool. Some gaps belong to deterministic core, runtime packets, repository/runtime policy, or other non-AI responsibilities.
+Do not mechanically turn every future gap into an AI tool. Responsibilities may belong to deterministic core, runtime packets, repository/runtime policy, or other non-AI boundaries.
 
 ---
 
@@ -631,9 +674,12 @@ Useful explicit commands:
 npm run test:e2e-fixture
 npm run audit:control-plane-gaps
 npm run audit:docker-storage
+npm run audit:search-gate-shadow
 npm run test:legacy
 npm run debugai:mcp
 ```
+
+`audit:search-gate-shadow` is read-only. It does not call search providers, mutate RuntimeEvidence, deploy/restart services, or authorize Search Gate activation.
 
 `debugai verify` is read-only and the CLI/MCP surfaces intentionally do not expose a patch-apply shortcut.
 
@@ -641,9 +687,34 @@ npm run debugai:mcp
 
 ## Current verified snapshot and CI boundary
 
-### MCP branch exact implementation snapshot
+### Current stacked branch exact snapshot
 
-For exact MCP implementation SHA `078203e61073be99a48444ba0c3467a7143102f4`, GitHub workflows were read back as:
+For exact current source HEAD `de79e37044cad2721a91ae494887b6ffe666a1f7`, GitHub workflows were read back as:
+
+```text
+Public Readiness Audit = SUCCESS (#305)
+Verify                 = SUCCESS (#340)
+Core Verify            = SUCCESS (#341)
+```
+
+The `Verify` workflow executed:
+
+```text
+tests     = 343
+pass      = 343
+fail      = 0
+cancelled = 0
+skipped   = 0
+todo      = 0
+```
+
+Core Verify additionally passed the current real CI gates for DebugAI image build/container health, Landlock+seccomp isolation, loopback-only/managed Node and Python DAP, main-to-sidecar queue round trip, and Compose sandbox boundary.
+
+PR #33 is still OPEN / DRAFT / UNMERGED. These source/CI results do not prove a live server deployment or a real Search Gate false-skip measurement.
+
+### Historical MCP implementation snapshot
+
+For exact MCP implementation SHA `078203e61073be99a48444ba0c3467a7143102f4`, GitHub workflows were previously read back as:
 
 ```text
 Verify                 = SUCCESS
@@ -651,7 +722,7 @@ Core Verify            = SUCCESS
 Public Readiness Audit = SUCCESS
 ```
 
-The `Verify` workflow executed the complete test suite:
+The historical MCP `Verify` workflow executed:
 
 ```text
 tests = 286
@@ -669,7 +740,7 @@ approve/apply tool absent  = PASS
 debugai_health tool call   = PASS
 ```
 
-The later documentation-only HEAD `8e1922d0b02414c6666a538634cdd0a25078f3ef` also has Verify / Core Verify / Public Readiness Audit SUCCESS.
+The later documentation-only HEAD `8e1922d0b02414c6666a538634cdd0a25078f3ef` also had Verify / Core Verify / Public Readiness Audit SUCCESS.
 
 The stdio regression used a controlled loopback HTTP fixture downstream. It proves the MCP protocol/delegation boundary but does not prove a deployed Contabo MCP runtime.
 
@@ -694,6 +765,12 @@ For exact durable implementation SHA `df261bdae3b6f259ac428a173b798fae2fb68bdf`,
 | Role Tool Loop telemetry | IMPLEMENTED |
 | Production skill/benchmark isolation | IMPLEMENTED |
 | Evidence Projection + Active Evidence Window | IMPLEMENTED + CONNECTED |
+| `evidence.read` | IMPLEMENTED + TESTED |
+| `runtime.trace.read` / `state.read` | IMPLEMENTED + TESTED |
+| `history.read` | IMPLEMENTED + TESTED |
+| `invariant.read` | IMPLEMENTED + TESTED |
+| `source.verify` | IMPLEMENTED + TESTED, FAIL-CLOSED |
+| Control-plane declared capability requirements | 18/18 IMPLEMENTED / 0 UNRESOLVED |
 | Repository revision fallback/binding | IMPLEMENTED + TESTED |
 | Patch / Review Packet workflow wiring | IMPLEMENTED + TESTED |
 | Strict Completion Gate module | IMPLEMENTED |
@@ -706,15 +783,18 @@ For exact durable implementation SHA `df261bdae3b6f259ac428a173b798fae2fb68bdf`,
 | MCP real stdio protocol / tools/list / health call | VERIFIED PASS IN CI |
 | MCP live Contabo DebugAI runtime | NOT VERIFIED |
 | Workspace MCP registration | NOT EXECUTED |
-| Role/Search Gate | SHADOW PARTIAL |
-| Remaining capability gaps | 11 NOT_IMPLEMENTED |
+| Search Gate provider-preserving shadow | SOURCE + CI VERIFIED |
+| Search Gate candidate-skip policy | SHADOW ONLY / SOURCE + CI VERIFIED |
+| Search Gate read-only audit CLI | SOURCE + CI VERIFIED |
+| Real live Search Gate candidate/false-skip measurement | NOT EXECUTED |
+| Search Gate skip activation | NOT EXECUTED / NOT AUTHORIZED BY SHADOW AUDIT |
 | Model A/B | PENDING |
 | Fresh real current-runtime self-development run | NOT EXECUTED |
 | Real production-equivalent full closed-loop E2E | PENDING |
 | Main merge | NOT DONE / NOT AUTHORIZED |
 | Deploy / production change | NOT DONE |
 
-DebugAI as a whole is therefore **not yet fully complete**.
+DebugAI as a whole is therefore **not yet fully complete**. The current source/CI boundary is substantially further ahead than the last verified live-runtime boundary, which must be read back rather than assumed.
 
 ---
 
@@ -723,22 +803,24 @@ DebugAI as a whole is therefore **not yet fully complete**.
 Current order is:
 
 ```text
-1. keep MCP live-runtime/Workspace registration separate from source/CI verification
-2. fresh real current-runtime DebugAI self-development/self-debug run
-3. bind the fresh run to current repository/runtime evidence and identify any real blocking defect
-4. fix confirmed source defects without weakening approval/evidence/revision gates
-5. focused regression + repository verification + exact-SHA CI
-6. DebugAI read-only verify against the corrected current source
-7. Role / Search Gate shadow verification
-8. limited activation only after false-skip safety proof
-9. close the remaining 11 capability gaps by responsibility
-10. model A/B
-11. final real production-equivalent closed-loop E2E
-12. PR final audit
-13. wait for explicit Master approval before merge/deploy
+1. read back the actual live DebugAI checkout/container/revision without mutation
+2. keep any live revision mismatch separate from current GitHub source/CI state
+3. run Search Gate Shadow Audit only when a compatible candidate-policy shadow runtime is actually present
+4. classify the real shadow window: no candidates / incompatible policy / non-evaluable / false-skip detected / zero observed
+5. do not activate search skipping from the audit alone; limited activation requires a separate safety decision and explicit approval boundary
+6. fresh real current-runtime DebugAI self-development/self-debug run
+7. bind the fresh run to current repository/runtime evidence and identify any real blocking defect
+8. fix confirmed source defects without weakening approval/evidence/revision gates
+9. focused regression + repository verification + exact-SHA CI
+10. DebugAI read-only verify against the corrected current source
+11. model A/B
+12. final real production-equivalent closed-loop E2E
+13. MCP live-runtime/Workspace registration remains a separate availability task
+14. PR final audit
+15. wait for explicit Master approval before merge/deploy
 ```
 
-Do not return to older status documents that list already completed durable, packet, Strict Completion, or MCP source/protocol foundations as pending work.
+Do not return to older status documents that list already completed durable, packet, Strict Completion, MCP source/protocol, or the closed 18/18 control-plane capability boundary as pending work.
 
 ---
 
@@ -760,7 +842,7 @@ Project-level completion still requires a real current-runtime run covering the 
 - required External Final Review;
 - Strict Completion Gate using actual runtime evidence.
 
-A deterministic fixture or MCP transport test alone is not enough.
+A deterministic fixture, source-only CI result, Search Gate shadow fixture, or MCP transport test alone is not enough.
 
 ---
 
