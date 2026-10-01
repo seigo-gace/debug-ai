@@ -13,38 +13,23 @@ const patchEngineer=require("./patch-engineer-skill-effect-benchmark.js");
 
 const SCHEMA="debugai.model-ab-benchmark/v1";
 const AXES=Object.freeze(["thinking","temperature","top_p","top_k","max_tokens"]);
-const SAMPLING_SCOPE=Object.freeze({
-  authority:"DEBUGAI_BENCHMARK_AI_CORE_REQUEST_CONTRACT",
-  temperature:"SUPPORTED_EXPLICIT_A_B_ONLY",
-  top_p:"SUPPORTED_EXPLICIT_A_B_ONLY",
-  top_k:"SUPPORTED_EXPLICIT_A_B_ONLY",
-  production_defaults_changed:false,
-  complete_sampling_sweep:false,
-});
+const SAMPLING_SCOPE=Object.freeze({authority:"DEBUGAI_BENCHMARK_AI_CORE_REQUEST_CONTRACT",temperature:"SUPPORTED_EXPLICIT_A_B_ONLY",top_p:"SUPPORTED_EXPLICIT_A_B_ONLY",top_k:"SUPPORTED_EXPLICIT_A_B_ONLY",production_defaults_changed:false,complete_sampling_sweep:false});
 const ROLE_ORDER=Object.freeze(["code_scout","causal_scout","researcher","diagnoser","patch_engineer","local_reviewer"]);
 const MODULES=Object.freeze({code_scout:codeScout,causal_scout:causalScout,researcher,diagnoser,patch_engineer:patchEngineer,local_reviewer:localReviewer});
 const OFFICIAL_SAMPLING_CANDIDATES=Object.freeze({
-  code_scout:Object.freeze({temperature:0.7,top_p:0.8,top_k:20,authority:"Qwen2.5-Coder-7B-Instruct generation_config"}),
-  causal_scout:Object.freeze({temperature:0.7,top_p:0.8,top_k:20,authority:"Qwen3-8B non-thinking guidance"}),
-  researcher:Object.freeze({temperature:1.0,top_p:0.95,top_k:null,authority:"IBM Granite 4.2 8B generation guidance"}),
-  diagnoser:Object.freeze({temperature:0.6,top_p:0.95,top_k:20,authority:"Qwen3-8B thinking guidance"}),
-  patch_engineer:Object.freeze({temperature:0.7,top_p:0.8,top_k:20,authority:"Qwen2.5-Coder-7B-Instruct generation_config"}),
-  local_reviewer:Object.freeze({temperature:0.7,top_p:0.95,top_k:null,authority:"Ministral 3 8B Reasoning model card"}),
+  code_scout:Object.freeze({model:"coder//models/qwen2.5-coder-7b-instruct-q4_k_m.gguf",temperature:0.7,top_p:0.8,top_k:20,authority:"Qwen2.5-Coder-7B-Instruct generation_config",source_url:"https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct/blob/main/generation_config.json"}),
+  causal_scout:Object.freeze({model:"qwen3//models/Qwen3-8B-Q4_K_M.gguf",temperature:0.7,top_p:0.8,top_k:20,authority:"Qwen3-8B non-thinking guidance",source_url:"https://huggingface.co/Qwen/Qwen3-8B"}),
+  researcher:Object.freeze({model:"granite//models/granite-4.2-8b-Q4_K_M.gguf",temperature:1.0,top_p:0.95,top_k:null,authority:"IBM Granite 4.2 8B generation guidance",source_url:"https://huggingface.co/ibm-granite/granite-4.2-8b"}),
+  diagnoser:Object.freeze({model:"qwen3//models/Qwen3-8B-Q4_K_M.gguf",temperature:0.6,top_p:0.95,top_k:20,authority:"Qwen3-8B thinking guidance",source_url:"https://huggingface.co/Qwen/Qwen3-8B"}),
+  patch_engineer:Object.freeze({model:"coder//models/qwen2.5-coder-7b-instruct-q4_k_m.gguf",temperature:0.7,top_p:0.8,top_k:20,authority:"Qwen2.5-Coder-7B-Instruct generation_config",source_url:"https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct/blob/main/generation_config.json"}),
+  local_reviewer:Object.freeze({model:"ministral//models/Ministral-3-8B-Reasoning-2512-Q4_K_M.gguf",temperature:0.7,top_p:0.95,top_k:null,authority:"Ministral 3 8B Reasoning model card",source_url:"https://huggingface.co/mistralai/Ministral-3-8B-Reasoning-2512"}),
 });
 
 function parseArgs(argv){const out={};for(let i=0;i<argv.length;i++){const token=argv[i];if(!token.startsWith("--"))continue;const name=token.slice(2),value=argv[i+1];if(value!==undefined&&!value.startsWith("--")){out[name]=value;i++;}else out[name]=true;}return out;}
 function baselineConfig(role){const cfg=ROLES[role];if(!cfg)throw new Error(`MODEL_AB_ROLE_INVALID:${role}`);const budget=getRoleRuntimeBudget(role);return Object.freeze({model:cfg.backend_model,thinking:cfg.thinking,temperature:0,top_p:null,top_k:null,max_tokens:budget.max_tokens});}
-function officialCandidate(role,axis){const profile=OFFICIAL_SAMPLING_CANDIDATES[role],value=profile?.[axis];if(!Number.isFinite(value))throw new Error(`MODEL_AB_OFFICIAL_CANDIDATE_UNAVAILABLE:${role}:${axis}`);return value;}
-function candidateValue(axis,raw,{role=null}={}){
-  if(raw==="official"){if(!role)throw new Error("MODEL_AB_OFFICIAL_CANDIDATE_ROLE_REQUIRED");return officialCandidate(role,axis);}
-  if(axis==="thinking"){if(raw===true||raw==="true")return true;if(raw===false||raw==="false")return false;throw new Error("MODEL_AB_THINKING_CANDIDATE_INVALID");}
-  if(axis==="temperature"){const value=Number(raw);if(!Number.isFinite(value)||value<0||value>2)throw new Error("MODEL_AB_TEMPERATURE_CANDIDATE_INVALID");return value;}
-  if(axis==="top_p"){const value=Number(raw);if(!Number.isFinite(value)||value<0||value>1)throw new Error("MODEL_AB_TOP_P_CANDIDATE_INVALID");return value;}
-  if(axis==="top_k"){const value=Number(raw);if(!Number.isInteger(value)||value<0||value>100000)throw new Error("MODEL_AB_TOP_K_CANDIDATE_INVALID");return value;}
-  if(axis==="max_tokens"){const value=Number(raw);if(!Number.isInteger(value)||value<64||value>8192)throw new Error("MODEL_AB_MAX_TOKENS_CANDIDATE_INVALID");return value;}
-  throw new Error(`MODEL_AB_AXIS_INVALID:${axis}`);
-}
-function buildVariant(role,axis,rawCandidate){if(!AXES.includes(axis))throw new Error(`MODEL_AB_AXIS_INVALID:${axis}`);const baseline=baselineConfig(role);if(axis==="thinking"&&typeof baseline.thinking!=="boolean")throw new Error(`MODEL_AB_AXIS_UNSUPPORTED:${role}:thinking`);const candidate={...baseline,[axis]:candidateValue(axis,rawCandidate,{role})};if(candidate[axis]===baseline[axis])throw new Error("MODEL_AB_CANDIDATE_EQUALS_BASELINE");assertSingleAxisDifference(baseline,candidate,axis);return Object.freeze({baseline,candidate:Object.freeze(candidate),candidate_authority:rawCandidate==="official"?OFFICIAL_SAMPLING_CANDIDATES[role]?.authority??null:null});}
+function officialCandidate(role,axis){const profile=OFFICIAL_SAMPLING_CANDIDATES[role];if(!profile)throw new Error(`MODEL_AB_OFFICIAL_CANDIDATE_UNAVAILABLE:${role}:${axis}`);if(profile.model!==ROLES[role]?.backend_model)throw new Error(`MODEL_AB_OFFICIAL_CANDIDATE_MODEL_MISMATCH:${role}`);const value=profile[axis];if(!Number.isFinite(value))throw new Error(`MODEL_AB_OFFICIAL_CANDIDATE_UNAVAILABLE:${role}:${axis}`);return value;}
+function candidateValue(axis,raw,{role=null}={}){if(raw==="official"){if(!role)throw new Error("MODEL_AB_OFFICIAL_CANDIDATE_ROLE_REQUIRED");return officialCandidate(role,axis);}if(axis==="thinking"){if(raw===true||raw==="true")return true;if(raw===false||raw==="false")return false;throw new Error("MODEL_AB_THINKING_CANDIDATE_INVALID");}if(axis==="temperature"){const value=Number(raw);if(!Number.isFinite(value)||value<0||value>2)throw new Error("MODEL_AB_TEMPERATURE_CANDIDATE_INVALID");return value;}if(axis==="top_p"){const value=Number(raw);if(!Number.isFinite(value)||value<0||value>1)throw new Error("MODEL_AB_TOP_P_CANDIDATE_INVALID");return value;}if(axis==="top_k"){const value=Number(raw);if(!Number.isInteger(value)||value<0||value>100000)throw new Error("MODEL_AB_TOP_K_CANDIDATE_INVALID");return value;}if(axis==="max_tokens"){const value=Number(raw);if(!Number.isInteger(value)||value<64||value>8192)throw new Error("MODEL_AB_MAX_TOKENS_CANDIDATE_INVALID");return value;}throw new Error(`MODEL_AB_AXIS_INVALID:${axis}`);}
+function buildVariant(role,axis,rawCandidate){if(!AXES.includes(axis))throw new Error(`MODEL_AB_AXIS_INVALID:${axis}`);const baseline=baselineConfig(role);if(axis==="thinking"&&typeof baseline.thinking!=="boolean")throw new Error(`MODEL_AB_AXIS_UNSUPPORTED:${role}:thinking`);const candidate={...baseline,[axis]:candidateValue(axis,rawCandidate,{role})};if(candidate[axis]===baseline[axis])throw new Error("MODEL_AB_CANDIDATE_EQUALS_BASELINE");assertSingleAxisDifference(baseline,candidate,axis);const profile=rawCandidate==="official"?OFFICIAL_SAMPLING_CANDIDATES[role]:null;return Object.freeze({baseline,candidate:Object.freeze(candidate),candidate_authority:profile?Object.freeze({authority:profile.authority,source_url:profile.source_url,model:profile.model}):null});}
 function assertSingleAxisDifference(baseline,candidate,axis){const keys=["model","thinking","temperature","top_p","top_k","max_tokens"],changed=keys.filter(key=>baseline[key]!==candidate[key]);if(changed.length!==1||changed[0]!==axis)throw new Error(`MODEL_AB_MULTI_AXIS_DRIFT:${changed.join(",")}`);return true;}
 function moduleForRole(role){const mod=MODULES[role];if(!mod)throw new Error(`MODEL_AB_ROLE_INVALID:${role}`);return mod;}
 function systemsFor(mod,testCase){if(typeof mod.buildSystemsForCase==="function")return mod.buildSystemsForCase(testCase);if(typeof mod.buildSystems==="function")return mod.buildSystems();throw new Error("MODEL_AB_SYSTEM_BUILDER_MISSING");}
