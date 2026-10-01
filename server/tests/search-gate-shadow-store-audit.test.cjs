@@ -6,7 +6,7 @@ const fs=require("node:fs");
 const os=require("node:os");
 const path=require("node:path");
 const {RuntimeEvidenceStore}=require("../runtime-evidence.js");
-const {auditSearchGateShadowStore,WINDOW_STATUS}=require("../control/search-gate-shadow-store-audit.js");
+const {auditSearchGateShadowStore,WINDOW_STATUS,POLICY_WINDOW_STATUS}=require("../control/search-gate-shadow-store-audit.js");
 const {runSearchGateShadowAudit,parseArgs}=require("../../scripts/search-gate-shadow-audit.cjs");
 
 function fixture(){
@@ -45,7 +45,7 @@ function allFiles(root){
 test("empty runtime evidence is NOT_EVALUABLE and never false-skip zero",()=>{
   const f=fixture();try{
     const out=auditSearchGateShadowStore(f.store);
-    assert.equal(out.read_only,true);assert.equal(out.shadow_record_count,0);assert.equal(out.shadow_run_count,0);assert.equal(out.candidate_skip_observations,0);assert.equal(out.evaluable_candidate_skip_observations,0);assert.equal(out.false_skip_observations,0);assert.equal(out.false_skip_assessment,"NOT_EVALUABLE");assert.equal(out.window_status,WINDOW_STATUS.NO_SHADOW_RECORDS);assert.equal(out.activation_authorized,false);assert.equal(out.activation_decision,"NOT_AUTHORIZED_BY_SHADOW_AUDIT");
+    assert.equal(out.read_only,true);assert.equal(out.shadow_record_count,0);assert.equal(out.shadow_run_count,0);assert.equal(out.first_observed_at,null);assert.equal(out.last_observed_at,null);assert.equal(out.policy_window_status,POLICY_WINDOW_STATUS.NO_SHADOW_RECORDS);assert.equal(out.policy_window_compatible,false);assert.equal(out.candidate_skip_observations,0);assert.equal(out.evaluable_candidate_skip_observations,0);assert.equal(out.false_skip_observations,0);assert.equal(out.false_skip_assessment,"NOT_EVALUABLE");assert.equal(out.window_status,WINDOW_STATUS.NO_SHADOW_RECORDS);assert.equal(out.activation_authorized,false);assert.equal(out.activation_decision,"NOT_AUTHORIZED_BY_SHADOW_AUDIT");
   }finally{f.cleanup();}
 });
 
@@ -53,7 +53,7 @@ test("ordinary shadow records with zero candidate skips remain NOT_EVALUABLE",()
   const f=fixture();try{
     f.store.write("run_a","search_gate_shadow",record({run_id:"run_a"}));f.store.write("run_a","search_gate_shadow",record({run_id:"run_a",search_kind:"INTERNAL_KB"}));
     const out=auditSearchGateShadowStore(f.store);
-    assert.equal(out.shadow_run_count,1);assert.equal(out.shadow_record_count,2);assert.equal(out.candidate_skip_observations,0);assert.equal(out.false_skip_assessment,"NOT_EVALUABLE");assert.equal(out.window_status,WINDOW_STATUS.NO_CANDIDATE_OBSERVATIONS);assert.equal(out.activation_authorized,false);
+    assert.equal(out.shadow_run_count,1);assert.equal(out.shadow_record_count,2);assert.equal(out.policy_window_status,POLICY_WINDOW_STATUS.SINGLE_VERSION);assert.equal(out.policy_window_compatible,true);assert.ok(out.first_observed_at);assert.ok(out.last_observed_at);assert.equal(out.candidate_skip_observations,0);assert.equal(out.false_skip_assessment,"NOT_EVALUABLE");assert.equal(out.window_status,WINDOW_STATUS.NO_CANDIDATE_OBSERVATIONS);assert.equal(out.activation_authorized,false);
   }finally{f.cleanup();}
 });
 
@@ -62,7 +62,16 @@ test("fully evaluated candidate observations can report ZERO_OBSERVED but never 
     f.store.write("run_a","search_gate_shadow",record({run_id:"run_a",query_class:"GENERIC_OR_MISSING",candidate_skip:true,false_skip_rule:"ZERO_RESULT_ONLY",shadow_disposition:{schema:"debugai.role-disposition/v1",decision:"NOT_APPLICABLE",reason_code:"QUERY_CONTEXT_UNAVAILABLE"},result_count:0,false_skip_evaluable:true,false_skip:false,activation_blocker:"SHADOW_ONLY_NOT_AUTHORIZED"}));
     f.store.write("run_b","search_gate_shadow",record({run_id:"run_b",search_kind:"INTERNAL_KB",query_class:"GENERIC_OR_MISSING",candidate_skip:true,false_skip_rule:"ZERO_RESULT_ONLY",shadow_disposition:{schema:"debugai.role-disposition/v1",decision:"NOT_APPLICABLE",reason_code:"QUERY_CONTEXT_UNAVAILABLE"},result_count:0,false_skip_evaluable:true,false_skip:false,activation_blocker:"SHADOW_ONLY_NOT_AUTHORIZED"}));
     const out=auditSearchGateShadowStore(f.store);
-    assert.equal(out.shadow_run_count,2);assert.equal(out.candidate_skip_observations,2);assert.equal(out.evaluable_candidate_skip_observations,2);assert.equal(out.false_skip_observations,0);assert.equal(out.false_skip_assessment,"ZERO_OBSERVED");assert.equal(out.window_status,WINDOW_STATUS.ZERO_OBSERVED_SHADOW_ONLY);assert.equal(out.activation_decision,"NOT_AUTHORIZED_BY_SHADOW_AUDIT");assert.equal(out.activation_authorized,false);
+    assert.equal(out.shadow_run_count,2);assert.equal(out.policy_window_compatible,true);assert.deepEqual(out.candidate_policy_versions,{"debugai.search-gate-candidate-policy/v1":2});assert.equal(out.candidate_skip_observations,2);assert.equal(out.evaluable_candidate_skip_observations,2);assert.equal(out.false_skip_observations,0);assert.equal(out.false_skip_assessment,"ZERO_OBSERVED");assert.equal(out.raw_false_skip_assessment,"ZERO_OBSERVED");assert.equal(out.window_status,WINDOW_STATUS.ZERO_OBSERVED_SHADOW_ONLY);assert.equal(out.activation_decision,"NOT_AUTHORIZED_BY_SHADOW_AUDIT");assert.equal(out.activation_authorized,false);
+  }finally{f.cleanup();}
+});
+
+test("mixed or unversioned candidate policy records force the effective assessment back to NOT_EVALUABLE",()=>{
+  const f=fixture();try{
+    f.store.write("run_v1","search_gate_shadow",record({run_id:"run_v1",candidate_skip:true,false_skip_rule:"ZERO_RESULT_ONLY",query_class:"GENERIC_OR_MISSING",shadow_disposition:{schema:"debugai.role-disposition/v1",decision:"NOT_APPLICABLE",reason_code:"QUERY_CONTEXT_UNAVAILABLE"},result_count:0,false_skip_evaluable:true,false_skip:false}));
+    f.store.write("run_old","search_gate_shadow",record({run_id:"run_old",candidate_policy_version:undefined,candidate_skip:true,false_skip_rule:"ZERO_RESULT_ONLY",query_class:"GENERIC_OR_MISSING",shadow_disposition:{schema:"debugai.role-disposition/v1",decision:"NOT_APPLICABLE",reason_code:"QUERY_CONTEXT_UNAVAILABLE"},result_count:0,false_skip_evaluable:true,false_skip:false}));
+    const out=auditSearchGateShadowStore(f.store);
+    assert.equal(out.raw_false_skip_assessment,"ZERO_OBSERVED");assert.equal(out.false_skip_assessment,"NOT_EVALUABLE");assert.equal(out.policy_window_status,POLICY_WINDOW_STATUS.MIXED_OR_UNVERSIONED);assert.equal(out.policy_window_compatible,false);assert.equal(out.unversioned_shadow_records,1);assert.equal(out.window_status,WINDOW_STATUS.POLICY_WINDOW_INCOMPATIBLE);assert.equal(out.activation_authorized,false);
   }finally{f.cleanup();}
 });
 
