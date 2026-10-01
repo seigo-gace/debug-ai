@@ -10,6 +10,7 @@ const KEYWORDS=Object.freeze({
   "contradictory-source-detection":["conflict","contradict","different","disagree"],
   "hypothesis-falsification":["cause","root","why","reproduce","falsify"],
   "evidence-sufficiency-assessment":["evidence","confirm","proof","sufficient","unknown"],
+  "rejected-hypothesis-avoidance":["history_available","rejected_history","rejected hypothesis","previously rejected"],
   "regression-risk-map":["regression","invariant","adjacent","compatibility"],
   "fresh-context-review":["review","final","verify","completion"],
   "overclaim-false-completion-review":["complete","done","pass","fixed"],
@@ -101,4 +102,4 @@ function assertInvocationCompiler(){
   return true;
 }
 
-module.exports={selectSkills,resolveSkills,compileInvocation,assertInvocationCompiler};
+module.exports={KEYWORDS,selectSkills,resolveSkills,compileInvocation,assertInvocationCompiler};
