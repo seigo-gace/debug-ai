@@ -20,7 +20,7 @@ function fixture(){
   return{root,repo,runtimeRoot,repoPolicy,authority,runtimeEvidence,cleanup:()=>fs.rmSync(root,{recursive:true,force:true})};
 }
 const RAW=[
-  "目的: failing pathを調査する",
+  "目的: 原因を調査する",
   "禁止: mainへmergeするな",
   "不変: 既存API契約を維持する",
   "明示的な承認がある場合のみ適用を許可する",
@@ -43,13 +43,22 @@ test("invariant authority read is current-run bound, bounded, and preserves exac
     const run=f.authority.start({rawRequest:RAW,repo:f.repo,projectId:"p1"});
     bindCurrentRun({runId:run.run_id,authority:f.authority,runtimeEvidence:f.runtimeEvidence});
     const direct=readInvariantAuthority({authority:f.authority,runtimeEvidence:f.runtimeEvidence,runId:run.run_id,args:{limit:2}});
-    assert.equal(direct.source,"IMMUTABLE_MASTER_REQUEST_SPANS");assert.equal(direct.classification,"DETERMINISTIC_BLOCK_CORE");assert.equal(direct.reconstructed_from_request,false);assert.equal(direct.total_authority_blocks,5);assert.equal(direct.count,2);assert.equal(direct.has_more,true);assert.equal(direct.next_offset,2);
+    assert.equal(direct.source,"IMMUTABLE_MASTER_REQUEST_SPANS");assert.equal(direct.classification,"DETERMINISTIC_BLOCK_CORE_WITH_EXPLICIT_OBJECTIVE_GUARD");assert.equal(direct.reconstructed_from_request,false);assert.equal(direct.total_authority_blocks,5);assert.equal(direct.count,2);assert.equal(direct.has_more,true);assert.equal(direct.next_offset,2);
     assert.equal(direct.authority_blocks[0].kind,"forbidden");assert.equal(direct.authority_blocks[0].text,"禁止: mainへmergeするな");assert.match(direct.authority_blocks[0].authority_ref,/^INV_[a-f0-9]{24}$/);
     assert.throws(()=>readInvariantAuthority({authority:f.authority,runtimeEvidence:f.runtimeEvidence,runId:run.run_id,args:{run_id:"other"}}),/RUN_ID_ARGUMENT_FORBIDDEN/);
     const runtime=createReadOnlyToolRuntime({repo:f.repo,repoPolicy:f.repoPolicy});
     await assert.rejects(()=>withInvariantAuthorityContext({authority:f.authority,runtimeEvidence:f.runtimeEvidence},()=>runtime.execute({role:"diagnoser",selectedSkillIds:["evidence-sufficiency-assessment"],tool:"invariant.read",arguments:{limit:1}})),/TOOL_NOT_IN_SELECTED_SKILLS/);
     const result=await withInvariantAuthorityContext({authority:f.authority,runtimeEvidence:f.runtimeEvidence},()=>runtime.execute({role:"diagnoser",selectedSkillIds:["hypothesis-falsification"],tool:"invariant.read",arguments:{limit:3}}));
     assert.equal(result.tool,"invariant.read");assert.equal(result.integrity.content_trust,"IMMUTABLE_MASTER_AUTHORITY_DATA");assert.equal(result.data.count,3);assert.equal(result.data.run_id,run.run_id);
+  }finally{f.cleanup();}
+});
+
+test("explicit objective marker is never exposed as authority merely because it contains a scope keyword",()=>{
+  const f=fixture();try{
+    const raw=["目的: failing pathを調査する","禁止: deployするな"].join("\n"),run=f.authority.start({rawRequest:raw,repo:f.repo,projectId:"p1"}),request=f.authority.store.loadRequest(run.request_hash),blocks=f.authority.store.loadBlocks(run.run_id,request);
+    assert.equal(blocks[0].kind,"scope");assert.equal(blocks[0].authority,true);
+    const out=readInvariantAuthority({authority:f.authority,runtimeEvidence:f.runtimeEvidence,runId:run.run_id,args:{}});
+    assert.equal(out.total_authority_blocks,1);assert.equal(out.authority_blocks[0].text,"禁止: deployするな");assert.equal(out.authority_blocks.some(x=>x.text.startsWith("目的:")),false);
   }finally{f.cleanup();}
 });
 
