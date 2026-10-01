@@ -12,6 +12,7 @@ DebugAI is a code-first, evidence-driven debugging runtime for G-ACE development
 
 - **Design authority:** [`docs/DURABLE-CONTINUATION-DESIGN.md`](docs/DURABLE-CONTINUATION-DESIGN.md)
 - **MCP integration contract:** [`docs/MCP_ADAPTER.md`](docs/MCP_ADAPTER.md)
+- **Pre-server qualification:** [`docs/PRE_SERVER_QUALIFICATION.md`](docs/PRE_SERVER_QUALIFICATION.md)
 - **VS Codex live MCP handoff:** [`docs/CODEX_MCP_LIVE_HANDOFF.md`](docs/CODEX_MCP_LIVE_HANDOFF.md)
 
 Use the documents and history with these distinct responsibilities:
@@ -61,43 +62,51 @@ The MCP adapter is a compatible parent-agent transport/integration layer and doe
 Current repository authority at this README update:
 
 ```text
-repository                      = seigo-gace/debug-ai
-branch                          = feat/search-gate-shadow-audit-cli-20261001
-base branch                     = feat/source-verify-boundary-20261001
-base SHA                        = db9394548dd1ab34aecf8f0a7d780683831f584a
-verified implementation HEAD    = 44f5dcdb6e52e9c0061d732724fc0b4a28ab27b5
-PR                              = #33 / OPEN / DRAFT / UNMERGED
-Public Readiness Audit          = SUCCESS (#321)
-Verify                          = SUCCESS (#356 / 355 of 355 PASS)
-Core Verify                     = SUCCESS (#357)
-control-plane capabilities      = 18/18 IMPLEMENTED / 0 UNRESOLVED
-MCP source/unit/stdio protocol  = PASS / 9 guarded tools
+repository                       = seigo-gace/debug-ai
+branch                           = feat/pre-server-benchmark-gates-20261001
+base branch                      = feat/search-gate-shadow-audit-cli-20261001
+base SHA                         = cfbe2908bb6190bc5f5c894779c4d0f08f51b80e
+verified implementation HEAD     = a7006347952808fe4ba017c51120fad436b8a6bc
+PR                               = #34 / OPEN / DRAFT / UNMERGED
+Public Readiness Audit           = SUCCESS (#352)
+Verify                           = SUCCESS (#387 / 370 of 370 PASS)
+Core Verify                      = SUCCESS (#388)
+control-plane capabilities       = 18/18 IMPLEMENTED / 0 UNRESOLVED
+pre-server source qualification  = READY / CI-EXECUTED / REAL MEASUREMENTS NOT EXECUTED
+six-role Skill A/B source        = READY / REAL MEASUREMENT NOT EXECUTED
+Model A/B source axes            = thinking / temperature / top_p / top_k / max_tokens
+MCP source/unit/stdio protocol   = PASS / 9 guarded tools
 MCP durable continuation surface = PASS
-live-runtime readback source    = V3 EXACT SOURCE PARITY + SOURCE/CI VERIFIED
-real Server readback            = NOT_EXECUTED / DELEGATED TO VS CODEX
-real MCP live-runtime calls     = NOT_EXECUTED / DELEGATED TO VS CODEX
-real Search Gate measurement    = NOT_EXECUTED
-false-skip zero proof           = NOT_PROVEN
-Search Gate skip activation     = NOT_EXECUTED
-main merge                      = NOT_EXECUTED
-server deploy                   = NOT_EXECUTED
-server restart                  = NOT_EXECUTED
-production change               = NONE
+live-runtime readback source     = V3 EXACT SOURCE PARITY + SOURCE/CI VERIFIED
+real Server readback             = NOT_EXECUTED / DELEGATED TO VS CODEX
+real model/Skill measurements    = NOT_EXECUTED / DELEGATED TO VS CODEX LIVE PHASE
+real MCP live-runtime calls      = NOT_EXECUTED / DELEGATED TO VS CODEX
+real Search Gate measurement     = NOT_EXECUTED
+false-skip zero proof            = NOT_PROVEN
+Search Gate skip activation      = NOT_EXECUTED
+main merge                       = NOT_EXECUTED
+server deploy                    = NOT_EXECUTED
+server restart                   = NOT_EXECUTED
+production change                = NONE
 ```
 
-These source/CI results do **not** prove that the live Contabo checkout is on this revision. The live repository/container/revision must be read back before any real-runtime claim or Search Gate measurement. Master has assigned that live-server check to VS Codex. If the live checkout/container is behind, preserve that fact as `RUNTIME_SOURCE_BEHIND_OR_UNKNOWN`; do not silently sync, deploy, or restart it.
+These source/CI results do **not** prove that the live Contabo checkout is on this revision. The live repository/container/revision must be read back before any real-runtime claim, real-model benchmark, MCP live claim, or Search Gate measurement. Master has assigned that live-server check to VS Codex. If the live checkout/container is behind, preserve that fact as `RUNTIME_SOURCE_BEHIND_OR_UNKNOWN`; do not silently sync, deploy, or restart it.
 
-Current MCP source/protocol verification at exact implementation SHA `44f5dcdb6e52e9c0061d732724fc0b4a28ab27b5`:
+Current source/protocol/pre-server verification at exact implementation SHA `a7006347952808fe4ba017c51120fad436b8a6bc`:
 
 ```text
-Verify                 = SUCCESS (#356)
-Core Verify            = SUCCESS (#357)
-Public Readiness Audit = SUCCESS (#321)
-repository tests        = 355/355 PASS
-MCP stdio handshake     = PASS
-MCP tools/list          = PASS / 9 expected tools
-MCP health call         = PASS
-approve/apply MCP tool  = ABSENT
+Verify                          = SUCCESS (#387)
+Core Verify                     = SUCCESS (#388)
+Public Readiness Audit          = SUCCESS (#352)
+repository tests                = 370/370 PASS
+pre-server qualification audit  = source_ready=true
+six-role benchmark suite        = SOURCE READY
+Model A/B five-axis harness     = SOURCE READY
+MCP stdio handshake             = PASS
+MCP tools/list                  = PASS / 9 expected tools
+MCP health call                 = PASS
+approve/apply MCP tool          = ABSENT
+real benchmark/model results    = NOT_EXECUTED_BY_SOURCE_AUDIT
 ```
 
 Historical MCP implementation SHA `078203e61073be99a48444ba0c3467a7143102f4` also passed its then-current 286/286 suite and real stdio regression. Historical results remain evidence for their exact SHA but are not reused as current-head proof.
@@ -217,6 +226,31 @@ Unavailable provider values remain `null`. Estimated values are not reported as 
 ### Role Tool Loop telemetry — implemented
 
 `server/control/tool-loop.js` records role-level LLM/tool execution telemetry including executed versus reused tool work.
+
+### Pre-server benchmark harness — source ready
+
+The repository now contains deterministic live-measurement entry points without pretending that source readiness equals a real result:
+
+```text
+npm run benchmark:local-reviewer
+npm run benchmark:skill-effect-all
+npm run benchmark:model-ab -- --role <role> --axis <axis> --candidate <value|official> --repeats <1..5>
+npm run audit:pre-server-qualification
+```
+
+The six-role Skill suite accepts Skill OFF wins and ties. The Model A/B harness changes exactly one axis, counterbalances baseline/candidate execution order, derives the score ceiling from the role scorer, and fixes `promotion_authorized=false`.
+
+Current Model A/B source axes are:
+
+```text
+thinking
+temperature
+top_p
+top_k
+max_tokens
+```
+
+Benchmark `top_p` / `top_k` are sent only for an explicitly selected candidate request. Production role defaults are unchanged by the harness. Official candidate gaps fail closed rather than inventing a number. The harness does not claim a complete sweep of every sampler exposed by llama.cpp.
 
 ---
 
@@ -441,7 +475,10 @@ The runtime must not manufacture booleans to satisfy the gate. Candidate identit
 - conservative candidate-skip policy in shadow only;
 - read-only Search Gate Shadow Audit CLI;
 - bounded read-only live-runtime readback with exact repository identity, fixed source tracking probes, Host↔Container SHA-256 parity for every measurement source, production entrypoint/workdir proof, and exact DebugAI health identity;
-- gated one-command live shadow measurement that executes only after all read-only runtime prerequisites pass and can never authorize activation.
+- gated one-command live shadow measurement that executes only after all read-only runtime prerequisites pass and can never authorize activation;
+- six-role Skill ON/OFF integrated benchmark suite;
+- five-axis one-variable Model A/B measurement harness;
+- read-only pre-server source qualification audit executed by Verify/Core Verify.
 
 Current control-plane capability audit:
 
@@ -460,12 +497,13 @@ This means each declared capability has an implemented owning provider/boundary.
 
 - Search Gate: source/CI shadow instrumentation, candidate policy, read-only store audit, and v3 exact-source live-runtime readback/measurement gate are verified in source/CI; **actual Contabo readback and candidate/false-skip measurement are still NOT EXECUTED**;
 - Search Gate production skip activation: NOT EXECUTED and requires real compatible shadow observations plus a separate approval/activation decision;
-- model A/B: pending;
+- six-role Skill ON/OFF: source harness READY; real-model suite NOT EXECUTED;
+- Model A/B: source harness READY for `thinking / temperature / top_p / top_k / max_tokens`; real-model measurements NOT EXECUTED;
 - fresh real current-runtime self-development/self-debug run: pending;
 - final real production-equivalent closed-loop E2E: pending;
 - MCP live Contabo runtime connection and VS Codex/Workspace registration: pending and explicitly delegated to the VS Codex live-server phase.
 
-Do not mechanically turn every future gap into an AI tool. Responsibilities may belong to deterministic core, runtime packets, repository/runtime policy, or other non-AI boundaries.
+Do not mechanically turn every future gap into an AI tool. Responsibilities may belong to deterministic core, runtime packets, repository/runtime policy, benchmark harnesses, or other non-AI boundaries.
 
 ---
 
@@ -480,9 +518,9 @@ Granite 4.2 8B      5.82 tok/s
 Ministral 3 8B      7.98 tok/s
 ```
 
-Current sampling baseline is `temperature=0`.
+Current production sampling baseline remains `temperature=0`; production does not change merely because the benchmark harness can send explicit `top_p` / `top_k` candidates.
 
-Model A/B is not yet complete. Use the exact GGUF and current llama.cpp/llama-swap environment and change one variable at a time: thinking -> sampling -> token cap. Official recommended settings are references, not automatic production settings.
+Model A/B real measurement is not yet complete. Use the exact GGUF and current llama.cpp/llama-swap environment and change one variable at a time: thinking -> sampling -> token cap. The source harness counterbalances execution order and accepts repository-recorded official sampling candidates where available. Official recommended settings are measurement candidates, not automatic production settings.
 
 Qwen Coder parallel-use/environment experimentation is currently separate/on hold and must not block DebugAI core work.
 
@@ -558,7 +596,7 @@ Important boundaries:
 - neither CLI nor MCP exposes a shortcut that silently approves/applies a patch;
 - mutation remains behind explicit approval using the exact candidate identity.
 
-CLI/MCP usage is documented in [`DEBUGAI.md`](DEBUGAI.md), the MCP-specific design/verification boundary is documented in [`docs/MCP_ADAPTER.md`](docs/MCP_ADAPTER.md), and the live VS Codex handoff is documented in [`docs/CODEX_MCP_LIVE_HANDOFF.md`](docs/CODEX_MCP_LIVE_HANDOFF.md).
+CLI/MCP usage is documented in [`DEBUGAI.md`](DEBUGAI.md), the MCP-specific design/verification boundary is documented in [`docs/MCP_ADAPTER.md`](docs/MCP_ADAPTER.md), the pre-server benchmark boundary is documented in [`docs/PRE_SERVER_QUALIFICATION.md`](docs/PRE_SERVER_QUALIFICATION.md), and the live VS Codex handoff is documented in [`docs/CODEX_MCP_LIVE_HANDOFF.md`](docs/CODEX_MCP_LIVE_HANDOFF.md).
 
 Run the MCP stdio entry with:
 
@@ -579,15 +617,16 @@ The MCP stdio protocol has been verified in current exact-head CI with the offic
 ## Repository layout
 
 - `server/` — live server runtime, workflow, adapters, patch/runtime services, control plane, native helper source, tests.
-- `server/control/` — role/tool/skill/evidence/progress/recovery/packet/completion control modules.
+- `server/control/` — role/tool/skill/evidence/progress/recovery/packet/completion/benchmark control modules.
 - `server/tests/` — adapter, workflow, security, durable, benchmark, fault, completion, storage, and regression tests.
 - `orchestrator/` — platform-neutral canonical cores and durable contracts/primitives.
 - `tests/` — repository-level contract/integration tests.
 - `mcp/` — guarded MCP adapter, module map, and MCP protocol/contract tests; does not own workflow or mutation authority.
 - `bin/debugai.js` — existing CLI/HTTP client integration.
 - `bin/debugai-mcp.mjs` — MCP stdio entrypoint.
+- `scripts/pre-server-qualification-audit.cjs` — read-only source readiness audit; never converts source readiness into a real benchmark/runtime PASS.
 - `legacy/pc-authority/` — preserved PC/Windows authority and regression material; not the current server runtime.
-- `docs/` — active design authority and supporting documentation, including MCP adapter contract and VS Codex live MCP handoff.
+- `docs/` — active design authority and supporting documentation, including pre-server qualification, MCP adapter contract, and VS Codex live MCP handoff.
 - `artifacts/benchmark-runs/` — canonical ignored location for benchmark-run evidence generated by the repository benchmark tooling.
 - `Dockerfile` / `compose.yaml` — server image/residency/security/runtime configuration.
 
@@ -684,7 +723,7 @@ npm install
 npm run verify
 ```
 
-`npm run verify` performs the durable native build, JavaScript syntax checks, and repository/server/MCP tests.
+`npm run verify` performs the durable native build, JavaScript syntax checks, repository/server/MCP tests, and the read-only pre-server source qualification audit.
 
 Useful explicit commands:
 
@@ -693,10 +732,16 @@ npm run test:e2e-fixture
 npm run audit:control-plane-gaps
 npm run audit:docker-storage
 npm run audit:search-gate-shadow
+npm run audit:pre-server-qualification
 npm run audit:live-runtime
+npm run benchmark:local-reviewer
+npm run benchmark:skill-effect-all
+npm run benchmark:model-ab -- --role <role> --axis <thinking|temperature|top_p|top_k|max_tokens> --candidate <value|official> --repeats <1..5>
 npm run test:legacy
 npm run debugai:mcp
 ```
+
+`audit:pre-server-qualification` is read-only. A `source_ready=true` result means the required benchmark/MCP/live-readback source entry points are coherent; every real benchmark/runtime result remains explicitly `NOT_EXECUTED_BY_SOURCE_AUDIT`.
 
 `audit:search-gate-shadow` is read-only. It does not call search providers, mutate RuntimeEvidence, deploy/restart services, or authorize Search Gate activation.
 
@@ -708,42 +753,57 @@ npm run debugai:mcp
 
 ## Current verified snapshot and CI boundary
 
-### Current stacked branch exact implementation snapshot
+### Current pre-server source snapshot
 
-For exact implementation HEAD `44f5dcdb6e52e9c0061d732724fc0b4a28ab27b5`, GitHub workflows were read back as:
+For exact implementation/documentation HEAD `a7006347952808fe4ba017c51120fad436b8a6bc`, GitHub workflows were read back as:
 
 ```text
-Public Readiness Audit = SUCCESS (#321)
-Verify                 = SUCCESS (#356)
-Core Verify            = SUCCESS (#357)
+Public Readiness Audit = SUCCESS (#352)
+Verify                 = SUCCESS (#387)
+Core Verify            = SUCCESS (#388)
 ```
 
 The `Verify` workflow executed:
 
 ```text
-tests     = 355
-pass      = 355
+tests     = 370
+pass      = 370
 fail      = 0
 cancelled = 0
 skipped   = 0
 todo      = 0
 ```
 
-The v3 live-readback regressions specifically prove wrong-repository rejection, bounded fixed-path tracking probes without untracked enumeration, all measurement-critical Host↔Container SHA-256 parity, required audit CLI source, production entrypoint/workdir identity, exact DebugAI health identity, one-byte source mismatch rejection, wrong entrypoint rejection, gated live shadow measurement, and fail-closed rejection of an audit result that attempts to claim activation.
+The same Verify run executed `audit:pre-server-qualification` and read back:
 
-The same exact-head Verify also passed the real MCP stdio initialize/handshake, exact nine-tool discovery, absent approve/apply shortcut, and `debugai_health` tool call against the controlled loopback fixture.
+```text
+source_ready                         = true
+local_reviewer_runner                = true
+six_role_skill_suite                 = true
+model_ab_runner                      = true
+model_ab_sampling_scope              = true
+model_ab_official_candidates         = true
+mcp_exact_nine_tools                 = true
+required_scripts                     = true
+required_docs                        = true
+production_profile_change_authorized = false
+server_mutation_authorized           = false
+all real measurements                = NOT_EXECUTED_BY_SOURCE_AUDIT
+```
+
+The A/B regressions prove one-axis changes, explicit thinking eligibility, temperature/top_p/top_k candidate-only sampling requests, omitted baseline top_p/top_k, official-candidate fail-closed behavior, counterbalanced execution order, dynamic scorer ceilings, bounded repeats, and non-promotion of quality regressions or improvements.
 
 Core Verify additionally passed the current real CI gates for DebugAI image build/container health, Landlock+seccomp isolation, loopback-only/managed Node and Python DAP, main-to-sidecar queue round trip, and Compose sandbox boundary.
 
-PR #33 is still OPEN / DRAFT / UNMERGED. These source/CI results do not prove a live server deployment, live checkout identity, a real VS Codex MCP registration, or a real Search Gate false-skip measurement.
+PR #34 is still OPEN / DRAFT / UNMERGED. These source/CI results do not prove live server identity, real model benchmark outcomes, real VS Codex MCP registration, or a real Search Gate false-skip measurement.
+
+### Previous MCP/live-readback snapshot
+
+PR #33 source/docs HEAD `cfbe2908bb6190bc5f5c894779c4d0f08f51b80e` previously passed its exact 355/355 source/CI boundary. PR #34 is stacked on that verified head and does not replace historical proof with assumption.
 
 ### Historical MCP implementation snapshot
 
-For exact MCP implementation SHA `078203e61073be99a48444ba0c3467a7143102f4`, GitHub workflows were previously read back as SUCCESS with 286/286 PASS and the real stdio regression. That snapshot is now historical because current exact implementation HEAD `44f5dcdb...` independently re-verifies the MCP protocol inside the 355/355 suite.
-
-### Previous durable implementation snapshot
-
-For exact durable implementation SHA `df261bdae3b6f259ac428a173b798fae2fb68bdf`, the prior seven-check source boundary was verified SUCCESS. Those results remain historical evidence for that SHA and are not reused as proof for later source without later exact-SHA checks.
+Exact MCP implementation SHA `078203e61073be99a48444ba0c3467a7143102f4` passed its then-current 286/286 suite and real stdio regression. It remains historical evidence only.
 
 ---
 
@@ -760,7 +820,7 @@ For exact durable implementation SHA `df261bdae3b6f259ac428a173b798fae2fb68bdf`,
 | Terminal archive/GC safety boundary | IMPLEMENTED + VERIFIED boundary |
 | AI Core telemetry | IMPLEMENTED |
 | Role Tool Loop telemetry | IMPLEMENTED |
-| Production skill/benchmark isolation | IMPLEMENTED |
+| Production skill/benchmark isolation | IMPLEMENTED + VERIFIED |
 | Evidence Projection + Active Evidence Window | IMPLEMENTED + CONNECTED |
 | `evidence.read` | IMPLEMENTED + TESTED |
 | `runtime.trace.read` / `state.read` | IMPLEMENTED + TESTED |
@@ -770,7 +830,7 @@ For exact durable implementation SHA `df261bdae3b6f259ac428a173b798fae2fb68bdf`,
 | Control-plane declared capability requirements | 18/18 IMPLEMENTED / 0 UNRESOLVED |
 | Repository revision fallback/binding | IMPLEMENTED + TESTED |
 | Patch / Review Packet workflow wiring | IMPLEMENTED + TESTED |
-| Strict Completion Gate module | IMPLEMENTED |
+| Strict Completion Gate module | IMPLEMENTED + TESTED |
 | Strict Completion runtime-input builder | IMPLEMENTED + TESTED |
 | Strict Completion workflow wiring | IMPLEMENTED + TESTED |
 | Deterministic full analyze→approved patch fixture | PASS |
@@ -788,13 +848,15 @@ For exact durable implementation SHA `df261bdae3b6f259ac428a173b798fae2fb68bdf`,
 | Live-runtime v3 exact-parity readback + gated shadow measurement | SOURCE + CI VERIFIED / LIVE NOT EXECUTED |
 | Real live Search Gate candidate/false-skip measurement | NOT EXECUTED |
 | Search Gate skip activation | NOT EXECUTED / NOT AUTHORIZED BY SHADOW AUDIT |
-| Model A/B | PENDING |
+| Six-role Skill ON/OFF integrated runner | SOURCE + CI VERIFIED / REAL NOT EXECUTED |
+| Model A/B five-axis runner | SOURCE + CI VERIFIED / REAL NOT EXECUTED |
+| Pre-server source qualification audit | SOURCE + CI VERIFIED / `source_ready=true` |
 | Fresh real current-runtime self-development run | NOT EXECUTED |
 | Real production-equivalent full closed-loop E2E | PENDING |
 | Main merge | NOT DONE / NOT AUTHORIZED |
 | Deploy / production change | NOT DONE |
 
-DebugAI as a whole is therefore **not yet fully complete**. The source/CI/MCP protocol boundary is ready for live verification, while the actual server/Codex/runtime boundary must still be measured rather than assumed.
+DebugAI as a whole is therefore **not yet fully complete**. The source/CI/MCP/benchmark-harness boundary is ready for live verification and measurement, while the actual server/model/Codex/runtime boundary must still be measured rather than assumed.
 
 ---
 
@@ -803,26 +865,25 @@ DebugAI as a whole is therefore **not yet fully complete**. The source/CI/MCP pr
 Current order is:
 
 ```text
-1. finish exact-head source/CI/documentation synchronization on PR #33 without server mutation
-2. VS Codex reads the actual live DebugAI checkout/runtime read-only; do not guess from historical paths or test fixtures
-3. VS Codex runs `npm run audit:live-runtime` only if the live checkout already contains that command; no pull/reset/deploy/restart is implied
-4. if the live checkout/runtime is behind or byte-incompatible, record RUNTIME_SOURCE_BEHIND_OR_UNKNOWN and stop before sync/deploy/restart
-5. in the real Codex execution context, register DebugAI MCP according to `docs/CODEX_MCP_LIVE_HANDOFF.md`; do not invent an SSH alias or remote wrapper
-6. verify exactly nine tools -> `debugai_health` -> bounded `debugai_start` -> exact run_id `debugai_status` -> `debugai_resume` only if applicable -> bounded `debugai_wait` -> `debugai_inspect`
-7. if live source/runtime prerequisites are already compatible, evaluate the read-only Search Gate Shadow Audit result: no candidates / incompatible policy / non-evaluable / false-skip detected / zero observed
-8. do not activate search skipping from the audit alone; limited activation requires a separate safety decision and explicit approval boundary
-9. fresh real current-runtime DebugAI self-development/self-debug run
-10. bind the fresh run to current repository/runtime evidence and identify any real blocking defect
-11. fix confirmed source defects without weakening approval/evidence/revision gates
-12. focused regression + repository verification + exact-SHA CI
-13. DebugAI read-only verify against the corrected current source
-14. model A/B
-15. final real production-equivalent closed-loop E2E
-16. PR final audit
-17. wait for explicit Master approval before merge/deploy
+1. keep PR #34 exact-head source/CI/documentation synchronized; do not merge or deploy
+2. VS Codex reads current server-core authority, then actual live DebugAI checkout/runtime read-only
+3. run `npm run audit:pre-server-qualification` on compatible live source; source READY is not a real benchmark PASS
+4. run `npm run audit:live-runtime`; if behind/incompatible, record RUNTIME_SOURCE_BEHIND_OR_UNKNOWN and stop before sync/deploy/restart
+5. on already-compatible runtime, run Local Reviewer real benchmark and six-role Skill ON/OFF suite
+6. run one-variable Model A/B in design order: Thinking where applicable -> Sampling (temperature/top_p/top_k with justified candidates) -> token cap
+7. in the real Codex execution context, verify exact nine MCP tools -> health -> durable start -> exact run_id status -> resume only if applicable -> bounded wait -> inspect
+8. run a bounded real current-runtime DebugAI self-development/self-debug case against an explicitly allowed repository
+9. preserve actual TGserver/Evidence Search use or non-use; do not manufacture provider traffic merely to mark a box PASS
+10. evaluate the read-only Search Gate Shadow Audit when source/runtime is compatible: no candidates / incompatible policy / non-evaluable / false-skip detected / zero observed
+11. do not activate search skipping from the audit alone; limited activation requires a separate safety decision and explicit approval boundary
+12. bind fresh real-run findings to current repository/runtime evidence and fix only confirmed source defects
+13. focused regression + repository verification + exact-SHA CI + read-only DebugAI verify
+14. final real production-equivalent closed-loop E2E
+15. PR final audit
+16. wait for explicit Master approval before merge/deploy/profile change
 ```
 
-Do not return to older status documents that list already completed durable, packet, Strict Completion, MCP source/protocol, or the closed 18/18 control-plane capability boundary as pending work.
+Do not return to older status documents that list already completed durable, packet, Strict Completion, Role Semantic, Evidence Projection, benchmark leakage isolation, MCP source/protocol, or the closed 18/18 control-plane capability boundary as pending work.
 
 ---
 
@@ -844,7 +905,7 @@ Project-level completion still requires a real current-runtime run covering the 
 - required External Final Review;
 - Strict Completion Gate using actual runtime evidence.
 
-A deterministic fixture, source-only CI result, Search Gate shadow fixture, or MCP transport test alone is not enough.
+A deterministic fixture, source-only CI result, pre-server source audit, Search Gate shadow fixture, or MCP transport test alone is not enough.
 
 ---
 
@@ -889,6 +950,7 @@ DebugAI must never become:
 - a system that replays mutation-capable effects automatically after restart;
 - a system that stores hidden chain-of-thought or credentials in durable state;
 - a system that calls final-review PASS `COMPLETE` without the strict completion conjunction;
+- a system that promotes a benchmark candidate directly into production configuration;
 - a reason to weaken repository, sandbox, revision, review, retention, or verification controls for speed.
 
 Its purpose is to make debugging faster and cheaper **without sacrificing evidence, verification, approval, recovery, and security correctness**.
