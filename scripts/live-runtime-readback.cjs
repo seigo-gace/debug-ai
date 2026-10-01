@@ -8,6 +8,7 @@ const {spawnSync}=require("child_process");
 
 const MAX_CAPTURE_BYTES=64*1024;
 const DEFAULT_TIMEOUT_MS=4000;
+const EXPECTED_REPOSITORY_IDENTITY="github.com/seigo-gace/debug-ai";
 const SOURCE_REQUIREMENTS=Object.freeze([
   "server/control/search-gate-candidate-policy.js",
   "server/control/search-gate-shadow-runtime.js",
@@ -18,6 +19,7 @@ const CONTAINER_SOURCE_REQUIREMENTS=Object.freeze([
   "/app/server/control/search-gate-candidate-policy.js",
   "/app/server/control/search-gate-shadow-runtime.js",
   "/app/server/control/search-gate-shadow-store-audit.js",
+  "/app/scripts/search-gate-shadow-audit.cjs",
 ]);
 
 function bounded(value,limit=512){
@@ -30,6 +32,21 @@ function boundedRaw(value,limit=4096){
 }
 function sanitizeRemote(value){
   return bounded(value).replace(/(https?:\/\/)[^/@\s]+@/i,"$1***@");
+}
+function repositoryIdentity(value){
+  const text=String(value??"").trim();
+  if(!text)return null;
+  const scp=text.match(/^git@github\.com:([^/\s]+)\/([^/\s]+?)(?:\.git)?$/i);
+  if(scp)return `github.com/${scp[1]}/${scp[2]}`.toLowerCase();
+  try{
+    const parsed=new URL(text);
+    if(!["https:","http:","ssh:"].includes(parsed.protocol)||parsed.hostname.toLowerCase()!=="github.com")return null;
+    const parts=parsed.pathname.replace(/^\/+|\/+$/g,"").split("/").filter(Boolean);
+    if(parts.length!==2)return null;
+    const repo=parts[1].replace(/\.git$/i,"");
+    if(!parts[0]||!repo)return null;
+    return `github.com/${parts[0]}/${repo}`.toLowerCase();
+  }catch{return null;}
 }
 function runReadOnly(command,args,{cwd=process.cwd(),timeout=DEFAULT_TIMEOUT_MS}={}){
   const out=spawnSync(command,args,{cwd,encoding:"utf8",timeout,maxBuffer:MAX_CAPTURE_BYTES,windowsHide:true});
@@ -51,6 +68,7 @@ function gitReadback(cwd,runner=runReadOnly){
   const root=rootResult.ok?bounded(rootResult.stdout,1024):"";
   const base=root||cwd;
   const origin=runner("git",["config","--get","remote.origin.url"],{cwd:base});
+  const identity=origin.ok?repositoryIdentity(origin.stdout):null;
   const branch=runner("git",["branch","--show-current"],{cwd:base});
   const head=runner("git",["rev-parse","HEAD"],{cwd:base});
   const worktree=runner("git",["diff","--quiet","--no-ext-diff","--"],{cwd:base});
@@ -65,6 +83,8 @@ function gitReadback(cwd,runner=runReadOnly){
     repository_detected:Boolean(rootResult.ok&&root),
     root:rootResult.ok?root:null,
     origin:origin.ok?sanitizeRemote(origin.stdout):null,
+    repository_identity:identity,
+    repository_identity_match:identity===EXPECTED_REPOSITORY_IDENTITY,
     branch:branch.ok?bounded(branch.stdout,256):null,
     head:head.ok?bounded(head.stdout,64):null,
     tracked_worktree_state:worktreeState,
@@ -139,16 +159,31 @@ function healthReadback({host="127.0.0.1",port=8787,pathName="/health",timeout=3
     let settled=false;
     const finish=value=>{if(!settled){settled=true;resolve(Object.freeze(value));}};
     const req=http.get({host,port,path:pathName,timeout},res=>{
-      res.resume();
-      finish({reachable:true,status_code:res.statusCode??null,error_code:null});
+      res.setEncoding("utf8");
+      let raw="";
+      res.on("data",chunk=>{
+        raw+=chunk;
+        if(raw.length>4096){req.destroy();finish({reachable:false,status_code:res.statusCode??null,ok:false,service:null,error_code:"HEALTH_BODY_TOO_LARGE"});}
+      });
+      res.on("end",()=>{
+        let body=null;
+        try{body=JSON.parse(raw||"null");}catch{}
+        finish({
+          reachable:true,
+          status_code:res.statusCode??null,
+          ok:body?.ok===true,
+          service:typeof body?.service==="string"?bounded(body.service,64):null,
+          error_code:body&&typeof body==="object"?null:"HEALTH_BODY_INVALID",
+        });
+      });
     });
-    req.on("timeout",()=>{req.destroy();finish({reachable:false,status_code:null,error_code:"TIMEOUT"});});
-    req.on("error",error=>finish({reachable:false,status_code:null,error_code:error?.code||"HTTP_ERROR"}));
+    req.on("timeout",()=>{req.destroy();finish({reachable:false,status_code:null,ok:false,service:null,error_code:"TIMEOUT"});});
+    req.on("error",error=>finish({reachable:false,status_code:null,ok:false,service:null,error_code:error?.code||"HTTP_ERROR"}));
   });
 }
-function healthOk(value){return value?.reachable===true&&Number.isInteger(value.status_code)&&value.status_code>=200&&value.status_code<300;}
+function healthOk(value){return value?.reachable===true&&Number.isInteger(value.status_code)&&value.status_code>=200&&value.status_code<300&&value.ok===true&&value.service==="debug-ai";}
 function checkoutProven(git,source){
-  return git?.repository_detected===true&&git?.tracked_worktree_state==="CLEAN"&&git?.index_state==="CLEAN"&&Object.values(git?.required_source_tracked||{}).length===SOURCE_REQUIREMENTS.length&&Object.values(git.required_source_tracked).every(Boolean)&&source?.search_shadow_source_compatible===true;
+  return git?.repository_detected===true&&git?.repository_identity_match===true&&git?.tracked_worktree_state==="CLEAN"&&git?.index_state==="CLEAN"&&Object.values(git?.required_source_tracked||{}).length===SOURCE_REQUIREMENTS.length&&Object.values(git.required_source_tracked).every(Boolean)&&source?.search_shadow_source_compatible===true;
 }
 async function collectReadback({cwd=process.cwd(),runner=runReadOnly,health=healthReadback}={}){
   const git=gitReadback(cwd,runner);
@@ -188,4 +223,4 @@ if(require.main===module){
   });
 }
 
-module.exports={MAX_CAPTURE_BYTES,DEFAULT_TIMEOUT_MS,SOURCE_REQUIREMENTS,CONTAINER_SOURCE_REQUIREMENTS,bounded,boundedRaw,sanitizeRemote,runReadOnly,quietState,gitReadback,policyVersion,sourceReadback,dockerReadback,containerSourceReadback,healthReadback,healthOk,checkoutProven,collectReadback};
+module.exports={MAX_CAPTURE_BYTES,DEFAULT_TIMEOUT_MS,EXPECTED_REPOSITORY_IDENTITY,SOURCE_REQUIREMENTS,CONTAINER_SOURCE_REQUIREMENTS,bounded,boundedRaw,sanitizeRemote,repositoryIdentity,runReadOnly,quietState,gitReadback,policyVersion,sourceReadback,dockerReadback,containerSourceReadback,healthReadback,healthOk,checkoutProven,collectReadback};
