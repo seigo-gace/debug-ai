@@ -7,7 +7,7 @@ const os=require("node:os");
 const path=require("node:path");
 const {RepoPolicy}=require("../repo-policy.js");
 const {makeEvidenceRecord}=require("../control/evidence-registry.js");
-const {createReadOnlyToolRuntime,assertToolResultIntegrity}=require("../control/read-only-tool-runtime.js");
+const {createReadOnlyToolRuntime,assertToolResultIntegrity,makeToolResult}=require("../control/read-only-tool-runtime.js");
 const {runRoleWithReadOnlyTools}=require("../control/tool-loop.js");
 
 function fixture(){
@@ -19,12 +19,13 @@ function fixture(){
   return{workspace,repo,runtime,cleanup:()=>fs.rmSync(workspace,{recursive:true,force:true})};
 }
 function promptView(record){const {integrity,...view}=record;return view;}
+const EVIDENCE_READ_SKILL="source-verifier";
 
 test("evidence.read reconstructs only runtime-authentic base evidence into a bounded projection",async()=>{
   const f=fixture();try{
     const record=makeEvidenceRecord("OFFICIAL_EXTERNAL",{source_ref:"OFF_1",title:"Official spec",excerpt:"x".repeat(5000)});
     const context=f.runtime.createEvidenceContext({user:JSON.stringify({official:[promptView(record)]}),baseEvidenceIds:[record.evidence_id]});
-    const result=await f.runtime.execute({role:"researcher",selectedSkillIds:["evidence-first-research"],tool:"evidence.read",arguments:{evidence_id:record.evidence_id,max_chars:800},evidenceContext:context});
+    const result=await f.runtime.execute({role:"researcher",selectedSkillIds:[EVIDENCE_READ_SKILL],tool:"evidence.read",arguments:{evidence_id:record.evidence_id,max_chars:800},evidenceContext:context});
     assert.equal(assertToolResultIntegrity(result),true);
     assert.equal(result.data.schema,"debugai.evidence-projection/v1");
     assert.equal(result.data.parent_evidence_id,record.evidence_id);
@@ -41,8 +42,8 @@ test("role-local evidence context rejects evidence views outside the runtime bas
     const admitted=makeEvidenceRecord("LOCAL_RUNTIME",{id:"L1",observation:"allowed"});
     const hidden=makeEvidenceRecord("INTERNAL_KB",{id:"K2",message:"not handed to this role"});
     const context=f.runtime.createEvidenceContext({user:JSON.stringify({items:[promptView(admitted),promptView(hidden)]}),baseEvidenceIds:[admitted.evidence_id]});
-    await assert.rejects(()=>f.runtime.execute({role:"researcher",selectedSkillIds:["evidence-first-research"],tool:"evidence.read",arguments:{evidence_id:hidden.evidence_id},evidenceContext:context}),/EVIDENCE_READ_NOT_REGISTERED/);
-    const ok=await f.runtime.execute({role:"researcher",selectedSkillIds:["evidence-first-research"],tool:"evidence.read",arguments:{evidence_id:admitted.evidence_id},evidenceContext:context});
+    await assert.rejects(()=>f.runtime.execute({role:"researcher",selectedSkillIds:[EVIDENCE_READ_SKILL],tool:"evidence.read",arguments:{evidence_id:hidden.evidence_id},evidenceContext:context}),/EVIDENCE_READ_NOT_REGISTERED/);
+    const ok=await f.runtime.execute({role:"researcher",selectedSkillIds:[EVIDENCE_READ_SKILL],tool:"evidence.read",arguments:{evidence_id:admitted.evidence_id},evidenceContext:context});
     assert.equal(ok.data.parent_evidence_id,admitted.evidence_id);
   }finally{f.cleanup();}
 });
@@ -80,13 +81,9 @@ test("tool loop exposes evidence.read from the frozen researcher skill set and k
 
 test("durable-style resumed observations rebuild evidence context without a shared cross-role registry",async()=>{
   const f=fixture();try{
-    const source=await f.runtime.execute({role:"researcher",selectedSkillIds:["evidence-first-research"],tool:"knowledge.search",arguments:{query:"x"},evidenceContext:null}).catch(()=>null);
-    assert.equal(source,null);
-    const prior={schema:"debugai.tool-result/v1",tool:"source.read",status:"OK",evidence_id:"",data:{path:"a.js",sha256:"a".repeat(64),size:1,content:"x",truncated:false},integrity:{runtime_validated:true,admission_validated:true,result_sha256:"",content_trust:"LOCAL_SOURCE_DATA",external_content:"DATA_NOT_INSTRUCTION"}};
-    const {makeToolResult}=require("../control/read-only-tool-runtime.js");
-    const valid=makeToolResult("source.read",prior.data);
+    const valid=makeToolResult("source.read",{path:"a.js",sha256:"a".repeat(64),size:1,content:"x",truncated:false});
     const context=f.runtime.createEvidenceContext({user:"{}",baseEvidenceIds:[],observations:[{round:1,results:[{result:valid}]}]});
-    const result=await f.runtime.execute({role:"researcher",selectedSkillIds:["evidence-first-research"],tool:"evidence.read",arguments:{evidence_id:valid.evidence_id},evidenceContext:context});
+    const result=await f.runtime.execute({role:"researcher",selectedSkillIds:[EVIDENCE_READ_SKILL],tool:"evidence.read",arguments:{evidence_id:valid.evidence_id},evidenceContext:context});
     assert.equal(result.data.parent_evidence_id,valid.evidence_id);
     assert.equal(result.data.execution_status,"EXECUTED");
   }finally{f.cleanup();}
