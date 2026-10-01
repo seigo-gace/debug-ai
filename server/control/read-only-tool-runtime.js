@@ -8,13 +8,14 @@ const {extractSpecifiers}=require("../../orchestrator/context-core.js");
 const {getRoleContract}=require("./role-contracts.js");
 const {getSkill}=require("./skill-registry.js");
 const {assertToolAdmission}=require("./tool-risk.js");
-const {assertEvidenceRecord}=require("./evidence-registry.js");
+const {makeEvidenceRecord,assertEvidenceRecord}=require("./evidence-registry.js");
 const {makeEvidenceProjection}=require("./evidence-projection.js");
 
 const SEARCH_EXT=/\.(?:[cm]?[jt]sx?|json|md|py|go|rs|java|kt|kts|cs|cpp|cc|c|h|hpp|rb|php|swift|vue|svelte|toml|ya?ml|css|scss|html)$/i;
 const TS_JS_EXT=/\.(?:[cm]?[jt]sx?)$/i;
 const SKIP_DIRS=new Set([".git","node_modules","dist","build","coverage",".next",".cache","runtime"]);
 const AVAILABLE_TOOLS=Object.freeze(["source.read","source.search","symbol.lookup","dependency.map","test.inventory","evidence.read","knowledge.search","authority.search"]);
+const EVIDENCE_CONTEXT=Symbol("debugai.evidence-read-context");
 
 function sha256(v){return crypto.createHash("sha256").update(v).digest("hex");}
 function stableStringify(value){
@@ -149,35 +150,59 @@ function assertToolResultIntegrity(result){
 }
 function normalizeRegisteredEvidence(record){
   if(!record||typeof record!=="object"||Array.isArray(record))throw new Error("EVIDENCE_REGISTER_OBJECT_REQUIRED");
+  if(record.schema==="debugai.evidence-record/v1"&&record.integrity){assertEvidenceRecord(record);return record;}
   if(record.schema==="debugai.evidence-record/v1"){
-    assertEvidenceRecord(record);return record;
+    const rebuilt=makeEvidenceRecord(record.source_type,record.payload,{sourceRef:record.source_ref});
+    if(rebuilt.evidence_id!==record.evidence_id)throw new Error(`EVIDENCE_VIEW_ID_MISMATCH:${String(record.evidence_id||"")}`);
+    return rebuilt;
   }
-  const toolRecord=record.schema==="debugai.tool-result/v1"?record:{schema:"debugai.tool-result/v1",status:"OK",evidence_id:record.evidence_id,tool:record.tool,data:record.data,integrity:record.integrity};
+  const toolRecord=record.schema==="debugai.tool-result/v1"&&record.integrity?record:makeToolResult(record.tool,record.data);
+  if(record.evidence_id&&toolRecord.evidence_id!==record.evidence_id)throw new Error(`EVIDENCE_VIEW_ID_MISMATCH:${String(record.evidence_id)}`);
   assertToolResultIntegrity(toolRecord);return toolRecord;
 }
 function evidenceProjection(record,{maxChars=6000}={}){
   const bounded=Math.max(500,Math.min(12000,Number(maxChars)||6000));
   if(record.schema==="debugai.evidence-record/v1"){
-    const content=stableStringify({source_type:record.source_type,source_ref:record.source_ref,payload:record.payload});
-    const truncated=content.length>bounded;
+    const content=stableStringify({source_type:record.source_type,source_ref:record.source_ref,payload:record.payload}),truncated=content.length>bounded;
     return makeEvidenceProjection({parentEvidenceId:record.evidence_id,parentDigest:record.integrity.content_sha256,evidenceKind:`EVIDENCE_RECORD:${record.source_type}`,source:record.source_ref||record.source_type,content,maxExcerptChars:bounded,provenanceStatus:"VERIFIED",applicabilityStatus:"UNKNOWN",executionStatus:"NOT_APPLICABLE",observedOutcome:"UNKNOWN",claimSupportStatus:"UNKNOWN",projectionCompleteness:truncated?"PARTIAL":"COMPLETE",omittedCount:truncated?1:0,omissionReason:truncated?"BOUNDED_EVIDENCE_READ":null});
   }
-  const content=stableStringify({tool:record.tool,data:record.data});const truncated=content.length>bounded;
+  const content=stableStringify({tool:record.tool,data:record.data}),truncated=content.length>bounded;
   return makeEvidenceProjection({parentEvidenceId:record.evidence_id,parentDigest:record.integrity.result_sha256,evidenceKind:`TOOL_RESULT:${record.tool}`,source:record.tool,content,maxExcerptChars:bounded,provenanceStatus:"VERIFIED",applicabilityStatus:"UNKNOWN",executionStatus:"EXECUTED",observedOutcome:"UNKNOWN",claimSupportStatus:"UNKNOWN",projectionCompleteness:truncated?"PARTIAL":"COMPLETE",omittedCount:truncated?1:0,omissionReason:truncated?"BOUNDED_EVIDENCE_READ":null});
 }
-function createReadOnlyToolRuntime({repo,repoPolicy=new RepoPolicy(),tgserver=null,evidenceSearch=null,lspFactory}={}){
-  const root=repoPolicy.assertRepo(repo);const evidenceRegistry=new Map();
-  function registerEvidence(records){
-    const ids=[];
-    for(const raw of Array.isArray(records)?records:[]){
-      const record=normalizeRegisteredEvidence(raw),id=record.evidence_id,encoded=stableStringify(record),existing=evidenceRegistry.get(id);
-      if(existing&&stableStringify(existing)!==encoded)throw new Error(`EVIDENCE_REGISTER_ID_CONFLICT:${id}`);
-      evidenceRegistry.set(id,record);if(!ids.includes(id))ids.push(id);
-    }
-    return ids;
+function evidenceViewCandidates(value,{limit=256,maxDepth=12}={}){
+  let root=value;if(typeof root==="string"){try{root=JSON.parse(root);}catch{return[];}}
+  const out=[],seen=new Set();
+  function visit(item,depth){
+    if(out.length>=limit||depth>maxDepth||item===null||typeof item!=="object")return;
+    if(seen.has(item))return;seen.add(item);
+    const id=String(item.evidence_id||"");
+    if(id&&(item.schema==="debugai.evidence-record/v1"||(id.startsWith("TRE_")&&typeof item.tool==="string"&&Object.prototype.hasOwnProperty.call(item,"data"))))out.push(item);
+    if(Array.isArray(item)){for(const child of item)visit(child,depth+1);return;}
+    for(const child of Object.values(item))visit(child,depth+1);
   }
-  function registeredEvidenceIds(){return [...evidenceRegistry.keys()].sort();}
-  async function execute({role,selectedSkillIds,tool,arguments:args={},allowedEvidenceIds=[]}={}){
+  visit(root,0);return out;
+}
+function addEvidenceToContext(context,records,{allowedEvidenceIds=null}={}){
+  if(!context||context[EVIDENCE_CONTEXT]!==true||!(context.records instanceof Map))throw new Error("EVIDENCE_CONTEXT_INVALID");
+  const allowed=allowedEvidenceIds===null?null:new Set((Array.isArray(allowedEvidenceIds)?allowedEvidenceIds:[]).map(String));
+  for(const raw of Array.isArray(records)?records:[]){
+    const id=String(raw?.evidence_id||"");if(allowed&&!allowed.has(id))continue;
+    const record=normalizeRegisteredEvidence(raw),existing=context.records.get(record.evidence_id);
+    if(existing&&stableStringify(existing)!==stableStringify(record))throw new Error(`EVIDENCE_CONTEXT_ID_CONFLICT:${record.evidence_id}`);
+    context.records.set(record.evidence_id,record);
+  }
+  return context;
+}
+function createEvidenceContext({user="",baseEvidenceIds=[],observations=[]}={}){
+  const context={[EVIDENCE_CONTEXT]:true,records:new Map()},allowed=[...new Set((Array.isArray(baseEvidenceIds)?baseEvidenceIds:[]).map(String).filter(Boolean))];
+  addEvidenceToContext(context,evidenceViewCandidates(user),{allowedEvidenceIds:allowed});
+  const observed=[];for(const observation of Array.isArray(observations)?observations:[])for(const item of observation?.results||[])if(item?.result?.status==="OK")observed.push(item.result);
+  addEvidenceToContext(context,observed);
+  return context;
+}
+function createReadOnlyToolRuntime({repo,repoPolicy=new RepoPolicy(),tgserver=null,evidenceSearch=null,lspFactory}={}){
+  const root=repoPolicy.assertRepo(repo);
+  async function execute({role,selectedSkillIds,tool,arguments:args={},evidenceContext=null}={}){
     if(!AVAILABLE_TOOLS.includes(tool))throw new Error(`TOOL_IMPLEMENTATION_UNAVAILABLE:${tool}`);admit({role,selectedSkillIds,tool});
     let data;
     if(tool==="source.read")data=readText(root,args.path,{maxChars:Math.max(500,Math.min(20000,Number(args.max_chars)||12000))});
@@ -187,14 +212,14 @@ function createReadOnlyToolRuntime({repo,repoPolicy=new RepoPolicy(),tgserver=nu
     else if(tool==="test.inventory")data=testInventory(root);
     else if(tool==="evidence.read"){
       const id=String(args.evidence_id||"").trim();if(!id)throw new Error("EVIDENCE_READ_ID_REQUIRED");
-      const admitted=new Set((Array.isArray(allowedEvidenceIds)?allowedEvidenceIds:[]).map(String));if(!admitted.has(id))throw new Error(`EVIDENCE_READ_NOT_ADMITTED:${id}`);
-      const record=evidenceRegistry.get(id);if(!record)throw new Error(`EVIDENCE_READ_NOT_REGISTERED:${id}`);
+      if(!evidenceContext||evidenceContext[EVIDENCE_CONTEXT]!==true)throw new Error("EVIDENCE_READ_CONTEXT_REQUIRED");
+      const record=evidenceContext.records.get(id);if(!record)throw new Error(`EVIDENCE_READ_NOT_REGISTERED:${id}`);
       data=evidenceProjection(record,{maxChars:args.max_chars});
     }
     else if(tool==="knowledge.search"){if(!tgserver)throw new Error("TGSERVER_TOOL_NOT_CONFIGURED");data=await tgserver.search(String(args.query||""),{});}
     else if(tool==="authority.search"){if(!evidenceSearch)throw new Error("EVIDENCE_SEARCH_TOOL_NOT_CONFIGURED");data=await evidenceSearch.search({query:String(args.query||""),topics:Array.isArray(args.topics)?args.topics:[],limit:Math.max(1,Math.min(12,Number(args.limit)||6))});}
-    const result=makeToolResult(tool,data);assertToolResultIntegrity(result);registerEvidence([result]);return result;
+    const result=makeToolResult(tool,data);assertToolResultIntegrity(result);if(evidenceContext)addEvidenceToContext(evidenceContext,[result]);return result;
   }
-  return {repo:root,availableTools:[...AVAILABLE_TOOLS],registerEvidence,registeredEvidenceIds,execute};
+  return {repo:root,availableTools:[...AVAILABLE_TOOLS],createEvidenceContext,addEvidenceToContext,execute};
 }
-module.exports={AVAILABLE_TOOLS,stableStringify,normalizeRel,blockedReadPath,resolveSafeFile,readText,walkFiles,searchSource,testInventory,languageIdFor,repoRelativeLocation,sanitizeSymbols,symbolLookup,toolResultHash,makeToolResult,assertToolResultIntegrity,normalizeRegisteredEvidence,evidenceProjection,createReadOnlyToolRuntime};
+module.exports={AVAILABLE_TOOLS,stableStringify,normalizeRel,blockedReadPath,resolveSafeFile,readText,walkFiles,searchSource,testInventory,languageIdFor,repoRelativeLocation,sanitizeSymbols,symbolLookup,toolResultHash,makeToolResult,assertToolResultIntegrity,normalizeRegisteredEvidence,evidenceProjection,evidenceViewCandidates,addEvidenceToContext,createEvidenceContext,createReadOnlyToolRuntime};
