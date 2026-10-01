@@ -1,4 +1,28 @@
 services:
+  runtime-init:
+    build:
+      context: .
+      target: sandbox-runner
+    user: "0:0"
+    network_mode: none
+    read_only: true
+    command: ["sh","-lc","mkdir -p /runtime && chown -R 1000:1000 /runtime && chmod -R go-rwx /runtime && chmod 0700 /runtime"]
+    volumes:
+      - debug_ai_runtime:/runtime:rw
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - FOWNER
+      - DAC_OVERRIDE
+    logging:
+      driver: local
+      options:
+        max-size: "1m"
+        max-file: "2"
+
   sandbox-init:
     build:
       context: .
@@ -19,6 +43,8 @@ services:
 
   debug-ai:
     depends_on:
+      runtime-init:
+        condition: service_completed_successfully
       sandbox-init:
         condition: service_completed_successfully
     build:
