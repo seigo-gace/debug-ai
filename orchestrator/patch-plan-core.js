@@ -94,6 +94,59 @@ function assertRollbackPlan(plan, { files = [], preconditions = [] } = {}) {
   return true;
 }
 
+function bindCandidatePlans(candidate, { verificationPlan } = {}) {
+  if (!candidate || typeof candidate.candidate_hash !== "string" || !candidate.candidate_hash) throw new Error("PATCH_PLAN_CANDIDATE_INVALID");
+  assertVerificationPlan(verificationPlan);
+  const rollbackPlan = makeRollbackPlan({ files: candidate.files, preconditions: candidate.preconditions });
+  const binding = {
+    candidate_hash: candidate.candidate_hash,
+    verification_plan_digest: verificationPlan.plan_digest,
+    rollback_plan_digest: rollbackPlan.plan_digest,
+  };
+  return {
+    ...candidate,
+    verification_plan: verificationPlan,
+    rollback_plan: rollbackPlan,
+    plan_binding_digest: digest(binding),
+  };
+}
+
+function assertBoundCandidatePlans(candidate) {
+  if (!candidate || typeof candidate.candidate_hash !== "string" || !candidate.candidate_hash) throw new Error("PATCH_PLAN_CANDIDATE_INVALID");
+  assertVerificationPlan(candidate.verification_plan);
+  assertRollbackPlan(candidate.rollback_plan, { files: candidate.files, preconditions: candidate.preconditions });
+  const expected = digest({
+    candidate_hash: candidate.candidate_hash,
+    verification_plan_digest: candidate.verification_plan.plan_digest,
+    rollback_plan_digest: candidate.rollback_plan.plan_digest,
+  });
+  if (candidate.plan_binding_digest !== expected) throw new Error("PATCH_PLAN_BINDING_TAMPERED");
+  return true;
+}
+
+function verifyInventoryAgainstPlan(plan, testInventory = []) {
+  assertVerificationPlan(plan);
+  if (!Array.isArray(testInventory)) throw new Error("VERIFICATION_PLAN_INVENTORY_INVALID");
+  const current = new Map(testInventory.filter((item) => item && typeof item === "object").map((item) => [String(item.name || ""), item]));
+  const failures = [];
+  for (const check of plan.checks) {
+    const item = current.get(check.name);
+    if (!item || item.configured !== true) failures.push(`VERIFICATION_PLAN_CHECK_MISSING:${check.name}`);
+    else if (String(item.command || "").trim() !== check.command) failures.push(`VERIFICATION_PLAN_COMMAND_DRIFT:${check.name}`);
+  }
+  const planned = new Set(plan.checks.map((item) => item.name));
+  for (const definition of CHECK_PLAN) {
+    const item = current.get(definition.name);
+    if (item?.configured === true && !planned.has(definition.name)) failures.push(`VERIFICATION_PLAN_NEW_CHECK:${definition.name}`);
+  }
+  return Object.freeze({
+    schema: "debugai.verification-plan-current/v1",
+    plan_digest: plan.plan_digest,
+    pass: failures.length === 0,
+    failures,
+  });
+}
+
 function verifyExecutionAgainstPlan(plan, results = []) {
   assertVerificationPlan(plan);
   if (!Array.isArray(results)) throw new Error("VERIFICATION_PLAN_RESULTS_INVALID");
@@ -127,5 +180,8 @@ module.exports = {
   makeRollbackPlan,
   assertVerificationPlan,
   assertRollbackPlan,
+  bindCandidatePlans,
+  assertBoundCandidatePlans,
+  verifyInventoryAgainstPlan,
   verifyExecutionAgainstPlan,
 };
