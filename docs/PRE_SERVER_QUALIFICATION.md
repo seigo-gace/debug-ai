@@ -4,7 +4,7 @@
 
 This document separates source-complete measurement logic from measurements that require the real DebugAI/AI Core runtime.
 
-It does not authorize merge, pull, reset, deployment, container rebuild/restart, Secret changes, or Search Gate activation.
+It does not authorize merge, pull, reset, deployment, container rebuild/restart, Secret changes, Search Gate activation, or automatic production-profile changes.
 
 ## Workspace / Server authority first
 
@@ -107,9 +107,28 @@ Order from the current design authority:
 
 ```text
 Thinking
--> Sampling / temperature
+-> Sampling
 -> Token cap
 ```
+
+The current DebugAI AI Core request contract can vary these benchmark axes:
+
+```text
+thinking
+ temperature
+ max_tokens
+```
+
+Current Sampling scope is deliberately narrower than the model vendors' complete recommended Sampling set:
+
+```text
+temperature = SUPPORTED
+top_p       = NOT_SUPPORTED_BY_CURRENT_DEBUGAI_ADAPTER_CONTRACT
+top_k       = NOT_SUPPORTED_BY_CURRENT_DEBUGAI_ADAPTER_CONTRACT
+complete Sampling sweep = NO
+```
+
+Do **not** call a temperature-only result a complete Sampling optimization. Official model cards may recommend `top_p`/`top_k`, but those values must not be claimed as measured until the DebugAI/AI Core adapter contract actually supports and verifies them.
 
 Do not execute the next axis merely because the prior axis produced a higher score. Record every measured result and review it first.
 
@@ -123,8 +142,6 @@ npm run benchmark:model-ab -- \
   --repeats <1..5>
 ```
 
-The candidate value must be an explicit measurement choice. The harness intentionally does not invent candidate values.
-
 The harness fixes these invariants inside each pair:
 
 ```text
@@ -135,7 +152,7 @@ same Skill-ON system
 exactly one changed axis
 ```
 
-Baseline values come from current runtime authority:
+Baseline values come from current DebugAI runtime authority:
 
 ```text
 thinking    = current role contract
@@ -144,6 +161,38 @@ max_tokens  = current role runtime budget
 ```
 
 A Thinking A/B is rejected for a role whose current thinking mode is not an explicit boolean. Do not reinterpret `null` as true or false.
+
+### Official temperature candidates
+
+The candidate temperature is no longer left to ad-hoc operator choice. For the current six role/model mappings, use the current official model guidance as the first temperature candidate against the DebugAI baseline `temperature=0`:
+
+| Role | Current model authority | Current thinking contract | First temperature candidate | Official authority |
+| --- | --- | ---: | ---: | --- |
+| `code_scout` | Qwen2.5-Coder 7B Instruct | `null` / provider-profile baseline | `0.7` | Qwen generation config |
+| `causal_scout` | Qwen3 8B | `false` | `0.7` | Qwen3 non-thinking guidance |
+| `researcher` | Granite 4.2 8B | `false` | `1.0` | IBM Granite generation guidance |
+| `diagnoser` | Qwen3 8B | `true` | `0.6` | Qwen3 thinking guidance |
+| `patch_engineer` | Qwen2.5-Coder 7B Instruct | `null` / provider-profile baseline | `0.7` | Qwen generation config |
+| `local_reviewer` | Ministral 3 8B Reasoning 2512 | `null` / model reasoning profile | `0.7` | Mistral model card |
+
+Official sources current at this documentation update:
+
+- Qwen2.5-Coder-7B-Instruct generation config: https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct/blob/main/generation_config.json
+- Qwen3-8B model card: https://huggingface.co/Qwen/Qwen3-8B
+- IBM Granite 4.2 8B model card: https://huggingface.co/ibm-granite/granite-4.2-8b
+- Ministral-3-8B-Reasoning-2512 model card: https://huggingface.co/mistralai/Ministral-3-8B-Reasoning-2512
+
+For Qwen3 specifically, the official guidance couples Sampling with thinking mode: thinking recommends temperature `0.6`; non-thinking recommends `0.7`. A Thinking-only A/B at the current DebugAI `temperature=0` is therefore a measurement of the **current DebugAI configuration**, not proof of the globally best Qwen3 thinking/non-thinking configuration. Do not over-generalize that result.
+
+Official cards also recommend additional Sampling values such as Qwen `top_p/top_k` and Granite/Mistral `top_p`; those are recorded as references only and remain unmeasured by this current harness.
+
+### Token-cap sequence
+
+Do not invent a reduced token cap before the preceding real measurements are available. The current role runtime budget is the baseline. After Thinking and supported temperature measurements are recorded, reduce `max_tokens` one explicit candidate at a time and retain a smaller cap only when quality does not regress and the measured cost/latency benefit is real.
+
+A lower token cap is not automatically better simply because it is cheaper.
+
+### Result authority
 
 Results are measurement-only:
 
@@ -199,7 +248,9 @@ read current server-core routing / operation authority
 -> if incompatible: report RUNTIME_SOURCE_BEHIND_OR_UNKNOWN and stop
 -> Local Reviewer measurement where current qualification must be re-confirmed
 -> six-role Skill ON/OFF measurement
--> explicit one-variable Model A/B measurements
+-> Thinking A/B only where the current role contract is explicitly boolean
+-> temperature A/B using the role/model official candidate above
+-> token-cap A/B using explicit candidates derived after prior measurement
 -> real AI Core/TGserver/Evidence Search/real-repo DebugAI run
 -> MCP start/status/resume-if-applicable/wait/inspect verification
 -> read-only Search Gate shadow measurement when source/runtime is compatible
@@ -216,7 +267,10 @@ SERVER_CORE_AUTHORITY_READ=PASS|FAIL
 PRE_SERVER_HARNESS_SOURCE=PASS|FAIL
 LOCAL_REVIEWER_REAL=PASS|FAIL|NOT_EXECUTED
 SKILL_EFFECT_ALL_REAL=PASS|FAIL|INCOMPLETE|NOT_EXECUTED
-MODEL_AB_REAL=MEASURED|INCOMPLETE|NOT_EXECUTED
+MODEL_AB_THINKING_REAL=MEASURED|PARTIAL|NOT_APPLICABLE|NOT_EXECUTED
+MODEL_AB_TEMPERATURE_REAL=MEASURED|INCOMPLETE|NOT_EXECUTED
+MODEL_AB_FULL_SAMPLING_REAL=NOT_SUPPORTED_BY_CURRENT_DEBUGAI_ADAPTER_CONTRACT
+MODEL_AB_TOKEN_CAP_REAL=MEASURED|INCOMPLETE|NOT_EXECUTED
 REAL_INTEGRATION_E2E=PASS|FAIL|NOT_EXECUTED
 MCP_LIVE=PASS|FAIL|NOT_EXECUTED
 SEARCH_GATE_SHADOW_REAL=MEASURED|NOT_EVALUABLE|NOT_EXECUTED
