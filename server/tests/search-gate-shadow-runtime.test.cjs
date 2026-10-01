@@ -10,6 +10,7 @@ const {RunAuthority}=require("../run-authority.js");
 const {RuntimeEvidenceStore}=require("../runtime-evidence.js");
 const {bindCurrentRun}=require("../control/run-observation-context.js");
 const {createSearchGateShadowAdapter}=require("../control/search-gate-shadow-runtime.js");
+const {summarizeSearchGateShadow}=require("../control/search-gate-shadow-audit.js");
 const {createWorkflow}=require("../workflow-observed.js");
 
 function fixture(){
@@ -18,6 +19,7 @@ function fixture(){
   return{root,repo,cleanup:()=>fs.rmSync(root,{recursive:true,force:true})};
 }
 function fakeAuthority(repo){return{load:runId=>({run_id:runId,project_dir:repo,state:"RESOLVING",revision_id:"rev_1"})};}
+function auditRecord(overrides={}){return{schema:"debugai.search-gate-shadow-comparison/v1",search_kind:"OFFICIAL_EXTERNAL",actual_search_executed:true,actual_status:"SUCCESS",candidate_skip:false,false_skip_evaluable:false,false_skip:null,...overrides};}
 
 test("search shadow always executes provider and records non-activatable RUN comparison",async()=>{
   const f=fixture();try{
@@ -65,11 +67,23 @@ test("production workflow executes both searches and stores shadow comparisons w
       if(role==="diagnoser")return{content:JSON.stringify({hypothesis:"unknown",decision:"HANDOFF"})};
       throw new Error(`UNEXPECTED_ROLE:${role}`);
     }};
-    const workflow=createWorkflow({aiCore,tgserver,evidenceSearch,runtimeEvidence,authority,repoPolicy});
+    const workflow=createWorkflow({aiCore,tgserver,evidenceSearch,runtimeEvidence,authority,repoPolicy,repositorySnapshot:()=>"git_fixture"});
     const out=await workflow.runAnalysis({rawRequest:"inspect search gate",failure:{message:"boom"},localEvidence:[],repo:f.repo});
     assert.equal(kbCalls,1);assert.equal(officialCalls,1);
     const records=runtimeEvidence.list(out.run_id,{types:["search_gate_shadow"],limit:8});assert.equal(records.length,2);
     const kinds=records.map(record=>record.payload.search_kind).sort();assert.deepEqual(kinds,["INTERNAL_KB","OFFICIAL_EXTERNAL"]);
     for(const record of records){assert.equal(record.payload.shadow_disposition.decision,"RUN");assert.equal(record.payload.actual_search_executed,true);assert.equal(record.payload.candidate_skip,false);assert.equal(record.payload.false_skip_evaluable,false);assert.equal(record.payload.activation_eligible,false);}
   }finally{f.cleanup();}
+});
+
+test("search shadow audit keeps zero candidate skips NOT_EVALUABLE instead of false-skip zero",()=>{
+  const summary=summarizeSearchGateShadow([auditRecord(),auditRecord({search_kind:"INTERNAL_KB"})]);
+  assert.equal(summary.records,2);assert.equal(summary.candidate_skip_observations,0);assert.equal(summary.evaluable_candidate_skip_observations,0);assert.equal(summary.false_skip_observations,0);assert.equal(summary.false_skip_assessment,"NOT_EVALUABLE");assert.equal(summary.activation_decision,"NOT_AUTHORIZED_BY_SHADOW_AUDIT");
+});
+
+test("search shadow audit distinguishes evaluated zero false skips from detected false skip",()=>{
+  const zero=summarizeSearchGateShadow([auditRecord({candidate_skip:true,false_skip_evaluable:true,false_skip:false})]);
+  assert.equal(zero.candidate_skip_observations,1);assert.equal(zero.evaluable_candidate_skip_observations,1);assert.equal(zero.false_skip_observations,0);assert.equal(zero.false_skip_assessment,"ZERO_OBSERVED");
+  const detected=summarizeSearchGateShadow([auditRecord({candidate_skip:true,false_skip_evaluable:true,false_skip:true})]);
+  assert.equal(detected.false_skip_observations,1);assert.equal(detected.false_skip_assessment,"DETECTED");
 });
