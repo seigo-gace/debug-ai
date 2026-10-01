@@ -6,6 +6,7 @@ const fs=require("node:fs");
 const os=require("node:os");
 const path=require("node:path");
 const {makeEvidenceRecord}=require("../control/evidence-registry.js");
+const baseRuntime=require("../control/read-only-tool-runtime-base.js");
 const {RepoPolicy}=require("../repo-policy.js");
 const {createReadOnlyToolRuntime}=require("../control/read-only-tool-runtime.js");
 const {STATUS,DECISION,verifySourceBoundary}=require("../control/source-verifier.js");
@@ -35,6 +36,24 @@ test("version mismatch rejects applicability while missing semantic match stays 
     assert.equal(wrongVersion.data.version_applicability_status,STATUS.FAIL);assert.equal(wrongVersion.data.verification_decision,DECISION.REJECTED_BOUNDARY);assert.equal(wrongVersion.data.usable_for_supported_claim,false);
     const paraphrase=await f.runtime.execute({role:"researcher",selectedSkillIds:["source-verifier"],tool:"source.verify",arguments:{evidence_id:record.evidence_id,expected_version:"24.20.0",claim:"feature X is mandatory on Node 24.20.0"},evidenceContext});
     assert.equal(paraphrase.data.claim_support_status,STATUS.UNKNOWN);assert.equal(paraphrase.data.verification_decision,DECISION.INSUFFICIENT_SEMANTIC_AUTHORITY);assert.equal(paraphrase.data.usable_for_supported_claim,false);
+  }finally{f.cleanup();}
+});
+
+test("internal KB claim metadata never becomes semantic claim authority",async()=>{
+  const f=fixture();try{
+    const claim="Node 24.20.0 requires feature X.",record=makeEvidenceRecord("INTERNAL_KB",{id:"K1",claim,version:"24.20.0"},{sourceRef:"K1"}),evidenceContext=context(f.runtime,record);
+    const result=await f.runtime.execute({role:"researcher",selectedSkillIds:["source-verifier"],tool:"source.verify",arguments:{evidence_id:record.evidence_id,expected_version:"24.20.0",claim},evidenceContext});
+    assert.equal(result.data.provenance_status,STATUS.VERIFIED);assert.equal(result.data.version_applicability_status,STATUS.VERIFIED);assert.equal(result.data.claim_support_status,STATUS.UNKNOWN);assert.equal(result.data.verification_decision,DECISION.INSUFFICIENT_SEMANTIC_AUTHORITY);assert.equal(result.data.usable_for_supported_claim,false);
+  }finally{f.cleanup();}
+});
+
+test("source.read direct content can support only an exact normalized claim",async()=>{
+  const f=fixture();try{
+    const sourceResult=baseRuntime.makeToolResult("source.read",{path:"server/a.js",sha256:"a".repeat(64),content:"const answer = 41;"}),evidenceContext=context(f.runtime,sourceResult);
+    const exact=await f.runtime.execute({role:"researcher",selectedSkillIds:["source-verifier"],tool:"source.verify",arguments:{evidence_id:sourceResult.evidence_id,expected_source_ref:"source.read",claim:"const answer = 41;"},evidenceContext});
+    assert.equal(exact.data.claim_support_status,STATUS.SUPPORTED);assert.equal(exact.data.verification_decision,DECISION.VERIFIED_BOUNDARY);assert.equal(exact.data.usable_for_supported_claim,true);
+    const inferred=await f.runtime.execute({role:"researcher",selectedSkillIds:["source-verifier"],tool:"source.verify",arguments:{evidence_id:sourceResult.evidence_id,expected_source_ref:"source.read",claim:"answer equals forty one"},evidenceContext});
+    assert.equal(inferred.data.claim_support_status,STATUS.UNKNOWN);assert.equal(inferred.data.usable_for_supported_claim,false);
   }finally{f.cleanup();}
 });
 
