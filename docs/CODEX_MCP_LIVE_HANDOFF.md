@@ -1,52 +1,83 @@
-# VS Codex -> DebugAI MCP Live Verification Handoff
+# VS Codex / Parent AI -> DebugAI MCP Live Verification Handoff
 
 ## Purpose
 
-This document starts **after** DebugAI source/CI/stdio MCP verification is complete and covers the live VS Codex verification boundary.
+Define the live parent-agent verification path after source/CI/MCP protocol verification. Read [`CURRENT_STATE.md`](CURRENT_STATE.md) first.
 
-It does not authorize deployment, restart, pull, reset, merge, production mutation, Search Gate activation, or automatic model-profile promotion.
+This document does not itself authorize main merge, Secret changes, Search Gate activation, production model/profile promotion, or unrelated Server mutations.
 
-Before using this handoff, read `docs/PRE_SERVER_QUALIFICATION.md`. Source readiness and real Server measurements are separate facts.
+Master has separately authorized the Current DebugAI source-reflection/build/recreate phase after the current README/document synchronization. Current server-core remains the Server-operation authority.
 
-## Mandatory Workspace / Server authority
+## Current known boundary
 
-Before touching the live Server, VS Codex must read the current `G-ACE-inc/server-core` authority in this order:
+Source implementation anchor before documentation synchronization:
 
 ```text
-server-core/README.md
--> server-core/docs/LOAD_SCOPE.md
--> server-core/SERVER_CORE_PROTOCOL.md
--> server-core/docs/DEPLOY_RUNBOOK.md only if an authorized deploy/runtime mutation phase is actually entered
--> DebugAI project authority
+c2355f8dd7628e717db1bba83725b33360796828
 ```
 
-A previously recorded server-core SHA is evidence for that point in time only. Re-read current server-core at execution time.
-
-Applicable shared rules include:
-
-- GitHub source revision and live Server runtime are separate states;
-- current runtime values must be read back, not inferred from old reports/registry metadata;
-- production residency is Docker / Docker Compose;
-- Server direct source editing is not the normal repair path;
-- container start, HTTP 200, build success, or CI green alone is not Runtime PASS;
-- unexecuted/unverified work stays `NOT_EXECUTED / UNKNOWN / NOT_VERIFIED`;
-- do not discard/overwrite local-only Server changes to make a check pass;
-- main/PR merge, Production deploy/public switch, service stop/restart/recreate, destructive reset/rebase, Secret mutation, provider resource mutation, and new model download remain behind the current server-core/Master approval boundary.
-
-## Current source-side expectation
-
-DebugAI MCP is an stdio adapter:
+Source/CI:
 
 ```text
-VS Codex / parent AI
+Public Readiness #359 = SUCCESS
+Verify #394           = SUCCESS
+Tests                 = 373/373 PASS
+Core Verify #395      = SUCCESS
+MCP exact 9 tools     = PASS
+runtime-image assets  = PASS
+```
+
+Last read-only Server state:
+
+```text
+checkout              = /home/admin1/projects/debug-ai
+Server HEAD           = df261bdae3b6f259ac428a173b798fae2fb68bdf
+old Runtime           = healthy
+entrypoint            = node server/main.js
+workdir               = /app
+container Node        = v24.20.0
+health                = PASS
+Current assets        = absent from old image
+Current source live   = RUNTIME_SOURCE_BEHIND_OR_UNKNOWN
+```
+
+## Required authority before mutation
+
+At execution time read the current `G-ACE-inc/server-core` authority required for an authorized deploy/runtime mutation. Do not reuse an old server-core SHA as current authority.
+
+Preserve local-only Server state. In particular, `.debugai-input/` is untracked Server-local state and must not be deleted merely to make the checkout clean.
+
+## Current authorized source-reflection phase
+
+The authorized scope is limited to bringing the existing DebugAI Server checkout/runtime onto the exact Current DebugAI source required for qualification, then proving health/parity.
+
+Required invariants:
+
+```text
+no force reset of unknown local-only material
+no .debugai-input deletion
+no Secret change
+no provider-resource change
+no new model download
+no main merge implied
+no Search Gate activation
+no production profile promotion
+```
+
+After reflection/build/recreate, prove the actual running runtime before any real-model/MCP claim.
+
+## MCP architecture
+
+```text
+Parent AI / Codex
   -> bin/debugai-mcp.mjs
   -> mcp/server.mjs
   -> bin/debugai.js
   -> http://127.0.0.1:8787
-  -> existing DebugAI runtime/workflow
+  -> existing DebugAI RunAuthority/workflow
 ```
 
-Expected MCP surface: exactly nine tools.
+Expected tools:
 
 ```text
 debugai_health
@@ -60,215 +91,110 @@ debugai_status
 debugai_inspect
 ```
 
-No approve/apply MCP shortcut is allowed.
+No approve/apply MCP shortcut is valid.
 
-## Known server-side paths / defaults
-
-Previously recorded live checkout:
+## Known paths
 
 ```text
-/home/admin1/projects/debug-ai
+checkout             = /home/admin1/projects/debug-ai
+MCP entry            = /home/admin1/projects/debug-ai/bin/debugai-mcp.mjs
+DebugAI API          = http://127.0.0.1:8787
+container workspace  = /workspace
 ```
 
-MCP entry:
+Do not invent a Codex execution context. Read the actual active environment/config before registration.
+
+## Qualification sequence after exact runtime parity
+
+### 1. Source/runtime gates
 
 ```text
-/home/admin1/projects/debug-ai/bin/debugai-mcp.mjs
+audit:pre-server-qualification
+audit:live-runtime
 ```
 
-Default delegated DebugAI API:
+Both must be interpreted according to `PRE_SERVER_QUALIFICATION.md`.
+
+### 2. Local Reviewer
 
 ```text
-http://127.0.0.1:8787
+benchmark:local-reviewer
 ```
 
-Container workspace root:
+Use the real current AI Core path.
+
+### 3. Six-role Skill ON/OFF
 
 ```text
-/workspace
+benchmark:skill-effect-all
 ```
 
-Compose binds the configured host workspace root into `/workspace`.
+Report Skill OFF wins/ties exactly. All six roles must measure or the suite is incomplete.
 
-## Codex configuration rule
+### 4. Model A/B
 
-Use the actual Codex execution context. Do not guess it.
-
-OpenAI Codex supports stdio MCP configuration through `mcp_servers.<id>.command`, `args`, and `cwd`; CLI and IDE extension share MCP configuration.
-
-If Codex is actually running in the server/Remote-SSH environment, the intended registration shape is:
-
-```toml
-[mcp_servers.debugai]
-command = "node"
-args = ["/home/admin1/projects/debug-ai/bin/debugai-mcp.mjs"]
-cwd = "/home/admin1/projects/debug-ai"
-
-[mcp_servers.debugai.env]
-DEBUGAI_URL = "http://127.0.0.1:8787"
-DEBUGAI_WORKSPACE_HOST_PATH = "/home/admin1/projects"
-DEBUGAI_SERVER_WORKSPACE_ROOT = "/workspace"
-```
-
-Do **not** install this block blindly. First read the real active Codex config and confirm that Codex is executing on the server side / Remote-SSH side.
-
-If Codex is running locally on Windows instead, do not invent an SSH alias or remote wrapper. Read the existing Codex/SSH arrangement first, then configure the stdio launch through the already-authorized remote execution path.
-
-## Required preflight — read only
-
-From `/home/admin1/projects/debug-ai`, read and report only the actual checkout/runtime state. Prefer repository gates when available:
-
-```bash
-npm run audit:pre-server-qualification
-npm run audit:live-runtime
-```
-
-`audit:pre-server-qualification` proves only that the expected source-side benchmark/MCP/live-readback harnesses are present and internally coherent. It deliberately reports all real measurements as not executed.
-
-`audit:live-runtime` is a read-only live-source/runtime gate. It must not deploy/restart/sync the server. If source/runtime is behind or incompatible, report `RUNTIME_SOURCE_BEHIND_OR_UNKNOWN` and stop the live measurement path.
-
-## Required real benchmark phase
-
-Only after the live runtime is already source-compatible may Codex run real-model qualification.
-
-### Local Reviewer
-
-```bash
-npm run benchmark:local-reviewer
-```
-
-Do not replace this with a unit-test result.
-
-### Six-role Skill ON/OFF
-
-```bash
-npm run benchmark:skill-effect-all
-```
-
-Report the measured result exactly. `SKILL_OFF` or `TIE` is valid evidence and must not be rewritten as a Skill-ON PASS. All six roles must measure or the suite is `INCOMPLETE`.
-
-### Model A/B
-
-Use `docs/PRE_SERVER_QUALIFICATION.md` and change one axis at a time:
-
-```bash
-npm run benchmark:model-ab -- \
-  --role <role> \
-  --axis <thinking|temperature|top_p|top_k|max_tokens> \
-  --candidate <explicit-value|official> \
-  --repeats <1..5>
-```
-
-The harness keeps the backend model, fixed benchmark case, input, and Skill-ON system constant inside each pair. It counterbalances baseline/candidate execution order and derives the score ceiling from the active role scorer.
-
-Baseline behavior remains the current production behavior:
+Axes:
 
 ```text
-thinking    = current role contract
-temperature = 0
-top_p       = not explicitly sent
-top_k       = not explicitly sent
-max_tokens  = current role budget
+thinking
+temperature
+top_p
+top_k
+max_tokens
 ```
 
-A selected `top_p` or `top_k` candidate is sent **only for the benchmark candidate request**. This does not alter the production role profile.
+Change one axis only. Keep model/case/input/Skill system fixed. Use official candidates only where recorded. Do not fabricate Thinking state or candidate values. Measurement never promotes production configuration automatically.
 
-For Thinking A/B, only roles whose current role contract is an explicit boolean are eligible. A role with `thinking=null` is not reinterpreted as true or false.
+### 5. Real integration case
 
-For Sampling, use `--candidate official` when the repository has an official first candidate:
-
-| Role | temperature | top_p | top_k |
-| --- | ---: | ---: | ---: |
-| code_scout | 0.7 | 0.8 | 20 |
-| causal_scout | 0.7 | 0.8 | 20 |
-| researcher | 1.0 | 0.95 | no fixed official candidate |
-| diagnoser | 0.6 | 0.95 | 20 |
-| patch_engineer | 0.7 | 0.8 | 20 |
-| local_reviewer | 0.7 | 0.95 | no fixed official candidate |
-
-If the repository has no official candidate for a role/axis pair, `official` must fail closed. Do not invent a number to make the measurement run.
-
-The current harness intentionally does not call this a complete Sampling sweep: llama.cpp exposes additional samplers that are outside the current DebugAI qualification plan.
-
-For token cap, do not invent the first reduced value before prior real measurements are available. Use one explicit candidate at a time after reviewing prior results.
-
-A real measurement may report:
-
-```text
-QUALITY_REGRESSION
-NO_QUALITY_GAIN
-QUALITY_IMPROVEMENT_MEASURED
-```
-
-Even an improvement is measurement only. Do not change production role/model profiles merely because the benchmark measured a gain.
-
-## Real integration boundary
-
-After the benchmark phase, execute one bounded real DebugAI run against an explicitly allowed repository and preserve actual use/non-use of:
+Use an explicitly allowed real repository. Preserve actual use/non-use and actual errors for:
 
 ```text
 AI Core
-TGserver search/retrieval when the run requires it
-Astera Evidence Search when the run requires it
+TGserver when applicable
+Astera Evidence Search when applicable
 Durable continuation
-current repository/runtime evidence
+repository/runtime evidence
 ```
 
-Do not manufacture TGserver/Evidence Search traffic solely to mark them PASS. If a provider is not applicable to the chosen run, report that accurately and use a separate representative case if its real path must be qualified.
+Do not manufacture provider traffic.
 
-Unknown or insufficient evidence must remain unknown/insufficient. Do not fabricate support to force a complete run.
-
-## MCP live verification sequence
-
-Only after the live runtime is present and the MCP server can be registered without server mutation:
-
-1. Confirm Codex discovers exactly the nine DebugAI tools.
-2. Call `debugai_health`.
-3. Create one bounded diagnostic run with `debugai_start` against an explicitly allowed repository path.
-4. Capture the exact returned `run_id`.
-5. Call `debugai_status` with that exact `run_id`.
-6. Call `debugai_resume` only if the run is actually interrupted/resumable. Do not manufacture a resume need.
-7. Call `debugai_wait` with a bounded timeout.
-8. Call `debugai_inspect` and confirm retained/redacted evidence is readable.
-9. Optionally call read-only `debugai_verify` on an explicitly allowed repository.
-10. Do not call or create an approve/apply shortcut.
-
-## Durable continuation proof
-
-The live check is not complete merely because `health` works.
-
-Capture evidence that:
+## MCP live sequence
 
 ```text
-start -> run_id
-same run_id -> status
-same run_id -> resume when applicable
-same run_id -> wait
-same run_id -> inspect
+1. discover exactly nine tools
+2. debugai_health
+3. debugai_start on an allowed repository
+4. capture exact run_id
+5. debugai_status with same run_id
+6. debugai_resume only if the run is genuinely resumable/interrupted
+7. bounded debugai_wait
+8. debugai_inspect
+9. optional read-only debugai_verify
+10. confirm no approve/apply shortcut
 ```
 
-The purpose is to prove that the parent AI can continue a DebugAI job across multiple MCP calls instead of treating one LLM/tool invocation as the whole debugging job.
+Health alone is insufficient. Durable continuation must be proven across multiple calls using the same run ID.
 
-## Search Gate shadow measurement
+## Search Gate shadow
 
-Only after `audit:live-runtime` proves source/runtime compatibility may Codex inspect the real read-only Shadow Audit result.
+Only inspect the real shadow result after exact compatible runtime source is proven.
 
-Preserve these distinctions:
+Preserve:
 
 ```text
-no candidate skips       != false-skip zero
-NOT_EVALUABLE            != ZERO_OBSERVED
-shadow measurement       != activation authority
+no candidate skips != false-skip zero
+NOT_EVALUABLE      != ZERO_OBSERVED
+shadow measurement != activation authority
 ```
 
-Do not activate search skipping from this audit.
+Do not activate search skipping from the shadow audit alone.
 
-## Pass / fail states
-
-Use these exact states in the report:
+## Live result states
 
 ```text
-SERVER_CORE_AUTHORITY_READ=PASS|FAIL
+CURRENT_SOURCE_SERVER_REFLECTION=PASS|FAIL|NOT_EXECUTED
+CURRENT_RUNTIME_EXACT_PARITY=PASS|FAIL|NOT_VERIFIED
 PRE_SERVER_HARNESS_SOURCE=PASS|FAIL
 LOCAL_REVIEWER_REAL=PASS|FAIL|NOT_EXECUTED
 SKILL_EFFECT_ALL_REAL=PASS|FAIL|INCOMPLETE|NOT_EXECUTED
@@ -276,8 +202,8 @@ MODEL_AB_THINKING_REAL=MEASURED|PARTIAL|NOT_APPLICABLE|NOT_EXECUTED
 MODEL_AB_SAMPLING_REAL=MEASURED|PARTIAL|INCOMPLETE|NOT_EXECUTED
 MODEL_AB_TOKEN_CAP_REAL=MEASURED|INCOMPLETE|NOT_EXECUTED
 REAL_INTEGRATION_E2E=PASS|FAIL|NOT_EXECUTED
-MCP_TOOL_DISCOVERY=PASS|FAIL
-MCP_HEALTH=PASS|FAIL
+MCP_TOOL_DISCOVERY=PASS|FAIL|NOT_EXECUTED
+MCP_HEALTH=PASS|FAIL|NOT_EXECUTED
 MCP_DURABLE_START=PASS|FAIL|NOT_EXECUTED
 MCP_STATUS=PASS|FAIL|NOT_EXECUTED
 MCP_RESUME=PASS|FAIL|NOT_APPLICABLE|NOT_EXECUTED
@@ -285,46 +211,18 @@ MCP_WAIT=PASS|FAIL|NOT_EXECUTED
 MCP_INSPECT=PASS|FAIL|NOT_EXECUTED
 MCP_VERIFY=PASS|FAIL|NOT_EXECUTED
 MCP_APPROVE_APPLY_SHORTCUT=ABSENT|PRESENT_INVALID
-LIVE_RUNTIME_SOURCE_STATE=EXACT_COMPATIBLE|RUNTIME_SOURCE_BEHIND_OR_UNKNOWN
 SEARCH_GATE_SHADOW_REAL=MEASURED|NOT_EVALUABLE|NOT_EXECUTED
 PRODUCTION_PROFILE_CHANGE=NONE|MASTER_AUTHORIZED
-SERVER_MUTATION=NONE|MASTER_AUTHORIZED
+SEARCH_SKIP_ACTIVATION=NO|MASTER_AUTHORIZED
 ```
 
-Do not report `AVAILABLE_VERIFIED` unless representative real-runtime calls pass.
+Do not report `AVAILABLE_VERIFIED` until representative live-runtime calls pass.
 
-## Hard prohibitions
+## References
 
-Without explicit Master authorization, do not:
-
-- `git pull`, `git reset`, force checkout, branch rewrite, or merge;
-- deploy, rebuild, recreate, restart, or stop DebugAI containers/services;
-- change `.env`, secrets, API keys, Cloudflare, TGserver, AI Core, Astera, or server-core;
-- expose port 8787 publicly;
-- create an MCP approve/apply tool;
-- change production model/profile settings merely because one A/B measurement looked better;
-- modify production data merely to make a verification pass.
-
-If the live runtime is older than the source under verification, report the mismatch and stop. Sync/deploy is a separate explicitly authorized phase governed by current server-core and the DebugAI project contract.
-
-## Source references
-
-- current `G-ACE-inc/server-core` `README.md`
-- current `G-ACE-inc/server-core` `docs/LOAD_SCOPE.md`
-- current `G-ACE-inc/server-core` `SERVER_CORE_PROTOCOL.md`
-- current `G-ACE-inc/server-core` `docs/DEPLOY_RUNBOOK.md` when deploy/runtime mutation is authorized
-- `docs/PRE_SERVER_QUALIFICATION.md`
-- `docs/MCP_ADAPTER.md`
-- `mcp/server.mjs`
-- `bin/debugai-mcp.mjs`
-- `bin/debugai.js`
-- `server/control/skill-effect-suite.js`
-- `server/control/model-ab-benchmark.js`
-- `scripts/pre-server-qualification-audit.cjs`
-- `compose.yaml`
-- `scripts/live-runtime-readback.cjs`
-
-Current Codex MCP configuration references:
-
-- https://developers.openai.com/docs/config-file/config-reference
-- https://developers.openai.com/learn/docs-mcp
+- `../README.md`
+- `CURRENT_STATE.md`
+- `DURABLE-CONTINUATION-DESIGN.md`
+- `PRE_SERVER_QUALIFICATION.md`
+- `MCP_ADAPTER.md`
+- `../DEBUGAI.md`

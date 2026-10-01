@@ -2,72 +2,109 @@
 
 ## Purpose
 
-This document separates source-complete measurement logic from measurements that require the real DebugAI/AI Core runtime.
+Separate source-complete measurement logic from real Server/model/runtime measurements. Source readiness must never be relabeled as a live PASS.
 
-It does not authorize merge, pull, reset, deployment, container rebuild/restart, Secret changes, Search Gate activation, or automatic production-profile changes.
+Read [`CURRENT_STATE.md`](CURRENT_STATE.md) for the current source/runtime boundary.
 
-## Workspace / Server authority first
+Server/VPS/Docker mutation is governed by current `G-ACE-inc/server-core` authority plus explicit Master authorization.
 
-Live Server work is governed by `G-ACE-inc/server-core` before the DebugAI project rules are applied.
+## Current source qualification anchor
 
-At the time this document was synchronized, server-core `main` readback was:
-
-```text
-repository = G-ACE-inc/server-core
-main SHA   = 081b61d38965267f8d2d43e224720e136e852340
-```
-
-Do not rely on that recorded SHA as the future current state. At live execution time, read current server-core authority again in the mandatory order:
+Before this documentation synchronization:
 
 ```text
-server-core/README.md
--> server-core/docs/LOAD_SCOPE.md
--> server-core/SERVER_CORE_PROTOCOL.md
--> server-core/docs/DEPLOY_RUNBOOK.md only when deploy/runtime mutation is actually in scope
--> DebugAI README / AGENTS / required DebugAI docs
+implementation anchor            = c2355f8dd7628e717db1bba83725b33360796828
+Public Readiness Audit #359      = SUCCESS
+Verify #394                      = SUCCESS
+repository tests                 = 373/373 PASS
+Core Verify #395                 = SUCCESS
+pre-server source audit          = source_ready=true
+runtime-image qualification      = PASS
+MCP source/stdio                 = PASS
 ```
 
-The current server-core contract requires, among other things:
+The source audit deliberately reports real model/integration/MCP/Search measurements as not executed.
 
-- GitHub source revision and Server runtime are separate states;
-- current runtime values are read back instead of inferred from old reports/registry entries;
-- production residency is Docker / Docker Compose;
-- Server direct source editing is not a substitute for the repository development loop;
-- container start, HTTP 200, build success, or green CI alone are not Runtime PASS;
-- unexecuted/unverified states remain `NOT_EXECUTED / UNKNOWN / NOT_VERIFIED`;
-- main/PR merge, Production deploy/public switch, service stop/recreate/restart, Secret mutation, destructive reset/rebase, provider resource mutation, and new model download require Master authority where specified by server-core;
-- if live source is behind or locally modified, do not discard/overwrite it to make a measurement pass.
+## Current live precondition
 
-This pre-server phase is read-only unless Master separately authorizes a Server mutation/deploy phase.
+Last read-only Server inspection:
+
+```text
+old Server checkout              = df261bdae3b6f259ac428a173b798fae2fb68bdf
+old Runtime                      = healthy
+Current source deployed          = no
+Current qualification assets     = absent from old running image
+LIVE_RUNTIME_SOURCE_STATE        = RUNTIME_SOURCE_BEHIND_OR_UNKNOWN
+```
+
+Master authorized Current DebugAI source reflection after the README/document synchronization. That mutation phase remains separate from the measurement claims below and must follow current server-core rules.
 
 ## Source-side qualification order
 
-Before a live Server result is interpreted, the repository must provide deterministic runners for these gates:
+Repository source must provide deterministic runners for:
 
-1. repository verification / exact-head CI;
-2. Local Reviewer real-role benchmark runner;
-3. six-role Skill ON/OFF benchmark suite;
-4. one-variable Model A/B benchmark harness;
-5. live-runtime source parity/readback gate;
-6. MCP durable-continuation live handoff.
+1. exact-head repository verification/CI;
+2. Local Reviewer real-role benchmark;
+3. six-role Skill ON/OFF suite;
+4. one-variable Model A/B harness;
+5. exact live source/runtime readback;
+6. MCP durable-continuation handoff;
+7. Search Gate read-only shadow assessment.
 
-`npm run verify` and `npm run verify:core` execute `audit:pre-server-qualification`, so a green exact-head CI also proves that these source-side entry points remain internally coherent. Source availability is still not a real measurement PASS.
+`npm run verify` executes the source qualification audit after build/check/tests.
 
-## Existing Local Reviewer benchmark
+## Pre-server source audit
+
+```bash
+npm run audit:pre-server-qualification
+```
+
+Required source checks include:
+
+```text
+local_reviewer_runner
+six_role_skill_suite
+model_ab_runner
+model_ab_sampling_scope
+model_ab_official_candidates
+mcp_exact_nine_tools
+required_scripts
+required_docs
+```
+
+A result of `source_ready=true` means only that the entry points/contracts exist and are coherent.
+
+## Live runtime readback
+
+```bash
+npm run audit:live-runtime
+```
+
+This is read-only. It verifies repository identity, bounded Git state, production entrypoint/workdir, exact Host↔Container measurement-source parity, DebugAI health identity, and the safe preconditions for read-only Search Gate shadow evaluation.
+
+If source/runtime is incompatible, preserve:
+
+```text
+LIVE_RUNTIME_SOURCE_STATE=RUNTIME_SOURCE_BEHIND_OR_UNKNOWN
+```
+
+Do not invent a live measurement.
+
+## Local Reviewer benchmark
 
 ```bash
 npm run benchmark:local-reviewer
 ```
 
-This uses the current Local Reviewer production role path and current AI Core connection. It is a measurement only. A source/unit test of this runner does not replace a real-runtime result.
+This uses the real current role path through AI Core. A unit test does not replace a real result.
 
-## Six-role Skill ON/OFF measurement
+## Six-role Skill ON/OFF suite
 
 ```bash
 npm run benchmark:skill-effect-all
 ```
 
-The suite executes the existing fixed benchmark/scorer for all six roles in this exact order:
+Fixed order:
 
 ```text
 code_scout
@@ -80,28 +117,13 @@ local_reviewer
 
 Rules:
 
-- same role model and existing fixed cases are preserved;
-- Skill ON is not assumed to be better;
-- Skill OFF wins and ties are valid measurements;
-- one missing or failed role makes the suite incomplete;
-- the suite cannot promote a production setting automatically.
+- same role/model/fixed cases;
+- Skill ON is not assumed better;
+- Skill OFF wins and ties are valid;
+- one missing/failing role makes the suite incomplete;
+- no production promotion authority.
 
-Required report fields include:
-
-```text
-completed
-summary.roles_total
-summary.roles_measured
-summary.roles_incomplete
-summary.skill_on_better
-summary.skill_off_better
-summary.ties
-production_promotion_authorized=false
-```
-
-## Model A/B measurement
-
-Model A/B changes exactly one variable at a time.
+## Model A/B
 
 Design order:
 
@@ -111,7 +133,7 @@ Thinking
 -> Token cap
 ```
 
-The current benchmark harness supports these explicit axes:
+Supported explicit axes:
 
 ```text
 thinking
@@ -121,23 +143,7 @@ top_k
 max_tokens
 ```
 
-The **production DebugAI defaults are not changed** by adding these benchmark axes. Baseline requests continue to omit `top_p` and `top_k`; a candidate request includes either value only when that one A/B axis is explicitly selected.
-
-The underlying llama.cpp server supports `temperature`, `top_p`, and `top_k` sampling parameters. The harness nevertheless labels its scope as incomplete because other llama.cpp samplers exist and are not part of the current DebugAI qualification plan.
-
-Do not execute the next axis merely because the prior axis produced a higher score. Record every measured result and review it first.
-
-Command shape:
-
-```bash
-npm run benchmark:model-ab -- \
-  --role <role> \
-  --axis <thinking|temperature|top_p|top_k|max_tokens> \
-  --candidate <explicit-value|official> \
-  --repeats <1..5>
-```
-
-The harness fixes these invariants inside each pair:
+Each pair fixes:
 
 ```text
 same backend model
@@ -145,58 +151,42 @@ same fixed benchmark case
 same input
 same Skill-ON system
 exactly one changed axis
-counterbalanced baseline/candidate execution order
+counterbalanced baseline/candidate order
 dynamic score ceiling from the role scorer
 ```
 
-Counterbalancing prevents every candidate call from receiving the same second-call/warm-up position. The score ceiling is read from each deterministic role scorer rather than assumed to be five forever.
-
-Baseline values come from current DebugAI runtime authority:
+Baseline:
 
 ```text
 thinking    = current role contract
 temperature = 0
-top_p       = unspecified / provider baseline
-top_k       = unspecified / provider baseline
+top_p       = unspecified/provider baseline
+top_k       = unspecified/provider baseline
 max_tokens  = current role runtime budget
 ```
 
-A Thinking A/B is rejected for a role whose current thinking mode is not an explicit boolean. Do not reinterpret `null` as true or false.
+A role with `thinking=null` is not eligible for fabricated Thinking A/B.
 
-### Official first Sampling candidates
+### Official-first candidates
 
-`--candidate official` is accepted only when the repository has a current official first candidate for that role and axis. Missing candidates fail closed instead of inventing a number.
+| Role | Temperature | top_p | top_k |
+| --- | ---: | ---: | ---: |
+| code_scout | 0.7 | 0.8 | 20 |
+| causal_scout | 0.7 | 0.8 | 20 |
+| researcher | 1.0 | 0.95 | no fixed official candidate |
+| diagnoser | 0.6 | 0.95 | 20 |
+| patch_engineer | 0.7 | 0.8 | 20 |
+| local_reviewer | 0.7 | 0.95 | no fixed official candidate |
 
-| Role | Current model authority | Thinking | Temperature | top_p | top_k | Authority |
-| --- | --- | ---: | ---: | ---: | ---: | --- |
-| `code_scout` | Qwen2.5-Coder 7B Instruct | `null` | `0.7` | `0.8` | `20` | Qwen generation config |
-| `causal_scout` | Qwen3 8B | `false` | `0.7` | `0.8` | `20` | Qwen3 non-thinking guidance |
-| `researcher` | Granite 4.2 8B | `false` | `1.0` | `0.95` | none fixed | IBM Granite generation guidance |
-| `diagnoser` | Qwen3 8B | `true` | `0.6` | `0.95` | `20` | Qwen3 thinking guidance |
-| `patch_engineer` | Qwen2.5-Coder 7B Instruct | `null` | `0.7` | `0.8` | `20` | Qwen generation config |
-| `local_reviewer` | Ministral 3 8B Reasoning 2512 | `null` | `0.7` | `0.95` | none fixed | Mistral model card |
+`--candidate official` must fail closed when no current model-bound candidate exists.
 
-Official sources current at this documentation update:
+Official reference authorities remain the repository-recorded Qwen/Qwen3/Granite/Ministral model guidance and llama.cpp server sampling contract. A recommendation is a measurement candidate, not automatic production configuration.
 
-- Qwen2.5-Coder-7B-Instruct generation config: https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct/blob/main/generation_config.json
-- Qwen3-8B model card: https://huggingface.co/Qwen/Qwen3-8B
-- IBM Granite 4.2 8B model card: https://huggingface.co/ibm-granite/granite-4.2-8b
-- Ministral-3-8B-Reasoning-2512 model card: https://huggingface.co/mistralai/Ministral-3-8B-Reasoning-2512
-- llama.cpp server sampling contract: https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md
+### Token cap
 
-For Qwen3, thinking and non-thinking guidance differs. A Thinking-only A/B at DebugAI's current `temperature=0` is a measurement of the current DebugAI baseline, not proof of the globally best Qwen3 configuration.
-
-For Granite and Ministral `top_k`, the table intentionally has no fixed official candidate. `--candidate official` must fail for those role/axis pairs. If a later measurement intentionally explores `top_k`, the candidate must be separately justified and recorded rather than silently invented.
-
-### Token-cap sequence
-
-Do not invent a reduced token cap before the preceding real measurements are available. The current role runtime budget is the baseline. After Thinking and supported Sampling measurements are recorded, reduce `max_tokens` one explicit candidate at a time and retain a smaller cap only when quality does not regress and the measured cost/latency benefit is real.
-
-A lower token cap is not automatically better simply because it is cheaper.
+Do not invent a lower cap before prior real measurements are available. Test one explicit candidate at a time and retain a smaller cap only when quality does not regress and measured cost/latency improvement is real.
 
 ### Result authority
-
-Results are measurement-only:
 
 ```text
 QUALITY_REGRESSION
@@ -204,68 +194,58 @@ NO_QUALITY_GAIN
 QUALITY_IMPROVEMENT_MEASURED
 ```
 
-Even `QUALITY_IMPROVEMENT_MEASURED` does not authorize a production profile change. Every result contains:
+Every result remains:
 
 ```text
 promotion_authorized=false
 ```
 
-Provider token counts remain null when the provider did not return measured usage. Estimated token counts must not be presented as measured values.
+Provider usage remains null when the provider does not return measured token counts.
 
-## Live integration gate
+## Real integration qualification
 
-After source/CI for the harness is green, the real-runtime phase may measure:
+After exact Current runtime parity:
 
 ```text
-AI Core real model calls
-TGserver real read/search path when the chosen DebugAI run requires it
-Astera Evidence Search real path when the chosen DebugAI run requires it
+AI Core real calls
+TGserver real path when the chosen case requires it
+Astera Evidence Search real path when the chosen case requires it
 real allowed repository
-Durable continuation across multiple calls
+Durable continuation
 MCP parent-agent path
+Search Gate shadow evidence
 ```
 
-The integration target is not satisfied by a fixture alone. The real phase must preserve evidence gaps and `UNKNOWN` rather than fabricating support merely to complete the run.
+Do not manufacture provider traffic solely to mark a box PASS. Choose a representative case if a dependency's live path separately requires qualification.
 
-## Relation to VS Codex handoff
-
-Live Server execution is delegated to VS Codex by Master. VS Codex should read:
-
-- current `G-ACE-inc/server-core` `README.md`;
-- current `G-ACE-inc/server-core` `docs/LOAD_SCOPE.md`;
-- current `G-ACE-inc/server-core` `SERVER_CORE_PROTOCOL.md`;
-- `docs/DEPLOY_RUNBOOK.md` only if an authorized deploy/runtime mutation phase is entered;
-- DebugAI `AGENTS.md`;
-- DebugAI `README.md`;
-- `docs/DURABLE-CONTINUATION-DESIGN.md`;
-- `docs/MCP_ADAPTER.md`;
-- `docs/PRE_SERVER_QUALIFICATION.md`;
-- `docs/CODEX_MCP_LIVE_HANDOFF.md`.
-
-The live order is:
+## Live order after authorized source reflection
 
 ```text
-read current server-core routing / operation authority
--> read-only live DebugAI source/runtime preflight
--> if incompatible: report RUNTIME_SOURCE_BEHIND_OR_UNKNOWN and stop
--> Local Reviewer measurement where current qualification must be re-confirmed
--> six-role Skill ON/OFF measurement
--> Thinking A/B only where the current role contract is explicitly boolean
--> temperature/top_p/top_k A/B where a justified candidate exists
--> token-cap A/B using explicit candidates derived after prior measurement
--> real AI Core/TGserver/Evidence Search/real-repo DebugAI run
--> MCP start/status/resume-if-applicable/wait/inspect verification
--> read-only Search Gate shadow measurement when source/runtime is compatible
+current server-core authority
+-> preserve local-only Server state
+-> exact Current source reflection
+-> Docker build/recreate
+-> /health + command/workdir + source parity
+-> audit:pre-server-qualification
+-> audit:live-runtime
+-> Local Reviewer real benchmark
+-> six-role Skill ON/OFF
+-> Thinking A/B only where explicit boolean
+-> Sampling A/B with justified candidates
+-> token-cap A/B after prior evidence
+-> real allowed-repository integration
+-> MCP durable continuation proof
+-> Search Gate shadow measurement
+-> fresh self-debug case
+-> final production-equivalent closed-loop E2E
 ```
-
-Do not silently sync or deploy an old runtime to make these measurements possible. Source synchronization/deployment is a separate Master-authorized phase governed by current server-core and the project deploy contract.
 
 ## Completion states
 
-Use explicit states instead of treating source readiness as runtime success:
-
 ```text
 SERVER_CORE_AUTHORITY_READ=PASS|FAIL
+CURRENT_SOURCE_SERVER_REFLECTION=PASS|FAIL|NOT_EXECUTED
+CURRENT_RUNTIME_EXACT_PARITY=PASS|FAIL|NOT_VERIFIED
 PRE_SERVER_HARNESS_SOURCE=PASS|FAIL
 LOCAL_REVIEWER_REAL=PASS|FAIL|NOT_EXECUTED
 SKILL_EFFECT_ALL_REAL=PASS|FAIL|INCOMPLETE|NOT_EXECUTED
@@ -276,5 +256,7 @@ REAL_INTEGRATION_E2E=PASS|FAIL|NOT_EXECUTED
 MCP_LIVE=PASS|FAIL|NOT_EXECUTED
 SEARCH_GATE_SHADOW_REAL=MEASURED|NOT_EVALUABLE|NOT_EXECUTED
 PRODUCTION_PROFILE_CHANGE=NONE|MASTER_AUTHORIZED
-SERVER_MUTATION=NONE|MASTER_AUTHORIZED
+SEARCH_SKIP_ACTIVATION=NO|MASTER_AUTHORIZED
 ```
+
+No fixture/source audit may promote an unexecuted real state to PASS.
