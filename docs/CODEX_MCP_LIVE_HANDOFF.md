@@ -182,6 +182,23 @@ npm run benchmark:model-ab -- \
 
 The harness keeps the backend model, fixed benchmark case, input, and Skill-ON system constant inside each pair.
 
+For `temperature`, do not invent candidate values. Use the first official candidate fixed in `docs/PRE_SERVER_QUALIFICATION.md` for the current role/model mapping:
+
+```text
+code_scout      Qwen2.5-Coder 7B        -> 0.7
+causal_scout    Qwen3 8B non-thinking   -> 0.7
+researcher      Granite 4.2 8B           -> 1.0
+diagnoser       Qwen3 8B thinking       -> 0.6
+patch_engineer  Qwen2.5-Coder 7B        -> 0.7
+local_reviewer  Ministral 3 8B Reasoning -> 0.7
+```
+
+Current DebugAI AI Core A/B support is **temperature only** for the Sampling phase. Do not pass or claim `top_p`/`top_k` measurements through this harness. The model vendors may recommend those values, but the current DebugAI adapter contract does not expose them.
+
+For Thinking A/B, only roles whose current role contract is an explicit boolean are eligible. A role with `thinking=null` is not reinterpreted as true or false.
+
+For token cap, do not invent the first reduced value before the prior real measurements are available. Use one explicit candidate at a time after reviewing the prior result.
+
 A real measurement may report:
 
 ```text
@@ -262,7 +279,10 @@ SERVER_CORE_AUTHORITY_READ=PASS|FAIL
 PRE_SERVER_HARNESS_SOURCE=PASS|FAIL
 LOCAL_REVIEWER_REAL=PASS|FAIL|NOT_EXECUTED
 SKILL_EFFECT_ALL_REAL=PASS|FAIL|INCOMPLETE|NOT_EXECUTED
-MODEL_AB_REAL=MEASURED|INCOMPLETE|NOT_EXECUTED
+MODEL_AB_THINKING_REAL=MEASURED|PARTIAL|NOT_APPLICABLE|NOT_EXECUTED
+MODEL_AB_TEMPERATURE_REAL=MEASURED|INCOMPLETE|NOT_EXECUTED
+MODEL_AB_FULL_SAMPLING_REAL=NOT_SUPPORTED_BY_CURRENT_DEBUGAI_ADAPTER_CONTRACT
+MODEL_AB_TOKEN_CAP_REAL=MEASURED|INCOMPLETE|NOT_EXECUTED
 REAL_INTEGRATION_E2E=PASS|FAIL|NOT_EXECUTED
 MCP_TOOL_DISCOVERY=PASS|FAIL
 MCP_HEALTH=PASS|FAIL
