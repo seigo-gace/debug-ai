@@ -2,7 +2,7 @@
 
 const test=require("node:test");
 const assert=require("node:assert/strict");
-const {baselineConfig,buildVariant,assertSingleAxisDifference,runModelAbBenchmark}=require("../control/model-ab-benchmark.js");
+const {SAMPLING_SCOPE,baselineConfig,buildVariant,assertSingleAxisDifference,runModelAbBenchmark}=require("../control/model-ab-benchmark.js");
 
 function perfectLocal(testCase){
   const expected=testCase.expected;
@@ -42,10 +42,18 @@ test("thinking AB is allowed only for roles with an explicit boolean thinking ba
   assert.equal(diagnoser.baseline.model,diagnoser.candidate.model);
 });
 
+test("sampling scope is explicit: temperature supported, top_p/top_k not claimed by current adapter contract",()=>{
+  assert.deepEqual(SAMPLING_SCOPE,{authority:"CURRENT_DEBUGAI_AI_CORE_REQUEST_CONTRACT",temperature:"SUPPORTED",top_p:"NOT_SUPPORTED_BY_CURRENT_DEBUGAI_ADAPTER_CONTRACT",top_k:"NOT_SUPPORTED_BY_CURRENT_DEBUGAI_ADAPTER_CONTRACT",complete_sampling_sweep:false});
+  assert.throws(()=>buildVariant("diagnoser","top_p","0.9"),/UNSUPPORTED_BY_CURRENT_AI_CORE_CONTRACT:top_p/);
+  assert.throws(()=>buildVariant("diagnoser","top_k","20"),/UNSUPPORTED_BY_CURRENT_AI_CORE_CONTRACT:top_k/);
+});
+
 test("same-model same-input temperature AB reports measurement only and never authorizes promotion",async()=>{
   const result=await runModelAbBenchmark({role:"local_reviewer",axis:"temperature",candidate:"0.2",repeats:2,callModel:fakeCaller()});
   assert.equal(result.completed,true);
   assert.equal(result.promotion_authorized,false);
+  assert.equal(result.sampling_scope.temperature,"SUPPORTED");
+  assert.equal(result.sampling_scope.complete_sampling_sweep,false);
   assert.deepEqual(result.invariant,{same_model:true,same_cases:true,same_input:true,same_system:true,exactly_one_axis_changed:true});
   assert.equal(result.quality.baseline,result.quality.max);
   assert.equal(result.quality.candidate,result.quality.max);
