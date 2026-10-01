@@ -38,7 +38,10 @@ COPY --from=sandbox-builder /debugai-sandbox-exec /usr/local/bin/debugai-sandbox
 COPY package.json ./
 RUN npm install --omit=dev --ignore-scripts --no-audit --no-fund
 COPY bin ./bin
-RUN chmod 0555 /app/bin/debugai.js && ln -s /app/bin/debugai.js /usr/local/bin/debugai
+COPY mcp ./mcp
+COPY scripts ./scripts
+COPY docs ./docs
+RUN chmod 0555 /app/bin/debugai.js /app/bin/debugai-mcp.mjs && ln -s /app/bin/debugai.js /usr/local/bin/debugai
 COPY orchestrator ./orchestrator
 COPY server ./server
 COPY --from=durable-native-builder /src/build/native/debugai-durable-lock.node ./build/native/debugai-durable-lock.node
