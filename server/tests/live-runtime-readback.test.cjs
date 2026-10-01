@@ -10,10 +10,12 @@ const {
   SOURCE_REQUIREMENTS,
   CONTAINER_SOURCE_REQUIREMENTS,
   sanitizeRemote,
+  repositoryIdentity,
   gitReadback,
   sourceReadback,
   dockerReadback,
   containerSourceReadback,
+  healthOk,
   collectReadback,
 }=require("../../scripts/live-runtime-readback.cjs");
 
@@ -43,9 +45,27 @@ function trackedProbePath(args){
   return args[3];
 }
 
-test("live readback redacts HTTPS remote credentials",()=>{
+function baseGitResult({root,origin="git@github.com:seigo-gace/debug-ai.git",head="c".repeat(40),branch="feat/runtime",tracked=true}={}){
+  return(command,args)=>{
+    const key=args.join(" ");
+    if(command==="git"&&key==="rev-parse --show-toplevel")return{ok:true,status:0,stdout:`${root}\n`,error_code:null};
+    if(command==="git"&&key==="config --get remote.origin.url")return{ok:true,status:0,stdout:`${origin}\n`,error_code:null};
+    if(command==="git"&&key==="branch --show-current")return{ok:true,status:0,stdout:`${branch}\n`,error_code:null};
+    if(command==="git"&&key==="rev-parse HEAD")return{ok:true,status:0,stdout:`${head}\n`,error_code:null};
+    if(command==="git"&&key.startsWith("diff "))return{ok:true,status:0,stdout:"",error_code:null};
+    const rel=command==="git"?trackedProbePath(args):null;
+    if(rel&&SOURCE_REQUIREMENTS.includes(rel))return tracked?{ok:true,status:0,stdout:`${rel}\n`,error_code:null}:{ok:false,status:1,stdout:"",error_code:null};
+    return null;
+  };
+}
+
+test("live readback redacts HTTPS remote credentials and normalizes repository identity",()=>{
   assert.equal(sanitizeRemote("https://secret-token@github.com/seigo-gace/debug-ai.git\n"),"https://***@github.com/seigo-gace/debug-ai.git");
   assert.equal(sanitizeRemote("git@github.com:seigo-gace/debug-ai.git"),"git@github.com:seigo-gace/debug-ai.git");
+  assert.equal(repositoryIdentity("https://token@github.com/seigo-gace/debug-ai.git"),"github.com/seigo-gace/debug-ai");
+  assert.equal(repositoryIdentity("git@github.com:seigo-gace/debug-ai.git"),"github.com/seigo-gace/debug-ai");
+  assert.equal(repositoryIdentity("ssh://git@github.com/seigo-gace/debug-ai.git"),"github.com/seigo-gace/debug-ai");
+  assert.equal(repositoryIdentity("https://github.com/other/debug-ai.git"),"github.com/other/debug-ai");
 });
 
 test("git readback never enumerates untracked files and only reports bounded dirty state",()=>{
@@ -67,6 +87,8 @@ test("git readback never enumerates untracked files and only reports bounded dir
   assert.equal(out.repository_detected,true);
   assert.equal(out.root,"/srv/debug-ai");
   assert.equal(out.origin,"https://***@github.com/seigo-gace/debug-ai.git");
+  assert.equal(out.repository_identity,"github.com/seigo-gace/debug-ai");
+  assert.equal(out.repository_identity_match,true);
   assert.equal(out.tracked_worktree_dirty,true);
   assert.equal(out.index_dirty,false);
   assert.equal(out.untracked_scanned,false);
@@ -102,7 +124,7 @@ test("docker readback parses only filtered bounded container rows",()=>{
   assert.deepEqual(out.containers[0],{id:"abc123",name:"debug-ai",image:"debug-ai:test",status:"Up 5 minutes (healthy)"});
 });
 
-test("running container source proof requires exactly one container and all shadow modules",()=>{
+test("running container source proof requires exactly one container and every measurement source file",()=>{
   const docker={available:true,container_count:1,containers:[{id:"abc123",name:"debug-ai",image:"debug-ai:test",status:"Up"}],error_code:null};
   const runner=(command,args)=>{
     assert.equal(command,"docker");
@@ -115,6 +137,7 @@ test("running container source proof requires exactly one container and all shad
   assert.equal(out.checked,true);
   assert.equal(out.compatible,true);
   assert.equal(out.reason,"SOURCE_COMPATIBLE");
+  assert.equal(out.required_files["/app/scripts/search-gate-shadow-audit.cjs"],true);
   assert.equal(containerSourceReadback({...docker,container_count:2,containers:[docker.containers[0],docker.containers[0]]},runner).compatible,false);
 });
 
@@ -122,19 +145,13 @@ test("combined live readback never authorizes search skip and fails closed on in
   const f=tempRepo();
   try{
     write(f.root,"package.json",JSON.stringify({scripts:{}}));
+    const git=baseGitResult({root:f.root,branch:"main",head:"b".repeat(40),tracked:false});
     const runner=(command,args)=>{
-      const key=args.join(" ");
-      if(command==="git"&&key==="rev-parse --show-toplevel")return{ok:true,status:0,stdout:f.root+"\n",error_code:null};
-      if(command==="git"&&key==="config --get remote.origin.url")return{ok:true,status:0,stdout:"git@github.com:seigo-gace/debug-ai.git\n",error_code:null};
-      if(command==="git"&&key==="branch --show-current")return{ok:true,status:0,stdout:"main\n",error_code:null};
-      if(command==="git"&&key==="rev-parse HEAD")return{ok:true,status:0,stdout:"b".repeat(40)+"\n",error_code:null};
-      if(command==="git"&&key.startsWith("diff "))return{ok:true,status:0,stdout:"",error_code:null};
-      const rel=command==="git"?trackedProbePath(args):null;
-      if(rel&&SOURCE_REQUIREMENTS.includes(rel))return{ok:false,status:1,stdout:"",error_code:null};
+      const result=git(command,args);if(result)return result;
       if(command==="docker")return{ok:true,status:0,stdout:"",error_code:null};
-      throw new Error(`UNEXPECTED:${command}:${key}`);
+      throw new Error(`UNEXPECTED:${command}:${args.join(" ")}`);
     };
-    const health=async()=>({reachable:true,status_code:200,error_code:null});
+    const health=async()=>({reachable:true,status_code:200,ok:true,service:"debug-ai",error_code:null});
     const out=await collectReadback({cwd:f.root,runner,health});
     assert.equal(out.read_only,true);
     assert.equal(out.mutation_attempted,false);
@@ -145,31 +162,46 @@ test("combined live readback never authorizes search skip and fails closed on in
   }finally{f.cleanup();}
 });
 
-test("measurement authorization needs compatible checkout, compatible running container and healthy loopback",async()=>{
+test("wrong repository identity cannot become a proven compatible checkout",async()=>{
+  const f=tempRepo();
+  try{
+    makeCompatibleCheckout(f.root);
+    const git=baseGitResult({root:f.root,origin:"git@github.com:other/debug-ai.git"});
+    const runner=(command,args)=>{
+      const result=git(command,args);if(result)return result;
+      if(command==="docker")return{ok:true,status:0,stdout:"",error_code:null};
+      throw new Error(`UNEXPECTED:${command}:${args.join(" ")}`);
+    };
+    const out=await collectReadback({cwd:f.root,runner,health:async()=>({reachable:true,status_code:200,ok:true,service:"debug-ai",error_code:null})});
+    assert.equal(out.git.repository_identity,"github.com/other/debug-ai");
+    assert.equal(out.git.repository_identity_match,false);
+    assert.equal(out.checkout_source_proven,false);
+    assert.equal(out.search_shadow_measurement_authorized,false);
+  }finally{f.cleanup();}
+});
+
+test("measurement authorization needs compatible checkout, compatible running container and exact DebugAI health identity",async()=>{
   const f=tempRepo();
   try{
     makeCompatibleCheckout(f.root);
     const required_files=Object.fromEntries(CONTAINER_SOURCE_REQUIREMENTS.map(p=>[p,true]));
+    const git=baseGitResult({root:f.root});
     const runner=(command,args)=>{
-      const key=args.join(" ");
-      if(command==="git"&&key==="rev-parse --show-toplevel")return{ok:true,status:0,stdout:f.root+"\n",error_code:null};
-      if(command==="git"&&key==="config --get remote.origin.url")return{ok:true,status:0,stdout:"git@github.com:seigo-gace/debug-ai.git\n",error_code:null};
-      if(command==="git"&&key==="branch --show-current")return{ok:true,status:0,stdout:"feat/runtime\n",error_code:null};
-      if(command==="git"&&key==="rev-parse HEAD")return{ok:true,status:0,stdout:"c".repeat(40)+"\n",error_code:null};
-      if(command==="git"&&key.startsWith("diff "))return{ok:true,status:0,stdout:"",error_code:null};
-      const rel=command==="git"?trackedProbePath(args):null;
-      if(rel&&SOURCE_REQUIREMENTS.includes(rel))return{ok:true,status:0,stdout:`${rel}\n`,error_code:null};
+      const result=git(command,args);if(result)return result;
       if(command==="docker"&&args[0]==="ps")return{ok:true,status:0,stdout:"abc123\tdebug-ai\tdebug-ai:test\tUp 1 minute (healthy)\n",error_code:null};
       if(command==="docker"&&args[0]==="exec")return{ok:true,status:0,stdout:JSON.stringify({required_files,candidate_policy_version:"debugai.search-gate-candidate-policy/v1",shadow_runtime_policy_version:"debugai.search-gate-shadow-runtime/v2"}),error_code:null};
-      throw new Error(`UNEXPECTED:${command}:${key}`);
+      throw new Error(`UNEXPECTED:${command}:${args.join(" ")}`);
     };
-    const healthy=async()=>({reachable:true,status_code:200,error_code:null});
+    const healthy=async()=>({reachable:true,status_code:200,ok:true,service:"debug-ai",error_code:null});
     const out=await collectReadback({cwd:f.root,runner,health:healthy});
     assert.equal(out.checkout_source_proven,true);
     assert.equal(out.runtime_source_state,"RUNNING_CONTAINER_SOURCE_COMPATIBLE");
     assert.equal(out.search_shadow_measurement_authorized,true);
     assert.equal(out.search_skip_activation_authorized,false);
-    const unhealthy=await collectReadback({cwd:f.root,runner,health:async()=>({reachable:true,status_code:503,error_code:null})});
-    assert.equal(unhealthy.search_shadow_measurement_authorized,false);
+    assert.equal(healthOk({reachable:true,status_code:200,ok:true,service:"other"}),false);
+    assert.equal(healthOk({reachable:true,status_code:503,ok:true,service:"debug-ai"}),false);
+    assert.equal(healthOk({reachable:true,status_code:200,ok:false,service:"debug-ai"}),false);
+    const wrongService=await collectReadback({cwd:f.root,runner,health:async()=>({reachable:true,status_code:200,ok:true,service:"other",error_code:null})});
+    assert.equal(wrongService.search_shadow_measurement_authorized,false);
   }finally{f.cleanup();}
 });
