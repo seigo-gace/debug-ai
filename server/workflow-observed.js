@@ -16,10 +16,11 @@ function enforceWorkflowRoleSemantics(workflow){
 }
 function withSearchGateShadow(options,authority){
   if(!options.runtimeEvidence||!options.authority)return options;
+  const repositorySnapshot=typeof options.repositorySnapshot==="function"?options.repositorySnapshot:undefined;
   return{
     ...options,
-    evidenceSearch:createSearchGateShadowAdapter({searchKind:"OFFICIAL_EXTERNAL",adapter:options.evidenceSearch,authority:options.authority,runtimeEvidence:options.runtimeEvidence}),
-    tgserver:createSearchGateShadowAdapter({searchKind:"INTERNAL_KB",adapter:options.tgserver,authority:options.authority,runtimeEvidence:options.runtimeEvidence}),
+    evidenceSearch:createSearchGateShadowAdapter({searchKind:"OFFICIAL_EXTERNAL",adapter:options.evidenceSearch,authority,runtimeEvidence:options.runtimeEvidence,repositorySnapshot}),
+    tgserver:createSearchGateShadowAdapter({searchKind:"INTERNAL_KB",adapter:options.tgserver,authority,runtimeEvidence:options.runtimeEvidence,repositorySnapshot}),
     authority,
   };
 }
