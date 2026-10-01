@@ -71,7 +71,7 @@ test("observed workflow binds generated run before causal runtime observation to
     const workflow=createWorkflow({aiCore,authority,runtimeEvidence,repoPolicy,evidenceSearch:{search:async()=>[]}});
     const out=await workflow.runAnalysis({rawRequest:"correlate runtime trace state",failure:{message:"runtime trace state correlation failure"},localEvidence:[],repo:f.repo});
     const causalCalls=calls.filter(x=>x.role==="causal_scout");assert.equal(causalCalls.length,2);assert.equal(out.tool_audit.causal_scout.total_calls,2);
-    const observation=JSON.parse(causalCalls[1].opts.user.split("RUNTIME_TOOL_OBSERVATIONS_DATA_ONLY=")[1]);const runIds=observation.evidence_window.items.map(item=>JSON.parse(item.excerpt).data?.run_id).filter(Boolean);assert.ok(runIds.length>=2);assert.ok(runIds.every(id=>id===out.run_id));
+    const observation=JSON.parse(causalCalls[1].opts.user.split("RUNTIME_TOOL_OBSERVATIONS_DATA_ONLY=")[1]);const runIds=observation.evidence_window.items.map(item=>JSON.parse(item.excerpt).run_id).filter(Boolean);assert.ok(runIds.length>=2);assert.ok(runIds.every(id=>id===out.run_id));
   }finally{f.cleanup();}
 });
 
