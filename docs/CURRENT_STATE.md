@@ -14,111 +14,100 @@ Live MCP handoff                   = docs/CODEX_MCP_LIVE_HANDOFF.md
 Server/VPS/Docker operations       = current G-ACE-inc/server-core authority
 ```
 
-GitHub source and live Server state are separate facts.
+GitHub source, CI, and live Server state are separate facts.
 
 ## Current repository state
-
-Implementation anchor before this documentation synchronization:
 
 ```text
 repository                  = seigo-gace/debug-ai
 branch                      = feat/pre-server-benchmark-gates-20261001
-implementation anchor       = c2355f8dd7628e717db1bba83725b33360796828
 PR                          = #34
 PR state                    = OPEN / DRAFT / UNMERGED
 base branch                 = feat/search-gate-shadow-audit-cli-20261001
 base SHA                    = cfbe2908bb6190bc5f5c894779c4d0f08f51b80e
+runtime-volume fix anchor   = cd3d43acabdaa4d512ec458b2df1f3735b7a0b5a
 ```
 
-Implementation verification at that anchor:
+Earlier implementation anchor `c2355f8dd7628e717db1bba83725b33360796828` passed Public Readiness #359, Verify #394, 373/373 tests, Core Verify #395, pre-server source audit, exact-nine MCP source/stdio checks, and runtime-image asset regression.
+
+Documentation synchronization anchor `9f072ed30a4e9c671a403ebca63e929fe2f47556` passed Public Readiness #361, Verify #396, and Core Verify #397 before the first Current Server reflection attempt.
+
+## Runtime-image and Server-local input correction
+
+Current runtime-image contract includes `server/`, `orchestrator/`, `bin/`, `mcp/`, `scripts/`, `docs/`, and `package.json`. The Server-local `.debugai-input/` path is excluded from Docker build context and must not be deleted by source reflection.
+
+## First Current Server reflection result
+
+The Server checkout was moved from old `df261bdae3b6f259ac428a173b798fae2fb68bdf` to exact documentation/source anchor `9f072ed30a4e9c671a403ebca63e929fe2f47556`, preserving `.debugai-input/`. Docker build and `docker compose up -d --force-recreate debug-ai sandbox-runner` completed far enough to create the new containers.
+
+Measured result after recreate:
 
 ```text
-Public Readiness Audit #359 = SUCCESS
-Verify #394                = SUCCESS
-Tests                      = 373/373 PASS
-Core Verify #395           = SUCCESS
-pre-server source audit    = source_ready=true
-control-plane audit        = 18/18 IMPLEMENTED / 0 UNRESOLVED
-MCP tools                  = exact 9 guarded tools
-runtime-image asset test   = PASS
-server mutation authority  = false in source audit by design
-production profile promote = false by design
+Server checkout HEAD        = 9f072ed30a4e9c671a403ebca63e929fe2f47556
+Server checkout mode        = detached HEAD
+.debugai-input/              = preserved / untracked
+sandbox-init                 = Exited (0)
+sandbox-runner               = Up
+debug-ai                     = Restarting
+DebugAI restart count        = 19 at readback
+DebugAI exit code            = 1
+DebugAI OOMKilled            = false
+DebugAI health               = unhealthy
+127.0.0.1:8787               = not listening
+/health HTTP code            = 000
 ```
 
-The documentation synchronization commit is intentionally separate from the implementation anchor so README/document edits do not pretend to be new runtime implementation evidence.
-
-## Runtime-image correction closed in source
-
-Read-only Server inspection revealed that the old deployed image could be healthy while lacking Current qualification assets. The current source fixed that packaging gap.
-
-Current runtime-image contract now includes:
+The repeated startup failure was exact and deterministic:
 
 ```text
-server/
-orchestrator/
-bin/
-mcp/
-scripts/
-docs/
-package.json
+Error: RUNTIME_EVIDENCE_DIRECTORY_PERMISSIONS_UNSAFE
+at assertPrivateDirectory (/app/server/runtime-evidence.js)
 ```
 
-The Server-local `.debugai-input/` path is excluded from Docker build context.
-
-Regression tests prove:
+Therefore:
 
 ```text
-runtime image carries live qualification and MCP source assets = PASS
-server-local debug input excluded from Docker build context    = PASS
+CURRENT_SERVER_SOURCE_REFLECTION_9F072ED = EXECUTED
+CURRENT_RUNTIME_HEALTH_9F072ED           = FAIL
+CURRENT_RUNTIME_EXACT_PARITY             = NOT_VERIFIED
+LOCAL_REVIEWER_REAL                      = NOT_EXECUTED
+SKILL_EFFECT_ALL_REAL                    = NOT_EXECUTED
+MODEL_AB_REAL                            = NOT_EXECUTED
 ```
 
-Core Verify #395 also rebuilt the image and passed real-container health plus existing sandbox/DAP/queue/Compose gates.
+Do not relabel the failed Current runtime as live qualification PASS.
 
-## Real Server readback
+## Root cause
 
-Last confirmed read-only state before Current source reflection:
+`RuntimeEvidenceStore` deliberately requires the runtime root to be owned by the effective process user and to have no group/world permission bits. The DebugAI image creates `/app/runtime` as the non-root `node` user, but production Compose mounts the named volume `debug_ai_runtime` over that image directory. Docker volume mount semantics therefore replace the image directory ownership/mode with the volume root metadata.
+
+Before the fix, Compose initialized only `debug_ai_sandbox_jobs`; it did not initialize `debug_ai_runtime`. Existing Core Verify real-container health used `DEBUG_AI_RUNTIME_ROOT=/tmp/debug-ai-runtime`, so it did not exercise the production named-volume boundary. This is why source/image CI could pass while the production-style recreate failed.
+
+## Source-side runtime-volume repair
+
+The runtime-volume repair is implemented on PR #34 after the failed live readback:
+
+- new one-shot `runtime-init` Compose service;
+- root filesystem read-only;
+- network disabled;
+- `no-new-privileges` enabled;
+- capabilities dropped and only `CHOWN`, `FOWNER`, `DAC_OVERRIDE` added for ownership/mode repair;
+- existing `debug_ai_runtime` volume preserved rather than deleted/recreated;
+- volume tree ownership repaired to UID/GID `1000:1000`;
+- group/world access removed;
+- runtime root fixed to mode `0700`;
+- `debug-ai` waits for successful `runtime-init` completion;
+- `composeGate` fails closed if the runtime initialization contract disappears or is weakened;
+- regression tests cover the Compose contract;
+- dedicated `Runtime Volume Gate` CI intentionally seeds a root-owned `0755` named volume, repairs it, mounts it into the DebugAI image, and instantiates/writes through the real `RuntimeEvidenceStore`.
+
+Implementation anchor for this repair:
 
 ```text
-checkout path              = /home/admin1/projects/debug-ai
-checkout branch            = feat/durable-role-continuation-final-20260928
-checkout HEAD              = df261bdae3b6f259ac428a173b798fae2fb68bdf
-worktree untracked         = .debugai-input/
-.debugai-input tracked     = 0 files
-.debugai-input size        = 48K
-host node/npm              = not installed
+cd3d43acabdaa4d512ec458b2df1f3735b7a0b5a
 ```
 
-Host Node/npm absence is not itself a runtime defect because production residency is Docker Compose.
-
-Running containers:
-
-```text
-debug-ai-debug-ai-1        = Up / healthy
-debug-ai-sandbox-runner-1  = Up
-DebugAI container Node     = v24.20.0
-DebugAI workdir            = /app
-DebugAI command            = node server/main.js
-loopback /health           = ok=true / service=debug-ai
-```
-
-Old running image did not contain:
-
-```text
-/app/scripts/live-runtime-readback.cjs
-/app/scripts/pre-server-qualification-audit.cjs
-/app/server/control/model-ab-benchmark.js
-/app/server/control/skill-effect-suite.js
-```
-
-Therefore the correct Current-source verdict remains:
-
-```text
-OLD_RUNTIME_HEALTHY=YES
-CURRENT_SOURCE_DEPLOYED=NO
-LIVE_RUNTIME_SOURCE_STATE=RUNTIME_SOURCE_BEHIND_OR_UNKNOWN
-```
-
-Do not relabel the old Runtime health as Current-source live qualification PASS.
+CI for that anchor must remain separate from live Server recovery until its actual conclusion is observed.
 
 ## Current implementation capabilities
 
@@ -128,29 +117,25 @@ Implemented/verified source boundary includes:
 - role-specific Skill procedures and bounded Tool Runtime;
 - deterministic evidence registry and claim/evidence binding;
 - Evidence Projection / Active Evidence Window;
-- `evidence.read`, `runtime.trace.read`, `state.read`, `history.read`, `invariant.read`, `source.verify`;
 - durable RunAuthority, native writer lock, generation/epoch fencing;
-- durable read-only effect reuse and Researcher A/B/C/D/E continuation;
-- real SIGKILL continuation regression;
-- patch/review packets;
-- exact candidate/approval/revision/application boundaries;
+- durable read-only effect reuse and Researcher continuation;
+- patch/review packets and exact approval/revision/application boundaries;
 - Strict Completion Gate;
 - runtime evidence retention/archive/GC safety;
-- local/official/TGserver/Evidence Search boundaries;
 - guarded CLI/HTTP surface;
 - exact nine-tool MCP stdio adapter;
-- real stdio MCP protocol test;
 - Search Gate provider-preserving shadow instrumentation/audit;
 - Local Reviewer benchmark;
 - six-role Skill ON/OFF suite;
 - one-variable Model A/B harness for `thinking`, `temperature`, `top_p`, `top_k`, `max_tokens`;
 - exact source/runtime live-readback gate;
-- runtime-image qualification/MCP asset packaging.
+- runtime-image qualification/MCP asset packaging;
+- production named-volume initialization contract.
 
 ## Explicitly not complete
 
 ```text
-CURRENT_SERVER_SOURCE_REFLECTION     = NOT_EXECUTED
+RUNTIME_VOLUME_FIX_SERVER_REFLECTION = NOT_EXECUTED
 CURRENT_RUNTIME_EXACT_PARITY         = NOT_VERIFIED
 LOCAL_REVIEWER_REAL                  = NOT_EXECUTED
 SKILL_EFFECT_ALL_REAL                = NOT_EXECUTED
@@ -171,51 +156,26 @@ PRODUCTION_PROFILE_CHANGE            = NONE
 
 ## Master authorization boundary
 
-On 2026-10-01, after requesting README and companion-document synchronization, Master explicitly authorized continuation into the Server source-reflection phase once documentation work is complete.
-
-Authorized next mutation scope:
-
-```text
-Current branch/source reflection into existing DebugAI Server checkout
-Docker build/recreate required to run Current source
-post-change health/source-parity/read-only qualification
-```
-
-Not implied by that authorization:
-
-```text
-PR #34 merge to main
-force reset/destructive cleanup
-removal of .debugai-input/
-Secret changes
-provider-resource changes
-new model downloads
-Search Gate skip activation
-production model/profile promotion
-unrelated project changes
-```
-
-All Server operations remain subject to current `G-ACE-inc/server-core` rules and actual live preconditions.
+Master authorized Current DebugAI Server source reflection/build/recreate after README/document synchronization. That authorization does not include PR/main merge, destructive reset, `.debugai-input/` deletion, Secret/provider changes, new model downloads, Search Gate skip activation, production profile promotion, or unrelated project mutation.
 
 ## Required next-work order
 
 ```text
-1. re-read only the current server-core authority required for authorized mutation
-2. preserve .debugai-input and verify no tracked/local-only source changes are being discarded
-3. reflect exact authorized Current DebugAI source into /home/admin1/projects/debug-ai
-4. build/recreate the required DebugAI Compose services
-5. verify container health, command/workdir, exact source parity, and Current qualification assets
-6. run audit:pre-server-qualification
-7. run audit:live-runtime
-8. run Local Reviewer real measurement
-9. run six-role Skill ON/OFF real suite
-10. run one-variable Model A/B: Thinking where eligible -> Sampling -> token cap
-11. run a bounded real allowed-repository integration case
-12. verify MCP exact nine tools + health + durable start/status/resume-if-applicable/wait/inspect
-13. evaluate real Search Gate shadow without activation
-14. run fresh current-runtime self-development/self-debug case
-15. run final production-equivalent closed-loop E2E
-16. update this document/README/Notion from actual measured results
+1. require source/CI PASS for the runtime-volume repair
+2. preserve .debugai-input and reflect the exact repaired PR HEAD to /home/admin1/projects/debug-ai
+3. rebuild/recreate the required DebugAI Compose services without deleting debug_ai_runtime
+4. prove runtime-init completion, DebugAI health, port 8787 loopback health, exact source parity, and Current image assets
+5. run audit:pre-server-qualification
+6. run audit:live-runtime
+7. run Local Reviewer real measurement
+8. run six-role Skill ON/OFF real suite
+9. run one-variable Model A/B: Thinking where eligible -> Sampling -> token cap
+10. run bounded real allowed-repository integration
+11. verify MCP exact nine tools + durable continuation
+12. evaluate Search Gate real shadow without activation
+13. run fresh current-runtime self-debug
+14. run final production-equivalent closed-loop E2E
+15. update README companion docs and Notion from measured results
 ```
 
 Every unexecuted item stays unexecuted until real evidence exists.
