@@ -116,6 +116,7 @@ async function runRoleWithReadOnlyTools({aiCore,role,system="",user="",toolRunti
   const resume=normalizeContinuationState(continuationState);
   if(resume.rounds_completed>rounds)throw new Error("ROLE_TOOL_CONTINUATION_EXCEEDS_ROUND_BUDGET");
   if(resume.total_calls>calls)throw new Error("ROLE_TOOL_CONTINUATION_EXCEEDS_CALL_BUDGET");
+  const evidenceContext=typeof toolRuntime.createEvidenceContext==="function"?toolRuntime.createEvidenceContext({user,baseEvidenceIds,observations:resume.observations}):null;
   const selected=availableForSelection(role,toolRuntime,user),protocol=toolProtocol(selected.tools),deadlineAt=Date.now()+(budget.tool_loop_wall_ms||budget.turn_timeout_ms),progress=createProgressController({maxNoProgressRounds:1,initialState:resume.progress});
   const baseUser=String(user||"");
   let currentUser=withObservations(baseUser,resume.observations),totalCalls=resume.total_calls;
@@ -146,6 +147,7 @@ async function runRoleWithReadOnlyTools({aiCore,role,system="",user="",toolRunti
       const reuse=await callHook(durableHooks,"reuseToolResult",{role,selectedSkillIds:[...selected.skillIds],tool,arguments:args,fingerprint,round,continuationState:continuationSnapshot({roundsCompleted:round,totalCalls,observations,seenToolCalls,progress,completedWorkIds,completedEffectIds})});
       if(reuse?.reused===true){
         assertToolResultIntegrity(reuse.result);
+        if(evidenceContext&&typeof toolRuntime.addEvidenceToContext==="function")toolRuntime.addEvidenceToContext(evidenceContext,[reuse.result]);
         toolCallsReusedCurrent++;
         seenToolCalls.add(fingerprint);
         if(reuse.completed_work_id)completedWorkIds.add(String(reuse.completed_work_id));
@@ -156,7 +158,7 @@ async function runRoleWithReadOnlyTools({aiCore,role,system="",user="",toolRunti
       if(seenToolCalls.has(fingerprint))throw new Error(`ROLE_TOOL_REPEAT_NO_PROGRESS:${role}:${tool}`);
       seenToolCalls.add(fingerprint);
       let result;const toolStartedAt=Date.now();
-      try{result=await toolRuntime.execute({role,selectedSkillIds:selected.skillIds,tool,arguments:args});assertToolResultIntegrity(result);}
+      try{result=await toolRuntime.execute({role,selectedSkillIds:selected.skillIds,tool,arguments:args,evidenceContext});assertToolResultIntegrity(result);}
       catch(error){result=safeToolError(error);}
       finally{toolWallMs+=Date.now()-toolStartedAt;toolCallsExecutedCurrent++;}
       const persisted=await callHook(durableHooks,"onToolResult",{role,selectedSkillIds:[...selected.skillIds],tool,arguments:args,fingerprint,round,result});
