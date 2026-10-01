@@ -1,5 +1,6 @@
 "use strict";
 const {validateReasoningArtifact}=require("./claim-evidence.js");
+const {currentRoleSemanticMode}=require("./role-semantic-mode.js");
 
 const ROLE_SEMANTIC_RULES=Object.freeze({
   code_scout:Object.freeze({expected_any:Object.freeze(["facts","claims","locations","source_facts"]),forbidden_mutation:true,forbid_confirmed_root:true}),
@@ -69,7 +70,7 @@ function attachSemanticShadow(value,semantic){
   return value;
 }
 function getSemanticShadow(value){return value&&typeof value==="object"?SEMANTIC_SHADOWS.get(value)||null:null;}
-function parseAndValidateRoleOutput(role,content,{availableEvidenceIds=[],strictEvidenceRefs=false,roleSemantics="shadow"}={}){
+function parseAndValidateRoleOutput(role,content,{availableEvidenceIds=[],strictEvidenceRefs=false,roleSemantics=currentRoleSemanticMode()}={}){
   let value;
   try{value=parseJsonContent(content);}catch(error){const e=new Error(`ROLE_OUTPUT_JSON_INVALID:${role}`);e.cause=error;throw e;}
   if(!value||typeof value!=="object"||Array.isArray(value))throw new Error(`ROLE_OUTPUT_OBJECT_REQUIRED:${role}`);
