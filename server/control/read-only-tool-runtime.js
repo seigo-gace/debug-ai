@@ -24,9 +24,19 @@ function assertToolResultIntegrity(result){
 }
 function extraMap(context){let map=EXTRA_EVIDENCE.get(context);if(!map){map=new Map();EXTRA_EVIDENCE.set(context,map);}return map;}
 function filterBaseObservations(observations){return(Array.isArray(observations)?observations:[]).map(observation=>({...observation,results:(observation?.results||[]).filter(item=>!RUN_OBSERVATION_SET.has(String(item?.result?.tool||"")))}));}
+function addRunObservationView(map,raw,allowed){
+  const id=String(raw?.evidence_id||"");if(!id||!RUN_OBSERVATION_SET.has(String(raw?.tool||""))||!Object.prototype.hasOwnProperty.call(raw||{},"data"))return;
+  if(allowed&&!allowed.has(id))return;
+  const rebuilt=makeToolResult(String(raw.tool),raw.data);if(rebuilt.evidence_id!==id)throw new Error(`EVIDENCE_VIEW_ID_MISMATCH:${id}`);
+  const existing=map.get(id);if(existing&&base.stableStringify(existing)!==base.stableStringify(rebuilt))throw new Error(`EVIDENCE_CONTEXT_ID_CONFLICT:${id}`);map.set(id,rebuilt);
+}
 function createEvidenceContext(args={}){
-  const context=base.createEvidenceContext({...args,observations:filterBaseObservations(args.observations)}),map=extraMap(context);
-  for(const observation of Array.isArray(args.observations)?args.observations:[])for(const item of observation?.results||[]){const result=item?.result;if(result?.status==="OK"&&RUN_OBSERVATION_SET.has(result.tool)){assertToolResultIntegrity(result);map.set(result.evidence_id,result);}}
+  const allowed=new Set((Array.isArray(args.baseEvidenceIds)?args.baseEvidenceIds:[]).map(String).filter(Boolean));
+  const promptCandidates=base.evidenceViewCandidates(args.user),basePrompt=promptCandidates.filter(item=>!RUN_OBSERVATION_SET.has(String(item?.tool||"")));
+  const context=base.createEvidenceContext({user:"{}",baseEvidenceIds:args.baseEvidenceIds,observations:filterBaseObservations(args.observations)}),map=extraMap(context);
+  if(basePrompt.length)base.addEvidenceToContext(context,basePrompt,{allowedEvidenceIds:[...allowed]});
+  for(const raw of promptCandidates)addRunObservationView(map,raw,allowed);
+  for(const observation of Array.isArray(args.observations)?args.observations:[])for(const item of observation?.results||[]){const result=item?.result;if(result?.status==="OK"&&RUN_OBSERVATION_SET.has(result.tool)){assertToolResultIntegrity(result);const existing=map.get(result.evidence_id);if(existing&&base.stableStringify(existing)!==base.stableStringify(result))throw new Error(`EVIDENCE_CONTEXT_ID_CONFLICT:${result.evidence_id}`);map.set(result.evidence_id,result);}}
   return context;
 }
 function addEvidenceToContext(context,records,{allowedEvidenceIds=null}={}){
