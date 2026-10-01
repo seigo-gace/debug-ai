@@ -13,6 +13,13 @@ const patchEngineer=require("./patch-engineer-skill-effect-benchmark.js");
 
 const SCHEMA="debugai.model-ab-benchmark/v1";
 const AXES=Object.freeze(["thinking","temperature","max_tokens"]);
+const SAMPLING_SCOPE=Object.freeze({
+  authority:"CURRENT_DEBUGAI_AI_CORE_REQUEST_CONTRACT",
+  temperature:"SUPPORTED",
+  top_p:"NOT_SUPPORTED_BY_CURRENT_DEBUGAI_ADAPTER_CONTRACT",
+  top_k:"NOT_SUPPORTED_BY_CURRENT_DEBUGAI_ADAPTER_CONTRACT",
+  complete_sampling_sweep:false,
+});
 const ROLE_ORDER=Object.freeze(["code_scout","causal_scout","researcher","diagnoser","patch_engineer","local_reviewer"]);
 const MODULES=Object.freeze({
   code_scout:codeScout,
@@ -49,9 +56,11 @@ function candidateValue(axis,raw){
   if(axis==="max_tokens"){
     const value=Number(raw);if(!Number.isInteger(value)||value<64||value>8192)throw new Error("MODEL_AB_MAX_TOKENS_CANDIDATE_INVALID");return value;
   }
+  if(axis==="top_p"||axis==="top_k")throw new Error(`MODEL_AB_AXIS_UNSUPPORTED_BY_CURRENT_AI_CORE_CONTRACT:${axis}`);
   throw new Error(`MODEL_AB_AXIS_INVALID:${axis}`);
 }
 function buildVariant(role,axis,rawCandidate){
+  if(axis==="top_p"||axis==="top_k")throw new Error(`MODEL_AB_AXIS_UNSUPPORTED_BY_CURRENT_AI_CORE_CONTRACT:${axis}`);
   if(!AXES.includes(axis))throw new Error(`MODEL_AB_AXIS_INVALID:${axis}`);
   const baseline=baselineConfig(role);
   if(axis==="thinking"&&typeof baseline.thinking!=="boolean")throw new Error(`MODEL_AB_AXIS_UNSUPPORTED:${role}:thinking`);
@@ -93,7 +102,7 @@ function makeAiCoreCaller({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=process.
       const text=await response.text();if(!response.ok)throw new Error(`AI_CORE_HTTP_${response.status}:${String(text).slice(0,300)}`);
       const envelope=JSON.parse(text),content=envelope?.choices?.[0]?.message?.content;if(typeof content!=="string"||!content.trim())throw new Error("AI_CORE_EMPTY");
       const usage=envelope?.usage||{};
-      return{content,finish_reason:envelope?.choices?.[0]?.finish_reason??null,usage:{prompt_tokens:Number.isFinite(usage.prompt_tokens)?usage.prompt_tokens:null,completion_tokens:Number.isFinite(usage.completion_tokens)?usage.completion_tokens:null,total_tokens:Number.isFinite(usage.total_tokens)?usage.total_tokens:null}};
+      return{content,finish_reason:envelope?.choices?.[0]?.message?.finish_reason??envelope?.choices?.[0]?.finish_reason??null,usage:{prompt_tokens:Number.isFinite(usage.prompt_tokens)?usage.prompt_tokens:null,completion_tokens:Number.isFinite(usage.completion_tokens)?usage.completion_tokens:null,total_tokens:Number.isFinite(usage.total_tokens)?usage.total_tokens:null}};
     }finally{clearTimeout(timer);}
   };
 }
@@ -121,6 +130,7 @@ async function runModelAbBenchmark({role,axis,candidate,repeats=1,callModel=null
   return Object.freeze({
     schema:SCHEMA,authority:"MEASUREMENT_ONLY",completed:true,promotion_authorized:false,
     role,axis,repeats,baseline:variant.baseline,candidate:variant.candidate,
+    sampling_scope:SAMPLING_SCOPE,
     invariant:Object.freeze({same_model:true,same_cases:true,same_input:true,same_system:true,exactly_one_axis_changed:true}),
     quality:Object.freeze({baseline:totals.baseline,candidate:totals.candidate,max:totals.max,delta:totals.candidate-totals.baseline,assessment}),
     telemetry:Object.freeze({baseline:publicTelemetry(telemetry.baseline),candidate:publicTelemetry(telemetry.candidate)}),
@@ -135,8 +145,8 @@ async function cli(){
     const repeats=args.repeats===undefined?1:Number(args.repeats);
     process.stdout.write(`${JSON.stringify(await runModelAbBenchmark({role:String(args.role),axis:String(args.axis),candidate:args.candidate,repeats}),null,2)}\n`);
   }catch(error){
-    process.stdout.write(`${JSON.stringify({schema:SCHEMA,authority:"MEASUREMENT_ONLY",completed:false,promotion_authorized:false,error_code:String(error?.code||error?.message||error).split(":")[0],error:String(error?.message||error).slice(0,500)},null,2)}\n`);process.exitCode=1;
+    process.stdout.write(`${JSON.stringify({schema:SCHEMA,authority:"MEASUREMENT_ONLY",completed:false,promotion_authorized:false,sampling_scope:SAMPLING_SCOPE,error_code:String(error?.code||error?.message||error).split(":")[0],error:String(error?.message||error).slice(0,500)},null,2)}\n`);process.exitCode=1;
   }
 }
 if(require.main===module)void cli();
-module.exports={SCHEMA,AXES,ROLE_ORDER,MODULES,parseArgs,baselineConfig,candidateValue,buildVariant,assertSingleAxisDifference,moduleForRole,systemsFor,benchmarkCases,benchmarkUser,telemetryAccumulator,addTelemetry,publicTelemetry,makeAiCoreCaller,assessScores,runModelAbBenchmark};
+module.exports={SCHEMA,AXES,SAMPLING_SCOPE,ROLE_ORDER,MODULES,parseArgs,baselineConfig,candidateValue,buildVariant,assertSingleAxisDifference,moduleForRole,systemsFor,benchmarkCases,benchmarkUser,telemetryAccumulator,addTelemetry,publicTelemetry,makeAiCoreCaller,assessScores,runModelAbBenchmark};
