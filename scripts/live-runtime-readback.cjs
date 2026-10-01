@@ -8,6 +8,8 @@ const {spawnSync}=require("child_process");
 
 const MAX_CAPTURE_BYTES=64*1024;
 const DEFAULT_TIMEOUT_MS=4000;
+const SHADOW_AUDIT_TIMEOUT_MS=8000;
+const SHADOW_AUDIT_MAX_MANAGED_RECORDS=10000;
 const EXPECTED_REPOSITORY_IDENTITY="github.com/seigo-gace/debug-ai";
 const SOURCE_REQUIREMENTS=Object.freeze([
   "server/control/search-gate-candidate-policy.js",
@@ -185,27 +187,53 @@ function healthOk(value){return value?.reachable===true&&Number.isInteger(value.
 function checkoutProven(git,source){
   return git?.repository_detected===true&&git?.repository_identity_match===true&&git?.tracked_worktree_state==="CLEAN"&&git?.index_state==="CLEAN"&&Object.values(git?.required_source_tracked||{}).length===SOURCE_REQUIREMENTS.length&&Object.values(git.required_source_tracked).every(Boolean)&&source?.search_shadow_source_compatible===true;
 }
+function shadowAuditReadback(docker,containerSource,runner=runReadOnly){
+  if(!docker?.available||docker?.container_count!==1||containerSource?.compatible!==true){
+    return Object.freeze({executed:false,ok:false,result:null,error_code:"MEASUREMENT_PRECONDITION_NOT_MET"});
+  }
+  const id=docker.containers[0].id;
+  const result=runner("docker",[
+    "exec",id,"node","/app/scripts/search-gate-shadow-audit.cjs",
+    "--runtime-root","/app/runtime",
+    "--max-managed-records",String(SHADOW_AUDIT_MAX_MANAGED_RECORDS),
+  ],{timeout:SHADOW_AUDIT_TIMEOUT_MS});
+  if(!result.ok)return Object.freeze({executed:true,ok:false,result:null,error_code:result.error_code||`EXIT_${result.status}`});
+  try{
+    const parsed=JSON.parse(result.stdout.trim());
+    const safe=parsed?.schema==="debugai.search-gate-shadow-store-audit/v1"&&parsed?.read_only===true&&parsed?.activation_authorized===false&&parsed?.activation_decision==="NOT_AUTHORIZED_BY_SHADOW_AUDIT";
+    if(!safe)return Object.freeze({executed:true,ok:false,result:null,error_code:"SHADOW_AUDIT_RESULT_INVALID"});
+    return Object.freeze({executed:true,ok:true,result:parsed,error_code:null});
+  }catch{
+    return Object.freeze({executed:true,ok:false,result:null,error_code:"SHADOW_AUDIT_OUTPUT_INVALID"});
+  }
+}
 async function collectReadback({cwd=process.cwd(),runner=runReadOnly,health=healthReadback}={}){
   const git=gitReadback(cwd,runner);
   const root=git.repository_detected?git.root:cwd;
   const source=sourceReadback(root);
+  const checkoutSourceProven=checkoutProven(git,source);
   const docker=dockerReadback(runner);
   const containerSource=containerSourceReadback(docker,runner);
   const healthResult=await health();
   const runtimeSourceState=containerSource.compatible?"RUNNING_CONTAINER_SOURCE_COMPATIBLE":"RUNTIME_SOURCE_BEHIND_OR_UNKNOWN";
-  const measurementAuthorized=checkoutProven(git,source)&&containerSource.compatible&&healthOk(healthResult);
+  const measurementAuthorized=checkoutSourceProven&&containerSource.compatible&&healthOk(healthResult);
+  const shadowAudit=measurementAuthorized?shadowAuditReadback(docker,containerSource,runner):Object.freeze({executed:false,ok:false,result:null,error_code:"MEASUREMENT_NOT_AUTHORIZED"});
   return Object.freeze({
-    schema:"debugai.live-runtime-readback/v1",
+    schema:"debugai.live-runtime-readback/v2",
     read_only:true,
     mutation_attempted:false,
     git,
     checkout_source:source,
-    checkout_source_proven:checkoutProven(git,source),
+    checkout_source_proven:checkoutSourceProven,
     docker,
     running_container_source:containerSource,
     health:healthResult,
     runtime_source_state:runtimeSourceState,
     search_shadow_measurement_authorized:measurementAuthorized,
+    search_shadow_measurement_executed:shadowAudit.executed,
+    search_shadow_measurement_pass:shadowAudit.ok,
+    shadow_audit:shadowAudit.result,
+    shadow_audit_error_code:shadowAudit.error_code,
     search_skip_activation_authorized:false,
   });
 }
@@ -223,4 +251,4 @@ if(require.main===module){
   });
 }
 
-module.exports={MAX_CAPTURE_BYTES,DEFAULT_TIMEOUT_MS,EXPECTED_REPOSITORY_IDENTITY,SOURCE_REQUIREMENTS,CONTAINER_SOURCE_REQUIREMENTS,bounded,boundedRaw,sanitizeRemote,repositoryIdentity,runReadOnly,quietState,gitReadback,policyVersion,sourceReadback,dockerReadback,containerSourceReadback,healthReadback,healthOk,checkoutProven,collectReadback};
+module.exports={MAX_CAPTURE_BYTES,DEFAULT_TIMEOUT_MS,SHADOW_AUDIT_TIMEOUT_MS,SHADOW_AUDIT_MAX_MANAGED_RECORDS,EXPECTED_REPOSITORY_IDENTITY,SOURCE_REQUIREMENTS,CONTAINER_SOURCE_REQUIREMENTS,bounded,boundedRaw,sanitizeRemote,repositoryIdentity,runReadOnly,quietState,gitReadback,policyVersion,sourceReadback,dockerReadback,containerSourceReadback,healthReadback,healthOk,checkoutProven,shadowAuditReadback,collectReadback};
