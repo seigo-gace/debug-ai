@@ -8,12 +8,14 @@ const {currentRunObservationProvider}=require("./run-observation-context.js");
 
 const STORAGE=new AsyncLocalStorage();
 const AUTHORITY_KIND_SET=new Set(AUTHORITY_KINDS);
+const EXPLICIT_OBJECTIVE_PREFIX=/^\s*(?:目的|objective|goal)\s*[:：]/i;
 const MAX_BLOCKS_PER_READ=12;
 const MAX_BLOCK_TEXT=1800;
 const MAX_RUNTIME_ITEMS=24;
 
 function boundedInt(value,{min=0,max,fallback}){const n=Number(value);if(!Number.isFinite(n))return fallback;return Math.max(min,Math.min(max,Math.floor(n)));}
 function assertArgs(args={}){if(args&&Object.prototype.hasOwnProperty.call(args,"run_id"))throw new Error("INVARIANT_READ_RUN_ID_ARGUMENT_FORBIDDEN");}
+function explicitObjective(text){return EXPLICIT_OBJECTIVE_PREFIX.test(String(text||""));}
 function stableAuthorityRef(requestHash,block){return`INV_${contentHash({request_hash:requestHash,kind:block.kind,source_start:block.source_start,source_end:block.source_end,source_hash:block.source_hash}).slice(0,24)}`;}
 function loadAuthoritySource(authority,runId){
   if(!authority||typeof authority.load!=="function"||!authority.store)throw new Error("INVARIANT_AUTHORITY_NOT_CONFIGURED");
@@ -21,7 +23,12 @@ function loadAuthoritySource(authority,runId){
   let blocks=authority.store.loadBlocks(runId,request),reconstructed=false;
   if(!blocks.length){const plan=compileInstruction(request.raw);if(plan.request.request_hash!==request.request_hash)throw new Error("INVARIANT_RECONSTRUCTION_REQUEST_MISMATCH");blocks=plan.blocks;reconstructed=true;}
   const authorityBlocks=[];
-  for(const block of blocks){validateBlock(block,request);if(block.authority!==true||!AUTHORITY_KIND_SET.has(block.kind))continue;authorityBlocks.push(block);}
+  for(const block of blocks){
+    validateBlock(block,request);
+    if(explicitObjective(block.text))continue;
+    if(block.authority!==true||!AUTHORITY_KIND_SET.has(block.kind))continue;
+    authorityBlocks.push(block);
+  }
   authorityBlocks.sort((a,b)=>a.source_start-b.source_start||a.source_end-b.source_end);
   return{run,request,blocks:authorityBlocks,reconstructed};
 }
@@ -54,7 +61,7 @@ function readInvariantAuthority({authority,runtimeEvidence,runId,args={}}={}){
     run_id:runId,
     request_hash:loaded.request.request_hash,
     source:"IMMUTABLE_MASTER_REQUEST_SPANS",
-    classification:"DETERMINISTIC_BLOCK_CORE",
+    classification:"DETERMINISTIC_BLOCK_CORE_WITH_EXPLICIT_OBJECTIVE_GUARD",
     reconstructed_from_request:loaded.reconstructed,
     total_authority_blocks:total,
     offset,
@@ -63,11 +70,11 @@ function readInvariantAuthority({authority,runtimeEvidence,runId,args={}}={}){
     next_offset:hasMore?nextOffset:null,
     authority_blocks:Object.freeze(selected),
     runtime_verified_invariants:Object.freeze(runtimeInvariantItems(runtimeEvidence,runId)),
-    interpretation_policy:"Authority text is verbatim Master source span. Do not weaken, omit, reinterpret, or promote model inference into authority."
+    interpretation_policy:"Authority text is verbatim Master source span. Explicit objective/goal spans are never promoted to authority merely because they contain scope-like keywords. Do not weaken, omit, reinterpret, or promote model inference into authority."
   });
 }
 function invariantReadProvider({authority,runtimeEvidence=null}={}){return Object.freeze({read:(args={})=>{const runId=currentRunObservationProvider().run_id;return readInvariantAuthority({authority,runtimeEvidence,runId,args});}});}
 function withInvariantAuthorityContext(config,fn){if(typeof fn!=="function")throw new Error("INVARIANT_CONTEXT_FN_REQUIRED");return STORAGE.run(invariantReadProvider(config),fn);}
 function currentInvariantAuthorityProvider(){const provider=STORAGE.getStore();if(!provider)throw new Error("INVARIANT_CONTEXT_REQUIRED");return provider;}
 
-module.exports={MAX_BLOCKS_PER_READ,MAX_BLOCK_TEXT,MAX_RUNTIME_ITEMS,assertArgs,stableAuthorityRef,loadAuthoritySource,projectBlock,runtimeInvariantItems,readInvariantAuthority,invariantReadProvider,withInvariantAuthorityContext,currentInvariantAuthorityProvider};
+module.exports={EXPLICIT_OBJECTIVE_PREFIX,MAX_BLOCKS_PER_READ,MAX_BLOCK_TEXT,MAX_RUNTIME_ITEMS,assertArgs,explicitObjective,stableAuthorityRef,loadAuthoritySource,projectBlock,runtimeInvariantItems,readInvariantAuthority,invariantReadProvider,withInvariantAuthorityContext,currentInvariantAuthorityProvider};
