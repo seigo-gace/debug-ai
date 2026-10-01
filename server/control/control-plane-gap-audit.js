@@ -6,6 +6,7 @@ const {ROLE_CONTRACTS}=require("./role-contracts.js");
 const {AVAILABLE_TOOLS}=require("./read-only-tool-runtime.js");
 const {makeReviewPacket}=require("./runtime-packets.js");
 const {preparePatchCandidate}=require("../../orchestrator/patch-core.js");
+const {makeVerificationPlan,bindCandidatePlans,assertBoundCandidatePlans}=require("../../orchestrator/patch-plan-core.js");
 
 const SCHEMA="debugai.control-plane-gap-audit/v2";
 const CAPABILITY_TYPE=Object.freeze({MODEL_TOOL:"MODEL_TOOL",RUNTIME_PACKET:"RUNTIME_PACKET",DETERMINISTIC_CORE:"DETERMINISTIC_CORE"});
@@ -39,8 +40,22 @@ function reviewPacketProbe(){
     });
   }catch{return null;}
 }
+function patchPlanProbe(){
+  try{
+    const verificationPlan=makeVerificationPlan({testInventory:[{name:"test",configured:true,command:"node --test"}]});
+    const candidate=bindCandidatePlans({
+      candidate_hash:"a".repeat(64),
+      files:["audit.js"],
+      preconditions:[{path:"audit.js",exists:true,sha256:"b".repeat(64)}]
+    },{verificationPlan});
+    assertBoundCandidatePlans(candidate);
+    return candidate;
+  }catch{return null;}
+}
 function nonRuntimeCapabilityImplemented(requirement){
   if(requirement==="diff.plan")return typeof preparePatchCandidate==="function";
+  if(requirement==="test.plan")return patchPlanProbe()?.verification_plan?.schema==="debugai.verification-plan/v1";
+  if(requirement==="rollback.plan")return patchPlanProbe()?.rollback_plan?.schema==="debugai.rollback-plan/v1";
   if(requirement==="diff.read"){
     const packet=reviewPacketProbe();
     return packet?.schema==="debugai.review-packet/v1"&&typeof packet.payload?.diff==="string"&&packet.payload.diff.length>0;
