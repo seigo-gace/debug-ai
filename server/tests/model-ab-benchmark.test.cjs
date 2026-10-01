@@ -2,7 +2,7 @@
 
 const test=require("node:test");
 const assert=require("node:assert/strict");
-const {SAMPLING_SCOPE,baselineConfig,buildVariant,assertSingleAxisDifference,runModelAbBenchmark}=require("../control/model-ab-benchmark.js");
+const {SAMPLING_SCOPE,baselineConfig,buildVariant,assertSingleAxisDifference,executionOrder,validateScored,runModelAbBenchmark}=require("../control/model-ab-benchmark.js");
 
 function perfectLocal(testCase){
   const expected=testCase.expected;
@@ -14,12 +14,15 @@ function perfectLocal(testCase){
   };
 }
 function badLocal(){return{benchmark_verdict:"SUPPORTED",evidence_refs:[],unsupported_claims:[],false_completions:[]};}
-function fakeCaller({candidateBad=false}={}){
-  return async({mode,testCase})=>({
-    content:JSON.stringify(candidateBad&&mode==="candidate"?badLocal():perfectLocal(testCase)),
-    finish_reason:"stop",
-    usage:{prompt_tokens:10,completion_tokens:5,total_tokens:15},
-  });
+function fakeCaller({candidateBad=false,seen=null}={}){
+  return async({mode,testCase})=>{
+    if(Array.isArray(seen))seen.push(`${testCase.id}:${mode}`);
+    return{
+      content:JSON.stringify(candidateBad&&mode==="candidate"?badLocal():perfectLocal(testCase)),
+      finish_reason:"stop",
+      usage:{prompt_tokens:10,completion_tokens:5,total_tokens:15},
+    };
+  };
 }
 
 test("model AB requires exactly one explicit changed axis and never changes model implicitly",()=>{
@@ -48,20 +51,42 @@ test("sampling scope is explicit: temperature supported, top_p/top_k not claimed
   assert.throws(()=>buildVariant("diagnoser","top_k","20"),/UNSUPPORTED_BY_CURRENT_AI_CORE_CONTRACT:top_k/);
 });
 
-test("same-model same-input temperature AB reports measurement only and never authorizes promotion",async()=>{
-  const result=await runModelAbBenchmark({role:"local_reviewer",axis:"temperature",candidate:"0.2",repeats:2,callModel:fakeCaller()});
+test("execution order is deterministically counterbalanced across cases and repeats",()=>{
+  assert.deepEqual(executionOrder(1,0),["baseline","candidate"]);
+  assert.deepEqual(executionOrder(1,1),["candidate","baseline"]);
+  assert.deepEqual(executionOrder(2,0),["candidate","baseline"]);
+  assert.deepEqual(executionOrder(2,1),["baseline","candidate"]);
+  assert.throws(()=>executionOrder(0,0),/ORDER_INPUT_INVALID/);
+});
+
+test("score validation derives the ceiling from scorer output and rejects impossible scores",()=>{
+  assert.deepEqual(validateScored("x","case","baseline",{score:6,max_score:7}),{score:6,max_score:7});
+  assert.throws(()=>validateScored("x","case","baseline",{score:8,max_score:7}),/SCORE_INVALID/);
+  assert.throws(()=>validateScored("x","case","baseline",{score:1,max_score:0}),/SCORE_INVALID/);
+});
+
+test("same-model same-input temperature AB counterbalances execution and never authorizes promotion",async()=>{
+  const seen=[];
+  const result=await runModelAbBenchmark({role:"local_reviewer",axis:"temperature",candidate:"0.2",repeats:2,callModel:fakeCaller({seen})});
   assert.equal(result.completed,true);
   assert.equal(result.promotion_authorized,false);
   assert.equal(result.sampling_scope.temperature,"SUPPORTED");
   assert.equal(result.sampling_scope.complete_sampling_sweep,false);
-  assert.deepEqual(result.invariant,{same_model:true,same_cases:true,same_input:true,same_system:true,exactly_one_axis_changed:true});
+  assert.deepEqual(result.invariant,{same_model:true,same_cases:true,same_input:true,same_system:true,exactly_one_axis_changed:true,counterbalanced_execution_order:true,dynamic_score_ceiling:true});
+  assert.equal(result.execution_balance.baseline_first,3);
+  assert.equal(result.execution_balance.candidate_first,3);
+  assert.equal(result.execution_balance.difference,0);
+  assert.deepEqual(result.cases[0].execution_order,["baseline","candidate"]);
+  assert.deepEqual(result.cases[1].execution_order,["candidate","baseline"]);
   assert.equal(result.quality.baseline,result.quality.max);
   assert.equal(result.quality.candidate,result.quality.max);
+  assert.equal(result.quality.max,result.cases.reduce((sum,item)=>sum+item.baseline.max_score,0));
   assert.equal(result.quality.assessment,"NO_QUALITY_GAIN");
   assert.equal(result.telemetry.baseline.calls,6);
   assert.equal(result.telemetry.candidate.calls,6);
   assert.equal(result.telemetry.baseline.total_tokens,90);
   assert.equal(result.telemetry.candidate.total_tokens,90);
+  assert.equal(seen.length,12);
   assert.match(result.qualification,/REQUIRES_REVIEW_AND_REPEAT/);
 });
 
