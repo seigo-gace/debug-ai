@@ -3,6 +3,7 @@
 const {COMMON,getRoleContract}=require("./role-contracts.js");
 const {getRoleSkills}=require("./skill-registry.js");
 const {compileProductionSkillProcedure}=require("./production-skill-procedures.js");
+const {currentRejectedHistoryProvider}=require("./rejected-history-provider.js");
 
 const KEYWORDS=Object.freeze({
   "source-runtime-correlation":["runtime","trace","state","chronology","mismatch"],
@@ -32,12 +33,24 @@ function activeRoleSkills(role){
 function assertMaxSkills(maxSkills){
   if(!Number.isInteger(maxSkills)||maxSkills<1||maxSkills>8) throw new Error("INVOCATION_MAX_SKILLS_INVALID");
 }
+function rejectedHistoryAvailable(role){
+  if(role!=="diagnoser")return false;
+  try{return currentRejectedHistoryProvider().read({},[]).count>0;}catch{return false;}
+}
+function ensureRejectedHistorySkill(role,selected,ranked,maxSkills){
+  if(role!=="diagnoser"||maxSkills<1||!rejectedHistoryAvailable(role))return selected;
+  const rejected=ranked.find(skill=>skill.id==="rejected-hypothesis-avoidance");
+  if(!rejected||selected.some(skill=>skill.id===rejected.id))return selected;
+  const out=[...selected],crossIndex=out.findIndex(skill=>skill.id==="cross-refutation"),replaceIndex=crossIndex>=0?crossIndex:out.length-1;
+  if(replaceIndex<0)return[rejected];out[replaceIndex]=rejected;return out;
+}
 
 function selectSkills(role,{task="",maxSkills=3}={}){
   assertMaxSkills(maxSkills);
   const contract=getRoleContract(role);
   const candidates=activeRoleSkills(role);
-  return candidates.sort((a,b)=>scoreSkill(b,task,contract.skill_ids)-scoreSkill(a,task,contract.skill_ids)||a.id.localeCompare(b.id)).slice(0,maxSkills);
+  const ranked=candidates.sort((a,b)=>scoreSkill(b,task,contract.skill_ids)-scoreSkill(a,task,contract.skill_ids)||a.id.localeCompare(b.id));
+  return ensureRejectedHistorySkill(role,ranked.slice(0,maxSkills),ranked,maxSkills);
 }
 
 function resolveSkills(role,{task="",maxSkills=3,selectedSkillIds=null}={}){
@@ -102,4 +115,4 @@ function assertInvocationCompiler(){
   return true;
 }
 
-module.exports={KEYWORDS,selectSkills,resolveSkills,compileInvocation,assertInvocationCompiler};
+module.exports={KEYWORDS,rejectedHistoryAvailable,ensureRejectedHistorySkill,selectSkills,resolveSkills,compileInvocation,assertInvocationCompiler};
