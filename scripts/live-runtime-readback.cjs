@@ -18,6 +18,10 @@ function bounded(value,limit=512){
   const text=String(value??"").replace(/[\r\n]+/g," ").trim();
   return text.length<=limit?text:`${text.slice(0,limit)}…`;
 }
+function boundedRaw(value,limit=4096){
+  const text=String(value??"");
+  return text.length<=limit?text:text.slice(0,limit);
+}
 function sanitizeRemote(value){
   return bounded(value).replace(/(https?:\/\/)[^/@\s]+@/i,"$1***@");
 }
@@ -27,13 +31,13 @@ function runReadOnly(command,args,{cwd=process.cwd(),timeout=DEFAULT_TIMEOUT_MS}
     ok:out.status===0&&!out.error,
     status:Number.isInteger(out.status)?out.status:null,
     signal:out.signal||null,
-    stdout:bounded(out.stdout,4096),
+    stdout:boundedRaw(out.stdout),
     error_code:out.error?.code||null,
   });
 }
 function gitReadback(cwd,runner=runReadOnly){
   const rootResult=runner("git",["rev-parse","--show-toplevel"],{cwd});
-  const root=rootResult.ok?rootResult.stdout:"";
+  const root=rootResult.ok?bounded(rootResult.stdout,1024):"";
   const base=root||cwd;
   const origin=runner("git",["config","--get","remote.origin.url"],{cwd:base});
   const branch=runner("git",["branch","--show-current"],{cwd:base});
@@ -42,7 +46,7 @@ function gitReadback(cwd,runner=runReadOnly){
   const index=runner("git",["diff","--cached","--quiet","--no-ext-diff","--"],{cwd:base});
   return Object.freeze({
     repository_detected:Boolean(rootResult.ok&&root),
-    root:rootResult.ok?bounded(root,1024):null,
+    root:rootResult.ok?root:null,
     origin:origin.ok?sanitizeRemote(origin.stdout):null,
     branch:branch.ok?bounded(branch.stdout,256):null,
     head:head.ok?bounded(head.stdout,64):null,
@@ -79,7 +83,7 @@ function dockerReadback(runner=runReadOnly){
     "--format","{{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Status}}",
   ],{});
   if(!result.ok)return Object.freeze({available:false,container_count:null,containers:[],error_code:result.error_code||`EXIT_${result.status}`});
-  const containers=result.stdout.split(/\n/).map(x=>x.trim()).filter(Boolean).slice(0,8).map(line=>{
+  const containers=result.stdout.split(/\r?\n/).map(x=>x.trim()).filter(Boolean).slice(0,8).map(line=>{
     const [id,name,image,...status]=line.split("\t");
     return Object.freeze({id:bounded(id,64),name:bounded(name,128),image:bounded(image,256),status:bounded(status.join(" "),256)});
   });
@@ -131,4 +135,4 @@ if(require.main===module){
   });
 }
 
-module.exports={MAX_CAPTURE_BYTES,DEFAULT_TIMEOUT_MS,SOURCE_REQUIREMENTS,bounded,sanitizeRemote,runReadOnly,gitReadback,sourceReadback,dockerReadback,healthReadback,collectReadback};
+module.exports={MAX_CAPTURE_BYTES,DEFAULT_TIMEOUT_MS,SOURCE_REQUIREMENTS,bounded,boundedRaw,sanitizeRemote,runReadOnly,gitReadback,sourceReadback,dockerReadback,healthReadback,collectReadback};
