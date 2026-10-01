@@ -25,6 +25,8 @@
     "benchmark:patch-engineer-skill-effect":"node server/control/patch-engineer-skill-effect-benchmark.js",
     "audit:control-plane-gaps":"node server/control/control-plane-gap-audit.js",
     "audit:docker-storage":"node scripts/docker-storage-audit.cjs",
+    "audit:search-gate-shadow":"node scripts/search-gate-shadow-audit.cjs",
+    "audit:live-runtime":"node scripts/live-runtime-readback.cjs",
     "start":"node server/main.js"
   }
 }
