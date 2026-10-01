@@ -62,7 +62,11 @@
 - First prove live source/runtime compatibility read-only. If it is behind or byte-incompatible, report `RUNTIME_SOURCE_BEHIND_OR_UNKNOWN` and stop; do not sync/deploy/restart without explicit Master approval.
 - Only on a compatible live runtime, follow `docs/PRE_SERVER_QUALIFICATION.md` for real Local Reviewer, six-role Skill ON/OFF, one-variable Model A/B, real integration E2E, MCP, and Search Gate shadow measurements.
 - Skill ON is not assumed to win. Skill OFF wins and ties must be reported exactly as measured.
-- Model A/B changes exactly one axis per comparison. Do not change the model, prompt/case/input, thinking, temperature, and token cap together.
+- Model A/B changes exactly one axis per comparison. Current source axes are `thinking`, `temperature`, `top_p`, `top_k`, and `max_tokens`.
+- Model A/B keeps the backend model, fixed case, input, and Skill-ON system constant; baseline/candidate execution order must be counterbalanced.
+- Baseline `top_p` and `top_k` remain unspecified. A benchmark candidate may send one explicitly without changing production defaults.
+- `--candidate official` is allowed only where the repository records an official first candidate. Missing official candidates must fail closed rather than being invented.
+- A role with `thinking=null` is not eligible for a fabricated Thinking A/B.
 - Model A/B measurement never authorizes a production profile change. A measured improvement remains `promotion_authorized=false` until a separate reviewed decision.
 - Provider token counts remain `null` when the provider does not return them. Do not relabel estimates as measurements.
 
