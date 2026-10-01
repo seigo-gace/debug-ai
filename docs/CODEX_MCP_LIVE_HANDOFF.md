@@ -20,15 +20,9 @@ server-core/README.md
 -> DebugAI project authority
 ```
 
-At this handoff update, server-core `main` was read back at:
+A previously recorded server-core SHA is evidence for that point in time only. Re-read current server-core at execution time.
 
-```text
-081b61d38965267f8d2d43e224720e136e852340
-```
-
-That SHA is a recorded authority point, not a future-current assumption. Re-read current server-core at execution time.
-
-The applicable shared rules include:
+Applicable shared rules include:
 
 - GitHub source revision and live Server runtime are separate states;
 - current runtime values must be read back, not inferred from old reports/registry metadata;
@@ -122,20 +116,7 @@ If Codex is running locally on Windows instead, do not invent an SSH alias or re
 
 ## Required preflight — read only
 
-From `/home/admin1/projects/debug-ai`, read and report only:
-
-```text
-pwd
-git remote get-url origin
-git branch --show-current
-git rev-parse HEAD
-git diff --quiet --no-ext-diff -- <tracked-only state>
-git diff --cached --quiet --no-ext-diff -- <index state>
-docker ps filtered to the Compose debug-ai service
-curl loopback /health
-```
-
-Prefer the repository-provided gates when the live checkout already contains them:
+From `/home/admin1/projects/debug-ai`, read and report only the actual checkout/runtime state. Prefer repository gates when available:
 
 ```bash
 npm run audit:pre-server-qualification
@@ -164,9 +145,7 @@ Do not replace this with a unit-test result.
 npm run benchmark:skill-effect-all
 ```
 
-Report the measured result exactly. `SKILL_OFF` or `TIE` is valid evidence and must not be rewritten as a Skill-ON PASS.
-
-The suite must cover all six roles. If any role is missing or fails to measure, report `INCOMPLETE`.
+Report the measured result exactly. `SKILL_OFF` or `TIE` is valid evidence and must not be rewritten as a Skill-ON PASS. All six roles must measure or the suite is `INCOMPLETE`.
 
 ### Model A/B
 
@@ -175,29 +154,43 @@ Use `docs/PRE_SERVER_QUALIFICATION.md` and change one axis at a time:
 ```bash
 npm run benchmark:model-ab -- \
   --role <role> \
-  --axis <thinking|temperature|max_tokens> \
-  --candidate <explicit-value> \
+  --axis <thinking|temperature|top_p|top_k|max_tokens> \
+  --candidate <explicit-value|official> \
   --repeats <1..5>
 ```
 
-The harness keeps the backend model, fixed benchmark case, input, and Skill-ON system constant inside each pair.
+The harness keeps the backend model, fixed benchmark case, input, and Skill-ON system constant inside each pair. It counterbalances baseline/candidate execution order and derives the score ceiling from the active role scorer.
 
-For `temperature`, do not invent candidate values. Use the first official candidate fixed in `docs/PRE_SERVER_QUALIFICATION.md` for the current role/model mapping:
+Baseline behavior remains the current production behavior:
 
 ```text
-code_scout      Qwen2.5-Coder 7B        -> 0.7
-causal_scout    Qwen3 8B non-thinking   -> 0.7
-researcher      Granite 4.2 8B           -> 1.0
-diagnoser       Qwen3 8B thinking       -> 0.6
-patch_engineer  Qwen2.5-Coder 7B        -> 0.7
-local_reviewer  Ministral 3 8B Reasoning -> 0.7
+thinking    = current role contract
+temperature = 0
+top_p       = not explicitly sent
+top_k       = not explicitly sent
+max_tokens  = current role budget
 ```
 
-Current DebugAI AI Core A/B support is **temperature only** for the Sampling phase. Do not pass or claim `top_p`/`top_k` measurements through this harness. The model vendors may recommend those values, but the current DebugAI adapter contract does not expose them.
+A selected `top_p` or `top_k` candidate is sent **only for the benchmark candidate request**. This does not alter the production role profile.
 
 For Thinking A/B, only roles whose current role contract is an explicit boolean are eligible. A role with `thinking=null` is not reinterpreted as true or false.
 
-For token cap, do not invent the first reduced value before the prior real measurements are available. Use one explicit candidate at a time after reviewing the prior result.
+For Sampling, use `--candidate official` when the repository has an official first candidate:
+
+| Role | temperature | top_p | top_k |
+| --- | ---: | ---: | ---: |
+| code_scout | 0.7 | 0.8 | 20 |
+| causal_scout | 0.7 | 0.8 | 20 |
+| researcher | 1.0 | 0.95 | no fixed official candidate |
+| diagnoser | 0.6 | 0.95 | 20 |
+| patch_engineer | 0.7 | 0.8 | 20 |
+| local_reviewer | 0.7 | 0.95 | no fixed official candidate |
+
+If the repository has no official candidate for a role/axis pair, `official` must fail closed. Do not invent a number to make the measurement run.
+
+The current harness intentionally does not call this a complete Sampling sweep: llama.cpp exposes additional samplers that are outside the current DebugAI qualification plan.
+
+For token cap, do not invent the first reduced value before prior real measurements are available. Use one explicit candidate at a time after reviewing prior results.
 
 A real measurement may report:
 
@@ -244,7 +237,7 @@ Only after the live runtime is present and the MCP server can be registered with
 
 The live check is not complete merely because `health` works.
 
-For the MCP continuation boundary, capture evidence that:
+Capture evidence that:
 
 ```text
 start -> run_id
@@ -280,8 +273,7 @@ PRE_SERVER_HARNESS_SOURCE=PASS|FAIL
 LOCAL_REVIEWER_REAL=PASS|FAIL|NOT_EXECUTED
 SKILL_EFFECT_ALL_REAL=PASS|FAIL|INCOMPLETE|NOT_EXECUTED
 MODEL_AB_THINKING_REAL=MEASURED|PARTIAL|NOT_APPLICABLE|NOT_EXECUTED
-MODEL_AB_TEMPERATURE_REAL=MEASURED|INCOMPLETE|NOT_EXECUTED
-MODEL_AB_FULL_SAMPLING_REAL=NOT_SUPPORTED_BY_CURRENT_DEBUGAI_ADAPTER_CONTRACT
+MODEL_AB_SAMPLING_REAL=MEASURED|PARTIAL|INCOMPLETE|NOT_EXECUTED
 MODEL_AB_TOKEN_CAP_REAL=MEASURED|INCOMPLETE|NOT_EXECUTED
 REAL_INTEGRATION_E2E=PASS|FAIL|NOT_EXECUTED
 MCP_TOOL_DISCOVERY=PASS|FAIL
