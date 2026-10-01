@@ -40,6 +40,8 @@
 ## VS Code / Cursor / Codex entry point
 - CLI contract: read `DEBUGAI.md`.
 - MCP contract: read `docs/MCP_ADAPTER.md` before registering or calling DebugAI as an MCP server.
+- Before any live Server qualification, read `docs/PRE_SERVER_QUALIFICATION.md` and `docs/CODEX_MCP_LIVE_HANDOFF.md`.
+- `npm run audit:pre-server-qualification` is a read-only **source readiness** audit. `READY` never means Local Reviewer, six-role Skill ON/OFF, Model A/B, live integration E2E, MCP live calls, or Search Gate shadow measurement have passed on the real Server.
 - DebugAI MCP is an stdio adapter over the existing CLI/HTTP/runtime; it is not a second orchestrator.
 - The MCP surface exposes exactly nine guarded tools: health, analyze, durable start, resume, wait, patch-candidate, verify, status, inspect.
 - MCP intentionally exposes no approve/apply shortcut.
@@ -50,8 +52,17 @@
 - `debugai patch` creates a candidate only. Do not confuse read-only `debugai verify` with mutation-capable `/v1/approve-apply-verify`.
 - The CLI deliberately has no apply command. Never infer approval from an analyze, patch, verify, MCP analyze, MCP patch-candidate, or MCP verify call.
 
+## Live qualification boundary
+- Source/CI/stdio protocol PASS does not prove live server/Codex registration or real-model quality.
+- First prove live source/runtime compatibility read-only. If it is behind or byte-incompatible, report `RUNTIME_SOURCE_BEHIND_OR_UNKNOWN` and stop; do not sync/deploy/restart without explicit Master approval.
+- Only on a compatible live runtime, follow `docs/PRE_SERVER_QUALIFICATION.md` for real Local Reviewer, six-role Skill ON/OFF, one-variable Model A/B, real integration E2E, MCP, and Search Gate shadow measurements.
+- Skill ON is not assumed to win. Skill OFF wins and ties must be reported exactly as measured.
+- Model A/B changes exactly one axis per comparison. Do not change the model, prompt/case/input, thinking, temperature, and token cap together.
+- Model A/B measurement never authorizes a production profile change. A measured improvement remains `promotion_authorized=false` until a separate reviewed decision.
+- Provider token counts remain `null` when the provider does not return them. Do not relabel estimates as measurements.
+
 ## Live MCP verification boundary
-- Source/CI/stdio protocol PASS does not prove live server/Codex registration.
-- When Master delegates live verification to VS Codex, verify in this order: tool discovery -> `debugai_health` -> bounded `debugai_start` -> `debugai_status` -> `debugai_resume` only when applicable -> bounded `debugai_wait` -> `debugai_inspect`.
-- Do not run server sync/deploy/restart/recreate as part of discovery or MCP verification without explicit Master approval.
+- When Master delegates live verification to VS Codex, verify the MCP sub-sequence as: tool discovery -> `debugai_health` -> bounded `debugai_start` -> `debugai_status` -> `debugai_resume` only when applicable -> bounded `debugai_wait` -> `debugai_inspect`.
+- Reuse the exact returned `run_id` across continuation calls; do not manufacture a new run merely to simulate continuation.
+- Do not run server sync/deploy/restart/recreate as part of discovery, benchmark, or MCP verification without explicit Master approval.
 - Do not mark Workspace MCP `AVAILABLE_VERIFIED` until representative calls succeed against the real DebugAI runtime.
