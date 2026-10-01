@@ -3,7 +3,7 @@
 const test=require("node:test");
 const assert=require("node:assert/strict");
 const path=require("node:path");
-const {EXPECTED_MCP_TOOLS,extractMcpTools,auditPreServerQualification}=require("../../scripts/pre-server-qualification-audit.cjs");
+const {EXPECTED_SAMPLING_SCOPE,EXPECTED_MCP_TOOLS,extractMcpTools,auditPreServerQualification}=require("../../scripts/pre-server-qualification-audit.cjs");
 
 const MCP_SOURCE=`export const EXPOSED_TOOLS = Object.freeze([\n${EXPECTED_MCP_TOOLS.map(x=>`  '${x}',`).join("\n")}\n]);`;
 const PACKAGE={scripts:{
@@ -14,6 +14,8 @@ test("pre-server audit recognizes complete source harness but never converts it 
   const result=auditPreServerQualification({root:"/repo",packageJson:PACKAGE,fileExists:()=>true,readFile:file=>String(file).endsWith(path.join("mcp","server.mjs"))?MCP_SOURCE:""});
   assert.equal(result.source_ready,true);
   assert.equal(result.pre_server_harness_source,"READY");
+  assert.deepEqual(result.model_ab_sampling_scope,EXPECTED_SAMPLING_SCOPE);
+  assert.equal(result.checks.model_ab_sampling_scope,true);
   assert.deepEqual(result.mcp_tools,EXPECTED_MCP_TOOLS);
   assert.ok(Object.values(result.real_measurements).every(x=>x==="NOT_EXECUTED_BY_SOURCE_AUDIT"));
   assert.equal(result.production_profile_change_authorized,false);
