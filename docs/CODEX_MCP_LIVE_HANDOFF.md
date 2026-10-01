@@ -8,6 +8,37 @@ It does not authorize deployment, restart, pull, reset, merge, production mutati
 
 Before using this handoff, read `docs/PRE_SERVER_QUALIFICATION.md`. Source readiness and real Server measurements are separate facts.
 
+## Mandatory Workspace / Server authority
+
+Before touching the live Server, VS Codex must read the current `G-ACE-inc/server-core` authority in this order:
+
+```text
+server-core/README.md
+-> server-core/docs/LOAD_SCOPE.md
+-> server-core/SERVER_CORE_PROTOCOL.md
+-> server-core/docs/DEPLOY_RUNBOOK.md only if an authorized deploy/runtime mutation phase is actually entered
+-> DebugAI project authority
+```
+
+At this handoff update, server-core `main` was read back at:
+
+```text
+081b61d38965267f8d2d43e224720e136e852340
+```
+
+That SHA is a recorded authority point, not a future-current assumption. Re-read current server-core at execution time.
+
+The applicable shared rules include:
+
+- GitHub source revision and live Server runtime are separate states;
+- current runtime values must be read back, not inferred from old reports/registry metadata;
+- production residency is Docker / Docker Compose;
+- Server direct source editing is not the normal repair path;
+- container start, HTTP 200, build success, or CI green alone is not Runtime PASS;
+- unexecuted/unverified work stays `NOT_EXECUTED / UNKNOWN / NOT_VERIFIED`;
+- do not discard/overwrite local-only Server changes to make a check pass;
+- main/PR merge, Production deploy/public switch, service stop/restart/recreate, destructive reset/rebase, Secret mutation, provider resource mutation, and new model download remain behind the current server-core/Master approval boundary.
+
 ## Current source-side expectation
 
 DebugAI MCP is an stdio adapter:
@@ -227,6 +258,7 @@ Do not activate search skipping from this audit.
 Use these exact states in the report:
 
 ```text
+SERVER_CORE_AUTHORITY_READ=PASS|FAIL
 PRE_SERVER_HARNESS_SOURCE=PASS|FAIL
 LOCAL_REVIEWER_REAL=PASS|FAIL|NOT_EXECUTED
 SKILL_EFFECT_ALL_REAL=PASS|FAIL|INCOMPLETE|NOT_EXECUTED
@@ -261,10 +293,14 @@ Without explicit Master authorization, do not:
 - change production model/profile settings merely because one A/B measurement looked better;
 - modify production data merely to make a verification pass.
 
-If the live runtime is older than the source under verification, report the mismatch and stop. Sync/deploy is a separate explicitly authorized phase.
+If the live runtime is older than the source under verification, report the mismatch and stop. Sync/deploy is a separate explicitly authorized phase governed by current server-core and the DebugAI project contract.
 
 ## Source references
 
+- current `G-ACE-inc/server-core` `README.md`
+- current `G-ACE-inc/server-core` `docs/LOAD_SCOPE.md`
+- current `G-ACE-inc/server-core` `SERVER_CORE_PROTOCOL.md`
+- current `G-ACE-inc/server-core` `docs/DEPLOY_RUNBOOK.md` when deploy/runtime mutation is authorized
 - `docs/PRE_SERVER_QUALIFICATION.md`
 - `docs/MCP_ADAPTER.md`
 - `mcp/server.mjs`
