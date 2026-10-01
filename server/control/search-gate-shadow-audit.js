@@ -11,6 +11,9 @@ function assertRecord(record){
   if(typeof record.false_skip_evaluable!=="boolean")throw new Error("SEARCH_GATE_SHADOW_EVALUABLE_REQUIRED");
   if(record.false_skip_evaluable===false&&record.false_skip!==null)throw new Error("SEARCH_GATE_SHADOW_UNEVALUABLE_FALSE_SKIP_MUST_BE_NULL");
   if(record.false_skip_evaluable===true&&typeof record.false_skip!=="boolean")throw new Error("SEARCH_GATE_SHADOW_FALSE_SKIP_BOOLEAN_REQUIRED");
+  if(record.candidate_skip===false&&record.false_skip_evaluable!==false)throw new Error("SEARCH_GATE_SHADOW_NON_CANDIDATE_NOT_EVALUABLE");
+  if(record.candidate_skip===false&&record.false_skip!==null)throw new Error("SEARCH_GATE_SHADOW_NON_CANDIDATE_FALSE_SKIP_MUST_BE_NULL");
+  if(record.false_skip_evaluable===true&&record.actual_status!=="SUCCESS")throw new Error("SEARCH_GATE_SHADOW_EVALUABLE_REQUIRES_SUCCESS");
   return record;
 }
 function summarizeSearchGateShadow(value){
