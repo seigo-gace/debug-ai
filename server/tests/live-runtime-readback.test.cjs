@@ -38,6 +38,11 @@ function makeCompatibleCheckout(root){
   write(root,"package.json",JSON.stringify({scripts:{"audit:search-gate-shadow":"node scripts/search-gate-shadow-audit.cjs"}}));
 }
 
+function trackedProbePath(args){
+  if(args[0]!=="ls-files"||args[1]!=="--error-unmatch"||args[2]!=="--"||args.length!==4)return null;
+  return args[3];
+}
+
 test("live readback redacts HTTPS remote credentials",()=>{
   assert.equal(sanitizeRemote("https://secret-token@github.com/seigo-gace/debug-ai.git\n"),"https://***@github.com/seigo-gace/debug-ai.git");
   assert.equal(sanitizeRemote("git@github.com:seigo-gace/debug-ai.git"),"git@github.com:seigo-gace/debug-ai.git");
@@ -54,6 +59,8 @@ test("git readback never enumerates untracked files and only reports bounded dir
     if(key==="rev-parse HEAD")return{ok:true,status:0,stdout:"a".repeat(40)+"\n",error_code:null};
     if(key.startsWith("diff --quiet"))return{ok:false,status:1,stdout:"",error_code:null};
     if(key.startsWith("diff --cached"))return{ok:true,status:0,stdout:"",error_code:null};
+    const rel=trackedProbePath(args);
+    if(rel&&SOURCE_REQUIREMENTS.includes(rel))return{ok:true,status:0,stdout:`${rel}\n`,error_code:null};
     throw new Error(`UNEXPECTED_COMMAND:${command} ${key} CWD=${options?.cwd}`);
   };
   const out=gitReadback("/start",runner);
@@ -65,7 +72,9 @@ test("git readback never enumerates untracked files and only reports bounded dir
   assert.equal(out.untracked_scanned,false);
   assert.equal(out.untracked_state,"NOT_SCANNED_TO_AVOID_UNBOUNDED_FILE_ENUMERATION");
   assert.equal(calls.some(call=>call.includes("status")),false);
-  assert.equal(calls.some(call=>call.includes("ls-files")),false);
+  const trackedCalls=calls.filter(call=>call[0]==="git"&&call[1]==="ls-files");
+  assert.equal(trackedCalls.length,SOURCE_REQUIREMENTS.length);
+  assert.deepEqual(trackedCalls.map(call=>call[4]).sort(),[...SOURCE_REQUIREMENTS].sort());
 });
 
 test("checkout source readback requires candidate, runtime and read-only audit source",()=>{
@@ -120,6 +129,8 @@ test("combined live readback never authorizes search skip and fails closed on in
       if(command==="git"&&key==="branch --show-current")return{ok:true,status:0,stdout:"main\n",error_code:null};
       if(command==="git"&&key==="rev-parse HEAD")return{ok:true,status:0,stdout:"b".repeat(40)+"\n",error_code:null};
       if(command==="git"&&key.startsWith("diff "))return{ok:true,status:0,stdout:"",error_code:null};
+      const rel=command==="git"?trackedProbePath(args):null;
+      if(rel&&SOURCE_REQUIREMENTS.includes(rel))return{ok:false,status:1,stdout:"",error_code:null};
       if(command==="docker")return{ok:true,status:0,stdout:"",error_code:null};
       throw new Error(`UNEXPECTED:${command}:${key}`);
     };
@@ -127,6 +138,7 @@ test("combined live readback never authorizes search skip and fails closed on in
     const out=await collectReadback({cwd:f.root,runner,health});
     assert.equal(out.read_only,true);
     assert.equal(out.mutation_attempted,false);
+    assert.equal(out.checkout_source_proven,false);
     assert.equal(out.runtime_source_state,"RUNTIME_SOURCE_BEHIND_OR_UNKNOWN");
     assert.equal(out.search_shadow_measurement_authorized,false);
     assert.equal(out.search_skip_activation_authorized,false);
@@ -145,12 +157,15 @@ test("measurement authorization needs compatible checkout, compatible running co
       if(command==="git"&&key==="branch --show-current")return{ok:true,status:0,stdout:"feat/runtime\n",error_code:null};
       if(command==="git"&&key==="rev-parse HEAD")return{ok:true,status:0,stdout:"c".repeat(40)+"\n",error_code:null};
       if(command==="git"&&key.startsWith("diff "))return{ok:true,status:0,stdout:"",error_code:null};
+      const rel=command==="git"?trackedProbePath(args):null;
+      if(rel&&SOURCE_REQUIREMENTS.includes(rel))return{ok:true,status:0,stdout:`${rel}\n`,error_code:null};
       if(command==="docker"&&args[0]==="ps")return{ok:true,status:0,stdout:"abc123\tdebug-ai\tdebug-ai:test\tUp 1 minute (healthy)\n",error_code:null};
       if(command==="docker"&&args[0]==="exec")return{ok:true,status:0,stdout:JSON.stringify({required_files,candidate_policy_version:"debugai.search-gate-candidate-policy/v1",shadow_runtime_policy_version:"debugai.search-gate-shadow-runtime/v2"}),error_code:null};
       throw new Error(`UNEXPECTED:${command}:${key}`);
     };
     const healthy=async()=>({reachable:true,status_code:200,error_code:null});
     const out=await collectReadback({cwd:f.root,runner,health:healthy});
+    assert.equal(out.checkout_source_proven,true);
     assert.equal(out.runtime_source_state,"RUNNING_CONTAINER_SOURCE_COMPATIBLE");
     assert.equal(out.search_shadow_measurement_authorized,true);
     assert.equal(out.search_skip_activation_authorized,false);
