@@ -16,6 +16,13 @@ function digest(value) {
   return crypto.createHash("sha256").update(stable(value), "utf8").digest("hex");
 }
 
+function assertSelfDigest(value, errorCode) {
+  if (!value || typeof value !== "object" || typeof value.plan_digest !== "string") throw new Error(errorCode);
+  const { plan_digest: planDigest, ...material } = value;
+  if (digest(material) !== planDigest) throw new Error(errorCode);
+  return true;
+}
+
 function makeVerificationPlan({ testInventory = [] } = {}) {
   if (!Array.isArray(testInventory)) throw new Error("VERIFICATION_PLAN_INVENTORY_INVALID");
   const inventory = new Map();
@@ -78,6 +85,7 @@ function assertVerificationPlan(plan) {
   if (!plan || plan.schema !== VERIFICATION_PLAN_SCHEMA || plan.authority !== "DETERMINISTIC_CORE") {
     throw new Error("VERIFICATION_PLAN_SCHEMA_INVALID");
   }
+  assertSelfDigest(plan, "VERIFICATION_PLAN_TAMPERED");
   const rebuilt = makeVerificationPlan({ testInventory: (plan.checks || []).map((item) => ({ name: item.name, configured: true, command: item.command })) });
   if (rebuilt.plan_digest !== plan.plan_digest || rebuilt.stop_on_first_non_pass !== plan.stop_on_first_non_pass || rebuilt.configured !== plan.configured) {
     throw new Error("VERIFICATION_PLAN_TAMPERED");
@@ -89,6 +97,7 @@ function assertRollbackPlan(plan, { files = [], preconditions = [] } = {}) {
   if (!plan || plan.schema !== ROLLBACK_PLAN_SCHEMA || plan.authority !== "DETERMINISTIC_CORE") {
     throw new Error("ROLLBACK_PLAN_SCHEMA_INVALID");
   }
+  assertSelfDigest(plan, "ROLLBACK_PLAN_TAMPERED");
   const rebuilt = makeRollbackPlan({ files, preconditions });
   if (rebuilt.plan_digest !== plan.plan_digest) throw new Error("ROLLBACK_PLAN_TAMPERED");
   return true;
