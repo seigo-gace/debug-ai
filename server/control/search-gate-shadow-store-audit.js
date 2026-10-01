@@ -24,15 +24,17 @@ function boundedMax(value){
   return n;
 }
 function policyWindow(records){
-  const counts={};let unversioned=0;
-  for(const record of Array.isArray(records)?records:[]){
+  const counts=new Map();let unversioned=0;
+  const input=Array.isArray(records)?records:[];
+  for(const record of input){
     const value=typeof record?.candidate_policy_version==="string"?record.candidate_policy_version.trim():"";
     if(!value){unversioned++;continue;}
-    counts[value]=(counts[value]||0)+1;
+    counts.set(value,(counts.get(value)||0)+1);
   }
-  const versions=Object.keys(counts).sort();
-  const status=records.length===0?POLICY_WINDOW_STATUS.NO_SHADOW_RECORDS:(unversioned===0&&versions.length===1?POLICY_WINDOW_STATUS.SINGLE_VERSION:POLICY_WINDOW_STATUS.MIXED_OR_UNVERSIONED);
-  return Object.freeze({status,versions:Object.freeze(counts),unversioned_records:unversioned,compatible:status===POLICY_WINDOW_STATUS.SINGLE_VERSION});
+  const versions=[...counts.keys()].sort(),serialized={};
+  for(const version of versions)Object.defineProperty(serialized,version,{value:counts.get(version),enumerable:true,writable:false,configurable:false});
+  const status=input.length===0?POLICY_WINDOW_STATUS.NO_SHADOW_RECORDS:(unversioned===0&&versions.length===1?POLICY_WINDOW_STATUS.SINGLE_VERSION:POLICY_WINDOW_STATUS.MIXED_OR_UNVERSIONED);
+  return Object.freeze({status,versions:Object.freeze(serialized),unversioned_records:unversioned,compatible:status===POLICY_WINDOW_STATUS.SINGLE_VERSION});
 }
 function windowStatus(summary,policy){
   if(summary.records===0)return WINDOW_STATUS.NO_SHADOW_RECORDS;
@@ -44,10 +46,13 @@ function windowStatus(summary,policy){
   return WINDOW_STATUS.CANDIDATES_NOT_FULLY_EVALUABLE;
 }
 function observationWindow(records){
-  const values=[];
-  for(const record of records){const ms=Date.parse(record?.created_at||"");if(Number.isFinite(ms))values.push(ms);}
-  if(!values.length)return Object.freeze({first_observed_at:null,last_observed_at:null});
-  return Object.freeze({first_observed_at:new Date(Math.min(...values)).toISOString(),last_observed_at:new Date(Math.max(...values)).toISOString()});
+  let first=Number.POSITIVE_INFINITY,last=Number.NEGATIVE_INFINITY,count=0;
+  for(const record of Array.isArray(records)?records:[]){
+    const ms=Date.parse(record?.created_at||"");if(!Number.isFinite(ms))continue;
+    count++;if(ms<first)first=ms;if(ms>last)last=ms;
+  }
+  if(count===0)return Object.freeze({first_observed_at:null,last_observed_at:null});
+  return Object.freeze({first_observed_at:new Date(first).toISOString(),last_observed_at:new Date(last).toISOString()});
 }
 function auditSearchGateShadowStore(runtimeEvidence,{maxManagedRecords=DEFAULT_MAX_MANAGED_RECORDS}={}){
   if(!runtimeEvidence||typeof runtimeEvidence._scanRoot!=="function")throw new Error("SEARCH_GATE_AUDIT_RUNTIME_EVIDENCE_SCAN_REQUIRED");
