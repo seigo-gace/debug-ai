@@ -41,6 +41,11 @@ function runReadOnly(command,args,{cwd=process.cwd(),timeout=DEFAULT_TIMEOUT_MS}
     error_code:out.error?.code||null,
   });
 }
+function quietState(result){
+  if(result?.status===0&& !result?.error_code)return"CLEAN";
+  if(result?.status===1&& !result?.error_code)return"DIRTY";
+  return"UNKNOWN";
+}
 function gitReadback(cwd,runner=runReadOnly){
   const rootResult=runner("git",["rev-parse","--show-toplevel"],{cwd});
   const root=rootResult.ok?bounded(rootResult.stdout,1024):"";
@@ -50,14 +55,23 @@ function gitReadback(cwd,runner=runReadOnly){
   const head=runner("git",["rev-parse","HEAD"],{cwd:base});
   const worktree=runner("git",["diff","--quiet","--no-ext-diff","--"],{cwd:base});
   const index=runner("git",["diff","--cached","--quiet","--no-ext-diff","--"],{cwd:base});
+  const requiredSourceTracked={};
+  for(const rel of SOURCE_REQUIREMENTS){
+    const result=runner("git",["ls-files","--error-unmatch","--",rel],{cwd:base});
+    requiredSourceTracked[rel]=result.ok;
+  }
+  const worktreeState=quietState(worktree),indexState=quietState(index);
   return Object.freeze({
     repository_detected:Boolean(rootResult.ok&&root),
     root:rootResult.ok?root:null,
     origin:origin.ok?sanitizeRemote(origin.stdout):null,
     branch:branch.ok?bounded(branch.stdout,256):null,
     head:head.ok?bounded(head.stdout,64):null,
-    tracked_worktree_dirty:worktree.status===1,
-    index_dirty:index.status===1,
+    tracked_worktree_state:worktreeState,
+    index_state:indexState,
+    tracked_worktree_dirty:worktreeState==="DIRTY",
+    index_dirty:indexState==="DIRTY",
+    required_source_tracked:Object.freeze(requiredSourceTracked),
     untracked_scanned:false,
     untracked_state:"NOT_SCANNED_TO_AVOID_UNBOUNDED_FILE_ENUMERATION",
   });
@@ -133,6 +147,9 @@ function healthReadback({host="127.0.0.1",port=8787,pathName="/health",timeout=3
   });
 }
 function healthOk(value){return value?.reachable===true&&Number.isInteger(value.status_code)&&value.status_code>=200&&value.status_code<300;}
+function checkoutProven(git,source){
+  return git?.repository_detected===true&&git?.tracked_worktree_state==="CLEAN"&&git?.index_state==="CLEAN"&&Object.values(git?.required_source_tracked||{}).length===SOURCE_REQUIREMENTS.length&&Object.values(git.required_source_tracked).every(Boolean)&&source?.search_shadow_source_compatible===true;
+}
 async function collectReadback({cwd=process.cwd(),runner=runReadOnly,health=healthReadback}={}){
   const git=gitReadback(cwd,runner);
   const root=git.repository_detected?git.root:cwd;
@@ -141,13 +158,14 @@ async function collectReadback({cwd=process.cwd(),runner=runReadOnly,health=heal
   const containerSource=containerSourceReadback(docker,runner);
   const healthResult=await health();
   const runtimeSourceState=containerSource.compatible?"RUNNING_CONTAINER_SOURCE_COMPATIBLE":"RUNTIME_SOURCE_BEHIND_OR_UNKNOWN";
-  const measurementAuthorized=source.search_shadow_source_compatible&&containerSource.compatible&&healthOk(healthResult);
+  const measurementAuthorized=checkoutProven(git,source)&&containerSource.compatible&&healthOk(healthResult);
   return Object.freeze({
     schema:"debugai.live-runtime-readback/v1",
     read_only:true,
     mutation_attempted:false,
     git,
     checkout_source:source,
+    checkout_source_proven:checkoutProven(git,source),
     docker,
     running_container_source:containerSource,
     health:healthResult,
@@ -170,4 +188,4 @@ if(require.main===module){
   });
 }
 
-module.exports={MAX_CAPTURE_BYTES,DEFAULT_TIMEOUT_MS,SOURCE_REQUIREMENTS,CONTAINER_SOURCE_REQUIREMENTS,bounded,boundedRaw,sanitizeRemote,runReadOnly,gitReadback,policyVersion,sourceReadback,dockerReadback,containerSourceReadback,healthReadback,healthOk,collectReadback};
+module.exports={MAX_CAPTURE_BYTES,DEFAULT_TIMEOUT_MS,SOURCE_REQUIREMENTS,CONTAINER_SOURCE_REQUIREMENTS,bounded,boundedRaw,sanitizeRemote,runReadOnly,quietState,gitReadback,policyVersion,sourceReadback,dockerReadback,containerSourceReadback,healthReadback,healthOk,checkoutProven,collectReadback};
