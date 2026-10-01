@@ -13,13 +13,13 @@ test("control-plane gap audit distinguishes implemented providers from real unre
     skill_procedures:25,
     skill_procedures_missing:0,
     declared_tools:18,
-    runtime_tools_available:12,
-    runtime_tools_missing:6,
+    runtime_tools_available:13,
+    runtime_tools_missing:5,
     capability_requirements:18,
-    capability_requirements_unresolved:1
+    capability_requirements_unresolved:0
   });
   assert.deepEqual(report.missing_skill_procedures,[]);
-  for(const tool of ["test.inventory","evidence.read","runtime.trace.read","state.read","history.read","invariant.read"])assert.ok(report.runtime_tools.available.includes(tool),tool);
+  for(const tool of ["test.inventory","evidence.read","runtime.trace.read","state.read","history.read","invariant.read","source.verify"])assert.ok(report.runtime_tools.available.includes(tool),tool);
 
   const byRequirement=new Map(report.capabilities.all.map(item=>[item.requirement,item]));
   assert.deepEqual(byRequirement.get("source.read"),{requirement:"source.read",type:CAPABILITY_TYPE.MODEL_TOOL,provider:"runtime-tool:source.read",status:"IMPLEMENTED"});
@@ -28,6 +28,7 @@ test("control-plane gap audit distinguishes implemented providers from real unre
   assert.deepEqual(byRequirement.get("state.read"),{requirement:"state.read",type:CAPABILITY_TYPE.MODEL_TOOL,provider:"runtime-tool:state.read",status:"IMPLEMENTED"});
   assert.deepEqual(byRequirement.get("history.read"),{requirement:"history.read",type:CAPABILITY_TYPE.MODEL_TOOL,provider:"runtime-tool:history.read",status:"IMPLEMENTED"});
   assert.deepEqual(byRequirement.get("invariant.read"),{requirement:"invariant.read",type:CAPABILITY_TYPE.MODEL_TOOL,provider:"runtime-tool:invariant.read",status:"IMPLEMENTED"});
+  assert.deepEqual(byRequirement.get("source.verify"),{requirement:"source.verify",type:CAPABILITY_TYPE.MODEL_TOOL,provider:"runtime-tool:source.verify",status:"IMPLEMENTED"});
 
   assert.equal(nonRuntimeCapabilityImplemented("diff.plan"),true);
   assert.equal(nonRuntimeCapabilityImplemented("test.plan"),true);
@@ -40,14 +41,8 @@ test("control-plane gap audit distinguishes implemented providers from real unre
   assert.deepEqual(byRequirement.get("diff.read"),{requirement:"diff.read",type:CAPABILITY_TYPE.RUNTIME_PACKET,provider:"review-packet-diff",status:"IMPLEMENTED"});
   assert.deepEqual(byRequirement.get("test.result.read"),{requirement:"test.result.read",type:CAPABILITY_TYPE.RUNTIME_PACKET,provider:"review-packet-test-results",status:"IMPLEMENTED"});
 
-  assert.deepEqual(byRequirement.get("source.verify"),{requirement:"source.verify",type:CAPABILITY_TYPE.DETERMINISTIC_CORE,provider:"source-provenance-validator",status:"NOT_IMPLEMENTED"});
-  assert.deepEqual(report.capabilities.unresolved.map(item=>item.requirement).sort(),["source.verify"]);
-  assert.deepEqual(report.roles.patch_engineer.capability_requirements_unresolved,[]);
-  assert.equal(report.roles.causal_scout.capability_requirements_unresolved.some(item=>["history.read","runtime.trace.read","state.read","invariant.read"].includes(item.requirement)),false);
-  assert.equal(report.roles.diagnoser.capability_requirements_unresolved.some(item=>item.requirement==="history.read"||item.requirement==="invariant.read"),false);
-  assert.equal(report.roles.local_reviewer.capability_requirements_unresolved.some(item=>item.requirement==="invariant.read"),false);
-  assert.equal(report.roles.researcher.capability_requirements_unresolved.some(item=>item.requirement==="evidence.read"),false);
-  assert.ok(report.roles.researcher.capability_requirements_unresolved.some(item=>item.requirement==="source.verify"&&item.type===CAPABILITY_TYPE.DETERMINISTIC_CORE));
+  assert.deepEqual(report.capabilities.unresolved,[]);
+  assert.ok(Object.values(report.roles).every(role=>role.capability_requirements_unresolved.length===0));
   assert.ok(Object.values(report.roles).every(role=>role.missing_skill_contracts.length===0));
-  assert.equal(isGapFree(report),false);
+  assert.equal(isGapFree(report),true);
 });
