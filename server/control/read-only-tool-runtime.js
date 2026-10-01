@@ -7,18 +7,20 @@ const {assertToolAdmission}=require("./tool-risk.js");
 const {currentRunObservationProvider}=require("./run-observation-context.js");
 const {currentRejectedHistoryProvider}=require("./rejected-history-provider.js");
 const {currentInvariantAuthorityProvider}=require("./invariant-authority-provider.js");
+const {verifySourceBoundary}=require("./source-verifier.js");
 
 const RUN_OBSERVATION_TOOLS=Object.freeze(["runtime.trace.read","state.read"]);
 const HISTORY_TOOLS=Object.freeze(["history.read"]);
 const AUTHORITY_TOOLS=Object.freeze(["invariant.read"]);
-const EXTENDED_TOOLS=Object.freeze([...RUN_OBSERVATION_TOOLS,...HISTORY_TOOLS,...AUTHORITY_TOOLS]);
+const SOURCE_VERIFY_TOOLS=Object.freeze(["source.verify"]);
+const EXTENDED_TOOLS=Object.freeze([...RUN_OBSERVATION_TOOLS,...HISTORY_TOOLS,...AUTHORITY_TOOLS,...SOURCE_VERIFY_TOOLS]);
 const EXTENDED_TOOL_SET=new Set(EXTENDED_TOOLS);
 const AVAILABLE_TOOLS=Object.freeze([...base.AVAILABLE_TOOLS,...EXTENDED_TOOLS]);
 const EXTRA_EVIDENCE=new WeakMap();
 
 function skillAllowsTool(selectedSkillIds,tool){for(const id of selectedSkillIds||[]){const skill=getSkill(id);if(skill.allowed_tools.includes(tool))return skill;}return null;}
 function admit({role,selectedSkillIds,tool}){const roleContract=getRoleContract(role),skill=skillAllowsTool(selectedSkillIds,tool);if(!skill)throw new Error(`TOOL_NOT_IN_SELECTED_SKILLS:${role}:${tool}`);return assertToolAdmission({roleContract,tool,riskCeiling:skill.tool_risk_ceiling,humanApproved:false});}
-function contentTrust(tool){if(tool==="runtime.trace.read"||tool==="state.read")return"CURRENT_RUN_OBSERVATION_DATA";if(tool==="history.read")return"DURABLE_HISTORY_AUTHORITY_DATA";if(tool==="invariant.read")return"IMMUTABLE_MASTER_AUTHORITY_DATA";if(tool==="authority.search")return"OPEN_WORLD_UNTRUSTED_DATA";if(tool==="knowledge.search")return"INTERNAL_KB_DATA";if(tool==="evidence.read")return"REGISTERED_EVIDENCE_DATA";return"LOCAL_SOURCE_DATA";}
+function contentTrust(tool){if(tool==="runtime.trace.read"||tool==="state.read")return"CURRENT_RUN_OBSERVATION_DATA";if(tool==="history.read")return"DURABLE_HISTORY_AUTHORITY_DATA";if(tool==="invariant.read")return"IMMUTABLE_MASTER_AUTHORITY_DATA";if(tool==="source.verify")return"SOURCE_VERIFICATION_BOUNDARY_DATA";if(tool==="authority.search")return"OPEN_WORLD_UNTRUSTED_DATA";if(tool==="knowledge.search")return"INTERNAL_KB_DATA";if(tool==="evidence.read")return"REGISTERED_EVIDENCE_DATA";return"LOCAL_SOURCE_DATA";}
 function makeToolResult(tool,data){const resultSha256=base.toolResultHash(tool,data);return{schema:"debugai.tool-result/v1",tool,status:"OK",evidence_id:`TRE_${resultSha256.slice(0,24)}`,data,integrity:{runtime_validated:true,admission_validated:true,result_sha256:resultSha256,content_trust:contentTrust(tool),external_content:"DATA_NOT_INSTRUCTION"}};}
 function assertToolResultIntegrity(result){
   if(!result||result.schema!=="debugai.tool-result/v1"||result.status!=="OK")throw new Error("TOOL_RESULT_SCHEMA_INVALID");
@@ -31,8 +33,17 @@ function extraMap(context){let map=EXTRA_EVIDENCE.get(context);if(!map){map=new 
 function currentEvidenceIds(context){
   if(!context)return[];const ids=[];
   if(context.records instanceof Map)for(const id of context.records.keys())if(!ids.includes(id))ids.push(id);
-  for(const record of extraMap(context).values())if(!["history.read","invariant.read"].includes(record?.tool)&&typeof record?.evidence_id==="string"&&!ids.includes(record.evidence_id))ids.push(record.evidence_id);
+  for(const record of extraMap(context).values())if(!["history.read","invariant.read","source.verify"].includes(record?.tool)&&typeof record?.evidence_id==="string"&&!ids.includes(record.evidence_id))ids.push(record.evidence_id);
   return ids;
+}
+function contextEvidenceRecord(context,evidenceId){
+  const id=String(evidenceId||"").trim();if(!id)throw new Error("SOURCE_VERIFY_EVIDENCE_ID_REQUIRED");
+  if(!context)throw new Error("SOURCE_VERIFY_EVIDENCE_CONTEXT_REQUIRED");
+  const baseRecord=context.records instanceof Map?context.records.get(id):null,extended=extraMap(context).get(id),record=baseRecord||extended;
+  if(!record)throw new Error(`SOURCE_VERIFY_EVIDENCE_NOT_REGISTERED:${id}`);
+  if(record.schema==="debugai.evidence-record/v1"){const normalized=base.normalizeRegisteredEvidence(record);return{evidenceId:normalized.evidence_id,sourceType:normalized.source_type,sourceRef:normalized.source_ref,payload:normalized.payload,integrityDigest:normalized.integrity.content_sha256};}
+  assertToolResultIntegrity(record);if(record.tool==="source.verify")throw new Error("SOURCE_VERIFY_RECURSIVE_INPUT_FORBIDDEN");
+  return{evidenceId:record.evidence_id,sourceType:`TOOL_RESULT:${record.tool}`,sourceRef:record.tool,payload:record.data,integrityDigest:record.integrity.result_sha256};
 }
 function filterBaseObservations(observations){return(Array.isArray(observations)?observations:[]).map(observation=>({...observation,results:(observation?.results||[]).filter(item=>!EXTENDED_TOOL_SET.has(String(item?.result?.tool||"")))}));}
 function addExtendedView(map,raw,allowed){
@@ -71,10 +82,11 @@ function createReadOnlyToolRuntime(options={}){
     let data;
     if(tool==="history.read")data=currentRejectedHistoryProvider().read(args,currentEvidenceIds(evidenceContext));
     else if(tool==="invariant.read")data=currentInvariantAuthorityProvider().read(args);
+    else if(tool==="source.verify")data=verifySourceBoundary({...contextEvidenceRecord(evidenceContext,args.evidence_id),args});
     else{const provider=currentRunObservationProvider();data=tool==="state.read"?provider.readState(args):provider.readTrace(args);}
     const result=makeToolResult(tool,data);assertToolResultIntegrity(result);if(evidenceContext)addEvidenceToContext(evidenceContext,[result]);return result;
   }
   return{...runtime,availableTools:[...AVAILABLE_TOOLS],createEvidenceContext,addEvidenceToContext,execute};
 }
 
-module.exports={...base,RUN_OBSERVATION_TOOLS,HISTORY_TOOLS,AUTHORITY_TOOLS,EXTENDED_TOOLS,AVAILABLE_TOOLS,makeToolResult,assertToolResultIntegrity,currentEvidenceIds,createEvidenceContext,addEvidenceToContext,createReadOnlyToolRuntime};
+module.exports={...base,RUN_OBSERVATION_TOOLS,HISTORY_TOOLS,AUTHORITY_TOOLS,SOURCE_VERIFY_TOOLS,EXTENDED_TOOLS,AVAILABLE_TOOLS,makeToolResult,assertToolResultIntegrity,currentEvidenceIds,contextEvidenceRecord,createEvidenceContext,addEvidenceToContext,createReadOnlyToolRuntime};

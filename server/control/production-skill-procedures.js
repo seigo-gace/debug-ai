@@ -15,8 +15,8 @@ const PRODUCTION_OVERRIDES=Object.freeze({
     "Emit alternatives as hypotheses, not facts, and do not invent identifiers, causal edges, or unsupported observations."
   ]),
   "source-verifier":Object.freeze([
-    "Accept supporting evidence only when source verification and version applicability are satisfied for the requested target.",
-    "Reject or quarantine unverified, unsupported, or version-inapplicable sources when stronger applicable authority exists, without rewriting the source claim."
+    "Use source.verify before treating a cited source as claim support. SUPPORTED is valid only when source.verify returns claim_support_status=SUPPORTED; UNKNOWN is not rejection but cannot support a final factual claim.",
+    "Bind a target version only when source.verify returns version_applicability_status=VERIFIED. UNKNOWN version applicability must remain an evidence gap, and FAIL/UNSUPPORTED must be rejected without rewriting the source claim."
   ]),
   "source-priority-filter":Object.freeze([
     "Prefer verified official API references, versioned guides, release notes, standards, or upstream advisories over community summaries or anonymous posts.",
