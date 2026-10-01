@@ -5,7 +5,7 @@ const assert=require("node:assert/strict");
 
 const {SCHEMA,CAPABILITY_TYPE,nonRuntimeCapabilityImplemented,auditControlPlaneGaps,isGapFree}=require("../control/control-plane-gap-audit.js");
 
-test("control-plane gap audit distinguishes implemented non-runtime providers from real unresolved requirements",()=>{
+test("control-plane gap audit distinguishes implemented providers from real unresolved requirements",()=>{
   const report=auditControlPlaneGaps();
   assert.equal(report.schema,SCHEMA);
   assert.deepEqual(report.summary,{
@@ -13,18 +13,18 @@ test("control-plane gap audit distinguishes implemented non-runtime providers fr
     skill_procedures:25,
     skill_procedures_missing:0,
     declared_tools:18,
-    runtime_tools_available:7,
-    runtime_tools_missing:11,
+    runtime_tools_available:8,
+    runtime_tools_missing:10,
     capability_requirements:18,
-    capability_requirements_unresolved:6
+    capability_requirements_unresolved:5
   });
   assert.deepEqual(report.missing_skill_procedures,[]);
   assert.ok(report.runtime_tools.available.includes("test.inventory"));
-  assert.ok(report.runtime_tools.missing.includes("evidence.read"));
+  assert.ok(report.runtime_tools.available.includes("evidence.read"));
 
   const byRequirement=new Map(report.capabilities.all.map(item=>[item.requirement,item]));
   assert.deepEqual(byRequirement.get("source.read"),{requirement:"source.read",type:CAPABILITY_TYPE.MODEL_TOOL,provider:"runtime-tool:source.read",status:"IMPLEMENTED"});
-  assert.deepEqual(byRequirement.get("evidence.read"),{requirement:"evidence.read",type:CAPABILITY_TYPE.MODEL_TOOL,provider:"bounded-evidence-read",status:"NOT_IMPLEMENTED"});
+  assert.deepEqual(byRequirement.get("evidence.read"),{requirement:"evidence.read",type:CAPABILITY_TYPE.MODEL_TOOL,provider:"runtime-tool:evidence.read",status:"IMPLEMENTED"});
 
   assert.equal(nonRuntimeCapabilityImplemented("diff.plan"),true);
   assert.equal(nonRuntimeCapabilityImplemented("test.plan"),true);
@@ -37,9 +37,12 @@ test("control-plane gap audit distinguishes implemented non-runtime providers fr
   assert.deepEqual(byRequirement.get("diff.read"),{requirement:"diff.read",type:CAPABILITY_TYPE.RUNTIME_PACKET,provider:"review-packet-diff",status:"IMPLEMENTED"});
   assert.deepEqual(byRequirement.get("test.result.read"),{requirement:"test.result.read",type:CAPABILITY_TYPE.RUNTIME_PACKET,provider:"review-packet-test-results",status:"IMPLEMENTED"});
 
+  assert.deepEqual(byRequirement.get("source.verify"),{requirement:"source.verify",type:CAPABILITY_TYPE.DETERMINISTIC_CORE,provider:"source-provenance-validator",status:"NOT_IMPLEMENTED"});
   assert.deepEqual(byRequirement.get("invariant.read"),{requirement:"invariant.read",type:CAPABILITY_TYPE.RUNTIME_PACKET,provider:"verified-invariant-packet",status:"NOT_IMPLEMENTED"});
   assert.ok(report.roles.patch_engineer.runtime_tools_missing.includes("diff.plan"));
   assert.deepEqual(report.roles.patch_engineer.capability_requirements_unresolved,[]);
+  assert.equal(report.roles.researcher.capability_requirements_unresolved.some(item=>item.requirement==="evidence.read"),false);
+  assert.ok(report.roles.researcher.capability_requirements_unresolved.some(item=>item.requirement==="source.verify"&&item.type===CAPABILITY_TYPE.DETERMINISTIC_CORE));
   assert.equal(report.roles.local_reviewer.capability_requirements_unresolved.some(item=>item.requirement==="diff.read"),false);
   assert.equal(report.roles.local_reviewer.capability_requirements_unresolved.some(item=>item.requirement==="test.result.read"),false);
   assert.ok(report.roles.local_reviewer.capability_requirements_unresolved.some(item=>item.requirement==="invariant.read"&&item.type===CAPABILITY_TYPE.RUNTIME_PACKET));
