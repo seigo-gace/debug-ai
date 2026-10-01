@@ -5,6 +5,7 @@ const {wrapAuthorityForRunObservation}=require("./control/run-observation-contex
 const {withRoleSemanticMode}=require("./control/role-semantic-mode.js");
 const {createSearchGateShadowAdapter}=require("./control/search-gate-shadow-runtime.js");
 const {withRejectedHistoryContext,persistRejectedFromDiagnosis,latestFailure}=require("./control/rejected-history-provider.js");
+const {withInvariantAuthorityContext}=require("./control/invariant-authority-provider.js");
 
 function enforceWorkflowRoleSemantics(workflow){
   return new Proxy(workflow,{
@@ -35,13 +36,16 @@ function wrapRuntimeEvidenceForRejectedHistory(runtimeEvidence,authority){
     }
   });
 }
-function withRejectedHistory(workflow,{authority,runtimeEvidence}={}){
-  if(!authority||!runtimeEvidence)return workflow;
+function withAuthorityContexts(workflow,{authority,runtimeEvidence}={}){
+  if(!authority)return workflow;
   return new Proxy(workflow,{
     get(target,property,receiver){
       const value=Reflect.get(target,property,receiver);
       if(typeof value!=="function")return value;
-      return function(...args){return withRejectedHistoryContext({authority,runtimeEvidence},()=>Reflect.apply(value,target,args));};
+      return function(...args){
+        const invoke=()=>withInvariantAuthorityContext({authority,runtimeEvidence},()=>Reflect.apply(value,target,args));
+        return runtimeEvidence?withRejectedHistoryContext({authority,runtimeEvidence},invoke):invoke();
+      };
     }
   });
 }
@@ -60,7 +64,7 @@ function createWorkflow(options={}){
   const authority=options.authority?wrapAuthorityForRunObservation(options.authority,historyRuntimeEvidence):options.authority;
   const observed=withSearchGateShadow({...options,runtimeEvidence:historyRuntimeEvidence,authority},authority);
   const workflow=enforceWorkflowRoleSemantics(base.createWorkflow(observed));
-  return withRejectedHistory(workflow,{authority:options.authority||null,runtimeEvidence:historyRuntimeEvidence});
+  return withAuthorityContexts(workflow,{authority:options.authority||null,runtimeEvidence:historyRuntimeEvidence});
 }
 
-module.exports={...base,enforceWorkflowRoleSemantics,wrapRuntimeEvidenceForRejectedHistory,withRejectedHistory,withSearchGateShadow,createWorkflow};
+module.exports={...base,enforceWorkflowRoleSemantics,wrapRuntimeEvidenceForRejectedHistory,withAuthorityContexts,withSearchGateShadow,createWorkflow};
