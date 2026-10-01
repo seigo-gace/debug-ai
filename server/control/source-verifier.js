@@ -42,7 +42,14 @@ function directTextCandidates(payload){
   for(const key of ["claims","supports","statements","direct_claims"])pushMany(out,source[key]);
   return out;
 }
-function contradictionCandidates(payload){
+function authoritativeClaimCandidates(payload,sourceType){
+  const source=payload&&typeof payload==="object"&&!Array.isArray(payload)?payload:{},out=[],type=String(sourceType||"");
+  if(type==="OFFICIAL_EXTERNAL")pushString(out,source.excerpt);
+  else if(type==="TOOL_RESULT:source.read")pushString(out,source.content);
+  return out;
+}
+function contradictionCandidates(payload,sourceType){
+  if(String(sourceType||"")!=="OFFICIAL_EXTERNAL")return[];
   const source=payload&&typeof payload==="object"&&!Array.isArray(payload)?payload:{},out=[];
   for(const key of ["contradicts","contradicted_claims","unsupported_claims","rejected_claims"])pushMany(out,source[key]);
   return out;
@@ -73,12 +80,12 @@ function quoteStatus(payload,requiredQuote){
   if(!candidates.length)return STATUS.UNKNOWN;
   return candidates.some(item=>normalizeCasefold(item).includes(needle))?STATUS.VERIFIED:STATUS.FAIL;
 }
-function claimSupportStatus(payload,claim){
+function claimSupportStatus(payload,claim,sourceType){
   const requested=boundedString(claim,"SOURCE_VERIFY_CLAIM");
   if(!requested)return STATUS.NOT_REQUESTED;
   const needle=normalizeCasefold(requested);
-  if(contradictionCandidates(payload).some(item=>normalizeCasefold(item)===needle))return STATUS.UNSUPPORTED;
-  if(directTextCandidates(payload).some(item=>normalizeCasefold(item)===needle))return STATUS.SUPPORTED;
+  if(contradictionCandidates(payload,sourceType).some(item=>normalizeCasefold(item)===needle))return STATUS.UNSUPPORTED;
+  if(authoritativeClaimCandidates(payload,sourceType).some(item=>normalizeCasefold(item)===needle))return STATUS.SUPPORTED;
   return STATUS.UNKNOWN;
 }
 function verificationDecision({sourceIdentity,version,quote,claimSupport}){
@@ -89,14 +96,14 @@ function verificationDecision({sourceIdentity,version,quote,claimSupport}){
   return DECISION.VERIFIED_BOUNDARY;
 }
 function verifySourceBoundary({evidenceId,sourceType,sourceRef,payload,integrityDigest,args={}}={}){
-  const evidence=boundedString(evidenceId,"SOURCE_VERIFY_EVIDENCE_ID",{required:true,max:200});
+  const evidence=boundedString(evidenceId,"SOURCE_VERIFY_EVIDENCE_ID",{required:true,max:200}),type=String(sourceType||"UNKNOWN");
   const digest=boundedString(integrityDigest,"SOURCE_VERIFY_INTEGRITY_DIGEST",{required:true,max:128});
   if(!/^[a-f0-9]{64}$/i.test(digest))throw new Error("SOURCE_VERIFY_INTEGRITY_DIGEST_INVALID");
-  const identity=sourceIdentityStatus(sourceRef,args.expected_source_ref),version=versionStatus(payload,args.expected_version),quote=quoteStatus(payload,args.required_quote),claim=claimSupportStatus(payload,args.claim);
+  const identity=sourceIdentityStatus(sourceRef,args.expected_source_ref),version=versionStatus(payload,args.expected_version),quote=quoteStatus(payload,args.required_quote),claim=claimSupportStatus(payload,args.claim,type);
   const decision=verificationDecision({sourceIdentity:identity,version,quote,claimSupport:claim});
   const usable=decision===DECISION.VERIFIED_BOUNDARY&&claim===STATUS.SUPPORTED&&(version===STATUS.VERIFIED||version===STATUS.NOT_REQUESTED);
-  const material={evidence_id:evidence,source_type:String(sourceType||"UNKNOWN"),source_ref:sourceRef===null||sourceRef===undefined?null:String(sourceRef),integrity_digest:digest,provenance_status:STATUS.VERIFIED,source_identity_status:identity,version_applicability_status:version,required_quote_status:quote,claim_support_status:claim,verification_decision:decision,usable_for_supported_claim:usable};
-  return Object.freeze({schema:"debugai.source-verification/v1",verification_id:`SVR_${contentHash(material).slice(0,24)}`,...material,semantic_policy:"SUPPORTED is emitted only for exact normalized direct-text equality. Absence of an exact match remains UNKNOWN, never UNSUPPORTED. Version applicability is VERIFIED only from exact structured version fields."});
+  const material={evidence_id:evidence,source_type:type,source_ref:sourceRef===null||sourceRef===undefined?null:String(sourceRef),integrity_digest:digest,provenance_status:STATUS.VERIFIED,source_identity_status:identity,version_applicability_status:version,required_quote_status:quote,claim_support_status:claim,verification_decision:decision,usable_for_supported_claim:usable};
+  return Object.freeze({schema:"debugai.source-verification/v1",verification_id:`SVR_${contentHash(material).slice(0,24)}`,...material,semantic_policy:"SUPPORTED is emitted only for exact normalized direct text from OFFICIAL_EXTERNAL excerpt or TOOL_RESULT:source.read content. Non-match remains UNKNOWN, never UNSUPPORTED. Explicit contradiction is accepted only from OFFICIAL_EXTERNAL structured contradiction fields. Version applicability is VERIFIED only from exact structured version fields."});
 }
 
-module.exports={STATUS,DECISION,MAX_TEXT,MAX_VALUES,normalize,directTextCandidates,contradictionCandidates,versionCandidates,sourceIdentityStatus,versionStatus,quoteStatus,claimSupportStatus,verificationDecision,verifySourceBoundary};
+module.exports={STATUS,DECISION,MAX_TEXT,MAX_VALUES,normalize,directTextCandidates,authoritativeClaimCandidates,contradictionCandidates,versionCandidates,sourceIdentityStatus,versionStatus,quoteStatus,claimSupportStatus,verificationDecision,verifySourceBoundary};
