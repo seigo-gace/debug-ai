@@ -3,84 +3,28 @@ const {performance}=require("node:perf_hooks");
 const {fetch:undiciFetch,Agent}=require("undici");
 const {ROLES}=require("../roles.js");
 const {compileInvocation}=require("./invocation-compiler.js");
+const {getModelOutputHardCeilingForRole}=require("./model-profiles.js");
 
 const SCHEMA="debugai.researcher-skill-effect-benchmark/v1";
 const ROLE="researcher";
-const MAX_TOKENS=400;
-const OUTPUT_POLICY="Return JSON only with exactly these top-level keys: research_status, answer, evidence_refs, rejected_source_refs, contradictions, bound_version. research_status must be SUPPORTED, CONTRADICTORY_EVIDENCE, or INSUFFICIENT_EVIDENCE. answer must be a short string and must be UNKNOWN when evidence is insufficient or unresolved. evidence_refs/rejected_source_refs/contradictions must be arrays of strings. bound_version must be a string or null. Use only supplied source_ref values. Preserve contradictory evidence and never invent support.";
+const MAX_TOKENS=getModelOutputHardCeilingForRole(ROLE);
+const OUTPUT_POLICY="Return JSON only with exactly these top-level keys: research_status, answer, evidence_refs, rejected_source_refs, contradictions, bound_version. research_status must be SUPPORTED, CONTRADICTORY_EVIDENCE, or INSUFFICIENT_EVIDENCE. answer must be a string and must be UNKNOWN when evidence is insufficient or unresolved. evidence_refs/rejected_source_refs/contradictions must be arrays of strings. bound_version must be a string or null. Use only supplied source_ref values. Preserve every material contradiction, rejected source, version binding and evidence reference; never invent support and never omit material evidence for brevity.";
 
 const CASES=Object.freeze([
-  Object.freeze({
-    id:"authoritative_source_priority",
-    skills:Object.freeze(["evidence-first-research","source-verifier","source-priority-filter"]),
-    expected:Object.freeze({status:"SUPPORTED",answer:"limit=128",evidence:Object.freeze(["OFFICIAL_API_42"]),rejected:Object.freeze(["COMMUNITY_BLOG_42"]),contradictions:Object.freeze(["OFFICIAL_API_42<>COMMUNITY_BLOG_42"]),version:"4.2"}),
-    input:Object.freeze({question:"What is the request limit in Runtime 4.2?",target_version:"4.2",evidence:Object.freeze([
-      Object.freeze({source_ref:"OFFICIAL_API_42",authority:"official_api_reference",verification:"VERIFIED",version:"4.2",claim:"limit=128"}),
-      Object.freeze({source_ref:"COMMUNITY_BLOG_42",authority:"community_summary",verification:"UNVERIFIED",version:"4.2",claim:"limit=256"}),
-    ])}),
-  }),
-  Object.freeze({
-    id:"exact_version_binding",
-    skills:Object.freeze(["source-verifier","source-priority-filter","version-specific-research"]),
-    expected:Object.freeze({status:"SUPPORTED",answer:"flag=legacy_mode",evidence:Object.freeze(["OFFICIAL_GUIDE_28"]),rejected:Object.freeze(["OFFICIAL_GUIDE_30"]),contradictions:Object.freeze([]),version:"2.8"}),
-    input:Object.freeze({question:"Which mode flag applies to Runtime 2.8?",target_version:"2.8",evidence:Object.freeze([
-      Object.freeze({source_ref:"OFFICIAL_GUIDE_28",authority:"official_versioned_guide",verification:"VERIFIED",version:"2.8",claim:"flag=legacy_mode"}),
-      Object.freeze({source_ref:"OFFICIAL_GUIDE_30",authority:"official_versioned_guide",verification:"VERIFIED",version:"3.0",claim:"flag=new_mode"}),
-    ])}),
-  }),
-  Object.freeze({
-    id:"contradictory_evidence_retention",
-    skills:Object.freeze(["evidence-first-research","source-verifier","contradictory-source-detection"]),
-    expected:Object.freeze({status:"CONTRADICTORY_EVIDENCE",answer:"UNKNOWN",evidence:Object.freeze(["OFFICIAL_RELEASE_51","OFFICIAL_API_51"]),rejected:Object.freeze([]),contradictions:Object.freeze(["OFFICIAL_RELEASE_51<>OFFICIAL_API_51"]),version:"5.1"}),
-    input:Object.freeze({question:"Is feature_x enabled by default in Runtime 5.1?",target_version:"5.1",evidence:Object.freeze([
-      Object.freeze({source_ref:"OFFICIAL_RELEASE_51",authority:"official_release_note",verification:"VERIFIED",version:"5.1",claim:"feature_x_default=enabled"}),
-      Object.freeze({source_ref:"OFFICIAL_API_51",authority:"official_api_reference",verification:"VERIFIED",version:"5.1",claim:"feature_x_default=disabled"}),
-    ])}),
-  }),
-  Object.freeze({
-    id:"no_evidence",
-    skills:Object.freeze(["evidence-first-research","source-verifier","source-priority-filter"]),
-    expected:Object.freeze({status:"INSUFFICIENT_EVIDENCE",answer:"UNKNOWN",evidence:Object.freeze([]),rejected:Object.freeze([]),contradictions:Object.freeze([]),version:null}),
-    input:Object.freeze({question:"What is the retry default in Runtime 1.4?",target_version:"1.4",evidence:Object.freeze([])}),
-  }),
-  Object.freeze({
-    id:"unsupported_source_rejection",
-    skills:Object.freeze(["evidence-first-research","source-verifier","source-priority-filter"]),
-    expected:Object.freeze({status:"SUPPORTED",answer:"NOT_AFFECTED",evidence:Object.freeze(["OFFICIAL_ADVISORY"]),rejected:Object.freeze(["ANON_FORUM"]),contradictions:Object.freeze(["OFFICIAL_ADVISORY<>ANON_FORUM"]),version:"2.3"}),
-    input:Object.freeze({question:"Is Package 2.3 affected by CVE-TEST?",target_version:"2.3",evidence:Object.freeze([
-      Object.freeze({source_ref:"OFFICIAL_ADVISORY",authority:"upstream_security_advisory",verification:"VERIFIED",version_scope:">=3.0 <3.2",claim:"affected"}),
-      Object.freeze({source_ref:"ANON_FORUM",authority:"anonymous_forum_post",verification:"UNSUPPORTED",version:"2.3",claim:"affected"}),
-    ])}),
-  }),
+  Object.freeze({id:"authoritative_source_priority",skills:Object.freeze(["evidence-first-research","source-verifier","source-priority-filter"]),expected:Object.freeze({status:"SUPPORTED",answer:"limit=128",evidence:Object.freeze(["OFFICIAL_API_42"]),rejected:Object.freeze(["COMMUNITY_BLOG_42"]),contradictions:Object.freeze(["OFFICIAL_API_42<>COMMUNITY_BLOG_42"]),version:"4.2"}),input:Object.freeze({question:"What is the request limit in Runtime 4.2?",target_version:"4.2",evidence:Object.freeze([Object.freeze({source_ref:"OFFICIAL_API_42",authority:"official_api_reference",verification:"VERIFIED",version:"4.2",claim:"limit=128"}),Object.freeze({source_ref:"COMMUNITY_BLOG_42",authority:"community_summary",verification:"UNVERIFIED",version:"4.2",claim:"limit=256"})])})}),
+  Object.freeze({id:"exact_version_binding",skills:Object.freeze(["source-verifier","source-priority-filter","version-specific-research"]),expected:Object.freeze({status:"SUPPORTED",answer:"flag=legacy_mode",evidence:Object.freeze(["OFFICIAL_GUIDE_28"]),rejected:Object.freeze(["OFFICIAL_GUIDE_30"]),contradictions:Object.freeze([]),version:"2.8"}),input:Object.freeze({question:"Which mode flag applies to Runtime 2.8?",target_version:"2.8",evidence:Object.freeze([Object.freeze({source_ref:"OFFICIAL_GUIDE_28",authority:"official_versioned_guide",verification:"VERIFIED",version:"2.8",claim:"flag=legacy_mode"}),Object.freeze({source_ref:"OFFICIAL_GUIDE_30",authority:"official_versioned_guide",verification:"VERIFIED",version:"3.0",claim:"flag=new_mode"})])})}),
+  Object.freeze({id:"contradictory_evidence_retention",skills:Object.freeze(["evidence-first-research","source-verifier","contradictory-source-detection"]),expected:Object.freeze({status:"CONTRADICTORY_EVIDENCE",answer:"UNKNOWN",evidence:Object.freeze(["OFFICIAL_RELEASE_51","OFFICIAL_API_51"]),rejected:Object.freeze([]),contradictions:Object.freeze(["OFFICIAL_RELEASE_51<>OFFICIAL_API_51"]),version:"5.1"}),input:Object.freeze({question:"Is feature_x enabled by default in Runtime 5.1?",target_version:"5.1",evidence:Object.freeze([Object.freeze({source_ref:"OFFICIAL_RELEASE_51",authority:"official_release_note",verification:"VERIFIED",version:"5.1",claim:"feature_x_default=enabled"}),Object.freeze({source_ref:"OFFICIAL_API_51",authority:"official_api_reference",verification:"VERIFIED",version:"5.1",claim:"feature_x_default=disabled"})])})}),
+  Object.freeze({id:"no_evidence",skills:Object.freeze(["evidence-first-research","source-verifier","source-priority-filter"]),expected:Object.freeze({status:"INSUFFICIENT_EVIDENCE",answer:"UNKNOWN",evidence:Object.freeze([]),rejected:Object.freeze([]),contradictions:Object.freeze([]),version:null}),input:Object.freeze({question:"What is the retry default in Runtime 1.4?",target_version:"1.4",evidence:Object.freeze([])})}),
+  Object.freeze({id:"unsupported_source_rejection",skills:Object.freeze(["evidence-first-research","source-verifier","source-priority-filter"]),expected:Object.freeze({status:"SUPPORTED",answer:"NOT_AFFECTED",evidence:Object.freeze(["OFFICIAL_ADVISORY"]),rejected:Object.freeze(["ANON_FORUM"]),contradictions:Object.freeze(["OFFICIAL_ADVISORY<>ANON_FORUM"]),version:"2.3"}),input:Object.freeze({question:"Is Package 2.3 affected by CVE-TEST?",target_version:"2.3",evidence:Object.freeze([Object.freeze({source_ref:"OFFICIAL_ADVISORY",authority:"upstream_security_advisory",verification:"VERIFIED",version_scope:">=3.0 <3.2",claim:"affected"}),Object.freeze({source_ref:"ANON_FORUM",authority:"anonymous_forum_post",verification:"UNSUPPORTED",version:"2.3",claim:"affected"})])})}),
 ]);
-
 function parseJson(content){const text=String(content||"").trim().replace(/^```json\s*/i,"").replace(/```$/i,"").trim();return JSON.parse(text);}
 function withoutSkillDirectives(system){return String(system).split("\n").filter(line=>!line.startsWith("SKILL_SELECTION=")&&!line.startsWith("SELECTED_SKILLS=")&&!line.includes(" procedure=")).join("\n");}
-function buildSystemsForCase(testCase){const compiled=compileInvocation(ROLE,{task:"select verified authoritative version-bound evidence retain contradictions reject unsupported sources",extraSystem:OUTPUT_POLICY,selectedSkillIds:[...testCase.skills]});return {on:compiled.system,off:withoutSkillDirectives(compiled.system),selected_skill_ids:[...compiled.selected_skill_ids]};}
+function buildSystemsForCase(testCase){const compiled=compileInvocation(ROLE,{task:"select verified authoritative version-bound evidence retain contradictions reject unsupported sources",extraSystem:OUTPUT_POLICY,selectedSkillIds:[...testCase.skills]});return{on:compiled.system,off:withoutSkillDirectives(compiled.system),selected_skill_ids:[...compiled.selected_skill_ids]};}
 function sameArray(a,b){return Array.isArray(a)&&Array.isArray(b)&&a.length===b.length&&a.every((x,i)=>x===b[i]);}
-function scoreCase(testCase,value){
-  const allowed=new Set(testCase.input.evidence.map(x=>x.source_ref));
-  const evidence=Array.isArray(value?.evidence_refs)?value.evidence_refs.map(String):[];
-  const rejected=Array.isArray(value?.rejected_source_refs)?value.rejected_source_refs.map(String):[];
-  const contradictions=Array.isArray(value?.contradictions)?value.contradictions.map(String):[];
-  let score=0;const checks={};
-  checks.status=value?.research_status===testCase.expected.status;if(checks.status)score+=1;
-  checks.answer=value?.answer===testCase.expected.answer;if(checks.answer)score+=1;
-  checks.evidence=sameArray(evidence,testCase.expected.evidence)&&evidence.every(x=>allowed.has(x));if(checks.evidence)score+=1;
-  checks.rejected=sameArray(rejected,testCase.expected.rejected)&&rejected.every(x=>allowed.has(x));if(checks.rejected)score+=1;
-  checks.context=sameArray(contradictions,testCase.expected.contradictions)&&(value?.bound_version??null)===testCase.expected.version;if(checks.context)score+=1;
-  return {score,max_score:5,checks,research_status:String(value?.research_status||""),answer:String(value?.answer||""),evidence_refs:evidence,rejected_source_refs:rejected,contradictions,bound_version:value?.bound_version??null};
-}
-function defaultClient({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=process.env.AI_CORE_API_KEY,fetchImpl=undiciFetch,timeoutMs=600000}={}){
-  if(!baseUrl)throw new Error("AI_CORE_URL_REQUIRED");if(!apiKey)throw new Error("AI_CORE_API_KEY_REQUIRED");
-  const endpoint=new URL("/v1/chat/completions",baseUrl).toString();const dispatcher=new Agent({headersTimeout:timeoutMs+5000,bodyTimeout:timeoutMs+5000});
-  return async function callModel({system,user}){const ctl=new AbortController();const timer=setTimeout(()=>ctl.abort(),timeoutMs);try{const r=await fetchImpl(endpoint,{method:"POST",headers:{authorization:`Bearer ${apiKey}`,"content-type":"application/json"},body:JSON.stringify({model:ROLES[ROLE].backend_model,messages:[{role:"system",content:system},{role:"user",content:user}],max_tokens:MAX_TOKENS,temperature:0,stream:false,response_format:{type:"json_object"},chat_template_kwargs:{enable_thinking:ROLES[ROLE].thinking}}),signal:ctl.signal,dispatcher});const text=await r.text();if(!r.ok)throw new Error(`AI_CORE_HTTP_${r.status}:${text.slice(0,300)}`);const envelope=JSON.parse(text);const content=envelope?.choices?.[0]?.message?.content;if(typeof content!=="string"||!content.trim())throw new Error("AI_CORE_EMPTY");return {content};}finally{clearTimeout(timer);}};
-}
-async function runResearcherSkillEffectBenchmark({callModel=defaultClient(),clock=performance}={}){
-  const results=[],totals={on:0,off:0,max:CASES.length*5};const started=clock.now();
-  for(const testCase of CASES){const systems=buildSystemsForCase(testCase);const user=JSON.stringify({benchmark_case:testCase.id,...testCase.input});const pair={case_id:testCase.id,selected_skill_ids:systems.selected_skill_ids};for(const mode of ["off","on"]){const t0=clock.now();const reply=await callModel({mode,system:systems[mode],user,case:testCase});const parsed=parseJson(reply.content);const scored=scoreCase(testCase,parsed);pair[mode]={...scored,elapsed_ms:Math.max(0,Math.round(clock.now()-t0)),output:parsed};totals[mode]+=scored.score;}results.push(pair);}
-  const delta=totals.on-totals.off;return {schema:SCHEMA,authority:"MEASUREMENT_ONLY",completed:true,role:ROLE,model:ROLES[ROLE].backend_model,temperature:0,skill_selection_boundary:"MAX_3_PER_INVOCATION",cases:results,score:{skill_on:totals.on,skill_off:totals.off,max:totals.max,delta,winner:delta>0?"SKILL_ON":delta<0?"SKILL_OFF":"TIE",effect_demonstrated:delta>0},elapsed_ms:Math.max(0,Math.round(clock.now()-started))};
-}
+function scoreCase(testCase,value){const allowed=new Set(testCase.input.evidence.map(x=>x.source_ref)),evidence=Array.isArray(value?.evidence_refs)?value.evidence_refs.map(String):[],rejected=Array.isArray(value?.rejected_source_refs)?value.rejected_source_refs.map(String):[],contradictions=Array.isArray(value?.contradictions)?value.contradictions.map(String):[];let score=0;const checks={};checks.status=value?.research_status===testCase.expected.status;if(checks.status)score+=1;checks.answer=value?.answer===testCase.expected.answer;if(checks.answer)score+=1;checks.evidence=sameArray(evidence,testCase.expected.evidence)&&evidence.every(x=>allowed.has(x));if(checks.evidence)score+=1;checks.rejected=sameArray(rejected,testCase.expected.rejected)&&rejected.every(x=>allowed.has(x));if(checks.rejected)score+=1;checks.context=sameArray(contradictions,testCase.expected.contradictions)&&(value?.bound_version??null)===testCase.expected.version;if(checks.context)score+=1;return{score,max_score:5,checks,research_status:String(value?.research_status||""),answer:String(value?.answer||""),evidence_refs:evidence,rejected_source_refs:rejected,contradictions,bound_version:value?.bound_version??null};}
+function assertComplete(envelope){const choice=envelope?.choices?.[0],content=choice?.message?.content;if(choice?.finish_reason==="length"){const e=new Error("AI_CORE_OUTPUT_TRUNCATED");e.code="AI_CORE_OUTPUT_TRUNCATED";e.benchmark_metadata={role:ROLE,max_tokens:MAX_TOKENS,finish_reason:"length",completion_tokens:Number.isFinite(envelope?.usage?.completion_tokens)?envelope.usage.completion_tokens:null,content_chars:typeof content==="string"?content.length:0};throw e;}return content;}
+function defaultClient({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=process.env.AI_CORE_API_KEY,fetchImpl=undiciFetch,timeoutMs=600000}={}){if(!baseUrl)throw new Error("AI_CORE_URL_REQUIRED");if(!apiKey)throw new Error("AI_CORE_API_KEY_REQUIRED");const endpoint=new URL("/v1/chat/completions",baseUrl).toString(),dispatcher=new Agent({headersTimeout:timeoutMs+5000,bodyTimeout:timeoutMs+5000});return async function callModel({system,user}){const ctl=new AbortController(),timer=setTimeout(()=>ctl.abort(),timeoutMs);try{const r=await fetchImpl(endpoint,{method:"POST",headers:{authorization:`Bearer ${apiKey}`,"content-type":"application/json"},body:JSON.stringify({model:ROLES[ROLE].backend_model,messages:[{role:"system",content:system},{role:"user",content:user}],max_tokens:MAX_TOKENS,temperature:0,stream:false,response_format:{type:"json_object"},chat_template_kwargs:{enable_thinking:ROLES[ROLE].thinking}}),signal:ctl.signal,dispatcher}),text=await r.text();if(!r.ok)throw new Error(`AI_CORE_HTTP_${r.status}:${text.slice(0,300)}`);const content=assertComplete(JSON.parse(text));if(typeof content!=="string"||!content.trim())throw new Error("AI_CORE_EMPTY");return{content};}finally{clearTimeout(timer);}};}
+async function runResearcherSkillEffectBenchmark({callModel=defaultClient(),clock=performance}={}){const results=[],totals={on:0,off:0,max:CASES.length*5},started=clock.now();for(const testCase of CASES){const systems=buildSystemsForCase(testCase),user=JSON.stringify({benchmark_case:testCase.id,...testCase.input}),pair={case_id:testCase.id,selected_skill_ids:systems.selected_skill_ids};for(const mode of ["off","on"]){const t0=clock.now(),reply=await callModel({mode,system:systems[mode],user,case:testCase}),parsed=parseJson(reply.content),scored=scoreCase(testCase,parsed);pair[mode]={...scored,elapsed_ms:Math.max(0,Math.round(clock.now()-t0)),output:parsed};totals[mode]+=scored.score;}results.push(pair);}const delta=totals.on-totals.off;return{schema:SCHEMA,authority:"MEASUREMENT_ONLY",completed:true,role:ROLE,model:ROLES[ROLE].backend_model,max_tokens:MAX_TOKENS,temperature:0,skill_selection_boundary:"CASE_DECLARED_SKILLS",cases:results,score:{skill_on:totals.on,skill_off:totals.off,max:totals.max,delta,winner:delta>0?"SKILL_ON":delta<0?"SKILL_OFF":"TIE",effect_demonstrated:delta>0},elapsed_ms:Math.max(0,Math.round(clock.now()-started))};}
 async function cli(){try{process.stdout.write(`${JSON.stringify(await runResearcherSkillEffectBenchmark(),null,2)}\n`);}catch(error){process.stdout.write(`${JSON.stringify({schema:SCHEMA,authority:"MEASUREMENT_ONLY",completed:false,error:String(error?.message||error)},null,2)}\n`);process.exitCode=1;}}
 if(require.main===module)void cli();
-module.exports={SCHEMA,ROLE,MAX_TOKENS,CASES,OUTPUT_POLICY,parseJson,withoutSkillDirectives,buildSystemsForCase,scoreCase,defaultClient,runResearcherSkillEffectBenchmark};
+module.exports={SCHEMA,ROLE,MAX_TOKENS,CASES,OUTPUT_POLICY,parseJson,withoutSkillDirectives,buildSystemsForCase,scoreCase,assertComplete,defaultClient,runResearcherSkillEffectBenchmark};
