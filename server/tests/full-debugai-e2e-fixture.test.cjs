@@ -59,7 +59,7 @@ test("HTTP entry points complete the deterministic analyze-to-approved-patch clo
         summary:"Update the reproduced stale value only",
         operations:[{type:"replace",path:"value.js",old:"module.exports=1;",new:"module.exports=2;"}]
       },
-      local_reviewer:{verdict:"PASS",reason:"all deterministic checks passed"}
+      local_reviewer:{verdict:"PASS",decision:"DONE",claims:[]}
     };
     return {content:JSON.stringify(outputs[role])};
   }};
