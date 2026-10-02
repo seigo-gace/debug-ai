@@ -31,7 +31,7 @@ Runtime Volume Gate #102   = SUCCESS
 Core Verify #507           = SUCCESS
 ```
 
-Approved deployed revision remains `b30649a19cd97929a595c639f51fae44c74d4185`. The current context/token/cache correction is not deployed. Documentation synchronization after `c9aa6f28...` creates a later branch head and therefore requires its own exact-head CI before it can become the reflection candidate.
+Approved deployed revision remains `b30649a19cd97929a595c639f51fae44c74d4185`. The current context/token/cache correction is not deployed. README, `docs/CURRENT_STATE.md`, and `docs/PRE_SERVER_QUALIFICATION.md` are synchronized to the current source contract; the final documentation head must pass its own exact-head CI before it can become the reflection candidate.
 
 ```text
 checkout path                    = /home/admin1/projects/debug-ai
@@ -557,14 +557,14 @@ Core Verify #507           = SUCCESS
 
 The current source contains direct regressions for model-profile ceilings, qualified runtime-context clamping, fail-closed truncation, telemetry-driven 85% working-context compaction, explicit prompt-cache request, current cache telemetry parsing, measured cache-hit ratio, prefix stability, and canonical user/evidence payload preservation.
 
-Documentation synchronization after that source creates a later exact branch head and requires its own CI before it can be used as the Server reflection revision.
+The final documentation head requires its own exact-head CI before it can be used as the Server reflection revision.
 
 ## Current next-work order
 
 Current-state owner: [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md).
 
 ```text
-1. require exact current documentation-head GitHub CI PASS
+1. require exact final documentation-head GitHub CI PASS
 2. obtain explicit Master approval for one exact reflection SHA; keep Server at approved b30649a until then
 3. reflect only that approved SHA, preserving .debugai-input, unmanaged state, both volumes, and historical checkpoints
 4. rebuild/recreate only debug-ai and repeat init/health/cleanliness/parity/durability verification
