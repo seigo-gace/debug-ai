@@ -27,7 +27,7 @@ function workflowFor(f,{failedAction=null,stdoutByAction={},aiCall=null}={}){
     async wait({jobId}){const action=prepared[Number(jobId.slice(4))-1].action,pass=action!==failedAction;return{job_id:jobId,action,command:`fixture:${action}`,code:pass?0:1,pass,timed_out:false,duration_ms:4,stdout:stdoutByAction[action]??(pass?"ok":""),stderr:pass?"":"failed",isolation:{backend:"sidecar+landlock+seccomp",network:"DENY",workspace_mount:"ABSENT",secret_mounts:"ABSENT",docker_socket:"ABSENT"}};}
   });
   const repoPolicy=new RepoPolicy({workspaceRoot:f.workspace,allowlist:"repo"}),authority=new RunAuthority({runtimeRoot:f.runtimeRoot,repoPolicy}),runtimeEvidence=new RuntimeEvidenceStore(path.join(f.runtimeRoot,"evidence"));let patchCalls=0;
-  const workflow=createWorkflow({aiCore:{call:async(role,options)=>{assert.equal(role,"local_reviewer");if(aiCall)return aiCall(role,options);return{content:JSON.stringify({verdict:"PASS",claims:[]})};}},sandboxVerification,repoPolicy,authority,runtimeEvidence,patchService:{create(){patchCalls++;throw new Error("PATCH_CREATE_FORBIDDEN");},apply(){patchCalls++;throw new Error("PATCH_APPLY_FORBIDDEN");}}});
+  const workflow=createWorkflow({aiCore:{call:async(role,options)=>{assert.equal(role,"local_reviewer");if(aiCall)return aiCall(role,options);return{content:JSON.stringify({verdict:"PASS",decision:"DONE",claims:[]})};}},sandboxVerification,repoPolicy,authority,runtimeEvidence,patchService:{create(){patchCalls++;throw new Error("PATCH_CREATE_FORBIDDEN");},apply(){patchCalls++;throw new Error("PATCH_APPLY_FORBIDDEN");}}});
   return{workflow,authority,runtimeEvidence,prepared,getPatchCalls:()=>patchCalls};
 }
 
@@ -44,7 +44,7 @@ test("read-only verify returns FAIL for deterministic failure and INSUFFICIENT_E
 
 test("read-only verify compacts successful command output only for Local Reviewer input",async t=>{
   const f=fixture();t.after(f.cleanup);const fullOutput="PASS_CASE_OUTPUT\n".repeat(4000);let invocation=null;
-  const h=workflowFor(f,{stdoutByAction:{"package.test":fullOutput},aiCall:async(_role,options)=>{invocation=options;return{content:JSON.stringify({verdict:"PASS",claims:[]})};}});
+  const h=workflowFor(f,{stdoutByAction:{"package.test":fullOutput},aiCall:async(_role,options)=>{invocation=options;return{content:JSON.stringify({verdict:"PASS",decision:"DONE",claims:[]})};}});
   const result=await h.workflow.verifyReadOnly({repo:f.repo});assert.equal(result.verdict,"PASS");assert.equal(result.deterministic_verification.checks.find(x=>x.name==="sandbox:test").stdout,fullOutput);
   assert.ok(invocation);assert.ok(Buffer.byteLength(invocation.user,"utf8")<12000);assert.equal(invocation.user.includes(fullOutput),false);
   const evidence=JSON.parse(invocation.user).verification_evidence;const testCheck=evidence.find(x=>x.payload?.name==="sandbox:test").payload;
