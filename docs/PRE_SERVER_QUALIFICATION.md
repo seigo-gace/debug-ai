@@ -19,7 +19,7 @@ Runtime Volume Gate #102   = SUCCESS
 Core Verify #507           = SUCCESS
 ```
 
-The approved live Server revision remains `b30649a19cd97929a595c639f51fae44c74d4185`. The current context/token/cache correction has not been reflected to Server. README, `CURRENT_STATE.md`, and this qualification document are being synchronized to the current source contract; the resulting exact branch head must pass its own CI before it can be considered the reflection candidate.
+The approved live Server revision remains `b30649a19cd97929a595c639f51fae44c74d4185`. The current context/token/cache correction has not been reflected to Server. README, `CURRENT_STATE.md`, and this qualification document are synchronized to the current source contract on the feature branch; the resulting exact branch head must pass its own CI before it can be considered the reflection candidate.
 
 ```text
 checkout path                    = /home/admin1/projects/debug-ai
