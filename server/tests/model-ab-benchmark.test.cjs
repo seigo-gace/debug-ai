@@ -81,7 +81,7 @@ test("real model AB client rejects empty partial and valid JSON at token exhaust
     const call=makeAiCoreCaller({baseUrl:"http://example.invalid",apiKey:"test",dispatcher:{},fetchImpl:async()=>new Response(JSON.stringify({choices:[{finish_reason:"length",message:{content,finish_reason:"stop",reasoning_content:"PRIVATE_REASONING_MARKER"}}],usage:{completion_tokens:800}}),{status:200})});
     await assert.rejects(()=>call({role:"diagnoser",config,system:"s",user:"u"}),e=>{
       assert.equal(e.code,"AI_CORE_OUTPUT_TRUNCATED");
-      assert.deepEqual(e.benchmark_metadata,{role:"diagnoser",max_tokens:800,finish_reason:"length",completion_tokens:800,content_chars:content.length});
+      assert.deepEqual(e.benchmark_metadata,{role:"diagnoser",max_tokens:config.max_tokens,finish_reason:"length",completion_tokens:800,content_chars:content.length});
       assert.equal(JSON.stringify(e).includes("PRIVATE_"),false);return true;
     });
   }
