@@ -53,6 +53,7 @@ jobs:
             -e DEBUG_AI_RUNTIME_ROOT=/tmp/debug-ai-runtime \
             -e DEBUG_AI_CORE_URL=http://127.0.0.1:18080 \
             -e AI_CORE_API_KEY=ci-test-key \
+            -e DEBUG_AI_CORE_CONTEXT_TOKENS=8192 \
             -e DEBUG_AI_EVIDENCE_SEARCH_URL=http://127.0.0.1:7376 \
             -e DEBUG_AI_EVIDENCE_SEARCH_SECRET=ci-evidence-secret-0123456789abcdef \
             -e DEBUG_AI_TGSERVER_URL=http://127.0.0.1:3000 \
@@ -207,6 +208,7 @@ jobs:
         env:
           DEBUG_AI_CORE_URL: http://127.0.0.1:18080
           AI_CORE_API_KEY: ci-test-key
+          DEBUG_AI_CORE_CONTEXT_TOKENS: '8192'
           DEBUG_AI_EVIDENCE_SEARCH_URL: http://127.0.0.1:7376
           DEBUG_AI_EVIDENCE_SEARCH_SECRET_HOST_PATH: /tmp/ci-evidence-secret
           DEBUG_AI_TGSERVER_URL: http://127.0.0.1:3000
