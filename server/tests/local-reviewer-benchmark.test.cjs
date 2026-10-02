@@ -7,7 +7,9 @@ const {compileInvocation}=require("../control/invocation-compiler.js");
 test("Local Reviewer invocation requires canonical verdict decision claims fields",()=>{
   const compiled=compileInvocation("local_reviewer",{task:"review completion evidence"});
   assert.match(compiled.system,/OUTPUT_FIELDS=verdict,decision,claims/);
-  assert.match(compiled.system,/Do not substitute review_state, final_review_state, or material_claims/);
+  assert.match(compiled.system,/type field exactly equal to one of FACT, INFERENCE, HYPOTHESIS, UNKNOWN, REJECTED/);
+  assert.match(compiled.system,/INSUFFICIENT_EVIDENCE is a decision\/verdict state, not a claim type/);
+  assert.match(compiled.system,/Do not use claim, status, support, review_state, final_review_state, or material_claims as substitutes/);
 });
 
 test("Local Reviewer benchmark uses fresh no-tool strict-evidence production path",async()=>{
@@ -45,6 +47,7 @@ test("Local Reviewer benchmark uses fresh no-tool strict-evidence production pat
   assert.equal(out.review.verdict,"PASS");
   assert.equal(out.review.decision,"DONE");
   assert.equal(out.review.claims_count,1);
+  assert.deepEqual(out.review.claim_types,["FACT"]);
 });
 
 test("Local Reviewer benchmark fails closed when model cites unregistered evidence",async()=>{
@@ -53,6 +56,15 @@ test("Local Reviewer benchmark fails closed when model cites unregistered eviden
     control_plane:{effective_timeout_ms:600000,selected_skill_ids:[]},
   })};
   await assert.rejects(()=>runLocalReviewerBenchmark({aiCore}),/ROLE_CLAIM_BINDING_INVALID:local_reviewer/);
+});
+
+test("Local Reviewer benchmark rejects claims missing canonical type",async()=>{
+  const ids=verificationRecords().map(x=>x.evidence_id);
+  const aiCore={call:async()=>({
+    content:JSON.stringify({verdict:"PASS",decision:"DONE",claims:[{claim:"verification passed",evidence_refs:[ids[0]],support:"PASS"}]}),
+    control_plane:{effective_timeout_ms:600000,selected_skill_ids:[]},
+  })};
+  await assert.rejects(()=>runLocalReviewerBenchmark({aiCore}),/ROLE_CLAIM_EVIDENCE_INVALID:local_reviewer:CLAIM_TYPE_INVALID:0/);
 });
 
 test("Local Reviewer benchmark rejects review_state material_claims substitute output",async()=>{
