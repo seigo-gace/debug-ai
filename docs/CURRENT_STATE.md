@@ -22,7 +22,7 @@ Repository: `seigo-gace/debug-ai`; existing branch: `feat/pre-server-benchmark-g
 
 Current source behavior revision is `023ae8f7fc08632d9c0a4f1046f5b809cf1c096b`. Exact source-behavior CI on that revision passed Public Readiness Audit #457, Verify #492, Runtime Volume Gate #88, and Core Verify #493. The approved deployed revision remains `b30649a19cd97929a595c639f51fae44c74d4185`; no result from that older live revision is promoted into a Runtime PASS for the current source.
 
-Documentation synchronization after `023ae8f7...` creates a later source revision and therefore requires its own exact-head CI before it can be considered the reflection candidate.
+README, this Current State document, and `PRE_SERVER_QUALIFICATION.md` have been synchronized to the current source contract on this branch. The resulting exact branch head must pass its own CI before it can be considered the Server reflection candidate.
 
 ## Current context / token source contract
 
@@ -251,7 +251,7 @@ CURRENT_SOURCE_PUBLIC_READINESS             = SUCCESS_457
 CURRENT_SOURCE_VERIFY                       = SUCCESS_492
 CURRENT_SOURCE_RUNTIME_VOLUME_GATE          = SUCCESS_88
 CURRENT_SOURCE_CORE_VERIFY                  = SUCCESS_493
-CURRENT_SOURCE_DOCUMENT_SYNC                = IN_PROGRESS
+CURRENT_SOURCE_DOCUMENT_SYNC                = PASS
 CURRENT_SOURCE_PR_SYNC                      = PASS
 CURRENT_SOURCE_REFLECTION                   = NOT_EXECUTED
 APPROVED_LIVE_SERVER_HEAD                   = b30649a19cd97929a595c639f51fae44c74d4185
@@ -292,19 +292,18 @@ The completed b30649a reflection does not authorize reflection of a different SH
 ## Required next-work order
 
 ```text
-1. complete README / CURRENT_STATE / PRE_SERVER_QUALIFICATION synchronization and remote readback
-2. require exact documentation-head GitHub CI PASS
-3. obtain explicit Master approval for one exact reflection SHA; keep Server at approved b30649a until then
-4. reflect only that approved SHA, preserving .debugai-input, unmanaged state, both volumes, and historical checkpoints
-5. rebuild/recreate only debug-ai and repeat init/health/cleanliness/parity/durability verification
-6. use a separate source-bound checkpoint on the existing runtime volume; never rebind incompatible old data
-7. complete current-source six-role Skill ON/OFF measurement and retain OFF wins/ties
-8. Thinking A/B only for explicit boolean roles
-9. Sampling A/B one axis at a time using model-bound source candidates
-10. token-cap optimization only if preceding measurements justify a smaller candidate
-11. real allowed-repository integration, exact-nine MCP continuation, and fresh self-debug
-12. Search Gate shadow remains read-only, with zero observations not proving zero false skips
-13. final production-equivalent closed loop and Strict Completion
+1. require exact current documentation-head GitHub CI PASS
+2. obtain explicit Master approval for one exact reflection SHA; keep Server at approved b30649a until then
+3. reflect only that approved SHA, preserving .debugai-input, unmanaged state, both volumes, and historical checkpoints
+4. rebuild/recreate only debug-ai and repeat init/health/cleanliness/parity/durability verification
+5. use a separate source-bound checkpoint on the existing runtime volume; never rebind incompatible old data
+6. complete current-source six-role Skill ON/OFF measurement and retain OFF wins/ties
+7. Thinking A/B only for explicit boolean roles
+8. Sampling A/B one axis at a time using model-bound source candidates
+9. token-cap optimization only if preceding measurements justify a smaller candidate
+10. real allowed-repository integration, exact-nine MCP continuation, and fresh self-debug
+11. Search Gate shadow remains read-only, with zero observations not proving zero false skips
+12. final production-equivalent closed loop and Strict Completion
 ```
 
 Unexecuted, failed, incomplete, and source/runtime-unmatched items retain their actual state.
