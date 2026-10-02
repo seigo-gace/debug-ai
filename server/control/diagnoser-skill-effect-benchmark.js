@@ -6,9 +6,9 @@ const {compileInvocation}=require("./invocation-compiler.js");
 
 const SCHEMA="debugai.diagnoser-skill-effect-benchmark/v1";
 const ROLE="diagnoser";
-// Thinking-enabled cross-refutation exhausted 1024; 1536 completed at 1292 tokens.
-// This is the fixed paired benchmark allowance, not a production profile change.
-const MAX_TOKENS=1536;
+// Correlation ON exhausted 1536; a 2048 candidate returned complete JSON.
+// Fixed paired benchmark allowance only; production Diagnoser remains at 800.
+const MAX_TOKENS=2048;
 const OUTPUT_POLICY="Return JSON only with exactly these top-level keys: diagnosis_status, hypotheses, confirmed_root_cause, unsupported_claims. diagnosis_status must be HYPOTHESES_RETAINED, NO_ACTIVE_HYPOTHESIS, or INSUFFICIENT_EVIDENCE. hypotheses must be an ordered array of objects with exactly id, evidence_refs, falsification_condition, counter_evidence_refs, status. status must be HYPOTHESIS, REJECTED, or UNKNOWN. confirmed_root_cause must be null unless supplied evidence proves the full causal chain. Use only supplied evidence_id values. Return verifiable artifacts only; never expose raw chain-of-thought.";
 
 const CASES=Object.freeze([
