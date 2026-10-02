@@ -23,22 +23,22 @@ test("ordinary fetch failure remains fail closed",()=>{
   assert.equal(isTimeoutError(error),false);
 });
 
-test("qualified runtime context caps requested model-native headroom without changing capability authority",()=>{
+test("qualified runtime context caps source output ceiling without rewriting model capability authority",()=>{
   assert.equal(normalizeRuntimeContextTokens("8192"),8192);
-  const capped=resolveEffectiveMaxTokens("local_reviewer",261144,{runtimeContextTokens:8192,requireRuntimeContextQualification:true});
-  assert.equal(capped.requested_max_tokens,261144);
-  assert.equal(capped.model_output_hard_ceiling_tokens,261144);
+  const capped=resolveEffectiveMaxTokens("local_reviewer",262144,{runtimeContextTokens:8192,requireRuntimeContextQualification:true});
+  assert.equal(capped.requested_max_tokens,262144);
+  assert.equal(capped.model_output_hard_ceiling_tokens,262144);
   assert.equal(capped.runtime_context_tokens,8192);
   assert.equal(capped.runtime_output_ceiling_tokens,7192);
   assert.equal(capped.effective_max_tokens,7192);
   assert.equal(capped.context_limited,true);
-  const native=resolveEffectiveMaxTokens("diagnoser",31768,{runtimeContextTokens:32768,requireRuntimeContextQualification:true});
-  assert.equal(native.effective_max_tokens,31768);
-  assert.equal(native.context_limited,false);
+  const belowRuntimeReserve=resolveEffectiveMaxTokens("diagnoser",30000,{runtimeContextTokens:32768,requireRuntimeContextQualification:true});
+  assert.equal(belowRuntimeReserve.effective_max_tokens,30000);
+  assert.equal(belowRuntimeReserve.context_limited,false);
 });
 
 test("production-style context qualification fails closed when runtime n_ctx is missing or invalid",()=>{
-  assert.throws(()=>resolveEffectiveMaxTokens("diagnoser",31768,{requireRuntimeContextQualification:true}),e=>e?.code==="AI_CORE_RUNTIME_CONTEXT_UNQUALIFIED");
+  assert.throws(()=>resolveEffectiveMaxTokens("diagnoser",32768,{requireRuntimeContextQualification:true}),e=>e?.code==="AI_CORE_RUNTIME_CONTEXT_UNQUALIFIED");
   assert.throws(()=>normalizeRuntimeContextTokens(1000),e=>e?.code==="AI_CORE_RUNTIME_CONTEXT_INVALID");
   assert.throws(()=>resolveEffectiveMaxTokens("diagnoser",40000,{runtimeContextTokens:32768}),e=>e?.code==="AI_CORE_MAX_TOKENS_EXCEEDS_MODEL_CEILING");
 });
@@ -47,9 +47,9 @@ test("qualified adapter sends runtime-safe max_tokens while retaining requested 
   let sent;
   const fetchImpl=async(_url,opts)=>{sent=JSON.parse(opts.body);return{ok:true,status:200,text:async()=>JSON.stringify({choices:[{message:{content:"{\"ok\":true}"},finish_reason:"stop"}],usage:{prompt_tokens:10,completion_tokens:2,total_tokens:12}})};};
   const ai=createAiCoreAdapter({baseUrl:"http://127.0.0.1:18080",apiKey:"test",fetchImpl,runtimeContextTokens:8192,requireRuntimeContextQualification:true});
-  const out=await ai.call("code_scout",{user:"x",maxTokens:31768});
+  const out=await ai.call("code_scout",{user:"x",maxTokens:8192});
   assert.equal(sent.max_tokens,7192);
-  assert.equal(out.control_plane.requested_max_tokens,31768);
+  assert.equal(out.control_plane.requested_max_tokens,8192);
   assert.equal(out.control_plane.max_tokens,7192);
   assert.equal(out.control_plane.runtime_context_tokens,8192);
   assert.equal(out.control_plane.runtime_context_qualified,true);
