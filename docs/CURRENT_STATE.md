@@ -14,7 +14,7 @@ Live MCP handoff                   = docs/CODEX_MCP_LIVE_HANDOFF.md
 Server/VPS/Docker operations       = current G-ACE-inc/server-core authority
 ```
 
-GitHub source, CI, AI Core runtime, and live DebugAI Server state are separate facts.
+GitHub source, exact-head CI, shared AI Core runtime, live DebugAI Server state, and production state are separate facts. No older report promotes an unverified current state.
 
 ## Current repository state
 
@@ -25,65 +25,76 @@ PR                                 = #34
 PR state                           = OPEN / DRAFT / UNMERGED
 base branch                        = feat/search-gate-shadow-audit-cli-20261001
 base SHA                           = cfbe2908bb6190bc5f5c894779c4d0f08f51b80e
-current source anchor              = 0ad40ea939866c9ae59086c1030aadd3f76bdb4a
+current source HEAD                = 9dc8def709ab277bbfb1e6b6701821791bf4dcd8
+current source purpose             = resumable six-role Skill ON/OFF measurement
 ```
 
-Exact source qualification observed at `0ad40ea939866c9ae59086c1030aadd3f76bdb4a`:
+Exact-head qualification observed at `9dc8def709ab277bbfb1e6b6701821791bf4dcd8`:
 
 ```text
-Public Readiness Audit #380 = SUCCESS
-Verify #415                 = SUCCESS
-repository tests            = 381/381 PASS
+Public Readiness Audit #384 = SUCCESS
+Verify #419                 = SUCCESS
 Dependency Review           = SUCCESS
 Legacy Authority            = SUCCESS
-Runtime Volume Gate #16     = SUCCESS
-Core Verify #416            = SUCCESS
-pre-server source audit     = source_ready=true / READY
+Runtime Volume Gate #20     = SUCCESS
+Core Verify #420            = SUCCESS
+pre-server source audit     = READY
 main merge                  = NOT EXECUTED
 ```
 
-Core Verify includes syntax/source gates, role routing, AI Core request/state/store/governance/repo/run-authority contracts, server behavior, TypeScript 7, real DebugAI image build/health, Sandbox/Landlock/seccomp, managed Node/Python DAP, queue round trip, and Compose boundary checks.
+The exact-head source adds a resumable Skill-effect measurement layer without changing the six role benchmark cases, scorers, models, Skill ON/OFF semantics, production profiles, Search Gate state, providers, or secrets.
+
+## Resumable Skill-effect source contract
+
+The previous `benchmark:skill-effect-all` path executed every real model call serially and only emitted a generic external heartbeat while the suite itself had no durable per-call progress/checkpoint state. Six roles currently require 44 real AI calls in total and each role client retains its 600000 ms per-call timeout ceiling. That made a long run operationally opaque and made interruption discard completed work.
+
+Current source `9dc8def...` routes the six-role measurement through `server/control/resumable-skill-effect-suite.js`.
+
+The new source contract:
+
+- preserves the existing six role benchmark cases and scoring;
+- preserves Skill OFF wins and ties as valid measurement results;
+- reports progress by `role -> case -> OFF/ON` rather than generic liveness only;
+- checkpoints each completed OFF/ON unit immediately;
+- writes checkpoint state atomically;
+- resumes completed units instead of paying for the same real inference twice;
+- binds checkpoint reuse to a source fingerprint and fails closed when incompatible source is detected;
+- does not grant production promotion authority.
+
+The resumable source is CI-qualified but is not yet the live Server runtime.
 
 ## Current live DebugAI Server boundary
 
-The latest authorized Server reflection currently running is exact source:
+Fresh readback after aborting the old long-running Skill suite confirmed:
 
 ```text
 checkout path                     = /home/admin1/projects/debug-ai
 checkout mode                     = detached HEAD
-checkout HEAD                     = ebe48131b236d8ca44057c813236fd0e99925214
-.debugai-input/                   = preserved / untracked
-runtime-init                      = Exited (0)
-sandbox-init                      = Exited (0)
-sandbox-runner                    = Up
-debug-ai                          = healthy
-container entrypoint              = node server/main.js
-container workdir                 = /app
-loopback /health                  = PASS
+checkout HEAD                     = 4c7e7273424d097fc4bfb60a727824c944ef374b
+.debugai-input/                   = PRESENT / PRESERVE
 tracked worktree                  = CLEAN
-pre-server qualification          = source_ready=true / READY
-source parity                     = PASS for deployed ebe48131 source
-Search Gate shadow                = NO_SHADOW_RECORDS / NOT_EVALUABLE
+runtime-init                      = Exited / exit=0
+sandbox-init                      = Exited / exit=0
+sandbox-runner                    = running / exit=0
+debug-ai                          = running / healthy / exit=0
+loopback /health                  = PASS
+old Skill benchmark process count = 0
+latest old temp log               = /tmp/debugai-skill.KgKjtd.json
+latest old temp log bytes         = 0
 Search skip activation            = NO
 ```
 
-The `ebe48131...` reflection preserved `.debugai-input/`, retained persistent volumes, passed Host↔Container source parity for the changed Local Reviewer/Workflow files, and completed with `REFLECTION=PASS`.
+Therefore the old Skill benchmark is no longer running and left no reusable result payload. The current live runtime is healthy at `4c7e727...` but is behind source `9dc8def...`.
 
-The live runtime is healthy for `ebe48131...`. It is now behind current qualified source `0ad40ea...`, so exact Current-source parity is not yet verified.
+```text
+CURRENT_RUNTIME_EXACT_PARITY_FOR_9DC8DEF = NOT_VERIFIED
+```
+
+No current claim treats source CI PASS as proof that the resumable runner is deployed.
 
 ## AI Core resource incident and closure
 
 The first real Local Reviewer benchmark during this qualification phase timed out at the 600000 ms role deadline. Direct backend and cgroup measurements showed that the previous AI Core memory ceilings were forcing reclaim/throttling during inference even though host memory remained available.
-
-Before correction:
-
-```text
-four backend mem_limit        = 6656m each
-ai-core.slice MemoryHigh      = 24087M
-ai-core.slice MemoryMax       = 28904M
-Ministral short speed         = about 0.31 tok/s during constrained state
-container/parent max-high hits= observed during tiny inference
-```
 
 Master authorized the shared AI Core resource correction. Current measured authority is:
 
@@ -97,113 +108,64 @@ backend CPU                   = 3 unchanged
 models/router                 = unchanged
 ```
 
-Measured after correction:
+Measured recovery included approximately Granite 7.31 tok/s, Qwen3 5.61 tok/s, Ministral 7.45 tok/s, Coder 8.05 tok/s, and a 128-token Ministral retest near 6.12 tok/s. The final tested serial path produced zero new parent High/Max/OOM/OOM-kill events. DebugAI role timeout was not extended as a workaround.
+
+## Local Reviewer defect history and closure
+
+The Local Reviewer qualification history has distinct causes and must not be collapsed.
+
+1. An early real run timed out while AI Core was under severe memory reclaim pressure.
+2. After the authorized AI Core resource correction, one run returned `ROLE_OUTPUT_JSON_INVALID`.
+3. A RAW capture returned complete JSON but noncanonical top-level `review_state/material_claims` instead of `verdict/decision/claims`.
+4. Source was tightened to require canonical top-level output.
+5. Real measurement on the then-live runtime produced three consecutive `CLAIM_TYPE_INVALID` failures because the model output omitted/invalidly represented canonical `claims[].type`.
+6. The validator remained strict. The invocation contract was repaired to explicitly require `type = FACT | INFERENCE | HYPOTHESIS | UNKNOWN | REJECTED` and the corresponding evidence/falsification/counter-evidence rules.
+7. That fixed source was reflected to Server revision `4c7e7273424d097fc4bfb60a727824c944ef374b` and measured three consecutive times through the real role path.
+
+Current measured Local Reviewer result on `4c7e727...`:
 
 ```text
-Granite short inference       = 7.31 tok/s
-Qwen3 short inference         = 5.61 tok/s
-Ministral short inference     = 7.45 tok/s
-Coder short inference         = 8.05 tok/s
-Ministral 128-token retest    = 6.12 tok/s
-parent HIGH_DELTA             = 0
-parent MAX_DELTA              = 0
-OOM_DELTA                     = 0
-OOM_KILL_DELTA                = 0
-Ministral MAX_DELTA           = 0
-host MemAvailable             = about 22 GiB at retest
+run 1: RC=0 / completed=true / elapsed_ms=161769
+       contract.validated=true / strict_evidence_refs=true
+       verdict=PASS / decision=DONE / claims_count=3 / claim_types=[FACT]
+       AI Core HIGH/MAX/OOM/OOM_KILL delta=0/0/0/0
+
+run 2: RC=0 / completed=true / elapsed_ms=55456
+       contract.validated=true / strict_evidence_refs=true
+       verdict=PASS / decision=DONE / claims_count=3 / claim_types=[FACT]
+       AI Core HIGH/MAX/OOM/OOM_KILL delta=0/0/0/0
+
+run 3: RC=0 / completed=true / elapsed_ms=54017
+       contract.validated=true / strict_evidence_refs=true
+       verdict=PASS / decision=DONE / claims_count=3 / claim_types=[FACT]
+       AI Core HIGH/MAX/OOM/OOM_KILL delta=0/0/0/0
+
+FINAL_OK=1
 ```
 
-The AI Core memory-pressure cause is closed for the tested serial role path. DebugAI role timeout remains unchanged; timeout extension is not used as a workaround.
+The Local Reviewer canonical output defect is closed for this fixed-source serial benchmark path. This is not evidence that every workflow/concurrency/integration path is complete.
 
-## Local Reviewer contract defect sequence
+## Old six-role Skill measurement attempt
 
-### 1. Noncanonical top-level output
+After Local Reviewer closure, the six-role Skill ON/OFF real suite was started on live `4c7e727...`.
 
-After the AI Core resource correction, one Local Reviewer run returned `ROLE_OUTPUT_JSON_INVALID`. A subsequent RAW capture on the real path produced complete JSON with `finish_reason=stop`, 835 completion tokens, about 6.07 tok/s, but used the noncanonical shape:
+Observed behavior:
+
+- heartbeat output continued for more than 30 minutes;
+- the wrapper exposed only `HEARTBEAT=skill-suite-running` and no role/case/OFF-ON position;
+- the old suite did not checkpoint completed real calls;
+- Master interrupted the run;
+- a subsequent process-targeting command found no remaining suite process;
+- fresh readback confirmed `SKILL_BENCHMARK_PROCESS_COUNT=0`;
+- the latest old temp result file is zero bytes.
+
+Therefore the attempt has no valid reusable benchmark result and must not be labeled PASS or complete.
 
 ```text
-review_state
-review_evidence
-material_claims
-final_review_state
+SKILL_EFFECT_ALL_REAL = INCOMPLETE / ABORTED_OLD_NONRESUMABLE_RUN
 ```
 
-Production Workflow consumes:
-
-```text
-verdict
-decision
-claims
-```
-
-The generic validator had allowed the substitute shape while Production Workflow could read the missing canonical verdict/decision as `UNKNOWN`. Source was therefore changed to require the canonical top-level Local Reviewer fields and fail closed on the substitute schema.
-
-### 2. Canonical claims item type missing in real model output
-
-That top-level repair was documented and reflected to Server at `ebe48131...`. The real Local Reviewer benchmark was then executed three consecutive times on the reflected runtime.
-
-Measured result:
-
-```text
-run 1 = FAIL / ROLE_CLAIM_EVIDENCE_INVALID / CLAIM_TYPE_INVALID on claims 0..3
-run 2 = FAIL / ROLE_CLAIM_EVIDENCE_INVALID / CLAIM_TYPE_INVALID on claims 0..2
-run 3 = FAIL / ROLE_CLAIM_EVIDENCE_INVALID / CLAIM_TYPE_INVALID on claims 0..2
-AI Core HIGH delta     = 0 on every run
-AI Core MAX delta      = 0 on every run
-AI Core OOM delta      = 0 on every run
-AI Core OOM_KILL delta = 0 on every run
-```
-
-This is repeatable schema-contract failure, not renewed AI Core resource pressure and not an intermittent JSON parse failure.
-
-`claim-evidence.js` already requires each `claims[]` item to use one of the canonical claim types:
-
-```text
-FACT
-INFERENCE
-HYPOTHESIS
-UNKNOWN
-REJECTED
-```
-
-The real prompt previously required a `claims` array but did not explicitly name the `type` field or enumerate its allowed values. Unit fixtures manually supplied `type:"FACT"`, so the gap was not exposed by the earlier unit path.
-
-## Current Local Reviewer claim-type repair
-
-Current source `0ad40ea939866c9ae59086c1030aadd3f76bdb4a` keeps the validator strict and changes the invocation contract instead of accepting malformed output.
-
-The current prompt explicitly requires:
-
-- top-level `verdict`, `decision`, `claims`;
-- every `claims[]` item has required `type`;
-- `type` is uppercase and exactly one of `FACT`, `INFERENCE`, `HYPOTHESIS`, `UNKNOWN`, `REJECTED`;
-- concise text uses `statement`;
-- `FACT` / `INFERENCE` require registered `evidence_refs`;
-- `HYPOTHESIS` requires `falsification_condition`;
-- `REJECTED` requires `counter_evidence_refs`;
-- `UNKNOWN` may remain unsupported rather than fabricate evidence;
-- `INSUFFICIENT_EVIDENCE` remains a valid verdict/decision state but is not a claim type;
-- `claim`, `status`, `support`, `review_state`, `final_review_state`, and `material_claims` cannot substitute for canonical fields.
-
-Regression coverage now includes the real failure family: a claim object using `claim/evidence_refs/support` but omitting canonical `type` must be rejected with `CLAIM_TYPE_INVALID`.
-
-The validator was not weakened. Existing `UNKNOWN and INSUFFICIENT_EVIDENCE are valid` non-fabrication policy was also preserved after CI caught its accidental removal during the first edit attempt.
-
-Exact source qualification for this repair is the `0ad40ea...` CI set recorded above.
-
-## Runtime-image and Server-local input contract
-
-Current runtime-image contract includes `server/`, `orchestrator/`, `bin/`, `mcp/`, `scripts/`, `docs/`, and `package.json`.
-
-The Server-local `.debugai-input/` path is excluded from Docker build context and must not be deleted by source reflection.
-
-Production Compose retains:
-
-- `runtime-init` one-shot ownership/mode repair for `debug_ai_runtime`;
-- `sandbox-init` for sandbox job storage;
-- `debug-ai` waiting for successful initialization;
-- `sandbox-runner` isolated from external network;
-- no deletion/recreation of persistent runtime volume merely to make deployment clean.
+Do not infer any role winner from the aborted run.
 
 ## Current implementation capabilities
 
@@ -223,7 +185,8 @@ Implemented/verified source boundary includes:
 - exact nine-tool MCP stdio adapter;
 - Search Gate provider-preserving shadow instrumentation/audit;
 - Local Reviewer benchmark;
-- six-role Skill ON/OFF suite;
+- six-role Skill ON/OFF benchmark definitions;
+- resumable/checkpointed six-role Skill measurement orchestration in current source;
 - one-variable Model A/B harness for `thinking`, `temperature`, `top_p`, `top_k`, `max_tokens`;
 - exact source/runtime live-readback gate;
 - runtime-image qualification/MCP asset packaging;
@@ -232,60 +195,63 @@ Implemented/verified source boundary includes:
 ## Current qualification state
 
 ```text
-SERVER_CORE_AUTHORITY_READ              = PASS
-AI_CORE_RESOURCE_GATE                   = PASS
-AI_CORE_SPEED_RECOVERED                 = PASS
-CURRENT_SOURCE_HEAD                     = 0ad40ea939866c9ae59086c1030aadd3f76bdb4a
-CURRENT_SOURCE_CI                       = PASS
-LIVE_SERVER_HEAD                        = ebe48131b236d8ca44057c813236fd0e99925214
-LIVE_SERVER_HEALTH                      = PASS
-LIVE_SERVER_SOURCE_PARITY_FOR_EBE       = PASS
-CURRENT_RUNTIME_EXACT_PARITY_FOR_0AD    = NOT_VERIFIED
-LOCAL_REVIEWER_REAL_ON_EBE              = FAIL_CLAIM_TYPE_INVALID_3_OF_3
-LOCAL_REVIEWER_CLAIM_TYPE_FIX_SOURCE    = PASS
-LOCAL_REVIEWER_CLAIM_TYPE_FIX_REFLECTED = NO
-SKILL_EFFECT_ALL_REAL                   = NOT_EXECUTED
-MODEL_AB_THINKING_REAL                  = NOT_EXECUTED
-MODEL_AB_SAMPLING_REAL                  = NOT_EXECUTED
-MODEL_AB_TOKEN_CAP_REAL                 = NOT_EXECUTED
-REAL_INTEGRATION_E2E                    = NOT_EXECUTED
-MCP_LIVE                                = NOT_VERIFIED
-VS_CODEX_MCP_REGISTRATION               = NOT_VERIFIED
-SEARCH_GATE_SHADOW_REAL                 = NOT_EVALUABLE_NO_RECORDS
-FALSE_SKIP_ZERO_PROVEN                  = NO
-SEARCH_SKIP_ACTIVATION                  = NO
-FRESH_CURRENT_RUNTIME_SELF_DEBUG        = NOT_EXECUTED
-FINAL_PRODUCTION_EQUIVALENT_E2E         = NOT_EXECUTED
-MAIN_MERGE                              = NO
-PRODUCTION_PROFILE_CHANGE               = NONE
+SERVER_CORE_AUTHORITY_READ                 = PASS
+AI_CORE_RESOURCE_GATE                      = PASS
+AI_CORE_SPEED_RECOVERED                    = PASS
+CURRENT_SOURCE_HEAD                        = 9dc8def709ab277bbfb1e6b6701821791bf4dcd8
+CURRENT_SOURCE_CI                          = PASS
+LIVE_SERVER_HEAD                           = 4c7e7273424d097fc4bfb60a727824c944ef374b
+LIVE_SERVER_HEALTH                         = PASS
+LIVE_SERVER_TRACKED_WORKTREE               = CLEAN
+DEBUGAI_INPUT                              = PRESENT / PRESERVE
+OLD_SKILL_BENCHMARK_PROCESS_COUNT          = 0
+OLD_SKILL_BENCHMARK_RESULT                 = NONE / ZERO_BYTE_LOG
+CURRENT_RUNTIME_EXACT_PARITY_FOR_9DC8DEF   = NOT_VERIFIED
+LOCAL_REVIEWER_CANONICAL_REAL              = PASS_3_OF_3_ON_4C7E727
+AI_CORE_RESOURCE_PATH                      = PASS_FOR_TESTED_SERIAL_PATH
+SKILL_EFFECT_ALL_REAL                      = INCOMPLETE_ABORTED_OLD_NONRESUMABLE_RUN
+RESUMABLE_SKILL_SUITE_SOURCE_CI            = PASS
+RESUMABLE_SKILL_SUITE_LIVE                 = NOT_VERIFIED
+MODEL_AB_THINKING_REAL                     = NOT_EXECUTED
+MODEL_AB_SAMPLING_REAL                     = NOT_EXECUTED
+MODEL_AB_TOKEN_CAP_REAL                    = NOT_EXECUTED
+REAL_INTEGRATION_E2E                       = NOT_EXECUTED
+MCP_LIVE                                   = NOT_VERIFIED
+VS_CODEX_MCP_REGISTRATION                  = NOT_VERIFIED
+SEARCH_GATE_SHADOW_REAL                    = NOT_EVALUABLE_NO_RECORDS
+FALSE_SKIP_ZERO_PROVEN                     = NO
+SEARCH_SKIP_ACTIVATION                     = NO
+FRESH_CURRENT_RUNTIME_SELF_DEBUG           = NOT_EXECUTED
+FINAL_PRODUCTION_EQUIVALENT_E2E            = NOT_EXECUTED
+MAIN_MERGE                                 = NO
+PRODUCTION_PROFILE_CHANGE                  = NONE
 ```
 
-A source/unit/CI PASS does not convert the real Local Reviewer gate to PASS. The claim-type repair must first be reflected to Server and measured through the real model path.
+## Mutation and approval boundary
 
-## Master authorization boundary
+No result above authorizes PR/main merge, force/rebase/reset, branch deletion, destructive runtime state deletion, `.debugai-input/` deletion, persistent volume deletion, Search Gate activation, production model/profile promotion, Secret/provider mutation, or a new model download.
 
-Master authorized Current DebugAI Server source reflection/build/recreate after README/document synchronization. That authorization does not include PR/main merge, destructive reset, `.debugai-input/` deletion, runtime-volume deletion, Secret/provider changes, new model downloads, Search Gate skip activation, production profile promotion, or unrelated project mutation.
-
-Master separately authorized the AI Core resource change recorded above. That does not authorize unrelated AI Core model/provider changes.
+Source-side documentation and feature-branch corrections may proceed independently. Reflecting current source `9dc8def...` into the live Server is a separate runtime mutation and remains subject to the current server-core authority and explicit Master authorization for that current mutation.
 
 ## Required next-work order
 
 ```text
-1. synchronize README / CURRENT_STATE / PRE_SERVER_QUALIFICATION to the 0ad40ea source and measured ebe48131 runtime
+1. synchronize README / CURRENT_STATE / PRE_SERVER_QUALIFICATION to current Source=9dc8def and live Runtime=4c7e727
 2. require exact documentation-following HEAD CI PASS
-3. preserve .debugai-input and reflect that exact confirmed GitHub revision to /home/admin1/projects/debug-ai
-4. rebuild/recreate only required DebugAI Compose services without deleting persistent volumes
-5. prove runtime-init/sandbox-init, DebugAI health, port 8787, tracked cleanliness, and exact source parity
-6. rerun pre-server/live-runtime gates where executable and preserve NOT_EXECUTED where not
-7. rerun Local Reviewer real benchmark three times and require canonical verdict/decision/claims plus valid claims[].type
-8. only after stable Local Reviewer PASS, run six-role Skill ON/OFF real suite
-9. run one-variable Model A/B: Thinking where eligible -> Sampling -> token cap only when justified
-10. run bounded real allowed-repository integration
-11. verify MCP exact nine tools + durable continuation
-12. accumulate/evaluate Search Gate real shadow without activation
-13. run fresh current-runtime self-debug
-14. run final production-equivalent closed-loop E2E
-15. update current-state docs and Notion from measured results
+3. keep Server at 4c7e727 until current-source reflection is explicitly authorized under server-core
+4. when authorized, preserve .debugai-input and persistent volumes and reflect the exact confirmed GitHub revision
+5. rebuild/recreate only the required DebugAI services and prove init/health/worktree/exact source parity
+6. run the resumable six-role Skill ON/OFF real measurement; reuse checkpoints after interruption rather than restarting completed units
+7. interpret Skill OFF wins and ties as valid data; do not tune the benchmark to force Skill ON
+8. run Thinking A/B only for roles with explicit boolean thinking contracts
+9. run official-first Sampling A/B
+10. run token-cap A/B only if preceding evidence justifies a candidate
+11. run bounded real allowed-repository integration
+12. verify MCP exact-nine tools plus durable continuation
+13. accumulate/evaluate Search Gate shadow read-only; do not activate skipping
+14. run fresh current-runtime self-debug
+15. run final production-equivalent closed-loop E2E
+16. update current-state docs and Notion only from measured evidence
 ```
 
-Every unexecuted, failed, or not-yet-reflected item keeps that state until real evidence changes it.
+Every unexecuted, failed, incomplete, or not-yet-reflected item keeps that state until real evidence changes it.
