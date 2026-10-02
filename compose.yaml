@@ -55,6 +55,7 @@ services:
     environment:
       DEBUG_AI_CORE_URL: ${DEBUG_AI_CORE_URL:?required}
       AI_CORE_API_KEY: ${AI_CORE_API_KEY:?required}
+      DEBUG_AI_CORE_CONTEXT_TOKENS: ${DEBUG_AI_CORE_CONTEXT_TOKENS:?required}
       DEBUG_AI_EVIDENCE_SEARCH_URL: ${DEBUG_AI_EVIDENCE_SEARCH_URL:?required}
       DEBUG_AI_EVIDENCE_SEARCH_SECRET_FILE: /run/secrets/astera_internal_service_secret
       DEBUG_AI_EVIDENCE_SEARCH_CALLER_ID: ${DEBUG_AI_EVIDENCE_SEARCH_CALLER_ID:-debug-ai}
