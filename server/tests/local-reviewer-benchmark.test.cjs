@@ -2,6 +2,13 @@
 const test=require("node:test");
 const assert=require("node:assert/strict");
 const {runLocalReviewerBenchmark,benchmarkFixture,verificationRecords}=require("../control/local-reviewer-benchmark.js");
+const {compileInvocation}=require("../control/invocation-compiler.js");
+
+test("Local Reviewer invocation requires canonical verdict decision claims fields",()=>{
+  const compiled=compileInvocation("local_reviewer",{task:"review completion evidence"});
+  assert.match(compiled.system,/OUTPUT_FIELDS=verdict,decision,claims/);
+  assert.match(compiled.system,/Do not substitute review_state, final_review_state, or material_claims/);
+});
 
 test("Local Reviewer benchmark uses fresh no-tool strict-evidence production path",async()=>{
   const seen=[];
@@ -46,4 +53,20 @@ test("Local Reviewer benchmark fails closed when model cites unregistered eviden
     control_plane:{effective_timeout_ms:600000,selected_skill_ids:[]},
   })};
   await assert.rejects(()=>runLocalReviewerBenchmark({aiCore}),/ROLE_CLAIM_BINDING_INVALID:local_reviewer/);
+});
+
+test("Local Reviewer benchmark rejects review_state material_claims substitute output",async()=>{
+  const aiCore={call:async()=>({
+    content:JSON.stringify({review_state:"review_pass",material_claims:[],final_review_state:"review_pass"}),
+    control_plane:{effective_timeout_ms:600000,selected_skill_ids:[]},
+  })};
+  await assert.rejects(()=>runLocalReviewerBenchmark({aiCore}),/ROLE_REVIEW_VERDICT_REQUIRED:local_reviewer/);
+});
+
+test("Local Reviewer benchmark rejects missing canonical decision",async()=>{
+  const aiCore={call:async()=>({
+    content:JSON.stringify({verdict:"PASS",claims:[]}),
+    control_plane:{effective_timeout_ms:600000,selected_skill_ids:[]},
+  })};
+  await assert.rejects(()=>runLocalReviewerBenchmark({aiCore}),/ROLE_REVIEW_DECISION_REQUIRED:local_reviewer/);
 });
