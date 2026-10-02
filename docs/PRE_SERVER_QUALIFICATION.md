@@ -19,7 +19,7 @@ Runtime Volume Gate #88    = SUCCESS
 Core Verify #493           = SUCCESS
 ```
 
-The approved live Server revision remains `b30649a19cd97929a595c639f51fae44c74d4185`. The current context/token correction has not been reflected to Server. Documentation synchronization after `023ae8f7...` creates a later documentation revision and therefore requires its own exact-head CI before it can be considered the reflection candidate.
+The approved live Server revision remains `b30649a19cd97929a595c639f51fae44c74d4185`. The current context/token correction has not been reflected to Server. README, `CURRENT_STATE.md`, and this qualification document are synchronized to the current source contract on the feature branch; the resulting exact branch head must pass its own CI before it can be considered the reflection candidate.
 
 ```text
 checkout path                    = /home/admin1/projects/debug-ai
@@ -390,19 +390,18 @@ Do not manufacture provider traffic solely to mark a box PASS.
 ## Required live order from the current boundary
 
 ```text
-1. complete README / CURRENT_STATE / PRE_SERVER_QUALIFICATION synchronization and remote readback
-2. require exact documentation-head GitHub CI PASS
-3. obtain explicit Master approval for one exact reflection SHA; keep Server at approved b30649a until then
-4. reflect only that approved SHA, preserving .debugai-input, unmanaged state, both volumes, and historical checkpoints
-5. rebuild/recreate only debug-ai and repeat init/health/cleanliness/parity/durability verification
-6. use a separate source-bound checkpoint on the existing runtime volume; never rebind incompatible old data
-7. complete current-source six-role Skill ON/OFF measurement and retain OFF wins/ties
-8. Thinking A/B only for explicit boolean roles
-9. Sampling A/B one axis at a time using model-bound source candidates
-10. token-cap optimization only if preceding measurements justify a smaller candidate
-11. real allowed-repository integration, exact-nine MCP continuation, and fresh self-debug
-12. Search Gate shadow remains read-only, with zero observations not proving zero false skips
-13. final production-equivalent closed loop and Strict Completion
+1. require exact current documentation-head GitHub CI PASS
+2. obtain explicit Master approval for one exact reflection SHA; keep Server at approved b30649a until then
+3. reflect only that approved SHA, preserving .debugai-input, unmanaged state, both volumes, and historical checkpoints
+4. rebuild/recreate only debug-ai and repeat init/health/cleanliness/parity/durability verification
+5. use a separate source-bound checkpoint on the existing runtime volume; never rebind incompatible old data
+6. complete current-source six-role Skill ON/OFF measurement and retain OFF wins/ties
+7. Thinking A/B only for explicit boolean roles
+8. Sampling A/B one axis at a time using model-bound source candidates
+9. token-cap optimization only if preceding measurements justify a smaller candidate
+10. real allowed-repository integration, exact-nine MCP continuation, and fresh self-debug
+11. Search Gate shadow remains read-only, with zero observations not proving zero false skips
+12. final production-equivalent closed loop and Strict Completion
 ```
 
 ## Completion states
