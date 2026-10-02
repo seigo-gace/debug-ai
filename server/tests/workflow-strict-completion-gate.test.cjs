@@ -36,7 +36,8 @@ function evidenceFixture(evidenceGap=false){
   };
 }
 function aiFixture(verdict="PASS"){
-  return {call:async role=>({content:JSON.stringify(role==="local_reviewer"?{verdict}:{verdict:"UNKNOWN"})})};
+  const decision=verdict==="PASS"?"DONE":verdict==="BLOCKED"?"BLOCKED":"CONTINUE";
+  return {call:async role=>({content:JSON.stringify(role==="local_reviewer"?{verdict,decision,claims:[]}:{verdict:"UNKNOWN"})})};
 }
 function externalFixture(verdict="PASS"){
   return {final:async()=>({provider:"fixture",json:{verdict}})};
