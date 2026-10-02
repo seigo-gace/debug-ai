@@ -3,6 +3,7 @@ const crypto=require("node:crypto");
 const {Agent,fetch:undiciFetch}=require("undici");
 const {ROLES}=require("../roles.js");
 const {compileInvocation}=require("../control/invocation-compiler.js");
+const {OUTPUT_HEADROOM_TOKENS,getModelOutputHardCeilingForRole}=require("../control/model-profiles.js");
 const ROLE_ALIASES=Object.freeze(Object.fromEntries(Object.entries(ROLES).map(([k,v])=>[k,v.alias])));
 const TIMEOUT_CLASS=Object.freeze({DEADLINE_ABORT:"DEADLINE_ABORT",TRANSPORT_TIMEOUT:"TRANSPORT_TIMEOUT",EXTERNAL_ABORT:"EXTERNAL_ABORT"});
 class AiCoreError extends Error{constructor(code,msg,meta={}){super(msg);this.name="AiCoreError";this.code=code;this.meta=meta;}}
@@ -16,6 +17,25 @@ function resolveEffectiveTimeoutMs(role,defaultTimeoutMs,{timeoutMsOverride=null
     effective=Math.min(effective,remaining);
   }
   return Math.max(1,effective);
+}
+function normalizeRuntimeContextTokens(value){
+  if(value===null||value===undefined||value==="")return null;
+  const tokens=Number(value);
+  if(!Number.isSafeInteger(tokens)||tokens<=OUTPUT_HEADROOM_TOKENS)throw new AiCoreError("AI_CORE_RUNTIME_CONTEXT_INVALID","Qualified AI Core context must be an integer larger than reserved output headroom",{runtime_context_tokens:value,output_headroom_tokens:OUTPUT_HEADROOM_TOKENS});
+  return tokens;
+}
+function resolveEffectiveMaxTokens(role,requestedMaxTokens,{runtimeContextTokens=null,requireRuntimeContextQualification=false}={}){
+  if(!ROLES[role])throw new AiCoreError("ROLE_INVALID",`Unknown DebugAI role: ${role}`);
+  if(!Number.isInteger(requestedMaxTokens)||requestedMaxTokens<1)throw new AiCoreError("AI_CORE_MAX_TOKENS_INVALID",`Invalid maxTokens for ${role}`,{role,max_tokens:requestedMaxTokens});
+  const modelCeiling=getModelOutputHardCeilingForRole(role);
+  if(requestedMaxTokens>modelCeiling)throw new AiCoreError("AI_CORE_MAX_TOKENS_EXCEEDS_MODEL_CEILING",`Requested output exceeds model-native safety ceiling for ${role}`,{role,requested_max_tokens:requestedMaxTokens,model_output_hard_ceiling_tokens:modelCeiling});
+  const runtimeContext=normalizeRuntimeContextTokens(runtimeContextTokens);
+  if(requireRuntimeContextQualification&&runtimeContext===null)throw new AiCoreError("AI_CORE_RUNTIME_CONTEXT_UNQUALIFIED",`AI Core runtime context is not qualified for ${role}`,{role,requested_max_tokens:requestedMaxTokens,model_output_hard_ceiling_tokens:modelCeiling});
+  if(runtimeContext===null)return Object.freeze({requested_max_tokens:requestedMaxTokens,effective_max_tokens:requestedMaxTokens,model_output_hard_ceiling_tokens:modelCeiling,runtime_context_tokens:null,runtime_output_ceiling_tokens:null,runtime_context_qualified:false,context_limited:false});
+  const runtimeCeiling=runtimeContext-OUTPUT_HEADROOM_TOKENS;
+  const effective=Math.min(requestedMaxTokens,modelCeiling,runtimeCeiling);
+  if(effective<1)throw new AiCoreError("AI_CORE_RUNTIME_CONTEXT_EXHAUSTED",`AI Core runtime context leaves no safe output room for ${role}`,{role,runtime_context_tokens:runtimeContext,output_headroom_tokens:OUTPUT_HEADROOM_TOKENS});
+  return Object.freeze({requested_max_tokens:requestedMaxTokens,effective_max_tokens:effective,model_output_hard_ceiling_tokens:modelCeiling,runtime_context_tokens:runtimeContext,runtime_output_ceiling_tokens:runtimeCeiling,runtime_context_qualified:true,context_limited:effective<requestedMaxTokens});
 }
 function classifyTimeoutError(error,{deadlineTriggered=false}={}){
   if(deadlineTriggered)return TIMEOUT_CLASS.DEADLINE_ABORT;
@@ -42,37 +62,20 @@ function providerTimingTelemetry(envelope){
 function prefixHash(system){return crypto.createHash("sha256").update(String(system||""),"utf8").digest("hex");}
 function makeTelemetry({queueWaitMs=0,prepareMs=0,upstreamMs=0,parseValidateMs=0,roleStartedAt=Date.now(),requestBytes=0,responseBytes=0,attempts=0,envelope=null,finishReason=null,prefix=null}={}){
   return Object.freeze({
-    queue_wait_ms:Math.max(0,Math.floor(queueWaitMs)),
-    prepare_ms:Math.max(0,Math.floor(prepareMs)),
-    upstream_request_wall_ms:Math.max(0,Math.floor(upstreamMs)),
-    parse_validate_ms:Math.max(0,Math.floor(parseValidateMs)),
-    role_wall_ms:Math.max(0,Date.now()-roleStartedAt),
-    request_bytes:Math.max(0,Math.floor(requestBytes)),
-    response_bytes:Math.max(0,Math.floor(responseBytes)),
-    attempts:Math.max(0,Math.floor(attempts)),
-    ...usageTelemetry(envelope),
-    ...providerTimingTelemetry(envelope),
-    prefix_hash:typeof prefix==="string"&&prefix?prefix:null,
-    finish_reason:typeof finishReason==="string"&&finishReason?finishReason:null
+    queue_wait_ms:Math.max(0,Math.floor(queueWaitMs)),prepare_ms:Math.max(0,Math.floor(prepareMs)),upstream_request_wall_ms:Math.max(0,Math.floor(upstreamMs)),parse_validate_ms:Math.max(0,Math.floor(parseValidateMs)),role_wall_ms:Math.max(0,Date.now()-roleStartedAt),request_bytes:Math.max(0,Math.floor(requestBytes)),response_bytes:Math.max(0,Math.floor(responseBytes)),attempts:Math.max(0,Math.floor(attempts)),...usageTelemetry(envelope),...providerTimingTelemetry(envelope),prefix_hash:typeof prefix==="string"&&prefix?prefix:null,finish_reason:typeof finishReason==="string"&&finishReason?finishReason:null
   });
 }
 function attachTelemetry(error,telemetry){if(error instanceof AiCoreError)error.meta={...error.meta,telemetry};return error;}
 function truncationError(role,cfg,{maxTokens,finishReason,content,envelope,telemetry}){
   const usage=usageTelemetry(envelope);
-  return new AiCoreError("AI_CORE_OUTPUT_TRUNCATED",`AI Core output truncated for ${role}`,{
-    role,
-    model:cfg.backend_model,
-    max_tokens:maxTokens,
-    finish_reason:finishReason,
-    completion_tokens:usage.completion_tokens,
-    content_chars:typeof content==="string"?content.length:0,
-    telemetry
-  });
+  return new AiCoreError("AI_CORE_OUTPUT_TRUNCATED",`AI Core output truncated for ${role}`,{role,model:cfg.backend_model,max_tokens:maxTokens,finish_reason:finishReason,completion_tokens:usage.completion_tokens,content_chars:typeof content==="string"?content.length:0,telemetry});
 }
-function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=process.env.AI_CORE_API_KEY,fetchImpl=undiciFetch,timeoutMs=600000,maxTransportTimeoutAttempts=2,maxTimeoutRetries,dispatcher}={}){
+function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=process.env.AI_CORE_API_KEY,fetchImpl=undiciFetch,timeoutMs=600000,maxTransportTimeoutAttempts=2,maxTimeoutRetries,dispatcher,runtimeContextTokens=process.env.DEBUG_AI_CORE_CONTEXT_TOKENS??null,requireRuntimeContextQualification=false}={}){
   if(!baseUrl)throw new AiCoreError("AI_CORE_URL_REQUIRED","DEBUG_AI_CORE_URL is required");
   if(!apiKey)throw new AiCoreError("AI_CORE_API_KEY_REQUIRED","AI_CORE_API_KEY is required");
   if(typeof fetchImpl!=="function")throw new AiCoreError("FETCH_REQUIRED","fetch implementation is required");
+  const qualifiedRuntimeContext=normalizeRuntimeContextTokens(runtimeContextTokens);
+  if(requireRuntimeContextQualification&&qualifiedRuntimeContext===null)throw new AiCoreError("AI_CORE_RUNTIME_CONTEXT_UNQUALIFIED","DEBUG_AI_CORE_CONTEXT_TOKENS is required for qualified production execution");
   if(maxTimeoutRetries!==undefined)maxTransportTimeoutAttempts=maxTimeoutRetries;
   if(!Number.isInteger(maxTransportTimeoutAttempts)||maxTransportTimeoutAttempts<1||maxTransportTimeoutAttempts>2)throw new AiCoreError("AI_CORE_RETRY_INVALID","transport timeout attempts must be an integer between 1 and 2");
   const endpoint=new URL("/v1/chat/completions",baseUrl).toString();
@@ -81,11 +84,12 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
   async function execute(role,{system="",user="",maxTokens=1024,responseFormat="json_object",temperature=0,selectedSkillIds=null,timeoutMsOverride=null,deadlineAt=null}={},runtimeMeta={}){
     const roleStartedAt=Date.now(),prepareStartedAt=Date.now();
     const cfg=ROLES[role];if(!cfg)throw new AiCoreError("ROLE_INVALID",`Unknown DebugAI role: ${role}`);
-    if(!Number.isInteger(maxTokens)||maxTokens<1)throw new AiCoreError("AI_CORE_MAX_TOKENS_INVALID",`Invalid maxTokens for ${role}`,{role,max_tokens:maxTokens});
+    const tokenBudget=resolveEffectiveMaxTokens(role,maxTokens,{runtimeContextTokens:qualifiedRuntimeContext,requireRuntimeContextQualification});
+    const effectiveMaxTokens=tokenBudget.effective_max_tokens;
     const effectiveTimeoutMs=resolveEffectiveTimeoutMs(role,timeoutMs,{timeoutMsOverride,deadlineAt,now:Date.now()});
     const invocation=compileInvocation(role,{task:user,extraSystem:system,selectedSkillIds});
     const compiledPrefixHash=prefixHash(invocation.system);
-    const body={model:cfg.backend_model,messages:[{role:"system",content:invocation.system},{role:"user",content:user}],max_tokens:maxTokens,temperature,stream:false,response_format:responseFormat?{type:responseFormat}:undefined};
+    const body={model:cfg.backend_model,messages:[{role:"system",content:invocation.system},{role:"user",content:user}],max_tokens:effectiveMaxTokens,temperature,stream:false,response_format:responseFormat?{type:responseFormat}:undefined};
     if(typeof cfg.thinking==="boolean")body.chat_template_kwargs={enable_thinking:cfg.thinking};
     const requestBody=JSON.stringify(body),requestBytesPerAttempt=Buffer.byteLength(requestBody,"utf8"),prepareMs=Date.now()-prepareStartedAt;
     let upstreamMs=0,responseBytes=0,parseValidateMs=0;
@@ -103,9 +107,9 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
         try{envelope=JSON.parse(text);}catch{parseValidateMs+=Date.now()-parseStartedAt;throw new AiCoreError("AI_CORE_ENVELOPE","AI Core returned non-JSON envelope");}
         const content=envelope?.choices?.[0]?.message?.content;finishReason=envelope?.choices?.[0]?.finish_reason??null;parseValidateMs+=Date.now()-parseStartedAt;
         const telemetry=makeTelemetry({queueWaitMs:runtimeMeta.queueWaitMs,prepareMs,upstreamMs,parseValidateMs,roleStartedAt,requestBytes:requestBytesPerAttempt*attempt,responseBytes,attempts:attempt,envelope,finishReason,prefix:compiledPrefixHash});
-        if(String(finishReason||"").toLowerCase()==="length")throw truncationError(role,cfg,{maxTokens,finishReason,content,envelope,telemetry});
+        if(String(finishReason||"").toLowerCase()==="length")throw truncationError(role,cfg,{maxTokens:effectiveMaxTokens,finishReason,content,envelope,telemetry});
         if(typeof content!=="string"||!content.trim())throw new AiCoreError("AI_CORE_EMPTY","AI Core returned empty content",{role,model:cfg.backend_model,finish_reason:finishReason,telemetry});
-        return {provider:"llama-swap",role,alias:cfg.alias,model:cfg.backend_model,thinking:cfg.thinking,content,raw:envelope,attempts:attempt,telemetry,control_plane:{selected_skill_ids:[...invocation.selected_skill_ids],skill_selection_mode:invocation.skill_selection_mode,role_contract_version:invocation.role_contract_version,output_schema:invocation.output_schema,guardrail_profile:invocation.guardrail_profile,effective_timeout_ms:effectiveTimeoutMs,max_tokens:maxTokens,prefix_hash:compiledPrefixHash}};
+        return {provider:"llama-swap",role,alias:cfg.alias,model:cfg.backend_model,thinking:cfg.thinking,content,raw:envelope,attempts:attempt,telemetry,control_plane:{selected_skill_ids:[...invocation.selected_skill_ids],skill_selection_mode:invocation.skill_selection_mode,role_contract_version:invocation.role_contract_version,output_schema:invocation.output_schema,guardrail_profile:invocation.guardrail_profile,effective_timeout_ms:effectiveTimeoutMs,max_tokens:effectiveMaxTokens,requested_max_tokens:tokenBudget.requested_max_tokens,model_output_hard_ceiling_tokens:tokenBudget.model_output_hard_ceiling_tokens,runtime_context_tokens:tokenBudget.runtime_context_tokens,runtime_output_ceiling_tokens:tokenBudget.runtime_output_ceiling_tokens,runtime_context_qualified:tokenBudget.runtime_context_qualified,context_limited:tokenBudget.context_limited,prefix_hash:compiledPrefixHash}};
       }catch(e){
         const timeoutClass=classifyTimeoutError(e,{deadlineTriggered});
         const telemetry=e?.meta?.telemetry||makeTelemetry({queueWaitMs:runtimeMeta.queueWaitMs,prepareMs,upstreamMs,parseValidateMs,roleStartedAt,requestBytes:requestBytesPerAttempt*attempt,responseBytes,attempts:attempt,envelope,finishReason,prefix:compiledPrefixHash});
@@ -117,11 +121,7 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
     }
     throw new AiCoreError("AI_CORE_TIMEOUT","AI Core transport timeout retry loop exhausted",{role,model:cfg.backend_model,timeout_ms:effectiveTimeoutMs,attempts:maxTransportTimeoutAttempts,timeout_class:TIMEOUT_CLASS.TRANSPORT_TIMEOUT,retryable:false});
   }
-  async function call(role,options={}){
-    let release;const queuedAt=Date.now(),turn=new Promise(resolve=>{release=resolve;}),previous=queueTail;queueTail=turn;await previous;
-    const queueWaitMs=Date.now()-queuedAt;
-    try{return await execute(role,options,{queueWaitMs});}finally{release();}
-  }
-  return{endpoint,call};
+  async function call(role,options={}){let release;const queuedAt=Date.now(),turn=new Promise(resolve=>{release=resolve;}),previous=queueTail;queueTail=turn;await previous;const queueWaitMs=Date.now()-queuedAt;try{return await execute(role,options,{queueWaitMs});}finally{release();}}
+  return{endpoint,runtime_context_tokens:qualifiedRuntimeContext,runtime_context_qualified:qualifiedRuntimeContext!==null,call};
 }
-module.exports={ROLE_ALIASES,TIMEOUT_CLASS,AiCoreError,classifyTimeoutError,isTimeoutError,resolveRoleTimeoutMs,resolveEffectiveTimeoutMs,finiteUsage,usageTelemetry,providerTimingTelemetry,prefixHash,truncationError,createAiCoreAdapter};
+module.exports={ROLE_ALIASES,TIMEOUT_CLASS,AiCoreError,classifyTimeoutError,isTimeoutError,resolveRoleTimeoutMs,resolveEffectiveTimeoutMs,normalizeRuntimeContextTokens,resolveEffectiveMaxTokens,finiteUsage,usageTelemetry,providerTimingTelemetry,prefixHash,truncationError,createAiCoreAdapter};
