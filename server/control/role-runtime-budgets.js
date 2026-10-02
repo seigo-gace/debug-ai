@@ -4,18 +4,16 @@ const {getModelOutputHardCeilingForRole}=require("./model-profiles.js");
 
 /*
  * Output policy:
- * - max_tokens is a safety ceiling, not a target consumption amount.
- * - local inference has no per-token API charge; quality/contract completion comes first.
- * - Master policy: keep 1,000 tokens of native model context as hard headroom.
- * - prompt-processing latency is an input/prefill concern and MUST NOT be used as a
- *   rationale for shrinking the output ceiling.
+ * - max_tokens is a request ceiling, not a target consumption amount.
+ * - do not derive generation allowance from historical prompt/prefill timeout.
+ * - model context capacity and generation ceiling are separate facts.
+ * - execution must additionally clamp this source ceiling to the independently
+ *   qualified AI Core runtime n_ctx before a real request is sent.
+ * - a high ceiling does not force the model to consume that many tokens; normal
+ *   stop conditions remain authoritative.
  *
- * Historical low-cap rationales are retained below as REFUTED so the same diagnosis
- * cannot silently reappear later.
- *
- * IMPORTANT: model-native ceilings do not prove the currently deployed AI Core n_ctx.
- * Source/runtime reflection is blocked until the runtime context is independently
- * qualified for the requested model profile. This file does not mutate AI Core.
+ * Historical low-cap rationales are retained below as REFUTED/SUPERSEDED so the
+ * same capability-suppressing diagnosis cannot silently reappear later.
  */
 function budget(role,{turnTimeoutMs=600000,toolLoopWallMs=1200000,maxToolRounds=3,maxToolCalls=8,historicalRefutedRationale=null,qualification="SOURCE_REQUALIFICATION_REQUIRED"}={}){
   return Object.freeze({
@@ -24,7 +22,7 @@ function budget(role,{turnTimeoutMs=600000,toolLoopWallMs=1200000,maxToolRounds=
     tool_loop_wall_ms:toolLoopWallMs,
     max_tool_rounds:maxToolRounds,
     max_tool_calls:maxToolCalls,
-    output_policy:"MODEL_NATIVE_CONTEXT_MINUS_1000_HEADROOM",
+    output_policy:"MODEL_GENERATION_OR_CONTEXT_CEILING_THEN_RUNTIME_N_CTX_CLAMP",
     historical_refuted_rationale:historicalRefutedRationale,
     qualification
   });
@@ -63,6 +61,7 @@ function assertRoleRuntimeBudgets(){
   for(const [role,b] of Object.entries(ROLE_RUNTIME_BUDGETS)){
     const expectedCeiling=getModelOutputHardCeilingForRole(role);
     if(!Number.isInteger(b.max_tokens)||b.max_tokens!==expectedCeiling)throw new Error(`ROLE_RUNTIME_MAX_TOKENS_INVALID:${role}`);
+    if(b.output_policy!=="MODEL_GENERATION_OR_CONTEXT_CEILING_THEN_RUNTIME_N_CTX_CLAMP")throw new Error(`ROLE_RUNTIME_OUTPUT_POLICY_INVALID:${role}`);
     if(!Number.isInteger(b.turn_timeout_ms)||b.turn_timeout_ms<1000||b.turn_timeout_ms>600000)throw new Error(`ROLE_RUNTIME_TIMEOUT_INVALID:${role}`);
     if(!Number.isInteger(b.tool_loop_wall_ms)||b.tool_loop_wall_ms<b.turn_timeout_ms)throw new Error(`ROLE_RUNTIME_WALL_INVALID:${role}`);
     if(!Number.isInteger(b.max_tool_rounds)||b.max_tool_rounds<1||b.max_tool_rounds>3)throw new Error(`ROLE_RUNTIME_TOOL_ROUNDS_INVALID:${role}`);
