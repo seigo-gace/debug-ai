@@ -22,7 +22,7 @@ Repository: `seigo-gace/debug-ai`; existing branch: `feat/pre-server-benchmark-g
 
 Current source behavior revision is `c9aa6f28ee5c0e4560f6c06ffa667462653c8125`. Exact source-behavior CI on that revision passed Public Readiness Audit #471, Verify #506, Runtime Volume Gate #102, and Core Verify #507. The approved deployed revision remains `b30649a19cd97929a595c639f51fae44c74d4185`; no result from that older live revision is promoted into a Runtime PASS for the current source.
 
-This Current State document now records the prompt-cache/context-speed correction. Documentation synchronization after `c9aa6f28...` creates a later branch head and therefore requires its own exact-head CI before it can be considered the Server reflection candidate.
+README, this Current State document, and `PRE_SERVER_QUALIFICATION.md` are synchronized to the prompt-cache/context-speed source contract. The final documentation head created by this status closure requires its own exact-head CI before it can be considered the Server reflection candidate. PR #34 is synchronized again after this final documentation commit without changing the repository head.
 
 ## Current context / token / cache source contract
 
@@ -43,7 +43,7 @@ Current source contract:
 
 Context pressure is connected to the real Tool Loop. Below 85% measured prompt pressure, the prompt can use the existing bounded Active Evidence Window. At or above 85%, the next working context keeps only the five most recent detailed tool results. Older raw tool results remain in durable runtime state; compact historical evidence pointers are retained and may be rehydrated only through admitted `evidence.read`.
 
-Prompt caching is now explicit source behavior rather than provider-default behavior:
+Prompt caching is explicit source behavior rather than provider-default behavior:
 
 - AI Core requests `cache_prompt=true` explicitly;
 - current llama.cpp-style `timings.cache_n` and `timings.prompt_n` are read as observed cache-hit and processed-prompt token counts, while existing compatible telemetry forms remain supported;
@@ -272,8 +272,8 @@ CURRENT_SOURCE_PUBLIC_READINESS             = SUCCESS_471
 CURRENT_SOURCE_VERIFY                       = SUCCESS_506
 CURRENT_SOURCE_RUNTIME_VOLUME_GATE          = SUCCESS_102
 CURRENT_SOURCE_CORE_VERIFY                  = SUCCESS_507
-CURRENT_SOURCE_DOCUMENT_SYNC                = IN_PROGRESS
-CURRENT_SOURCE_PR_SYNC                      = NO
+CURRENT_SOURCE_DOCUMENT_SYNC                = PASS
+CURRENT_SOURCE_PR_SYNC                      = PASS
 CURRENT_SOURCE_REFLECTION                   = NOT_EXECUTED
 APPROVED_LIVE_SERVER_HEAD                   = b30649a19cd97929a595c639f51fae44c74d4185
 APPROVED_LIVE_SOURCE_CI                     = PASS
@@ -303,7 +303,7 @@ REAL_INTEGRATION_E2E                        = NOT_EXECUTED
 MCP_EXACT_NINE_AND_LIVE_HEALTH             = PASS_ON_APPROVED_B30649A
 MCP_CONTINUATION_WORKFLOW                   = NOT_VERIFIED
 SEARCH_GATE_SHADOW_REAL                     = NOT_VERIFIED_AT_THIS_BOUNDARY
-FALSE_SKIP_ZERO_PROVEN                     = NO
+FALSE_SKIP_ZERO_PROVEN                      = NO
 SEARCH_SKIP_ACTIVATION                     = NO
 FRESH_CURRENT_RUNTIME_SELF_DEBUG            = NOT_EXECUTED
 FINAL_PRODUCTION_EQUIVALENT_E2E             = NOT_EXECUTED
@@ -318,7 +318,7 @@ The completed b30649a reflection does not authorize reflection of a different SH
 ## Required next-work order
 
 ```text
-1. synchronize current cache/context source facts into required documentation and PR, then require exact documentation-head GitHub CI PASS
+1. require exact final documentation-head GitHub CI PASS
 2. obtain explicit Master approval for one exact reflection SHA; keep Server at approved b30649a until then
 3. reflect only that approved SHA, preserving .debugai-input, unmanaged state, both volumes, and historical checkpoints
 4. rebuild/recreate only debug-ai and repeat init/health/cleanliness/parity/durability verification
