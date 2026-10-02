@@ -1,5 +1,5 @@
 "use strict";
-const {validateReasoningArtifact}=require("./claim-evidence.js");
+const {validateReasoningArtifact,DECISIONS}=require("./claim-evidence.js");
 const {currentRoleSemanticMode}=require("./role-semantic-mode.js");
 
 const ROLE_SEMANTIC_RULES=Object.freeze({
@@ -8,7 +8,7 @@ const ROLE_SEMANTIC_RULES=Object.freeze({
   researcher:Object.freeze({expected_any:Object.freeze(["research_status","selected_evidence","evidence_refs","answer","claims"]),forbidden_mutation:true,forbid_confirmed_root:true}),
   diagnoser:Object.freeze({expected_any:Object.freeze(["hypothesis","diagnoses","confirmed_root_cause","unsupported_claims","claims"]),forbidden_mutation:true,forbid_confirmed_root:false}),
   patch_engineer:Object.freeze({expected_any:Object.freeze(["operations","candidate_changes","patch_status","claims"]),forbidden_mutation:false,forbid_confirmed_root:false}),
-  local_reviewer:Object.freeze({expected_any:Object.freeze(["verdict","decision","review_status","claims"]),forbidden_mutation:true,forbid_confirmed_root:false}),
+  local_reviewer:Object.freeze({expected_any:Object.freeze(["verdict","decision","claims"]),forbidden_mutation:true,forbid_confirmed_root:false}),
 });
 
 const RESEARCH_STATUS=new Set(["SUPPORTED","CONTRADICTORY_EVIDENCE","INSUFFICIENT_EVIDENCE"]);
@@ -35,6 +35,14 @@ function validateEvidenceBindings(value,{availableEvidenceIds=[],strictEvidenceR
   }
   return errors;
 }
+function validateRequiredRoleShape(role,value){
+  if(role!=="local_reviewer")return;
+  if(typeof value.verdict!=="string"||!value.verdict.trim())throw new Error(`ROLE_REVIEW_VERDICT_REQUIRED:${role}`);
+  if(!REVIEW_VERDICT.has(value.verdict.trim().toUpperCase()))throw new Error(`ROLE_REVIEW_VERDICT_INVALID:${role}:${String(value.verdict)}`);
+  if(typeof value.decision!=="string"||!value.decision.trim())throw new Error(`ROLE_REVIEW_DECISION_REQUIRED:${role}`);
+  if(!DECISIONS.has(value.decision.trim().toUpperCase()))throw new Error(`ROLE_REVIEW_DECISION_INVALID:${role}:${String(value.decision)}`);
+  if(!Array.isArray(value.claims))throw new Error(`ROLE_OUTPUT_CLAIMS_ARRAY_REQUIRED:${role}`);
+}
 function hasNonEmpty(value,key){
   if(!Object.prototype.hasOwnProperty.call(value,key))return false;
   const v=value[key];
@@ -59,7 +67,7 @@ function evaluateRoleSemantics(role,value){
   }
   if(role==="researcher"&&value.research_status!==undefined&&!RESEARCH_STATUS.has(String(value.research_status)))violations.push(`RESEARCH_STATUS_INVALID:${String(value.research_status)}`);
   if(role==="local_reviewer"){
-    const verdict=value.verdict??value.decision??value.review_status;
+    const verdict=value.verdict;
     if(verdict!==undefined&&!REVIEW_VERDICT.has(String(verdict).toUpperCase()))violations.push(`REVIEW_VERDICT_INVALID:${String(verdict)}`);
   }
   return Object.freeze({schema:"debugai.role-semantic-shadow/v1",role,status:violations.length?"WARN":"PASS",violations:Object.freeze(violations)});
@@ -75,6 +83,7 @@ function parseAndValidateRoleOutput(role,content,{availableEvidenceIds=[],strict
   try{value=parseJsonContent(content);}catch(error){const e=new Error(`ROLE_OUTPUT_JSON_INVALID:${role}`);e.cause=error;throw e;}
   if(!value||typeof value!=="object"||Array.isArray(value))throw new Error(`ROLE_OUTPUT_OBJECT_REQUIRED:${role}`);
   if(value.tool_requests!==undefined){if(!Array.isArray(value.tool_requests))throw new Error(`ROLE_OUTPUT_TOOL_REQUESTS_ARRAY_REQUIRED:${role}`);if(value.tool_requests.length>0)throw new Error(`ROLE_OUTPUT_UNRESOLVED_TOOL_REQUESTS:${role}`);}
+  validateRequiredRoleShape(role,value);
   if(value.claims!==undefined){
     if(!Array.isArray(value.claims))throw new Error(`ROLE_OUTPUT_CLAIMS_ARRAY_REQUIRED:${role}`);
     const check=validateReasoningArtifact(value);if(!check.valid)throw new Error(`ROLE_CLAIM_EVIDENCE_INVALID:${role}:${check.errors.join("|")}`);
@@ -88,4 +97,4 @@ function parseAndValidateRoleOutput(role,content,{availableEvidenceIds=[],strict
   }
   return value;
 }
-module.exports={ROLE_SEMANTIC_RULES,parseJsonContent,validateEvidenceBindings,evaluateRoleSemantics,attachSemanticShadow,getSemanticShadow,parseAndValidateRoleOutput};
+module.exports={ROLE_SEMANTIC_RULES,REVIEW_VERDICT,parseJsonContent,validateEvidenceBindings,validateRequiredRoleShape,evaluateRoleSemantics,attachSemanticShadow,getSemanticShadow,parseAndValidateRoleOutput};
