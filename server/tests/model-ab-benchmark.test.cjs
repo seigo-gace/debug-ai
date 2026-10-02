@@ -3,7 +3,7 @@
 const test=require("node:test");
 const assert=require("node:assert/strict");
 const {ROLES}=require("../roles.js");
-const {SAMPLING_SCOPE,OFFICIAL_SAMPLING_CANDIDATES,baselineConfig,officialCandidate,buildVariant,assertSingleAxisDifference,requestBody,executionOrder,validateScored,runModelAbBenchmark}=require("../control/model-ab-benchmark.js");
+const {SAMPLING_SCOPE,OFFICIAL_SAMPLING_CANDIDATES,baselineConfig,officialCandidate,buildVariant,assertSingleAxisDifference,requestBody,makeAiCoreCaller,executionOrder,validateScored,runModelAbBenchmark}=require("../control/model-ab-benchmark.js");
 
 function perfectLocal(testCase){const expected=testCase.expected;return{benchmark_verdict:expected,evidence_refs:[...(testCase.decisive_refs||[])],unsupported_claims:expected==="REJECTED"?["completion claim contradicted"]:[],false_completions:expected==="REJECTED"?["Fix is complete"]:[]};}
 function badLocal(){return{benchmark_verdict:"SUPPORTED",evidence_refs:[],unsupported_claims:[],false_completions:[]};}
@@ -73,4 +73,27 @@ test("candidate quality regression is rejected as a measurement outcome rather t
 
 test("invalid role axis candidate and repeat count fail closed",async()=>{
   assert.throws(()=>baselineConfig("missing_role"),/ROLE_INVALID/);assert.throws(()=>buildVariant("diagnoser","temperature","nan"),/TEMPERATURE_CANDIDATE_INVALID/);assert.throws(()=>buildVariant("diagnoser","max_tokens","12"),/MAX_TOKENS_CANDIDATE_INVALID/);await assert.rejects(()=>runModelAbBenchmark({role:"local_reviewer",axis:"temperature",candidate:"0.2",repeats:0,callModel:fakeCaller()}),/REPEATS_INVALID/);
+});
+
+test("real model AB client rejects empty partial and valid JSON at token exhaustion",async()=>{
+  const config=baselineConfig("diagnoser");
+  for(const content of ["",'{"partial":',"{}"]){
+    const call=makeAiCoreCaller({baseUrl:"http://example.invalid",apiKey:"test",dispatcher:{},fetchImpl:async()=>new Response(JSON.stringify({choices:[{finish_reason:"length",message:{content,finish_reason:"stop",reasoning_content:"PRIVATE_REASONING_MARKER"}}],usage:{completion_tokens:800}}),{status:200})});
+    await assert.rejects(()=>call({role:"diagnoser",config,system:"s",user:"u"}),e=>{
+      assert.equal(e.code,"AI_CORE_OUTPUT_TRUNCATED");
+      assert.deepEqual(e.benchmark_metadata,{role:"diagnoser",max_tokens:800,finish_reason:"length",completion_tokens:800,content_chars:content.length});
+      assert.equal(JSON.stringify(e).includes("PRIVATE_"),false);return true;
+    });
+  }
+});
+test("real model AB client accepts stop and uses choice-level finish reason",async()=>{
+  const config=baselineConfig("diagnoser");
+  const call=makeAiCoreCaller({baseUrl:"http://example.invalid",apiKey:"test",dispatcher:{},fetchImpl:async()=>new Response(JSON.stringify({choices:[{finish_reason:"stop",message:{content:"{}",finish_reason:"length"}}],usage:{prompt_tokens:2,completion_tokens:3,total_tokens:5}}),{status:200})});
+  const reply=await call({role:"diagnoser",config,system:"s",user:"u"});
+  assert.deepEqual(reply,{content:"{}",finish_reason:"stop",usage:{prompt_tokens:2,completion_tokens:3,total_tokens:5}});
+});
+test("model AB cannot score a truncated reply supplied by an injected caller",async()=>{
+  await assert.rejects(()=>runModelAbBenchmark({role:"local_reviewer",axis:"temperature",candidate:"0.2",callModel:async({testCase})=>({content:JSON.stringify(perfectLocal(testCase)),finish_reason:"length",usage:{completion_tokens:100},reasoning_content:"PRIVATE_REASONING_MARKER"})}),e=>{
+    assert.equal(e.code,"AI_CORE_OUTPUT_TRUNCATED");assert.equal(e.benchmark_metadata.role,"local_reviewer");assert.equal(e.benchmark_metadata.completion_tokens,100);assert.equal(JSON.stringify(e).includes("PRIVATE_"),false);return true;
+  });
 });

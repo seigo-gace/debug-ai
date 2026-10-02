@@ -187,9 +187,13 @@ The first real resumable suite on approved Server revision `b30649a19cd97929a595
 
 Metadata-only reproduction established token exhaustion with thinking=true: at 600 tokens, finish_reason=length and content_chars=0; at the unchanged production allowance of 800 tokens, finish_reason=length and content_chars=410 with incomplete JSON. A benchmark-only 1024-token candidate returned finish_reason=stop, completion_tokens=911, and complete JSON. Its OFF score was 0/5. The patched source also completed the previously unexecuted ON unit with finish_reason=stop, 970 completion tokens, and score 1/5. These are repair diagnostics for one case, not a role winner, full-suite measurement, or quality PASS.
 
-Further candidate measurement on source `1e7d907ca706068a7d8cb20e790750e961548050` failed at `cross_refutation / OFF`: HTTP 200, finish_reason=length, 1024 completion tokens, and only 2 visible characters. A one-variable benchmark-only 1536-token candidate completed that unit at 1292 completion tokens with finish_reason=stop and complete JSON, scoring 1/5. Remaining paired measurements are in progress; this is neither full-suite completion nor a quality PASS.
+Further candidate measurement on source `1e7d907ca706068a7d8cb20e790750e961548050` failed at `cross_refutation / OFF`: HTTP 200, finish_reason=length, 1024 completion tokens, and only 2 visible characters. A one-variable benchmark-only 1536-token candidate completed that unit at 1292 completion tokens with finish_reason=stop and complete JSON, scoring 1/5. The 1536 candidate later completed 7/8 modes and failed at correlation_insufficient/ON: finish_reason=length, completion_tokens=1536, content_chars=382, reasoning_chars=7166. Its role measurement remains INCOMPLETE, with no total/winner. A one-mode 2048-token retry is in progress; completed 1536 modes are preserved and are not remeasured or merged across budgets.
 
 This source correction fixes the paired Diagnoser benchmark allowance at 1536 and keeps AI_CORE_OUTPUT_TRUNCATED fail-closed. The resumable runner now retains only whitelisted truncation metadata (role, allowance, finish reason, completion tokens, visible character count) in failed-unit checkpoints and clears it after a successful retry. Raw reasoning and provider payloads are excluded. Production Diagnoser remains at 800 tokens. Cases, scorers, models, thinking, temperature, Skill semantics, and production profiles are unchanged. Diagnoser/runner targeted tests passed 12/12; related benchmark/qualification tests passed 43/43. This revision still requires its own exact-head CI and explicitly approved Server reflection.
+
+Model A/B Source contract reproduction showed that the old real client accepted a visible JSON response marked finish_reason=length. The actual caller and injected-call measurement boundary now reject it as AI_CORE_OUTPUT_TRUNCATED and use the canonical choice-level finish reason. Model A/B plus qualification tests passed 16/16; real Thinking/Sampling A/B remains NOT_EXECUTED. This does not change baselines, candidate ranges, sampling, models, or production profiles.
+
+Live MCP stdio on approved b30649a passed initialize, the exact ordered nine-tool list, and real health delegation. No approval/apply shortcut was exposed. Full analyze/start/resume/wait/status/inspect continuation remains NOT_VERIFIED. The development-client dependency was absent as expected from the production image; a dependency-free JSON-RPC probe succeeded without installing or changing packages.
 
 Candidate diagnostics persist atomically on the existing runtime volume: `/app/runtime/benchmarks/diagnoser-candidate-1e7d907ca706068a7d8cb20e790750e961548050.json` preserves the 1024-token failure; `/app/runtime/benchmarks/diagnoser-candidate-1e7d907-cap1536.json` binds the in-memory 1536 candidate to its module SHA256 and stores each completed mode. Inspect active processes and reuse DONE modes. These diagnostic records must not be seeded into a different source-bound suite checkpoint. An interrupted earlier stream with no recoverable output is NOT counted as completed.
 
@@ -212,7 +216,10 @@ DIAGNOSER_1024_FAILED_OFF_CASE_DIAGNOSTIC   = COMPLETE_JSON_STOP_911_TOKENS_SCOR
 DIAGNOSER_1024_FIRST_ON_CASE_DIAGNOSTIC     = COMPLETE_JSON_STOP_970_TOKENS_SCORE_1_OF_5
 DIAGNOSER_1024_CROSS_OFF_DIAGNOSTIC        = FAIL_OUTPUT_TRUNCATED_CONTENT_2
 DIAGNOSER_1536_CROSS_OFF_DIAGNOSTIC        = COMPLETE_JSON_STOP_1292_TOKENS_SCORE_1_OF_5
-DIAGNOSER_1536_PAIRED_DIAGNOSTICS          = IN_PROGRESS_NOT_FULL_SUITE
+DIAGNOSER_1536_PAIRED_DIAGNOSTICS          = INCOMPLETE_7_OF_8_TRUNCATED_CORRELATION_ON
+DIAGNOSER_2048_FAILED_ON_DIAGNOSTIC        = IN_PROGRESS_SINGLE_MODE_ONLY
+MCP_EXACT_NINE_AND_LIVE_HEALTH            = PASS_ON_APPROVED_B30649A
+MCP_CONTINUATION_WORKFLOW                 = NOT_VERIFIED
 CORRECTED_SOURCE_SIX_ROLE_MEASUREMENT      = NOT_EXECUTED
 MODEL_AB_THINKING_REAL                     = NOT_EXECUTED
 MODEL_AB_SAMPLING_REAL                     = NOT_EXECUTED
