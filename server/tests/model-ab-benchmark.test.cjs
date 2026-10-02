@@ -3,7 +3,7 @@
 const test=require("node:test");
 const assert=require("node:assert/strict");
 const {ROLES}=require("../roles.js");
-const {SAMPLING_SCOPE,OFFICIAL_SAMPLING_CANDIDATES,baselineConfig,officialCandidate,buildVariant,assertSingleAxisDifference,requestBody,makeAiCoreCaller,executionOrder,validateScored,runModelAbBenchmark}=require("../control/model-ab-benchmark.js");
+const {SAMPLING_SCOPE,OFFICIAL_SAMPLING_CANDIDATES,baselineConfig,officialCandidate,buildVariant,assertSingleAxisDifference,qualifyConfigForRuntime,qualifyVariantForRuntime,requestBody,makeAiCoreCaller,executionOrder,validateScored,runModelAbBenchmark}=require("../control/model-ab-benchmark.js");
 
 function perfectLocal(testCase){const expected=testCase.expected;return{benchmark_verdict:expected,evidence_refs:[...(testCase.decisive_refs||[])],unsupported_claims:expected==="REJECTED"?["completion claim contradicted"]:[],false_completions:expected==="REJECTED"?["Fix is complete"]:[]};}
 function badLocal(){return{benchmark_verdict:"SUPPORTED",evidence_refs:[],unsupported_claims:[],false_completions:[]};}
@@ -15,6 +15,28 @@ test("model AB requires exactly one explicit changed axis and never changes mode
   assert.equal(assertSingleAxisDifference(variant.baseline,variant.candidate,"temperature"),true);
   assert.throws(()=>assertSingleAxisDifference(variant.baseline,{...variant.candidate,max_tokens:2048},"temperature"),/MULTI_AXIS_DRIFT/);
   assert.throws(()=>buildVariant("local_reviewer","temperature","0"),/CANDIDATE_EQUALS_BASELINE/);
+});
+
+test("runtime qualification preserves a non-token A/B axis and reports safe effective output ceilings",()=>{
+  const requested=buildVariant("local_reviewer","temperature","0.2");
+  const qualified=qualifyVariantForRuntime("local_reviewer","temperature",requested,8192);
+  assert.equal(qualified.baseline.max_tokens,7192);
+  assert.equal(qualified.candidate.max_tokens,7192);
+  assert.equal(qualified.baseline.temperature,0);
+  assert.equal(qualified.candidate.temperature,0.2);
+  assert.equal(qualified.budgets.baseline.runtime_context_tokens,8192);
+  assert.equal(qualified.budgets.baseline.context_limited,true);
+  assert.equal(assertSingleAxisDifference(qualified.baseline,qualified.candidate,"temperature"),true);
+});
+
+test("runtime qualification preserves a measurable max-token axis and fails closed when runtime clamping collapses it",()=>{
+  const measurable=buildVariant("diagnoser","max_tokens","512");
+  const qualified=qualifyVariantForRuntime("diagnoser","max_tokens",measurable,8192);
+  assert.equal(qualified.baseline.max_tokens,7192);
+  assert.equal(qualified.candidate.max_tokens,512);
+  assert.equal(assertSingleAxisDifference(qualified.baseline,qualified.candidate,"max_tokens"),true);
+  const collapsed=buildVariant("diagnoser","max_tokens","20000");
+  assert.throws(()=>qualifyVariantForRuntime("diagnoser","max_tokens",collapsed,8192),e=>e?.code==="MODEL_AB_RUNTIME_AXIS_COLLAPSED"&&e?.runtime_metadata?.baseline_effective_max_tokens===7192&&e?.runtime_metadata?.candidate_effective_max_tokens===7192);
 });
 
 test("thinking AB is allowed only for roles with an explicit boolean thinking baseline",()=>{
@@ -75,20 +97,25 @@ test("invalid role axis candidate and repeat count fail closed",async()=>{
   assert.throws(()=>baselineConfig("missing_role"),/ROLE_INVALID/);assert.throws(()=>buildVariant("diagnoser","temperature","nan"),/TEMPERATURE_CANDIDATE_INVALID/);assert.throws(()=>buildVariant("diagnoser","max_tokens","12"),/MAX_TOKENS_CANDIDATE_INVALID/);await assert.rejects(()=>runModelAbBenchmark({role:"local_reviewer",axis:"temperature",candidate:"0.2",repeats:0,callModel:fakeCaller()}),/REPEATS_INVALID/);
 });
 
+test("real model AB client requires qualified runtime context",()=>{
+  assert.throws(()=>makeAiCoreCaller({baseUrl:"http://example.invalid",apiKey:"test",dispatcher:{},runtimeContextTokens:null,fetchImpl:async()=>{}}),e=>e?.code==="AI_CORE_RUNTIME_CONTEXT_UNQUALIFIED");
+});
+
 test("real model AB client rejects empty partial and valid JSON at token exhaustion",async()=>{
-  const config=baselineConfig("diagnoser");
+  const requested=baselineConfig("diagnoser"),config=qualifyConfigForRuntime("diagnoser",requested,8192).config;
+  assert.equal(config.max_tokens,7192);
   for(const content of ["",'{"partial":',"{}"]){
-    const call=makeAiCoreCaller({baseUrl:"http://example.invalid",apiKey:"test",dispatcher:{},fetchImpl:async()=>new Response(JSON.stringify({choices:[{finish_reason:"length",message:{content,finish_reason:"stop",reasoning_content:"PRIVATE_REASONING_MARKER"}}],usage:{completion_tokens:800}}),{status:200})});
+    const call=makeAiCoreCaller({baseUrl:"http://example.invalid",apiKey:"test",dispatcher:{},runtimeContextTokens:8192,fetchImpl:async()=>new Response(JSON.stringify({choices:[{finish_reason:"length",message:{content,finish_reason:"stop",reasoning_content:"PRIVATE_REASONING_MARKER"}}],usage:{completion_tokens:7192}}),{status:200})});
     await assert.rejects(()=>call({role:"diagnoser",config,system:"s",user:"u"}),e=>{
       assert.equal(e.code,"AI_CORE_OUTPUT_TRUNCATED");
-      assert.deepEqual(e.benchmark_metadata,{role:"diagnoser",max_tokens:config.max_tokens,finish_reason:"length",completion_tokens:800,content_chars:content.length});
+      assert.deepEqual(e.benchmark_metadata,{role:"diagnoser",max_tokens:7192,finish_reason:"length",completion_tokens:7192,content_chars:content.length});
       assert.equal(JSON.stringify(e).includes("PRIVATE_"),false);return true;
     });
   }
 });
 test("real model AB client accepts stop and uses choice-level finish reason",async()=>{
-  const config=baselineConfig("diagnoser");
-  const call=makeAiCoreCaller({baseUrl:"http://example.invalid",apiKey:"test",dispatcher:{},fetchImpl:async()=>new Response(JSON.stringify({choices:[{finish_reason:"stop",message:{content:"{}",finish_reason:"length"}}],usage:{prompt_tokens:2,completion_tokens:3,total_tokens:5}}),{status:200})});
+  const config=qualifyConfigForRuntime("diagnoser",baselineConfig("diagnoser"),8192).config;
+  const call=makeAiCoreCaller({baseUrl:"http://example.invalid",apiKey:"test",dispatcher:{},runtimeContextTokens:8192,fetchImpl:async()=>new Response(JSON.stringify({choices:[{finish_reason:"stop",message:{content:"{}",finish_reason:"length"}}],usage:{prompt_tokens:2,completion_tokens:3,total_tokens:5}}),{status:200})});
   const reply=await call({role:"diagnoser",config,system:"s",user:"u"});
   assert.deepEqual(reply,{content:"{}",finish_reason:"stop",usage:{prompt_tokens:2,completion_tokens:3,total_tokens:5}});
 });
