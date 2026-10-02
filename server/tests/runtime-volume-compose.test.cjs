@@ -36,3 +36,9 @@ test("debug-ai must wait for successful runtime initialization",t=>{
   assert.equal(out.pass,false);
   assert.ok(out.failures.includes("DEBUG_AI_RUNTIME_INIT_DEPENDENCY_REQUIRED"));
 });
+
+test("debug-ai compose requires measured AI Core context qualification input",t=>{
+  const out=gateFor(t,s=>s.replace("      DEBUG_AI_CORE_CONTEXT_TOKENS: ${DEBUG_AI_CORE_CONTEXT_TOKENS:?required}\n",""));
+  assert.equal(out.pass,false);
+  assert.ok(out.failures.includes("DEBUG_AI_CORE_CONTEXT_QUALIFICATION_REQUIRED"));
+});
