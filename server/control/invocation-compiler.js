@@ -18,6 +18,9 @@ const KEYWORDS=Object.freeze({
 });
 
 const ACTIVE_SKILL_STATUS=new Set(["contract_active","qualified_builtin"]);
+const ROLE_OUTPUT_PROTOCOL=Object.freeze({
+  local_reviewer:"OUTPUT_FIELDS=verdict,decision,claims. verdict is required and must be one of PASS, FAIL, UNKNOWN, INSUFFICIENT_EVIDENCE, BLOCKED, APPROVED, REJECTED, ACCEPTED. decision is required and must be one of CONTINUE, HANDOFF, INSUFFICIENT_EVIDENCE, BLOCKED, DONE. claims is required and must be a JSON array of concise review claims using the claim policy and registered evidence IDs. Do not substitute review_state, final_review_state, or material_claims for these required fields. Keep the response minimal and JSON only."
+});
 
 function scoreSkill(skill,task,preferred){
   let score=preferred.indexOf(skill.id)>=0?100-preferred.indexOf(skill.id):0;
@@ -91,6 +94,7 @@ function compileInvocation(role,{task="",extraSystem="",maxSkills=3,selectedSkil
     `SELECTED_SKILLS=${skills.map(compactSkill).join(" || ")}`,
     `OUTPUT_SCHEMA=${c.output_schema}; JSON only. Do not claim tool/test execution that is not present in supplied evidence.`,
   ];
+  if(ROLE_OUTPUT_PROTOCOL[role]) lines.push(ROLE_OUTPUT_PROTOCOL[role]);
   if(extraSystem) lines.push(`TASK_SPECIFIC_POLICY=${String(extraSystem).trim()}`);
   return Object.freeze({
     role,
@@ -109,10 +113,11 @@ function assertInvocationCompiler(){
     if(!x.system.includes(`ROLE=${role}`)) throw new Error(`INVOCATION_ROLE_MISSING:${role}`);
     if(x.selected_skill_ids.length<1||x.selected_skill_ids.length>3) throw new Error(`INVOCATION_SKILL_COUNT_INVALID:${role}`);
     if(!x.system.includes("model output is not evidence")) throw new Error(`INVOCATION_EVIDENCE_POLICY_MISSING:${role}`);
+    if(role==="local_reviewer"&&!x.system.includes("OUTPUT_FIELDS=verdict,decision,claims")) throw new Error("INVOCATION_LOCAL_REVIEWER_OUTPUT_PROTOCOL_MISSING");
     const fixed=compileInvocation(role,{task:"untrusted observations",selectedSkillIds:[x.selected_skill_ids[0]]});
     if(fixed.skill_selection_mode!=="RUNTIME_FIXED"||fixed.selected_skill_ids[0]!==x.selected_skill_ids[0]) throw new Error(`INVOCATION_FIXED_SKILL_FAILED:${role}`);
   }
   return true;
 }
 
-module.exports={KEYWORDS,rejectedHistoryAvailable,ensureRejectedHistorySkill,selectSkills,resolveSkills,compileInvocation,assertInvocationCompiler};
+module.exports={KEYWORDS,ROLE_OUTPUT_PROTOCOL,rejectedHistoryAvailable,ensureRejectedHistorySkill,selectSkills,resolveSkills,compileInvocation,assertInvocationCompiler};
