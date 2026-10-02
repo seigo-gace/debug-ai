@@ -25,19 +25,19 @@ PR                                 = #34
 PR state                           = OPEN / DRAFT / UNMERGED
 base branch                        = feat/search-gate-shadow-audit-cli-20261001
 base SHA                           = cfbe2908bb6190bc5f5c894779c4d0f08f51b80e
-Local Reviewer contract fix anchor = 6f2882fcd05d141f7392ede635dbb31ee15289fb
+current source anchor              = 0ad40ea939866c9ae59086c1030aadd3f76bdb4a
 ```
 
-Exact source qualification at `6f2882fcd05d141f7392ede635dbb31ee15289fb`:
+Exact source qualification observed at `0ad40ea939866c9ae59086c1030aadd3f76bdb4a`:
 
 ```text
-Public Readiness Audit #373 = SUCCESS
-Verify #408                 = SUCCESS
-repository tests            = 380/380 PASS
+Public Readiness Audit #380 = SUCCESS
+Verify #415                 = SUCCESS
+repository tests            = 381/381 PASS
 Dependency Review           = SUCCESS
 Legacy Authority            = SUCCESS
-Runtime Volume Gate #9      = SUCCESS
-Core Verify #409            = SUCCESS
+Runtime Volume Gate #16     = SUCCESS
+Core Verify #416            = SUCCESS
 pre-server source audit     = source_ready=true / READY
 main merge                  = NOT EXECUTED
 ```
@@ -46,34 +46,34 @@ Core Verify includes syntax/source gates, role routing, AI Core request/state/st
 
 ## Current live DebugAI Server boundary
 
-The previously authorized source reflection recovered the production runtime to exact source `56e1059f20cf0604a7b973717194a3e7999f75e4` before the new Local Reviewer contract fix was discovered.
-
-Measured live state before reflecting the new contract fix:
+The latest authorized Server reflection currently running is exact source:
 
 ```text
 checkout path                     = /home/admin1/projects/debug-ai
 checkout mode                     = detached HEAD
-checkout HEAD                     = 56e1059f20cf0604a7b973717194a3e7999f75e4
+checkout HEAD                     = ebe48131b236d8ca44057c813236fd0e99925214
 .debugai-input/                   = preserved / untracked
 runtime-init                      = Exited (0)
 sandbox-init                      = Exited (0)
 sandbox-runner                    = Up
 debug-ai                          = healthy
-runtime root                      = UID/GID 1000:1000 / mode 0700
 container entrypoint              = node server/main.js
 container workdir                 = /app
 loopback /health                  = PASS
-pre-server qualification          = PASS at deployed source
-source parity                     = PASS at deployed source
+tracked worktree                  = CLEAN
+pre-server qualification          = source_ready=true / READY
+source parity                     = PASS for deployed ebe48131 source
 Search Gate shadow                = NO_SHADOW_RECORDS / NOT_EVALUABLE
 Search skip activation            = NO
 ```
 
-The live DebugAI runtime is healthy for `56e1059...`, but it is now behind the qualified Local Reviewer contract-fix source. Do not claim exact Current-source parity until `6f2882f...` or its documentation-following descendant is reflected and read back.
+The `ebe48131...` reflection preserved `.debugai-input/`, retained persistent volumes, passed Host↔Container source parity for the changed Local Reviewer/Workflow files, and completed with `REFLECTION=PASS`.
+
+The live runtime is healthy for `ebe48131...`. It is now behind current qualified source `0ad40ea...`, so exact Current-source parity is not yet verified.
 
 ## AI Core resource incident and closure
 
-The first real Local Reviewer benchmark after the original source reflection timed out at the 600000 ms role deadline. Direct backend tests showed that this was not a DebugAI timeout-policy defect: AI Core memory ceilings were forcing reclaim/throttling during inference.
+The first real Local Reviewer benchmark during this qualification phase timed out at the 600000 ms role deadline. Direct backend and cgroup measurements showed that the previous AI Core memory ceilings were forcing reclaim/throttling during inference even though host memory remained available.
 
 Before correction:
 
@@ -81,14 +81,11 @@ Before correction:
 four backend mem_limit        = 6656m each
 ai-core.slice MemoryHigh      = 24087M
 ai-core.slice MemoryMax       = 28904M
-Ministral 4-token speed       = about 0.31 tok/s
-Ministral container max hits  = observed during tiny inference
-parent MemoryHigh hits        = observed during tiny inference
+Ministral short speed         = about 0.31 tok/s during constrained state
+container/parent max-high hits= observed during tiny inference
 ```
 
-Master authorized the AI Core resource correction for the actual operating model: four resident models with normal inference not intended to run as four simultaneous full-memory bursts.
-
-Current AI Core resource authority:
+Master authorized the shared AI Core resource correction. Current measured authority is:
 
 ```text
 four backend mem_limit        = 9216m each
@@ -97,8 +94,7 @@ ai-core.slice MemoryMax       = 36G
 --cache-ram                   = 4096 unchanged
 context                       = 8192 unchanged
 backend CPU                   = 3 unchanged
-models                        = unchanged
-router                        = unchanged
+models/router                 = unchanged
 ```
 
 Measured after correction:
@@ -117,30 +113,13 @@ Ministral MAX_DELTA           = 0
 host MemAvailable             = about 22 GiB at retest
 ```
 
-The AI Core memory-pressure cause is therefore closed for the tested serial real-role path. The DebugAI Local Reviewer 600000 ms timeout remains unchanged.
+The AI Core memory-pressure cause is closed for the tested serial role path. DebugAI role timeout remains unchanged; timeout extension is not used as a workaround.
 
-## Local Reviewer real measurement defect discovered
+## Local Reviewer contract defect sequence
 
-After the AI Core resource correction, the next real Local Reviewer run reached the model but returned:
+### 1. Noncanonical top-level output
 
-```text
-completed   = false
-error_code  = ROLE_OUTPUT_JSON_INVALID
-AI Core HIGH/MAX/OOM deltas = 0
-```
-
-A subsequent RAW capture using the same real benchmark path completed in about 137.6 s and proved the model itself could produce a full valid JSON response:
-
-```text
-finish_reason       = stop
-completion_tokens   = 835 / 1024
-prompt_tokens       = 1547
-reasoning_content   = null
-Ministral speed     = about 6.07 tok/s
-validator parse     = PASS for generic JSON/evidence checks
-```
-
-However, the returned shape was noncanonical:
+After the AI Core resource correction, one Local Reviewer run returned `ROLE_OUTPUT_JSON_INVALID`. A subsequent RAW capture on the real path produced complete JSON with `finish_reason=stop`, 835 completion tokens, about 6.07 tok/s, but used the noncanonical shape:
 
 ```text
 review_state
@@ -149,7 +128,7 @@ material_claims
 final_review_state
 ```
 
-while Benchmark summary and Production Workflow consume the canonical Local Reviewer contract:
+Production Workflow consumes:
 
 ```text
 verdict
@@ -157,25 +136,66 @@ decision
 claims
 ```
 
-The generic validator previously allowed the noncanonical shape to pass while semantic checking was shadow-only. Production Workflow then could interpret the missing `verdict` / `decision` as `UNKNOWN`. This was a real production-impacting contract mismatch, not a cosmetic benchmark display issue.
+The generic validator had allowed the substitute shape while Production Workflow could read the missing canonical verdict/decision as `UNKNOWN`. Source was therefore changed to require the canonical top-level Local Reviewer fields and fail closed on the substitute schema.
 
-## Local Reviewer canonical contract repair
+### 2. Canonical claims item type missing in real model output
 
-The source fix anchored at `6f2882fcd05d141f7392ede635dbb31ee15289fb` does all of the following:
+That top-level repair was documented and reflected to Server at `ebe48131...`. The real Local Reviewer benchmark was then executed three consecutive times on the reflected runtime.
 
-- Invocation explicitly requires Local Reviewer fields `verdict`, `decision`, and `claims`.
-- The prompt enumerates allowed verdict/decision values and forbids substituting `review_state`, `final_review_state`, or `material_claims` for the required canonical fields.
-- Validator requires canonical Local Reviewer `verdict`, `decision`, and `claims` even when semantic mode is shadow.
-- Missing or invalid canonical fields fail closed.
-- Existing claim/evidence binding remains active.
-- Regression tests reject the exact noncanonical shape observed from the real model.
-- Existing workflow/E2E/verify/telemetry fixtures were updated to use the canonical contract rather than weakening the validator.
+Measured result:
 
-The first CI attempt after tightening the validator exposed seven stale fixtures. Those failures were not suppressed: the fixtures were corrected and the exact qualified anchor subsequently passed all 380 tests and all required CI gates.
+```text
+run 1 = FAIL / ROLE_CLAIM_EVIDENCE_INVALID / CLAIM_TYPE_INVALID on claims 0..3
+run 2 = FAIL / ROLE_CLAIM_EVIDENCE_INVALID / CLAIM_TYPE_INVALID on claims 0..2
+run 3 = FAIL / ROLE_CLAIM_EVIDENCE_INVALID / CLAIM_TYPE_INVALID on claims 0..2
+AI Core HIGH delta     = 0 on every run
+AI Core MAX delta      = 0 on every run
+AI Core OOM delta      = 0 on every run
+AI Core OOM_KILL delta = 0 on every run
+```
+
+This is repeatable schema-contract failure, not renewed AI Core resource pressure and not an intermittent JSON parse failure.
+
+`claim-evidence.js` already requires each `claims[]` item to use one of the canonical claim types:
+
+```text
+FACT
+INFERENCE
+HYPOTHESIS
+UNKNOWN
+REJECTED
+```
+
+The real prompt previously required a `claims` array but did not explicitly name the `type` field or enumerate its allowed values. Unit fixtures manually supplied `type:"FACT"`, so the gap was not exposed by the earlier unit path.
+
+## Current Local Reviewer claim-type repair
+
+Current source `0ad40ea939866c9ae59086c1030aadd3f76bdb4a` keeps the validator strict and changes the invocation contract instead of accepting malformed output.
+
+The current prompt explicitly requires:
+
+- top-level `verdict`, `decision`, `claims`;
+- every `claims[]` item has required `type`;
+- `type` is uppercase and exactly one of `FACT`, `INFERENCE`, `HYPOTHESIS`, `UNKNOWN`, `REJECTED`;
+- concise text uses `statement`;
+- `FACT` / `INFERENCE` require registered `evidence_refs`;
+- `HYPOTHESIS` requires `falsification_condition`;
+- `REJECTED` requires `counter_evidence_refs`;
+- `UNKNOWN` may remain unsupported rather than fabricate evidence;
+- `INSUFFICIENT_EVIDENCE` remains a valid verdict/decision state but is not a claim type;
+- `claim`, `status`, `support`, `review_state`, `final_review_state`, and `material_claims` cannot substitute for canonical fields.
+
+Regression coverage now includes the real failure family: a claim object using `claim/evidence_refs/support` but omitting canonical `type` must be rejected with `CLAIM_TYPE_INVALID`.
+
+The validator was not weakened. Existing `UNKNOWN and INSUFFICIENT_EVIDENCE are valid` non-fabrication policy was also preserved after CI caught its accidental removal during the first edit attempt.
+
+Exact source qualification for this repair is the `0ad40ea...` CI set recorded above.
 
 ## Runtime-image and Server-local input contract
 
-Current runtime-image contract includes `server/`, `orchestrator/`, `bin/`, `mcp/`, `scripts/`, `docs/`, and `package.json`. The Server-local `.debugai-input/` path is excluded from Docker build context and must not be deleted by source reflection.
+Current runtime-image contract includes `server/`, `orchestrator/`, `bin/`, `mcp/`, `scripts/`, `docs/`, and `package.json`.
+
+The Server-local `.debugai-input/` path is excluded from Docker build context and must not be deleted by source reflection.
 
 Production Compose retains:
 
@@ -192,7 +212,7 @@ Implemented/verified source boundary includes:
 - six fixed internal roles through shared AI Core;
 - role-specific Skill procedures and bounded Tool Runtime;
 - deterministic evidence registry and claim/evidence binding;
-- Local Reviewer canonical output enforcement;
+- canonical Local Reviewer top-level and claim-item output enforcement;
 - Evidence Projection / Active Evidence Window;
 - durable RunAuthority, native writer lock, generation/epoch fencing;
 - durable read-only effect reuse and Researcher continuation;
@@ -209,29 +229,38 @@ Implemented/verified source boundary includes:
 - runtime-image qualification/MCP asset packaging;
 - production named-volume initialization contract.
 
-## Explicitly not complete
+## Current qualification state
 
 ```text
-CURRENT_CONTRACT_FIX_SERVER_REFLECTION = NOT_EXECUTED
-CURRENT_RUNTIME_EXACT_PARITY           = NOT_VERIFIED_FOR_NEW_HEAD
-LOCAL_REVIEWER_CANONICAL_REAL          = NOT_EXECUTED_ON_FIXED_SOURCE
-SKILL_EFFECT_ALL_REAL                  = NOT_EXECUTED
-MODEL_AB_THINKING_REAL                 = NOT_EXECUTED
-MODEL_AB_SAMPLING_REAL                 = NOT_EXECUTED
-MODEL_AB_TOKEN_CAP_REAL                = NOT_EXECUTED
-REAL_INTEGRATION_E2E                   = NOT_EXECUTED
-MCP_LIVE                               = NOT_VERIFIED
-VS_CODEX_MCP_REGISTRATION              = NOT_VERIFIED
-SEARCH_GATE_SHADOW_REAL                = NOT_EVALUABLE_NO_RECORDS
-FALSE_SKIP_ZERO_PROVEN                 = NO
-SEARCH_SKIP_ACTIVATION                 = NO
-FRESH_CURRENT_RUNTIME_SELF_DEBUG       = NOT_EXECUTED
-FINAL_PRODUCTION_EQUIVALENT_E2E        = NOT_EXECUTED
-MAIN_MERGE                             = NO
-PRODUCTION_PROFILE_CHANGE              = NONE
+SERVER_CORE_AUTHORITY_READ              = PASS
+AI_CORE_RESOURCE_GATE                   = PASS
+AI_CORE_SPEED_RECOVERED                 = PASS
+CURRENT_SOURCE_HEAD                     = 0ad40ea939866c9ae59086c1030aadd3f76bdb4a
+CURRENT_SOURCE_CI                       = PASS
+LIVE_SERVER_HEAD                        = ebe48131b236d8ca44057c813236fd0e99925214
+LIVE_SERVER_HEALTH                      = PASS
+LIVE_SERVER_SOURCE_PARITY_FOR_EBE       = PASS
+CURRENT_RUNTIME_EXACT_PARITY_FOR_0AD    = NOT_VERIFIED
+LOCAL_REVIEWER_REAL_ON_EBE              = FAIL_CLAIM_TYPE_INVALID_3_OF_3
+LOCAL_REVIEWER_CLAIM_TYPE_FIX_SOURCE    = PASS
+LOCAL_REVIEWER_CLAIM_TYPE_FIX_REFLECTED = NO
+SKILL_EFFECT_ALL_REAL                   = NOT_EXECUTED
+MODEL_AB_THINKING_REAL                  = NOT_EXECUTED
+MODEL_AB_SAMPLING_REAL                  = NOT_EXECUTED
+MODEL_AB_TOKEN_CAP_REAL                 = NOT_EXECUTED
+REAL_INTEGRATION_E2E                    = NOT_EXECUTED
+MCP_LIVE                                = NOT_VERIFIED
+VS_CODEX_MCP_REGISTRATION               = NOT_VERIFIED
+SEARCH_GATE_SHADOW_REAL                 = NOT_EVALUABLE_NO_RECORDS
+FALSE_SKIP_ZERO_PROVEN                  = NO
+SEARCH_SKIP_ACTIVATION                  = NO
+FRESH_CURRENT_RUNTIME_SELF_DEBUG        = NOT_EXECUTED
+FINAL_PRODUCTION_EQUIVALENT_E2E         = NOT_EXECUTED
+MAIN_MERGE                              = NO
+PRODUCTION_PROFILE_CHANGE               = NONE
 ```
 
-The successful RAW capture on the old source does not qualify the canonical Local Reviewer gate because its output shape was incompatible with Production Workflow.
+A source/unit/CI PASS does not convert the real Local Reviewer gate to PASS. The claim-type repair must first be reflected to Server and measured through the real model path.
 
 ## Master authorization boundary
 
@@ -242,22 +271,21 @@ Master separately authorized the AI Core resource change recorded above. That do
 ## Required next-work order
 
 ```text
-1. finish README/current-state/qualification documentation synchronization for the qualified contract-fix anchor
+1. synchronize README / CURRENT_STATE / PRE_SERVER_QUALIFICATION to the 0ad40ea source and measured ebe48131 runtime
 2. require exact documentation-following HEAD CI PASS
-3. preserve .debugai-input and reflect the exact confirmed GitHub revision to /home/admin1/projects/debug-ai
+3. preserve .debugai-input and reflect that exact confirmed GitHub revision to /home/admin1/projects/debug-ai
 4. rebuild/recreate only required DebugAI Compose services without deleting persistent volumes
-5. prove runtime-init/sandbox-init state, DebugAI health, port 8787, source parity, and required image assets
+5. prove runtime-init/sandbox-init, DebugAI health, port 8787, tracked cleanliness, and exact source parity
 6. rerun pre-server/live-runtime gates where executable and preserve NOT_EXECUTED where not
-7. rerun Local Reviewer real measurement and require canonical verdict/decision/claims
-8. repeat enough real Local Reviewer measurement to distinguish intermittent JSON-format failure from a closed defect
-9. run six-role Skill ON/OFF real suite
-10. run one-variable Model A/B: Thinking where eligible -> Sampling -> token cap only when justified
-11. run bounded real allowed-repository integration
-12. verify MCP exact nine tools + durable continuation
-13. accumulate/evaluate Search Gate real shadow without activation
-14. run fresh current-runtime self-debug
-15. run final production-equivalent closed-loop E2E
-16. update current-state docs and Notion from measured results
+7. rerun Local Reviewer real benchmark three times and require canonical verdict/decision/claims plus valid claims[].type
+8. only after stable Local Reviewer PASS, run six-role Skill ON/OFF real suite
+9. run one-variable Model A/B: Thinking where eligible -> Sampling -> token cap only when justified
+10. run bounded real allowed-repository integration
+11. verify MCP exact nine tools + durable continuation
+12. accumulate/evaluate Search Gate real shadow without activation
+13. run fresh current-runtime self-debug
+14. run final production-equivalent closed-loop E2E
+15. update current-state docs and Notion from measured results
 ```
 
-Every unexecuted or not-yet-reflected item stays unexecuted until real evidence exists.
+Every unexecuted, failed, or not-yet-reflected item keeps that state until real evidence changes it.
