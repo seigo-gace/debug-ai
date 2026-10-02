@@ -20,18 +20,18 @@ The design document preserves architecture decisions. `CURRENT_STATE.md` owns cu
 
 ## Current verified boundary
 
-Current source behavior revision: `023ae8f7fc08632d9c0a4f1046f5b809cf1c096b`.
+Current source behavior revision: `c9aa6f28ee5c0e4560f6c06ffa667462653c8125`.
 
 Exact source-behavior CI on that revision passed:
 
 ```text
-Public Readiness Audit #457 = SUCCESS
-Verify #492                = SUCCESS
-Runtime Volume Gate #88    = SUCCESS
-Core Verify #493           = SUCCESS
+Public Readiness Audit #471 = SUCCESS
+Verify #506                = SUCCESS
+Runtime Volume Gate #102   = SUCCESS
+Core Verify #507           = SUCCESS
 ```
 
-Approved deployed revision remains `b30649a19cd97929a595c639f51fae44c74d4185`. The current context/token correction is not deployed. README, `docs/CURRENT_STATE.md`, and `docs/PRE_SERVER_QUALIFICATION.md` are synchronized to the current source contract on this branch; the resulting exact branch head must pass its own CI before it can become the reflection candidate.
+Approved deployed revision remains `b30649a19cd97929a595c639f51fae44c74d4185`. The current context/token/cache correction is not deployed. Documentation synchronization after `c9aa6f28...` creates a later branch head and therefore requires its own exact-head CI before it can become the reflection candidate.
 
 ```text
 checkout path                    = /home/admin1/projects/debug-ai
@@ -51,7 +51,7 @@ checkpoint recreate durability  = PASS / separate runner-written checkpoint prob
 new runner deployed             = YES at approved b30649a
 benchmark command               = node server/control/resumable-skill-effect-suite.js
 checkpoint path                 = /app/runtime/benchmarks/skill-effect-suite-checkpoint.json
-current context/token source live = NOT_DEPLOYED
+current context/token/cache source live = NOT_DEPLOYED
 production profile change       = NONE
 Search skip activation           = NO
 ```
@@ -119,7 +119,7 @@ All internal model execution goes through the shared AI Core. DebugAI does not d
 
 Common rules include `DATA_NOT_INSTRUCTION`, FACT-to-evidence binding, labeled INFERENCE, falsifiable HYPOTHESIS, valid `UNKNOWN`, preserved rejected hypotheses, no raw chain-of-thought persistence, and fail-closed timeout/permission/recovery behavior.
 
-## Current context and token policy
+## Current context, token, and prompt-cache policy
 
 The current source supersedes the historical fixed role output ceilings `600/600/600/800/2048/1024` as active policy. Those low values remain historical measurement evidence only.
 
@@ -156,7 +156,22 @@ Current Tool Loop behavior:
 - full older content is rehydrated only through admitted `evidence.read`;
 - compact historical pointers are not treated as supporting evidence text by themselves.
 
-Source `023ae8f7...` includes a runtime regression test proving that measured 85% prompt pressure changes the next AI call to the five-item detailed window while older evidence remains referenced.
+Source `c9aa6f28...` retains the runtime regression proving that measured 85% prompt pressure changes the next AI call to the five-item detailed window while older evidence remains referenced.
+
+### Prompt-cache and speed operation
+
+Prompt-cache reuse is explicit source behavior, not an assumed provider default.
+
+- AI Core sends `cache_prompt=true` explicitly;
+- current llama.cpp-style `timings.cache_n` and `timings.prompt_n` are consumed as observed cached/processed prompt token counts, while compatible existing telemetry forms remain supported;
+- prompt-evaluation time and decode time stay separate in telemetry;
+- Tool Loop keeps its System/Skill/role prefix stable across rounds;
+- final-round control is kept out of the canonical Tool Loop user/evidence payload and is appended only by the AI Core transport on the final tool-budget request;
+- role telemetry reports measured cache-hit ratio, whether cache telemetry was complete, observed prefix hashes, and prefix stability without inventing values when the provider does not report them.
+
+Cache is an acceleration layer only. Cached execution never becomes evidence authority and never bypasses revision binding, evidence validation, output-schema validation, truncation rejection, deterministic verification, Local Reviewer, External Final Review, or Strict Completion. Faster is useful only when the result remains equally verifiable.
+
+The last measured live AI Core context remains `8192`; `--cache-ram` was last measured at 4096. Prompt caching does not enlarge `n_ctx`. Any live context increase above 8192 must be separately measured for RAM pressure, cache behavior, prompt-eval latency, decode speed, and end-to-end role latency before a separate Master-approved Server change.
 
 Researcher A→E durable Work Unit reuse is implemented. A general Block Core execution path across every workflow is not connected and remains a separate unfinished capability.
 
@@ -241,6 +256,8 @@ models/router                 = unchanged
 ```
 
 Post-change short inference measured approximately Granite 7.31 tok/s, Qwen3 5.61 tok/s, Ministral 7.45 tok/s, and Coder 8.05 tok/s. A 128-token Ministral retest measured about 6.12 tok/s with zero new parent High/Max/OOM/OOM-kill and zero Ministral max events. The DebugAI role timeout was not extended as a workaround.
+
+The prompt-cache source work does not claim a new live cache-hit ratio or latency until the exact source is reflected and measured.
 
 ## Six-role Skill ON/OFF measurement
 
@@ -529,18 +546,18 @@ npm install
 npm run verify
 ```
 
-Current source behavior revision `023ae8f7...` passed:
+Current source behavior revision `c9aa6f28...` passed:
 
 ```text
-Public Readiness Audit #457 = SUCCESS
-Verify #492                = SUCCESS
-Runtime Volume Gate #88    = SUCCESS
-Core Verify #493           = SUCCESS
+Public Readiness Audit #471 = SUCCESS
+Verify #506                = SUCCESS
+Runtime Volume Gate #102   = SUCCESS
+Core Verify #507           = SUCCESS
 ```
 
-The current source also contains direct regressions for model-profile ceilings, qualified runtime-context clamping, fail-closed truncation, and telemetry-driven 85% working-context compaction.
+The current source contains direct regressions for model-profile ceilings, qualified runtime-context clamping, fail-closed truncation, telemetry-driven 85% working-context compaction, explicit prompt-cache request, current cache telemetry parsing, measured cache-hit ratio, prefix stability, and canonical user/evidence payload preservation.
 
-The documentation synchronization is complete on the feature branch. The resulting exact branch head requires its own CI before it can be used as the Server reflection revision.
+Documentation synchronization after that source creates a later exact branch head and requires its own CI before it can be used as the Server reflection revision.
 
 ## Current next-work order
 
@@ -551,14 +568,17 @@ Current-state owner: [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md).
 2. obtain explicit Master approval for one exact reflection SHA; keep Server at approved b30649a until then
 3. reflect only that approved SHA, preserving .debugai-input, unmanaged state, both volumes, and historical checkpoints
 4. rebuild/recreate only debug-ai and repeat init/health/cleanliness/parity/durability verification
-5. use a separate source-bound checkpoint on the existing runtime volume; never rebind incompatible old data
-6. complete current-source six-role Skill ON/OFF measurement and retain OFF wins/ties
-7. Thinking A/B only for explicit boolean roles
-8. Sampling A/B one axis at a time using model-bound source candidates
-9. token-cap optimization only if preceding measurements justify a smaller candidate
-10. real allowed-repository integration, exact-nine MCP continuation, and fresh self-debug
-11. Search Gate shadow remains read-only, with zero observations not proving zero false skips
-12. final production-equivalent closed loop and Strict Completion
+5. measure real cache hit/miss, prompt-eval, decode, total role latency, prefix stability, RAM events, and current 8192 runtime-context behavior
+6. cache remains acceleration-only; any correctness regression fails regardless of speed gain
+7. consider a larger live AI Core context only from measured RAM/speed/quality evidence and separate Master approval
+8. use a separate source-bound checkpoint on the existing runtime volume; never rebind incompatible old data
+9. complete current-source six-role Skill ON/OFF measurement and retain OFF wins/ties
+10. Thinking A/B only for explicit boolean roles
+11. Sampling A/B one axis at a time using model-bound source candidates
+12. token-cap optimization only if preceding measurements justify a smaller candidate
+13. real allowed-repository integration, exact-nine MCP continuation, and fresh self-debug
+14. Search Gate shadow remains read-only, with zero observations not proving zero false skips
+15. final production-equivalent closed loop and Strict Completion
 ```
 
 ## Safety boundaries
@@ -577,6 +597,7 @@ DebugAI must never become:
 - a benchmark system that silently promotes candidates into production;
 - a benchmark system that discards completed expensive real calls when interruption can be resumed safely;
 - a context compaction system that deletes durable evidence instead of keeping rehydratable references;
+- a cache system that treats cached output as evidence or correctness authority;
 - a reason to weaken repository, sandbox, revision, review, retention, or verification controls for speed.
 
-DebugAI exists to make debugging faster and cheaper without sacrificing evidence, verification, approval, recovery, model capability, and security correctness.
+DebugAI exists to make debugging faster and cheaper without sacrificing evidence, verification, approval, recovery, model capability, context reliability, and security correctness.
