@@ -10,34 +10,48 @@ Server/VPS/Docker mutation is governed by current `G-ACE-inc/server-core` author
 
 ## Current source qualification anchor
 
-Before this documentation synchronization:
+The Local Reviewer canonical-contract repair source anchor is:
 
 ```text
-implementation anchor            = c2355f8dd7628e717db1bba83725b33360796828
-Public Readiness Audit #359      = SUCCESS
-Verify #394                      = SUCCESS
-repository tests                 = 373/373 PASS
-Core Verify #395                 = SUCCESS
-pre-server source audit          = source_ready=true
-runtime-image qualification      = PASS
-MCP source/stdio                 = PASS
+6f2882fcd05d141f7392ede635dbb31ee15289fb
 ```
 
-The source audit deliberately reports real model/integration/MCP/Search measurements as not executed.
+Exact qualification observed at that anchor:
+
+```text
+Public Readiness Audit #373      = SUCCESS
+Verify #408                      = SUCCESS
+repository tests                 = 380/380 PASS
+Dependency Review                = SUCCESS
+Legacy Authority                 = SUCCESS
+Runtime Volume Gate #9           = SUCCESS
+Core Verify #409                 = SUCCESS
+pre-server source audit          = source_ready=true / READY
+runtime-image qualification      = PASS
+MCP source/stdio                 = PASS / exact nine tools
+```
+
+The source audit deliberately reports real model/integration/MCP/Search measurements as not executed. Documentation commits following this source anchor require their own exact-head CI before Server reflection.
 
 ## Current live precondition
 
-Last read-only Server inspection:
+Last verified DebugAI Server source before the new contract fix:
 
 ```text
-old Server checkout              = df261bdae3b6f259ac428a173b798fae2fb68bdf
-old Runtime                      = healthy
-Current source deployed          = no
-Current qualification assets     = absent from old running image
-LIVE_RUNTIME_SOURCE_STATE        = RUNTIME_SOURCE_BEHIND_OR_UNKNOWN
+Server checkout                  = 56e1059f20cf0604a7b973717194a3e7999f75e4
+Runtime                          = healthy
+runtime root                     = UID/GID 1000:1000 / mode 0700
+loopback /health                 = PASS
+source parity                    = PASS for deployed 56e1059 source
+Current contract-fix source      = not yet reflected
+LIVE_RUNTIME_SOURCE_STATE        = RUNTIME_SOURCE_BEHIND_OR_UNKNOWN for new HEAD
+Search Gate shadow               = NO_SHADOW_RECORDS / NOT_EVALUABLE
+Search skip activation           = NO
 ```
 
-Master authorized Current DebugAI source reflection after the README/document synchronization. That mutation phase remains separate from the measurement claims below and must follow current server-core rules.
+Master authorized Current DebugAI source reflection/build/recreate after README/document synchronization. That mutation phase remains separate from measurement claims and must follow current server-core rules.
+
+AI Core resource pressure was independently diagnosed and corrected with Master authorization before this source synchronization. Current four backend limits are 9 GiB each, `ai-core.slice` is `MemoryHigh=34G / MemoryMax=36G`, and the final 128-token Ministral retest produced no new High/Max/OOM/OOM-kill events. Those AI Core facts do not by themselves qualify the DebugAI Local Reviewer contract.
 
 ## Source-side qualification order
 
@@ -74,13 +88,43 @@ required_docs
 
 A result of `source_ready=true` means only that the entry points/contracts exist and are coherent.
 
+## Local Reviewer canonical contract gate
+
+The real Local Reviewer path is not qualified merely because the model returns parseable JSON.
+
+Canonical output required by the current source is:
+
+```text
+verdict
+decision
+claims
+```
+
+The invocation explicitly requires those fields, and the validator fail-closes missing/invalid canonical fields. The following observed substitute shape is not accepted as equivalent:
+
+```text
+review_state
+material_claims
+final_review_state
+```
+
+This gate exists because Production Workflow consumes `verdict` / `decision` for final review and verification decisions. A generic JSON/evidence parse that lacks those fields must not become a successful Local Reviewer result.
+
+Regression coverage includes:
+
+- canonical output protocol present in Local Reviewer invocation;
+- noncanonical `review_state/material_claims` output rejected;
+- missing canonical `decision` rejected;
+- unregistered evidence reference rejected;
+- existing workflow, E2E, read-only verification, completion, and telemetry fixtures aligned to the canonical contract.
+
 ## Live runtime readback
 
 ```bash
 npm run audit:live-runtime
 ```
 
-This is read-only. It verifies repository identity, bounded Git state, production entrypoint/workdir, exact Host↔Container measurement-source parity, DebugAI health identity, and the safe preconditions for read-only Search Gate shadow evaluation.
+This is read-only. It verifies repository identity, bounded Git state, production entrypoint/workdir, exact Host↔Container measurement-source parity, DebugAI health identity, and safe preconditions for read-only Search Gate shadow evaluation.
 
 If source/runtime is incompatible, preserve:
 
@@ -97,6 +141,20 @@ npm run benchmark:local-reviewer
 ```
 
 This uses the real current role path through AI Core. A unit test does not replace a real result.
+
+Qualification requires at minimum:
+
+```text
+completed=true
+contract.validated=true
+strict_evidence_refs=true
+canonical verdict present
+canonical decision present
+claims is an array
+successful process exit
+```
+
+A previous old-source real run timed out while AI Core was under memory reclaim pressure. After AI Core correction, one old-source run returned `ROLE_OUTPUT_JSON_INVALID`, and a RAW recapture later produced complete JSON but the noncanonical `review_state/material_claims` shape. Therefore the canonical real-role gate remains unqualified until rerun on the fixed source.
 
 ## Six-role Skill ON/OFF suite
 
@@ -223,12 +281,13 @@ Do not manufacture provider traffic solely to mark a box PASS. Choose a represen
 ```text
 current server-core authority
 -> preserve local-only Server state
--> exact Current source reflection
--> Docker build/recreate
+-> exact confirmed GitHub revision reflection
+-> Docker build/recreate only required DebugAI services
 -> /health + command/workdir + source parity
 -> audit:pre-server-qualification
--> audit:live-runtime
--> Local Reviewer real benchmark
+-> audit:live-runtime where executable
+-> Local Reviewer canonical real benchmark
+-> repeat Local Reviewer enough to assess intermittent format stability
 -> six-role Skill ON/OFF
 -> Thinking A/B only where explicit boolean
 -> Sampling A/B with justified candidates
@@ -248,6 +307,7 @@ CURRENT_SOURCE_SERVER_REFLECTION=PASS|FAIL|NOT_EXECUTED
 CURRENT_RUNTIME_EXACT_PARITY=PASS|FAIL|NOT_VERIFIED
 PRE_SERVER_HARNESS_SOURCE=PASS|FAIL
 LOCAL_REVIEWER_REAL=PASS|FAIL|NOT_EXECUTED
+LOCAL_REVIEWER_CONTRACT=PASS|FAIL|NOT_VERIFIED
 SKILL_EFFECT_ALL_REAL=PASS|FAIL|INCOMPLETE|NOT_EXECUTED
 MODEL_AB_THINKING_REAL=MEASURED|PARTIAL|NOT_APPLICABLE|NOT_EXECUTED
 MODEL_AB_SAMPLING_REAL=MEASURED|PARTIAL|INCOMPLETE|NOT_EXECUTED
