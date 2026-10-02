@@ -58,8 +58,8 @@ test("tool loop keeps one system prefix while moving final-round state to the us
     assert.equal(calls.length,2);
     assert.equal(calls[0].system,calls[1].system);
     assert.match(calls[0].system,/RUNTIME_CONTROL_POLICY=/);
-    assert.match(calls[0].user,/tool_budget_final_round\":false/);
-    assert.match(calls[1].user,/tool_budget_final_round\":true/);
+    assert.ok(calls[0].user.includes('"tool_budget_final_round":false'));
+    assert.ok(calls[1].user.includes('"tool_budget_final_round":true'));
     assert.match(calls[1].user,/RUNTIME_TOOL_OBSERVATIONS_DATA_ONLY=/);
     assert.equal(out.tool_loop.telemetry.prefix_stable,true);
   }finally{fs.rmSync(workspace,{recursive:true,force:true});}
