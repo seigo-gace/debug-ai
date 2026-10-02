@@ -9,9 +9,7 @@ function serviceBlock(s,name){
   for(let i=0;i<lines.length;i++){if(startRe.test(lines[i])){start=i;break;}}
   if(start<0)return '';
   const out=[lines[start]];
-  for(let i=start+1;i<lines.length;i++){
-    const line=lines[i];if(/^\S/.test(line)||/^  [A-Za-z0-9_.-]+:\s*$/.test(line))break;out.push(line);
-  }
+  for(let i=start+1;i<lines.length;i++){const line=lines[i];if(/^\S/.test(line)||/^  [A-Za-z0-9_.-]+:\s*$/.test(line))break;out.push(line);}
   return out.join('\n');
 }
 function composeGate(file){
@@ -33,6 +31,7 @@ function composeGate(file){
   if(!debug)failures.push('DEBUG_AI_SERVICE_MISSING');
   if(!/network_mode:\s*host/i.test(debug))failures.push('HOST_NETWORK_REQUIRED_FOR_LOOPBACK_AI_CORE');
   if(!/DEBUG_AI_HOST:\s*127\.0\.0\.1/m.test(debug))failures.push('DEBUG_AI_LOOPBACK_BIND_REQUIRED');
+  if(!/DEBUG_AI_CORE_CONTEXT_TOKENS:\s*\$\{DEBUG_AI_CORE_CONTEXT_TOKENS:\?required\}/m.test(debug))failures.push('DEBUG_AI_CORE_CONTEXT_QUALIFICATION_REQUIRED');
   if(!/target:\s*debug-ai/m.test(debug))failures.push('DEBUG_AI_BUILD_TARGET_REQUIRED');
   if(!/debug_ai_runtime:\/app\/runtime/m.test(debug))failures.push('DEBUG_AI_RUNTIME_VOLUME_REQUIRED');
   if(!/debug_ai_sandbox_jobs:\/sandbox-jobs:rw/m.test(debug))failures.push('DEBUG_AI_SANDBOX_JOB_VOLUME_REQUIRED');
