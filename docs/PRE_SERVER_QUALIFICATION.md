@@ -8,66 +8,38 @@ Read [`CURRENT_STATE.md`](CURRENT_STATE.md) for the current source/runtime bound
 
 Server/VPS/Docker mutation is governed by current `G-ACE-inc/server-core` authority plus explicit Master authorization.
 
-## Current source qualification anchor
+## Source qualification and live boundary
 
-Current source HEAD:
+Resumable implementation anchor `9dc8def709ab277bbfb1e6b6701821791bf4dcd8` was followed by documentation revision `b30649a19cd97929a595c639f51fae44c74d4185`, which passed all six required CI checks and was explicitly approved and deployed.
 
-```text
-9dc8def709ab277bbfb1e6b6701821791bf4dcd8
-```
-
-Purpose of the current source anchor:
+This revision repairs the measured Diagnoser benchmark cap and adds fail-closed truncation classification. Targeted tests: 6/6 PASS; related benchmark/qualification tests: 40/40 PASS. Exact-head CI for this correction must be read back before a new approved reflection. These source tests are not full corrected-source real measurement.
 
 ```text
-resumable/checkpointed six-role Skill ON/OFF measurement
-```
-
-Exact-head qualification observed at that anchor:
-
-```text
-Public Readiness Audit #384      = SUCCESS
-Verify #419                      = SUCCESS
-Dependency Review                = SUCCESS
-Legacy Authority                 = SUCCESS
-Runtime Volume Gate #20          = SUCCESS
-Core Verify #420                 = SUCCESS
-pre-server source audit          = source_ready=true / READY
-main merge                       = NOT EXECUTED
-```
-
-The source audit deliberately reports real model/integration/MCP/Search measurements separately. Source/CI PASS does not promote an unreflected, aborted, incomplete, or failed real benchmark to PASS.
-
-Documentation commits following this anchor require their own exact-head CI before Server reflection.
-
-## Current live precondition
-
-Fresh live readback after stopping the old long-running Skill suite:
-
-```text
-Server checkout                  = 4c7e7273424d097fc4bfb60a727824c944ef374b
-Runtime                          = running / healthy / exit=0
-runtime-init                     = exited / exit=0
-sandbox-init                     = exited / exit=0
-sandbox-runner                   = running / exit=0
-loopback /health                 = PASS
+checkout path                    = /home/admin1/projects/debug-ai
+checkout mode                    = detached HEAD
+approved checkout HEAD           = b30649a19cd97929a595c639f51fae44c74d4185
 tracked worktree                 = CLEAN
-.debugai-input                   = PRESENT / PRESERVE
-old Skill suite process count    = 0
-latest old result log            = /tmp/debugai-skill.KgKjtd.json
-latest old result log bytes      = 0
-Current 9dc8def source           = not reflected
-LIVE_RUNTIME_SOURCE_STATE        = RUNTIME_SOURCE_BEHIND_OR_UNKNOWN for current HEAD
-Search Gate shadow               = NO_SHADOW_RECORDS / NOT_EVALUABLE
+.debugai-input/                  = PRESENT / PRESERVE
+unmanaged local files            = pre/post content hashes match
+runtime-init                     = exited / exit=0 / container unchanged
+sandbox-init                     = exited / exit=0 / container unchanged
+sandbox-runner                   = running / container unchanged
+debug-ai                         = running / healthy / rebuilt and recreated
+loopback /health                 = PASS / expected service and safety contract
+approved Host/Container parity   = PASS / 219 shipped tracked files / zero mismatches
+persistent volumes              = both identities and mountpoints preserved
+checkpoint recreate durability  = PASS / separate runner-written checkpoint probe
+new runner deployed             = YES at approved b30649a
+benchmark command               = node server/control/resumable-skill-effect-suite.js
+checkpoint path                 = /app/runtime/benchmarks/skill-effect-suite-checkpoint.json
+corrected Diagnoser source live  = NOT_DEPLOYED
+production profile change       = NONE
 Search skip activation           = NO
 ```
 
-The live runtime is healthy for `4c7e727...`. That does not prove current-source parity for `9dc8def...`.
+Only `debug-ai` was rebuilt/recreated. Both init containers and sandbox-runner were retained. A separate checkpoint written with the runner save routine before recreation loaded after recreation with the identical SHA-256; only that owned probe was removed. Environment hashes, mounts, and production/profile/Search source remained unchanged. Stopped old host Docker clients were retained because no contention requiring cleanup was established.
 
-```text
-CURRENT_RUNTIME_EXACT_PARITY_FOR_9DC8DEF = NOT_VERIFIED
-```
-
-Reflecting current source to Server is a separate runtime mutation and remains governed by server-core and current explicit Master authorization.
+No Runtime PASS for b30649a is promoted into a Runtime PASS for this pending Diagnoser correction.
 
 ## AI Core resource gate
 
@@ -268,20 +240,26 @@ SKILL_EFFECT_ALL_REAL = INCOMPLETE / ABORTED_OLD_NONRESUMABLE_RUN
 
 No role winner may be inferred from it.
 
-### Current resumable source behavior
+### Deployed resumable behavior and measured correction
 
-Current source `9dc8def...` preserves the existing role benchmark logic but adds resumable orchestration:
+The deployed b30649a runner preserves OFF/ON progress and checkpoints on the existing runtime volume. Completed unit reuse, failed-unit retry, and incompatible-source rejection remain required; production promotion is never authorized by the measurement runner.
 
-- progress at `role -> case -> OFF/ON` granularity;
-- heartbeat during each real model call;
-- atomic checkpoint after each completed OFF/ON unit;
-- resume from compatible checkpoints;
-- no repeat charge for already completed compatible units;
-- source-fingerprint binding;
-- fail-closed checkpoint rejection after incompatible source change;
-- no production promotion authority.
+The first real resumable suite on approved Server revision `b30649a19cd97929a595c639f51fae44c74d4185` returned RC=1 / completed=false / INCOMPLETE: five roles measured and Diagnoser failed at `competing_falsifiable_hypotheses / OFF / AI_CORE_EMPTY`.
 
-The resumable source is CI-qualified but not yet reflected to live Server. Do not rerun the six-role real suite until the exact resumable source is reflected and live parity is proven.
+| Role | Skill OFF | Skill ON | Result |
+| --- | ---: | ---: | --- |
+| code_scout | 8/15 | 15/15 | SKILL_ON |
+| causal_scout | 3/15 | 3/15 | TIE |
+| researcher | 19/25 | 17/25 | SKILL_OFF |
+| diagnoser | not completed | not completed | INCOMPLETE / AI_CORE_EMPTY |
+| patch_engineer | 9/20 | 9/20 | TIE |
+| local_reviewer | 15/15 | 15/15 | TIE |
+
+Metadata-only reproduction established token exhaustion with thinking=true: at 600 tokens, finish_reason=length and content_chars=0; at the unchanged production allowance of 800 tokens, finish_reason=length and content_chars=410 with incomplete JSON. A benchmark-only 1024-token candidate returned finish_reason=stop, completion_tokens=911, and complete JSON. Its OFF score was 0/5. The patched source also completed the previously unexecuted ON unit with finish_reason=stop, 970 completion tokens, and score 1/5. These are repair diagnostics for one case, not a role winner, full-suite measurement, or quality PASS.
+
+This source correction sets the fixed Diagnoser benchmark allowance to 1024 for both OFF and ON and rejects finish_reason=length as AI_CORE_OUTPUT_TRUNCATED, with bounded public failure metadata. Production Diagnoser remains at 800 tokens. Cases, scorers, models, thinking, temperature, Skill semantics, and production profiles are unchanged. Targeted tests passed 6/6; related benchmark/qualification tests passed 40/40. The correction still requires its own exact-head CI and explicitly approved Server reflection.
+
+The existing checkpoint remains preserved at `/app/runtime/benchmarks/skill-effect-suite-checkpoint.json`, bound to fingerprint `810356ebbffd98fee5fff0ba1cfbb03613248857ac7ebb4da034236721b38568`. The corrected source fingerprint is `019bf433c3299d90769569393fceec23718228ac89663bb4d5fd67c1b663b312`. They are incompatible: do not edit/rebind the old checkpoint or replay it against the corrected source. Use a distinct checkpoint filename on the same existing runtime volume when the new revision is approved. The five completed role results remain historical measurement evidence for b30649a; they are not current corrected-source measurements.
 
 ## Model A/B
 
@@ -359,22 +337,18 @@ Do not manufacture provider traffic solely to mark a box PASS.
 ## Required live order from the current boundary
 
 ```text
-current server-core authority
--> exact documentation-following source CI PASS
--> explicit authorization for current Server reflection
--> preserve .debugai-input and persistent volumes
--> exact confirmed GitHub revision reflection
--> rebuild/recreate only required DebugAI services
--> /health + init states + worktree + exact source parity
--> resumable six-role Skill ON/OFF real measurement
--> Thinking A/B only where explicit boolean
--> official-first Sampling A/B
--> token-cap A/B only after prior evidence
--> real allowed-repository integration
--> MCP durable continuation proof
--> Search Gate shadow measurement, read-only
--> fresh self-debug case
--> final production-equivalent closed-loop E2E
+1. require exact corrected-source GitHub CI PASS
+2. obtain explicit approval for one exact correction SHA; keep Server at approved b30649a until then
+3. reflect only that approved SHA, preserving .debugai-input, unmanaged state, both volumes, and the old checkpoint
+4. rebuild/recreate only debug-ai and repeat init/health/cleanliness/parity/durability verification
+5. use a separate source-bound checkpoint on the existing runtime volume; never rebind incompatible old data
+6. complete corrected-source six-role Skill ON/OFF measurement and retain OFF wins/ties
+7. Thinking A/B only for explicit boolean roles
+8. Sampling A/B one axis at a time using model-bound source candidates
+9. token-cap optimization only if preceding measurements justify a smaller candidate
+10. real allowed-repository integration, exact-nine MCP continuation, and fresh self-debug
+11. Search Gate shadow remains read-only, with zero observations not proving zero false skips
+12. final production-equivalent closed loop and Strict Completion
 ```
 
 ## Completion states

@@ -1,12 +1,12 @@
 "use strict";
 const test=require("node:test");
 const assert=require("node:assert/strict");
-const {MAX_TOKENS,CASES,buildSystemsForCase,scoreCase,runDiagnoserSkillEffectBenchmark}=require("../control/diagnoser-skill-effect-benchmark.js");
+const {MAX_TOKENS,CASES,buildSystemsForCase,scoreCase,runDiagnoserSkillEffectBenchmark,defaultClient}=require("../control/diagnoser-skill-effect-benchmark.js");
 
 function good(c){return{diagnosis_status:c.expected.diagnosis_status,hypotheses:c.expected.hypotheses.map(x=>({id:x.id,evidence_refs:[...x.evidence_refs],falsification_condition:x.falsification_condition,counter_evidence_refs:[...x.counter_evidence_refs],status:x.status})),confirmed_root_cause:c.expected.confirmed_root_cause,unsupported_claims:[...c.expected.unsupported_claims]};}
 
 test("Diagnoser benchmark fixes falsification, refutation, rejection history, and insufficiency cases",()=>{
-  assert.equal(MAX_TOKENS,600);
+  assert.equal(MAX_TOKENS,1024);
   assert.deepEqual(CASES.map(x=>x.id),["competing_falsifiable_hypotheses","cross_refutation","rejected_hypothesis_avoidance","correlation_insufficient"]);
   for(const c of CASES){const systems=buildSystemsForCase(c);assert.equal(systems.selected_skill_ids.length,3);assert.deepEqual(systems.selected_skill_ids,[...c.skills]);assert.match(systems.on,/SELECTED_SKILLS=/);assert.match(systems.on,/procedure=/);assert.doesNotMatch(systems.off,/SELECTED_SKILLS=|procedure=/);assert.match(systems.off,/ROLE=diagnoser/);assert.match(systems.off,/never expose raw chain-of-thought/i);}
 });
@@ -23,4 +23,29 @@ test("Diagnoser benchmark keeps paired inputs identical and derives the winner",
   for(const c of CASES){outputs.set(`off:${c.id}`,JSON.stringify({diagnosis_status:"INSUFFICIENT_EVIDENCE",hypotheses:[],confirmed_root_cause:null,unsupported_claims:[]}));outputs.set(`on:${c.id}`,JSON.stringify(good(c)));}
   const result=await runDiagnoserSkillEffectBenchmark({callModel:async({mode,user})=>{const parsed=JSON.parse(user);calls.push({mode,user});return{content:outputs.get(`${mode}:${parsed.benchmark_case}`)};},clock:{now:(()=>{let n=0;return()=>++n;})()}});
   assert.equal(result.skill_selection_boundary,"MAX_3_PER_INVOCATION");assert.equal(result.score.skill_on,20);assert.ok(result.score.skill_off<20);assert.equal(result.score.winner,"SKILL_ON");for(let i=0;i<calls.length;i+=2)assert.equal(calls[i].user,calls[i+1].user);
+});
+
+
+test("Diagnoser real client fixes the paired request allowance without changing model or thinking",async()=>{
+  const calls=[];
+  const client=defaultClient({baseUrl:"http://ai-core.invalid",apiKey:"fixture-only",fetchImpl:async(url,options)=>{
+    calls.push({url,body:JSON.parse(options.body)});
+    return{ok:true,status:200,text:async()=>JSON.stringify({choices:[{finish_reason:"stop",message:{content:JSON.stringify(good(CASES[0]))}}]})};
+  }});
+  const systems=buildSystemsForCase(CASES[0]),user=JSON.stringify({benchmark_case:CASES[0].id,...CASES[0].input});
+  for(const mode of ["off","on"])assert.equal(scoreCase(CASES[0],JSON.parse((await client({system:systems[mode],user})).content)).score,5);
+  const {ROLES}=require("../roles.js");
+  for(const {body} of calls){assert.equal(body.max_tokens,1024);assert.equal(body.model,ROLES.diagnoser.backend_model);assert.equal(body.temperature,0);assert.equal(body.chat_template_kwargs.enable_thinking,true);assert.equal(body.messages[1].content,user);}
+});
+
+test("Diagnoser refuses exhausted-token replies and reports only safe failure metadata",async()=>{
+  for(const content of ["",'{"diagnosis_status":"HYPOTHESES_',JSON.stringify(good(CASES[0]))]){
+    const client=defaultClient({baseUrl:"http://ai-core.invalid",apiKey:"fixture-only",fetchImpl:async()=>({ok:true,status:200,text:async()=>JSON.stringify({choices:[{finish_reason:"length",message:{content,reasoning_content:"DO_NOT_PERSIST_PRIVATE_REASONING"}}],usage:{completion_tokens:1024}})})});
+    await assert.rejects(client({system:"system",user:"input"}),error=>{assert.equal(error.code,"AI_CORE_OUTPUT_TRUNCATED");assert.deepEqual(error.benchmark_metadata,{role:"diagnoser",max_tokens:1024,finish_reason:"length",completion_tokens:1024,content_chars:content.length});assert.doesNotMatch(JSON.stringify(error),/DO_NOT_PERSIST_PRIVATE_REASONING/);return true;});
+  }
+});
+
+test("Diagnoser still refuses genuinely empty non-truncated provider replies",async()=>{
+  const client=defaultClient({baseUrl:"http://ai-core.invalid",apiKey:"fixture-only",fetchImpl:async()=>({ok:true,status:200,text:async()=>JSON.stringify({choices:[{finish_reason:"stop",message:{content:" "}}]})})});
+  await assert.rejects(client({system:"system",user:"input"}),/AI_CORE_EMPTY/);
 });

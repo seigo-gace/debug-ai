@@ -20,48 +20,36 @@ The design document preserves architecture decisions. `CURRENT_STATE.md` owns cu
 
 ## Current verified boundary
 
-Current source boundary:
-
-```text
-repository                       = seigo-gace/debug-ai
-branch                           = feat/pre-server-benchmark-gates-20261001
-source HEAD                      = 9dc8def709ab277bbfb1e6b6701821791bf4dcd8
-PR                               = #34 / OPEN / DRAFT / UNMERGED
-Public Readiness Audit           = #384 SUCCESS
-Verify                           = #419 SUCCESS
-Dependency Review                = SUCCESS
-Legacy Authority                 = SUCCESS
-Runtime Volume Gate              = #20 SUCCESS
-Core Verify                      = #420 SUCCESS
-pre-server source qualification  = READY
-main merge                       = NOT EXECUTED
-```
-
-Current live DebugAI Server boundary from fresh readback:
+Resumable implementation anchor: `9dc8def709ab277bbfb1e6b6701821791bf4dcd8`. Approved deployed revision: `b30649a19cd97929a595c639f51fae44c74d4185`, whose six required CI checks succeeded. This revision corrects a measured Diagnoser benchmark token-exhaustion defect; its own exact-head CI and deployment are separate pending states.
 
 ```text
 checkout path                    = /home/admin1/projects/debug-ai
 checkout mode                    = detached HEAD
-checkout HEAD                    = 4c7e7273424d097fc4bfb60a727824c944ef374b
-.debugai-input/                  = PRESENT / PRESERVE
+approved checkout HEAD           = b30649a19cd97929a595c639f51fae44c74d4185
 tracked worktree                 = CLEAN
-runtime-init                     = exited / exit=0
-sandbox-init                     = exited / exit=0
-sandbox-runner                   = running / exit=0
-running debug-ai container       = running / healthy / exit=0
-loopback /health                 = PASS
-old Skill benchmark process      = 0
-old Skill temp result            = zero-byte / no reusable result
+.debugai-input/                  = PRESENT / PRESERVE
+unmanaged local files            = pre/post content hashes match
+runtime-init                     = exited / exit=0 / container unchanged
+sandbox-init                     = exited / exit=0 / container unchanged
+sandbox-runner                   = running / container unchanged
+debug-ai                         = running / healthy / rebuilt and recreated
+loopback /health                 = PASS / expected service and safety contract
+approved Host/Container parity   = PASS / 219 shipped tracked files / zero mismatches
+persistent volumes              = both identities and mountpoints preserved
+checkpoint recreate durability  = PASS / separate runner-written checkpoint probe
+new runner deployed             = YES at approved b30649a
+benchmark command               = node server/control/resumable-skill-effect-suite.js
+checkpoint path                 = /app/runtime/benchmarks/skill-effect-suite-checkpoint.json
+corrected Diagnoser source live  = NOT_DEPLOYED
+production profile change       = NONE
 Search skip activation           = NO
 ```
 
-The live runtime is healthy for `4c7e727...`. Current source `9dc8def...` contains the resumable Skill-effect runner but is not yet reflected to Server.
+Only `debug-ai` was rebuilt/recreated. Both init containers and sandbox-runner were retained. A separate checkpoint written with the runner save routine before recreation loaded after recreation with the identical SHA-256; only that owned probe was removed. Environment hashes, mounts, and production/profile/Search source remained unchanged. Stopped old host Docker clients were retained because no contention requiring cleanup was established.
 
-```text
-CURRENT_RUNTIME_EXACT_PARITY_FOR_9DC8DEF = NOT_VERIFIED
-```
+No Runtime PASS for b30649a is promoted into a Runtime PASS for this pending Diagnoser correction.
 
-No source/CI PASS is treated as proof that the new runner is live.
+See `docs/CURRENT_STATE.md` for current measurement results and remaining work.
 
 ## What DebugAI does
 
@@ -249,22 +237,26 @@ SKILL_EFFECT_ALL_REAL = INCOMPLETE / ABORTED_OLD_NONRESUMABLE_RUN
 
 No role winner may be inferred from that run.
 
-### Current resumable source
+### Deployed resumable runner and pending Diagnoser correction
 
-Current source `9dc8def...` keeps the existing role cases, scorers, models, and Skill ON/OFF semantics but routes the suite through a resumable runner.
+The deployed runner reports per-role/case/OFF/ON progress, checkpoints completed units atomically, resumes only compatible results, rejects incompatible fingerprints, and grants no production promotion authority. The definitions still require 44 real calls for a complete fresh suite.
 
-The current source adds:
+The first real resumable suite on approved Server revision `b30649a19cd97929a595c639f51fae44c74d4185` returned RC=1 / completed=false / INCOMPLETE: five roles measured and Diagnoser failed at `competing_falsifiable_hypotheses / OFF / AI_CORE_EMPTY`.
 
-- progress by `role -> case -> OFF/ON`;
-- heartbeat during each real model call;
-- atomic checkpoint after every completed OFF/ON unit;
-- resume from compatible completed units;
-- no repeated real call for an already completed compatible unit;
-- source-fingerprint binding;
-- fail-closed rejection of incompatible checkpoints;
-- no production-promotion authority.
+| Role | Skill OFF | Skill ON | Result |
+| --- | ---: | ---: | --- |
+| code_scout | 8/15 | 15/15 | SKILL_ON |
+| causal_scout | 3/15 | 3/15 | TIE |
+| researcher | 19/25 | 17/25 | SKILL_OFF |
+| diagnoser | not completed | not completed | INCOMPLETE / AI_CORE_EMPTY |
+| patch_engineer | 9/20 | 9/20 | TIE |
+| local_reviewer | 15/15 | 15/15 | TIE |
 
-The resumable source is exact-head CI qualified but not yet live on Server. Do not rerun the six-role real suite until current-source reflection and exact live parity are proven.
+Metadata-only reproduction established token exhaustion with thinking=true: at 600 tokens, finish_reason=length and content_chars=0; at the unchanged production allowance of 800 tokens, finish_reason=length and content_chars=410 with incomplete JSON. A benchmark-only 1024-token candidate returned finish_reason=stop, completion_tokens=911, and complete JSON. Its OFF score was 0/5. The patched source also completed the previously unexecuted ON unit with finish_reason=stop, 970 completion tokens, and score 1/5. These are repair diagnostics for one case, not a role winner, full-suite measurement, or quality PASS.
+
+This source correction sets the fixed Diagnoser benchmark allowance to 1024 for both OFF and ON and rejects finish_reason=length as AI_CORE_OUTPUT_TRUNCATED, with bounded public failure metadata. Production Diagnoser remains at 800 tokens. Cases, scorers, models, thinking, temperature, Skill semantics, and production profiles are unchanged. Targeted tests passed 6/6; related benchmark/qualification tests passed 40/40. The correction still requires its own exact-head CI and explicitly approved Server reflection.
+
+The existing checkpoint remains preserved at `/app/runtime/benchmarks/skill-effect-suite-checkpoint.json`, bound to fingerprint `810356ebbffd98fee5fff0ba1cfbb03613248857ac7ebb4da034236721b38568`. The corrected source fingerprint is `019bf433c3299d90769569393fceec23718228ac89663bb4d5fd67c1b663b312`. They are incompatible: do not edit/rebind the old checkpoint or replay it against the corrected source. Use a distinct checkpoint filename on the same existing runtime volume when the new revision is approved. The five completed role results remain historical measurement evidence for b30649a; they are not current corrected-source measurements.
 
 ## Evidence architecture
 
@@ -507,28 +499,22 @@ Documentation synchronization commits after this source anchor require their own
 
 ## Current next-work order
 
-The authoritative current order is maintained in [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md).
+Current-state owner: [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md).
 
 ```text
-1. synchronize README / CURRENT_STATE / PRE_SERVER_QUALIFICATION to Source=9dc8def and live Runtime=4c7e727
-2. require exact documentation-following HEAD CI PASS
-3. keep live Server at 4c7e727 until current-source reflection is explicitly authorized under server-core
-4. when authorized, preserve .debugai-input and persistent volumes and reflect the exact confirmed GitHub revision
-5. rebuild/recreate only required DebugAI services and prove init/health/worktree/exact source parity
-6. run resumable six-role Skill ON/OFF real measurement; resume from checkpoints after interruption
-7. interpret Skill OFF wins and ties as valid measurements
-8. run Thinking A/B only for explicit boolean thinking roles
-9. run official-first Sampling A/B
-10. run token-cap A/B only when prior evidence justifies a candidate
-11. prove bounded real AI Core/TGserver/Evidence Search/allowed-repository integration as applicable
-12. prove MCP discovery/health/durable continuation
-13. measure Search Gate shadow read-only without activating skipping
-14. execute fresh self-debug
-15. execute final production-equivalent closed-loop E2E
-16. update current docs and Notion only from measured evidence
+1. require exact corrected-source GitHub CI PASS
+2. obtain explicit approval for one exact correction SHA; keep Server at approved b30649a until then
+3. reflect only that approved SHA, preserving .debugai-input, unmanaged state, both volumes, and the old checkpoint
+4. rebuild/recreate only debug-ai and repeat init/health/cleanliness/parity/durability verification
+5. use a separate source-bound checkpoint on the existing runtime volume; never rebind incompatible old data
+6. complete corrected-source six-role Skill ON/OFF measurement and retain OFF wins/ties
+7. Thinking A/B only for explicit boolean roles
+8. Sampling A/B one axis at a time using model-bound source candidates
+9. token-cap optimization only if preceding measurements justify a smaller candidate
+10. real allowed-repository integration, exact-nine MCP continuation, and fresh self-debug
+11. Search Gate shadow remains read-only, with zero observations not proving zero false skips
+12. final production-equivalent closed loop and Strict Completion
 ```
-
-Current Server reflection is not permission to merge PR #34, activate Search Gate skipping, change production model profiles, alter Secrets/providers, download models, delete local runtime state, or bypass any runtime gate.
 
 ## Safety boundaries
 
