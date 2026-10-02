@@ -18,17 +18,41 @@ GitHub source, exact-head CI, shared AI Core runtime, live DebugAI Server state,
 
 ## Current repository state
 
-Repository: `seigo-gace/debug-ai`; existing branch: `feat/pre-server-benchmark-gates-20261001`; PR #34 remains OPEN / DRAFT / UNMERGED. Resumable implementation anchor is `9dc8def709ab277bbfb1e6b6701821791bf4dcd8`; approved deployed revision is `b30649a19cd97929a595c639f51fae44c74d4185`.
+Repository: `seigo-gace/debug-ai`; existing branch: `feat/pre-server-benchmark-gates-20261001`; PR #34 remains OPEN / DRAFT / UNMERGED.
 
-Exact b30649a CI succeeded for public-readiness, verify, core-verify, runtime-volume, dependency-review, and legacy-authority. This correction revision changes the Diagnoser benchmark allowance and truncated-response classification; its exact-head CI must be read back independently. It is not yet approved or reflected to Server.
+Current source behavior revision is `023ae8f7fc08632d9c0a4f1046f5b809cf1c096b`. Exact source-behavior CI on that revision passed Public Readiness Audit #457, Verify #492, Runtime Volume Gate #88, and Core Verify #493. The approved deployed revision remains `b30649a19cd97929a595c639f51fae44c74d4185`; no result from that older live revision is promoted into a Runtime PASS for the current source.
+
+Documentation synchronization after `023ae8f7...` creates a later source revision and therefore requires its own exact-head CI before it can be considered the reflection candidate.
+
+## Current context / token source contract
+
+The current source supersedes the historical fixed role output ceilings `600/600/600/800/2048/1024` as active runtime policy. Those values remain historical measurement evidence only.
+
+Current source contract:
+
+- model context capacity and model generation ceiling are separate facts;
+- role request ceilings come from model-profile authority rather than historical prompt-latency failures;
+- Qwen2.5-Coder uses its declared 8192 generation ceiling;
+- Qwen3 uses its 32768 native-context ceiling where no smaller model generation ceiling is declared;
+- Granite uses its 131072 native-context ceiling where no smaller model generation ceiling is declared;
+- Ministral uses its 262144 native-context ceiling where no smaller model generation ceiling is declared;
+- every real request is additionally clamped to the independently qualified AI Core runtime context;
+- the compatibility `1000` token value is a runtime input reserve used by that runtime-context clamp, not a claim that every model has `native context - 1000` as its model generation maximum;
+- `finish_reason=length` is rejected as `AI_CORE_OUTPUT_TRUNCATED` rather than accepted as a successful visible partial response.
+
+Context pressure is also connected to the real Tool Loop. Below 85% measured prompt pressure, the prompt can use the existing bounded Active Evidence Window. At or above 85%, the next working context keeps only the five most recent detailed tool results. Older raw tool results remain in durable runtime state; compact historical evidence pointers are retained and may be rehydrated only through admitted `evidence.read`.
+
+The runtime regression test on source `023ae8f7...` proves that measured 85% prompt pressure changes the next AI call to five detailed recent observations while older evidence remains referenced. This does not claim a current live Server PASS because the source has not been reflected.
+
+Researcher A→E durable Work Unit reuse is implemented. A general Block Core execution path for every workflow is not connected and remains a separate unfinished capability; it is not counted as completed by the context/token correction.
 
 ## Resumable Skill-effect source contract
 
-The previous `benchmark:skill-effect-all` path executed every real model call serially and only emitted a generic external heartbeat while the suite itself had no durable per-call progress/checkpoint state. Six roles currently require 44 real AI calls in total and each role client retains its 600000 ms per-call timeout ceiling. That made a long run operationally opaque and made interruption discard completed work.
+The previous `benchmark:skill-effect-all` path executed every real model call serially and only emitted a generic external heartbeat while the suite itself had no durable per-call progress/checkpoint state. Six roles currently require 44 real AI calls in total. That made a long run operationally opaque and made interruption discard completed work.
 
-Current source `9dc8def...` routes the six-role measurement through `server/control/resumable-skill-effect-suite.js`.
+The resumable implementation anchor `9dc8def709ab277bbfb1e6b6701821791bf4dcd8` routed the six-role measurement through `server/control/resumable-skill-effect-suite.js`. The current source extends that line without replacing its durability contract.
 
-The new source contract:
+The source contract:
 
 - preserves the existing six role benchmark cases and scoring;
 - preserves Skill OFF wins and ties as valid measurement results;
@@ -39,7 +63,7 @@ The new source contract:
 - binds checkpoint reuse to a source fingerprint and fails closed when incompatible source is detected;
 - does not grant production promotion authority.
 
-The resumable runner is deployed and qualified at approved b30649a. The Diagnoser correction in this revision remains source-side pending its own CI and approved reflection.
+The resumable runner is deployed and qualified at approved b30649a. The current context/token correction is source-side only and is not yet reflected.
 
 ## Current live DebugAI Server boundary
 
@@ -63,20 +87,20 @@ checkpoint recreate durability  = PASS / separate runner-written checkpoint prob
 new runner deployed             = YES at approved b30649a
 benchmark command               = node server/control/resumable-skill-effect-suite.js
 checkpoint path                 = /app/runtime/benchmarks/skill-effect-suite-checkpoint.json
-corrected Diagnoser source live  = NOT_DEPLOYED
+current context/token source live = NOT_DEPLOYED
 production profile change       = NONE
 Search skip activation           = NO
 ```
 
-Only `debug-ai` was rebuilt/recreated. Both init containers and sandbox-runner were retained. A separate checkpoint written with the runner save routine before recreation loaded after recreation with the identical SHA-256; only that owned probe was removed. Environment hashes, mounts, and production/profile/Search source remained unchanged. Stopped old host Docker clients were retained because no contention requiring cleanup was established.
+Only `debug-ai` was rebuilt/recreated during the last approved reflection. Both init containers and sandbox-runner were retained. A separate checkpoint written with the runner save routine before recreation loaded after recreation with the identical SHA-256; only that owned probe was removed. Environment hashes, mounts, and production/profile/Search source remained unchanged. Stopped old host Docker clients were retained because no contention requiring cleanup was established.
 
-No Runtime PASS for b30649a is promoted into a Runtime PASS for this pending Diagnoser correction.
+No Runtime PASS for b30649a is promoted into a Runtime PASS for the current source.
 
 ## AI Core resource incident and closure
 
 The first real Local Reviewer benchmark during this qualification phase timed out at the 600000 ms role deadline. Direct backend and cgroup measurements showed that the previous AI Core memory ceilings were forcing reclaim/throttling during inference even though host memory remained available.
 
-Master authorized the shared AI Core resource correction. Current measured authority is:
+Master authorized the shared AI Core resource correction. Last measured authority is:
 
 ```text
 four backend mem_limit        = 9216m each
@@ -156,6 +180,10 @@ Implemented/verified source boundary includes:
 - deterministic evidence registry and claim/evidence binding;
 - canonical Local Reviewer top-level and claim-item output enforcement;
 - Evidence Projection / Active Evidence Window;
+- telemetry-driven 85% context-pressure compaction in the real Tool Loop;
+- durable historical evidence pointers with admitted `evidence.read` rehydration;
+- model-profile output ceilings plus qualified runtime-context clamp;
+- fail-closed `AI_CORE_OUTPUT_TRUNCATED` handling;
 - durable RunAuthority, native writer lock, generation/epoch fencing;
 - durable read-only effect reuse and Researcher continuation;
 - patch/review packets and exact approval/revision/application boundaries;
@@ -166,13 +194,21 @@ Implemented/verified source boundary includes:
 - Search Gate provider-preserving shadow instrumentation/audit;
 - Local Reviewer benchmark;
 - six-role Skill ON/OFF benchmark definitions;
-- resumable/checkpointed six-role Skill measurement orchestration in current source;
+- resumable/checkpointed six-role Skill measurement orchestration;
 - one-variable Model A/B harness for `thinking`, `temperature`, `top_p`, `top_k`, `max_tokens`;
 - exact source/runtime live-readback gate;
 - runtime-image qualification/MCP asset packaging;
 - production named-volume initialization contract.
 
-## Current measurement and Diagnoser correction
+Not completed by this source boundary:
+
+- a general Block Core execution path wired across every workflow;
+- current-source live Server reflection and runtime verification;
+- fresh current-source six-role real measurement;
+- fresh current-source Model A/B real measurement;
+- current-source real integration/MCP continuation/self-debug/production-equivalent E2E.
+
+## Historical measurement and correction evidence
 
 The first real resumable suite on approved Server revision `b30649a19cd97929a595c639f51fae44c74d4185` returned RC=1 / completed=false / INCOMPLETE: five roles measured and Diagnoser failed at `competing_falsifiable_hypotheses / OFF / AI_CORE_EMPTY`.
 
@@ -185,11 +221,11 @@ The first real resumable suite on approved Server revision `b30649a19cd97929a595
 | patch_engineer | 9/20 | 9/20 | TIE |
 | local_reviewer | 15/15 | 15/15 | TIE |
 
-Metadata-only reproduction established token exhaustion with thinking=true: at 600 tokens, finish_reason=length and content_chars=0; at the unchanged production allowance of 800 tokens, finish_reason=length and content_chars=410 with incomplete JSON. A benchmark-only 1024-token candidate returned finish_reason=stop, completion_tokens=911, and complete JSON. Its OFF score was 0/5. The patched source also completed the previously unexecuted ON unit with finish_reason=stop, 970 completion tokens, and score 1/5. These are repair diagnostics for one case, not a role winner, full-suite measurement, or quality PASS.
+Metadata-only reproduction established token exhaustion with thinking=true: at 600 tokens, finish_reason=length and content_chars=0; at 800 tokens, finish_reason=length and content_chars=410 with incomplete JSON. A benchmark-only 1024-token candidate returned finish_reason=stop, completion_tokens=911, and complete JSON. Its OFF score was 0/5. The patched intermediate source also completed the previously unexecuted ON unit with finish_reason=stop, 970 completion tokens, and score 1/5. These remain repair diagnostics for one case, not a role winner, full-suite measurement, or current production policy.
 
 Further candidate measurement on source `1e7d907ca706068a7d8cb20e790750e961548050` failed at `cross_refutation / OFF`: HTTP 200, finish_reason=length, 1024 completion tokens, and only 2 visible characters. A one-variable benchmark-only 1536-token candidate completed that unit at 1292 completion tokens with finish_reason=stop and complete JSON, scoring 1/5. The 1536 candidate later completed 7/8 modes and failed at correlation_insufficient/ON: finish_reason=length, completion_tokens=1536, content_chars=382, reasoning_chars=7166. Its role measurement remains INCOMPLETE, with no total/winner. The isolated failed-ON retry at 2048 completed; seven DONE 1536 modes are preserved and are not remeasured or merged across budgets.
 
-This source correction fixes the paired Diagnoser benchmark allowance at 2048 and keeps AI_CORE_OUTPUT_TRUNCATED fail-closed. The resumable runner now retains only whitelisted truncation metadata (role, allowance, finish reason, completion tokens, visible character count) in failed-unit checkpoints and clears it after a successful retry. Raw reasoning and provider payloads are excluded. Production Diagnoser remains at 800 tokens. Cases, scorers, models, thinking, temperature, Skill semantics, and production profiles are unchanged. Diagnoser/runner targeted tests passed 12/12; related benchmark/qualification tests passed 43/43. The final 2048 update passed Diagnoser/qualification targeted tests 9/9 and source syntax checks; earlier runner-related 43/43 and Model A/B/qualification 16/16 remain scoped evidence for their respective changes. This revision still requires its own exact-head CI and explicitly approved Server reflection.
+The intermediate fixed-2048 source kept `AI_CORE_OUTPUT_TRUNCATED` fail-closed and proved that the historical low allowance could truncate valid work. Source `023ae8f7...` supersedes the fixed low-cap policy itself: role output ceilings now come from model profiles and are then clamped by qualified runtime context. The historical 1024/1536/2048 data remains evidence explaining the correction; it is not the current runtime limit.
 
 | Diagnoser case | 1536 OFF | 1536 ON |
 | --- | ---: | ---: |
@@ -198,74 +234,77 @@ This source correction fixes the paired Diagnoser benchmark allowance at 2048 an
 | rejected_hypothesis_avoidance | 0/5 | 3/5 |
 | correlation_insufficient | 1/5 | INCOMPLETE / AI_CORE_OUTPUT_TRUNCATED |
 
-The isolated correlation_insufficient/ON retry at 2048 completed with finish_reason=stop, 1205 completion tokens, complete JSON and score 1/5. This lower observed token count does not establish a deterministic minimum allowance or guarantee all future calls. No aggregate/winner combines the 1536 and 2048 records. Fixed-2048 full-role and corrected-source six-role measurements remain NOT_EXECUTED; visible artifacts still fail strict quality checks.
+The isolated correlation_insufficient/ON retry at 2048 completed with finish_reason=stop, 1205 completion tokens, complete JSON and score 1/5. This lower observed token count does not establish a deterministic minimum allowance or guarantee all future calls. No aggregate/winner combines the 1536 and 2048 records.
 
-The one-mode checkpoint `/app/runtime/benchmarks/diagnoser-candidate-856296e-cap2048.json` is diagnostic-only, base Source 856296e and module SHA256 `a002f039c99ccb23b35c09e4feaf551bb071fd86a2e9e26c42ae1c876c7be08a`. The 1536 record remains completed=false with seven DONE and one FAILED mode. No diagnostic process remains active after completion. Historical suite checkpoint SHA256 `841f63272353465cbca465a4746886a479713e1175a3962b86b413b07e982118` stayed unchanged when the incompatible 1536 source fingerprint was explicitly rejected.
+The one-mode checkpoint `/app/runtime/benchmarks/diagnoser-candidate-856296e-cap2048.json` is diagnostic-only. The 1536 record remains completed=false with seven DONE and one FAILED mode. No diagnostic process remains active after completion. Historical suite checkpoints remain immutable historical evidence and must not be rebound to the current source fingerprint.
 
-Model A/B Source contract reproduction showed that the old real client accepted a visible JSON response marked finish_reason=length. The actual caller and injected-call measurement boundary now reject it as AI_CORE_OUTPUT_TRUNCATED and use the canonical choice-level finish reason. Model A/B plus qualification tests passed 16/16; real Thinking/Sampling A/B remains NOT_EXECUTED. This does not change baselines, candidate ranges, sampling, models, or production profiles.
+Model A/B Source contract reproduction showed that the old real client accepted a visible JSON response marked finish_reason=length. The actual caller and injected-call measurement boundary now reject it as AI_CORE_OUTPUT_TRUNCATED and use the canonical choice-level finish reason. Real Thinking/Sampling/Token-cap A/B on the current source remains NOT_EXECUTED.
 
-Live MCP stdio on approved b30649a passed initialize, the exact ordered nine-tool list, and real health delegation. No approval/apply shortcut was exposed. Full analyze/start/resume/wait/status/inspect continuation remains NOT_VERIFIED. The development-client dependency was absent as expected from the production image; a dependency-free JSON-RPC probe succeeded without installing or changing packages.
-
-Candidate diagnostics persist atomically on the existing runtime volume: `/app/runtime/benchmarks/diagnoser-candidate-1e7d907ca706068a7d8cb20e790750e961548050.json` preserves the 1024-token failure; `/app/runtime/benchmarks/diagnoser-candidate-1e7d907-cap1536.json` binds the in-memory 1536 candidate to its module SHA256 and stores each completed mode. Inspect active processes and reuse DONE modes. These diagnostic records must not be seeded into a different source-bound suite checkpoint. An interrupted earlier stream with no recoverable output is NOT counted as completed.
-
-The existing checkpoint remains preserved at `/app/runtime/benchmarks/skill-effect-suite-checkpoint.json`, bound to fingerprint `810356ebbffd98fee5fff0ba1cfbb03613248857ac7ebb4da034236721b38568`. The previous 1e7d correction fingerprint was `019bf433c3299d90769569393fceec23718228ac89663bb4d5fd67c1b663b312`; the 1536 revision's fingerprint was `2008657cb9e067f26ea4045edf6e4624ce64a6feee371f04890134ca3f3ce369`; this revision's source fingerprint is `1be9cc7916195ad5950c001143d1359fcd6d1cef81c60da03391431af5c4672c`. They are incompatible: do not edit/rebind the old checkpoint or replay it against the corrected source. Use a distinct checkpoint filename on the same existing runtime volume when the new revision is approved. The five completed role results remain historical measurement evidence for b30649a; they are not current corrected-source measurements.
+Live MCP stdio on approved b30649a passed initialize, the exact ordered nine-tool list, and real health delegation. No approval/apply shortcut was exposed. Full analyze/start/resume/wait/status/inspect continuation remains NOT_VERIFIED for the current source.
 
 ## Current qualification state
 
 ```text
-APPROVED_LIVE_SERVER_HEAD                  = b30649a19cd97929a595c639f51fae44c74d4185
-APPROVED_LIVE_SOURCE_CI                    = PASS
-APPROVED_LIVE_HEALTH                       = PASS
+CURRENT_SOURCE_BEHAVIOR_HEAD                = 023ae8f7fc08632d9c0a4f1046f5b809cf1c096b
+CURRENT_SOURCE_BEHAVIOR_CI                  = PASS_4_OF_4
+CURRENT_SOURCE_PUBLIC_READINESS             = SUCCESS_457
+CURRENT_SOURCE_VERIFY                       = SUCCESS_492
+CURRENT_SOURCE_RUNTIME_VOLUME_GATE          = SUCCESS_88
+CURRENT_SOURCE_CORE_VERIFY                  = SUCCESS_493
+CURRENT_SOURCE_DOCUMENT_SYNC                = IN_PROGRESS
+CURRENT_SOURCE_PR_SYNC                      = PASS
+CURRENT_SOURCE_REFLECTION                   = NOT_EXECUTED
+APPROVED_LIVE_SERVER_HEAD                   = b30649a19cd97929a595c639f51fae44c74d4185
+APPROVED_LIVE_SOURCE_CI                     = PASS
+APPROVED_LIVE_HEALTH                        = PASS
 APPROVED_LIVE_EXACT_SHIPPED_PARITY          = PASS_219_FILES
-CHECKPOINT_RECREATE_DURABILITY             = PASS_FOR_TESTED_PATH
-CURRENT_CORRECTION_EXACT_HEAD_CI           = REQUIRES_REMOTE_READBACK
-CURRENT_CORRECTION_REFLECTION              = NOT_EXECUTED
-LOCAL_REVIEWER_CANONICAL_REAL              = PASS_3_OF_3_ON_4C7E727_EXISTING_EVIDENCE
-SKILL_EFFECT_ALL_REAL_ON_B30649A           = INCOMPLETE_5_OF_6_AI_CORE_EMPTY
+CHECKPOINT_RECREATE_DURABILITY              = PASS_FOR_TESTED_PATH
+CONTEXT_PRESSURE_85_SOURCE                  = PASS_ON_023AE8F7
+CONTEXT_PRESSURE_85_LIVE                    = NOT_EXECUTED
+MODEL_PROFILE_OUTPUT_CEILING_SOURCE         = PASS_ON_023AE8F7
+RUNTIME_CONTEXT_CLAMP_SOURCE                = PASS_ON_023AE8F7
+TRUNCATION_FAIL_CLOSED_SOURCE               = PASS_ON_023AE8F7
+RESEARCHER_WORK_UNIT_REUSE                  = IMPLEMENTED
+GENERAL_BLOCK_CORE_ALL_WORKFLOWS            = NOT_CONNECTED
+LOCAL_REVIEWER_CANONICAL_REAL               = PASS_3_OF_3_ON_4C7E727_EXISTING_EVIDENCE
+SKILL_EFFECT_ALL_REAL_ON_B30649A            = INCOMPLETE_5_OF_6_AI_CORE_EMPTY
 AI_CORE_HIGH_MAX_OOM_OOM_KILL_SUITE_DELTA  = 0_0_0_0
-DIAGNOSER_1024_FAILED_OFF_CASE_DIAGNOSTIC   = COMPLETE_JSON_STOP_911_TOKENS_SCORE_0_OF_5
-DIAGNOSER_1024_FIRST_ON_CASE_DIAGNOSTIC     = COMPLETE_JSON_STOP_970_TOKENS_SCORE_1_OF_5
-DIAGNOSER_1024_CROSS_OFF_DIAGNOSTIC        = FAIL_OUTPUT_TRUNCATED_CONTENT_2
-DIAGNOSER_1536_CROSS_OFF_DIAGNOSTIC        = COMPLETE_JSON_STOP_1292_TOKENS_SCORE_1_OF_5
-DIAGNOSER_1536_PAIRED_DIAGNOSTICS          = INCOMPLETE_7_OF_8_TRUNCATED_CORRELATION_ON
-DIAGNOSER_2048_FAILED_ON_DIAGNOSTIC        = COMPLETE_JSON_STOP_1205_TOKENS_SCORE_1_OF_5
-DIAGNOSER_FIXED_2048_FULL_ROLE             = NOT_EXECUTED
-MCP_EXACT_NINE_AND_LIVE_HEALTH            = PASS_ON_APPROVED_B30649A
-MCP_CONTINUATION_WORKFLOW                 = NOT_VERIFIED
-CORRECTED_SOURCE_SIX_ROLE_MEASUREMENT      = NOT_EXECUTED
-MODEL_AB_THINKING_REAL                     = NOT_EXECUTED
-MODEL_AB_SAMPLING_REAL                     = NOT_EXECUTED
-MODEL_AB_TOKEN_CAP_REAL                    = NOT_EXECUTED
-REAL_INTEGRATION_E2E                       = NOT_EXECUTED
-MCP_LIVE                                   = NOT_VERIFIED
-SEARCH_GATE_SHADOW_REAL                    = NOT_VERIFIED_AT_THIS_BOUNDARY
-FALSE_SKIP_ZERO_PROVEN                     = NO
-SEARCH_SKIP_ACTIVATION                     = NO
-FRESH_CURRENT_RUNTIME_SELF_DEBUG           = NOT_EXECUTED
-FINAL_PRODUCTION_EQUIVALENT_E2E            = NOT_EXECUTED
-MAIN_MERGE                                 = NOT_EXECUTED
-PRODUCTION_PROFILE_CHANGE                  = NONE
+CURRENT_SOURCE_SIX_ROLE_MEASUREMENT         = NOT_EXECUTED
+MODEL_AB_THINKING_REAL                      = NOT_EXECUTED
+MODEL_AB_SAMPLING_REAL                      = NOT_EXECUTED
+MODEL_AB_TOKEN_CAP_REAL                     = NOT_EXECUTED
+REAL_INTEGRATION_E2E                        = NOT_EXECUTED
+MCP_EXACT_NINE_AND_LIVE_HEALTH             = PASS_ON_APPROVED_B30649A
+MCP_CONTINUATION_WORKFLOW                   = NOT_VERIFIED
+SEARCH_GATE_SHADOW_REAL                     = NOT_VERIFIED_AT_THIS_BOUNDARY
+FALSE_SKIP_ZERO_PROVEN                      = NO
+SEARCH_SKIP_ACTIVATION                      = NO
+FRESH_CURRENT_RUNTIME_SELF_DEBUG            = NOT_EXECUTED
+FINAL_PRODUCTION_EQUIVALENT_E2E             = NOT_EXECUTED
+MAIN_MERGE                                  = NOT_EXECUTED
+PRODUCTION_PROFILE_CHANGE                   = NONE
 ```
 
 ## Mutation and approval boundary
 
-The completed b30649a reflection does not authorize reflection of a different SHA. Source-side corrections and documentation may proceed on the existing feature branch. Keep existing Server checkout at its explicitly approved revision until approval for the corrected exact SHA. Preserve the old checkpoint even though it cannot be resumed under the changed fingerprint. No profile promotion, Search Gate activation, Secret/provider/model change, persistent-state deletion, or unrelated project mutation is permitted by a benchmark result.
+The completed b30649a reflection does not authorize reflection of a different SHA. Source-side corrections, documentation, existing Draft PR synchronization, and exact-head CI may proceed on the existing feature branch. Keep the existing Server checkout at its explicitly approved revision until Master approves one exact new SHA. Preserve historical checkpoints; do not rebind incompatible data. No profile promotion, Search Gate activation, Secret/provider/model change, persistent-state deletion, or unrelated project mutation is permitted by a benchmark result.
 
 ## Required next-work order
 
 ```text
-1. require exact corrected-source GitHub CI PASS
-2. obtain explicit approval for one exact correction SHA; keep Server at approved b30649a until then
-3. reflect only that approved SHA, preserving .debugai-input, unmanaged state, both volumes, and the old checkpoint
-4. rebuild/recreate only debug-ai and repeat init/health/cleanliness/parity/durability verification
-5. use a separate source-bound checkpoint on the existing runtime volume; never rebind incompatible old data
-6. complete corrected-source six-role Skill ON/OFF measurement and retain OFF wins/ties
-7. Thinking A/B only for explicit boolean roles
-8. Sampling A/B one axis at a time using model-bound source candidates
-9. token-cap optimization only if preceding measurements justify a smaller candidate
-10. real allowed-repository integration, exact-nine MCP continuation, and fresh self-debug
-11. Search Gate shadow remains read-only, with zero observations not proving zero false skips
-12. final production-equivalent closed loop and Strict Completion
+1. complete README / CURRENT_STATE / PRE_SERVER_QUALIFICATION synchronization and remote readback
+2. require exact documentation-head GitHub CI PASS
+3. obtain explicit Master approval for one exact reflection SHA; keep Server at approved b30649a until then
+4. reflect only that approved SHA, preserving .debugai-input, unmanaged state, both volumes, and historical checkpoints
+5. rebuild/recreate only debug-ai and repeat init/health/cleanliness/parity/durability verification
+6. use a separate source-bound checkpoint on the existing runtime volume; never rebind incompatible old data
+7. complete current-source six-role Skill ON/OFF measurement and retain OFF wins/ties
+8. Thinking A/B only for explicit boolean roles
+9. Sampling A/B one axis at a time using model-bound source candidates
+10. token-cap optimization only if preceding measurements justify a smaller candidate
+11. real allowed-repository integration, exact-nine MCP continuation, and fresh self-debug
+12. Search Gate shadow remains read-only, with zero observations not proving zero false skips
+13. final production-equivalent closed loop and Strict Completion
 ```
 
 Unexecuted, failed, incomplete, and source/runtime-unmatched items retain their actual state.
