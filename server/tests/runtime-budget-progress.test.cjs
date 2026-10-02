@@ -7,10 +7,10 @@ const {createProgressController}=require("../control/progress-controller.js");
 const {resolveEffectiveTimeoutMs}=require("../adapters/ai-core.js");
 const {runRoleWithReadOnlyTools}=require("../control/tool-loop.js");
 
-test("role runtime budgets use model native context minus 1000 instead of legacy low caps",()=>{
+test("role runtime budgets preserve model generation/context ceilings instead of legacy low caps",()=>{
   assert.equal(assertRoleRuntimeBudgets(),true);
-  for(const role of Object.keys(ROLE_RUNTIME_BUDGETS)){const budget=ROLE_RUNTIME_BUDGETS[role];assert.equal(budget.max_tokens,getModelOutputHardCeilingForRole(role));assert.equal(budget.output_policy,"MODEL_NATIVE_CONTEXT_MINUS_1000_HEADROOM");assert.match(budget.historical_refuted_rationale,/\[(?:REFUTED|SUPERSEDED)\]/);assert.equal(budget.max_tool_rounds,3);assert.equal(budget.max_tool_calls,8);assert.equal(budget.qualification,"SOURCE_REQUALIFICATION_REQUIRED");}
-  assert.equal(ROLE_RUNTIME_BUDGETS.code_scout.max_tokens,31768);assert.equal(ROLE_RUNTIME_BUDGETS.causal_scout.max_tokens,31768);assert.equal(ROLE_RUNTIME_BUDGETS.researcher.max_tokens,130072);assert.equal(ROLE_RUNTIME_BUDGETS.diagnoser.max_tokens,31768);assert.equal(ROLE_RUNTIME_BUDGETS.patch_engineer.max_tokens,31768);assert.equal(ROLE_RUNTIME_BUDGETS.local_reviewer.max_tokens,261144);
+  for(const role of Object.keys(ROLE_RUNTIME_BUDGETS)){const budget=ROLE_RUNTIME_BUDGETS[role];assert.equal(budget.max_tokens,getModelOutputHardCeilingForRole(role));assert.equal(budget.output_policy,"MODEL_GENERATION_OR_CONTEXT_CEILING_THEN_RUNTIME_N_CTX_CLAMP");assert.match(budget.historical_refuted_rationale,/\[(?:REFUTED|SUPERSEDED)\]/);assert.equal(budget.max_tool_rounds,3);assert.equal(budget.max_tool_calls,8);assert.equal(budget.qualification,"SOURCE_REQUALIFICATION_REQUIRED");}
+  assert.equal(ROLE_RUNTIME_BUDGETS.code_scout.max_tokens,8192);assert.equal(ROLE_RUNTIME_BUDGETS.causal_scout.max_tokens,32768);assert.equal(ROLE_RUNTIME_BUDGETS.researcher.max_tokens,131072);assert.equal(ROLE_RUNTIME_BUDGETS.diagnoser.max_tokens,32768);assert.equal(ROLE_RUNTIME_BUDGETS.patch_engineer.max_tokens,8192);assert.equal(ROLE_RUNTIME_BUDGETS.local_reviewer.max_tokens,262144);
   assert.equal(ROLE_RUNTIME_BUDGETS.code_scout.turn_timeout_ms,600000);assert.equal(ROLE_RUNTIME_BUDGETS.patch_engineer.turn_timeout_ms,360000);
 });
 
@@ -18,7 +18,7 @@ test("effective timeout is bounded by role override and remaining aggregate dead
 
 test("progress controller stops after configured consecutive rounds with zero new evidence",()=>{const p=createProgressController({maxNoProgressRounds:2});assert.equal(p.observe({evidenceIds:["E1"]}).stop,false);assert.equal(p.observe({evidenceIds:["E1"]}).stop,false);assert.equal(p.observe({evidenceIds:["E1"]}).stop,false);const stop=p.observe({evidenceIds:["E1"]});assert.equal(stop.stop,true);assert.equal(stop.decision,"HANDOFF_OR_INSUFFICIENT_EVIDENCE");assert.equal(p.snapshot().total_evidence_ids,1);});
 
-test("read-only role call applies model-headroom token and timeout budget even without tool runtime",async()=>{let options;const aiCore={call:async(_role,o)=>{options=o;return{content:JSON.stringify({decision:"HANDOFF"}),control_plane:{selected_skill_ids:["failure-scope-reduction"]}};}};const out=await runRoleWithReadOnlyTools({aiCore,role:"code_scout",user:"x"});assert.equal(options.maxTokens,31768);assert.equal(options.timeoutMsOverride,600000);assert.ok(Number.isFinite(options.deadlineAt));assert.equal(out.validated_output.decision,"HANDOFF");});
+test("read-only role call applies source output ceiling and timeout budget before adapter runtime clamp",async()=>{let options;const aiCore={call:async(_role,o)=>{options=o;return{content:JSON.stringify({decision:"HANDOFF"}),control_plane:{selected_skill_ids:["failure-scope-reduction"]}};}};const out=await runRoleWithReadOnlyTools({aiCore,role:"code_scout",user:"x"});assert.equal(options.maxTokens,8192);assert.equal(options.timeoutMsOverride,600000);assert.ok(Number.isFinite(options.deadlineAt));assert.equal(out.validated_output.decision,"HANDOFF");});
 
 test("tool loop stops after three successive tool rounds produce zero durable progress",async()=>{
   const toolRuntime={availableTools:["source.read"],execute:async()=>{throw new Error("READ_FAILED");}};let n=0;
