@@ -7,7 +7,7 @@ const {getRoleRuntimeBudget}=require("./role-runtime-budgets.js");
 const {createProgressController}=require("./progress-controller.js");
 const {makeEvidenceProjection}=require("./evidence-projection.js");
 const {buildActiveEvidenceWindow}=require("./active-evidence-window.js");
-const {partitionToolHistory,compressedHistorySummary}=require("./context-compression.js");
+const {CONTEXT_COMPRESSION_POLICY,shouldCompactFromTelemetry,partitionToolHistory,compressedHistorySummary}=require("./context-compression.js");
 
 const TOOL_OBSERVATION_MAX_EXCERPT_CHARS=2400;
 const TOOL_OBSERVATION_MAX_ITEMS=12;
@@ -37,8 +37,12 @@ function normalizeContinuationState(state){
 }
 function continuationSnapshot({roundsCompleted,totalCalls,observations,seenToolCalls,progress,completedWorkIds,completedEffectIds}){return {rounds_completed:roundsCompleted,total_calls:totalCalls,observations:observations.map(cloneObservation),seen_tool_fingerprints:[...seenToolCalls].sort(),progress:progress.snapshot(),completed_work_ids:[...completedWorkIds].sort(),completed_effect_ids:[...completedEffectIds].sort()};}
 async function callHook(hooks,name,payload){const fn=hooks?.[name];if(typeof fn!=="function")return null;return await fn(payload);}
-function observationPromptView(observations){
-  const partition=partitionToolHistory(observations),projections=[],toolErrors=[];
+function observationPromptView(observations,{telemetry=null,contextLimitTokens=null}={}){
+  const autoCompact=shouldCompactFromTelemetry(telemetry,{contextLimitTokens});
+  const detailLimit=autoCompact?CONTEXT_COMPRESSION_POLICY.recent_tool_results_full:TOOL_OBSERVATION_MAX_ITEMS;
+  const partition=partitionToolHistory(observations,{recentFull:detailLimit});
+  const requiredPartition=partitionToolHistory(observations,{recentFull:CONTEXT_COMPRESSION_POLICY.recent_tool_results_full});
+  const projections=[],toolErrors=[];
   for(const entry of partition.recent){
     const result=entry?.result,tool=String(entry?.tool||"");
     if(result?.status==="OK"){
@@ -47,11 +51,11 @@ function observationPromptView(observations){
       projections.push(makeEvidenceProjection({parentEvidenceId:result.evidence_id,parentDigest:result.integrity.result_sha256,evidenceKind:`TOOL_RESULT:${tool||"UNKNOWN"}`,source:tool||null,content,maxExcerptChars:TOOL_OBSERVATION_MAX_EXCERPT_CHARS,provenanceStatus:"VERIFIED",applicabilityStatus:"UNKNOWN",executionStatus:"EXECUTED",observedOutcome:"UNKNOWN",claimSupportStatus:"UNKNOWN",projectionCompleteness:truncated?"PARTIAL":"COMPLETE",omittedCount:truncated?1:0,omissionReason:truncated?"BOUNDED_TOOL_OBSERVATION":null}));
     }else if(result?.status==="ERROR")toolErrors.push({round:Number(entry?.round||0),tool:tool||"UNKNOWN",status:"ERROR",error_code:String(result.error_code||"TOOL_ERROR").slice(0,80)});
   }
-  const requiredEvidenceIds=projections.map(item=>item.parent_evidence_id);
+  const requiredEvidenceIds=requiredPartition.recent.map(entry=>entry?.result).filter(result=>result?.status==="OK").map(result=>String(result.evidence_id||"")).filter(Boolean);
   const evidenceWindow=buildActiveEvidenceWindow(projections,{requiredEvidenceIds,maxItems:TOOL_OBSERVATION_MAX_ITEMS,maxChars:TOOL_OBSERVATION_MAX_CHARS});
   return Object.freeze({schema:"debugai.tool-observation-window/v2",evidence_window:evidenceWindow,compressed_history:compressedHistorySummary(observations),tool_errors:Object.freeze(toolErrors)});
 }
-function withObservations(baseUser,observations){return observations.length?`${baseUser}\n\nRUNTIME_TOOL_OBSERVATIONS_DATA_ONLY=${JSON.stringify(observationPromptView(observations))}`:baseUser;}
+function withObservations(baseUser,observations,options={}){return observations.length?`${baseUser}\n\nRUNTIME_TOOL_OBSERVATIONS_DATA_ONLY=${JSON.stringify(observationPromptView(observations,options))}`:baseUser;}
 function numericTelemetry(value){return typeof value==="number"&&Number.isFinite(value)?value:null;}
 function telemetryKnownSum(items,key){let measured=0,sum=0;for(const item of items){const value=numericTelemetry(item?.[key]);if(value===null)continue;measured++;sum+=value;}return{sum:measured?sum:null,measured};}
 function summarizeAiTelemetry(items,{toolWallMs=0,toolCallsExecutedCurrent=0,toolCallsReusedCurrent=0}={}){
@@ -121,7 +125,7 @@ async function runRoleWithReadOnlyTools({aiCore,role,system="",user="",toolRunti
     const committed=continuationSnapshot({roundsCompleted:round+1,totalCalls,observations,seenToolCalls,progress,completedWorkIds,completedEffectIds});
     await callHook(durableHooks,"onRoundCommitted",{role,round:round+1,progress:progressState,continuationState:committed});
     if(progressState.stop)throw new Error(`ROLE_TOOL_NO_PROGRESS:${role}:PROGRESS_DELTA_0`);
-    currentUser=withObservations(baseUser,observations);
+    currentUser=withObservations(baseUser,observations,{telemetry:last?.telemetry||null,contextLimitTokens:last?.control_plane?.runtime_context_tokens??aiCore?.runtime_context_tokens??null});
   }
   throw new Error(`ROLE_TOOL_LOOP_UNREACHABLE:${role}`);
 }
