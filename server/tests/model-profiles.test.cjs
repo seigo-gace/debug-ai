@@ -1,13 +1,13 @@
 "use strict";
 const test=require("node:test");
 const assert=require("node:assert/strict");
-const {PROFILE_VERSION,OUTPUT_HEADROOM_TOKENS,MODEL_PROFILES,ROLE_PROFILE,getModelProfileForRole,getModelOutputHardCeilingForRole,assertModelProfiles}=require("../control/model-profiles.js");
+const {PROFILE_VERSION,RUNTIME_MIN_INPUT_RESERVE_TOKENS,OUTPUT_HEADROOM_TOKENS,MODEL_PROFILES,ROLE_PROFILE,getModelProfileForRole,getModelOutputHardCeilingForRole,assertModelProfiles}=require("../control/model-profiles.js");
 
-test("model profiles preserve current six-role backend authority and native context headroom",()=>{
-  assert.equal(PROFILE_VERSION,"debugai.model-profile/v3");assert.equal(OUTPUT_HEADROOM_TOKENS,1000);assert.equal(assertModelProfiles(),true);assert.equal(Object.keys(ROLE_PROFILE).length,6);assert.equal(getModelProfileForRole("code_scout").id,"coder");assert.equal(getModelProfileForRole("diagnoser").id,"qwen3");assert.equal(getModelProfileForRole("local_reviewer").id,"ministral");
-  assert.equal(MODEL_PROFILES.coder.context.native_context_tokens,32768);assert.equal(MODEL_PROFILES.qwen3.context.native_context_tokens,32768);assert.equal(MODEL_PROFILES.granite.context.native_context_tokens,131072);assert.equal(MODEL_PROFILES.ministral.context.native_context_tokens,262144);
-  assert.equal(getModelOutputHardCeilingForRole("code_scout"),31768);assert.equal(getModelOutputHardCeilingForRole("diagnoser"),31768);assert.equal(getModelOutputHardCeilingForRole("researcher"),130072);assert.equal(getModelOutputHardCeilingForRole("local_reviewer"),261144);
-  for(const profile of Object.values(MODEL_PROFILES)){assert.equal(profile.context.output_headroom_tokens,1000);assert.equal(profile.context.output_hard_ceiling_tokens,profile.context.native_context_tokens-1000);assert.equal(profile.context.runtime_context_tokens,null);assert.equal(profile.context.runtime_context_qualified,false);}
+test("model profiles preserve six-role backend authority and separate context from output request ceilings",()=>{
+  assert.equal(PROFILE_VERSION,"debugai.model-profile/v4");assert.equal(RUNTIME_MIN_INPUT_RESERVE_TOKENS,1000);assert.equal(OUTPUT_HEADROOM_TOKENS,RUNTIME_MIN_INPUT_RESERVE_TOKENS);assert.equal(assertModelProfiles(),true);assert.equal(Object.keys(ROLE_PROFILE).length,6);assert.equal(getModelProfileForRole("code_scout").id,"coder");assert.equal(getModelProfileForRole("diagnoser").id,"qwen3");assert.equal(getModelProfileForRole("local_reviewer").id,"ministral");
+  assert.equal(MODEL_PROFILES.coder.context.native_context_tokens,131072);assert.equal(MODEL_PROFILES.coder.context.declared_generation_max_tokens,8192);assert.equal(MODEL_PROFILES.qwen3.context.native_context_tokens,32768);assert.equal(MODEL_PROFILES.qwen3.context.extended_context_tokens,131072);assert.equal(MODEL_PROFILES.granite.context.native_context_tokens,131072);assert.equal(MODEL_PROFILES.granite.context.extended_context_tokens,524288);assert.equal(MODEL_PROFILES.ministral.context.native_context_tokens,262144);
+  assert.equal(getModelOutputHardCeilingForRole("code_scout"),8192);assert.equal(getModelOutputHardCeilingForRole("patch_engineer"),8192);assert.equal(getModelOutputHardCeilingForRole("diagnoser"),32768);assert.equal(getModelOutputHardCeilingForRole("researcher"),131072);assert.equal(getModelOutputHardCeilingForRole("local_reviewer"),262144);
+  for(const profile of Object.values(MODEL_PROFILES)){assert.ok(profile.context.authority.startsWith("https://"));assert.equal(profile.context.runtime_context_tokens,null);assert.equal(profile.context.runtime_context_qualified,false);assert.ok(profile.context.output_request_ceiling_tokens<=profile.context.native_context_tokens);}
 });
 
 test("model profiles record measured server speed without prematurely changing sampling",()=>{
