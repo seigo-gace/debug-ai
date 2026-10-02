@@ -20,11 +20,11 @@ GitHub source, exact-head CI, shared AI Core runtime, live DebugAI Server state,
 
 Repository: `seigo-gace/debug-ai`; existing branch: `feat/pre-server-benchmark-gates-20261001`; PR #34 remains OPEN / DRAFT / UNMERGED.
 
-Current source behavior revision is `023ae8f7fc08632d9c0a4f1046f5b809cf1c096b`. Exact source-behavior CI on that revision passed Public Readiness Audit #457, Verify #492, Runtime Volume Gate #88, and Core Verify #493. The approved deployed revision remains `b30649a19cd97929a595c639f51fae44c74d4185`; no result from that older live revision is promoted into a Runtime PASS for the current source.
+Current source behavior revision is `c9aa6f28ee5c0e4560f6c06ffa667462653c8125`. Exact source-behavior CI on that revision passed Public Readiness Audit #471, Verify #506, Runtime Volume Gate #102, and Core Verify #507. The approved deployed revision remains `b30649a19cd97929a595c639f51fae44c74d4185`; no result from that older live revision is promoted into a Runtime PASS for the current source.
 
-README, this Current State document, and `PRE_SERVER_QUALIFICATION.md` have been synchronized to the current source contract on this branch. The resulting exact branch head must pass its own CI before it can be considered the Server reflection candidate.
+This Current State document now records the prompt-cache/context-speed correction. Documentation synchronization after `c9aa6f28...` creates a later branch head and therefore requires its own exact-head CI before it can be considered the Server reflection candidate.
 
-## Current context / token source contract
+## Current context / token / cache source contract
 
 The current source supersedes the historical fixed role output ceilings `600/600/600/800/2048/1024` as active runtime policy. Those values remain historical measurement evidence only.
 
@@ -38,13 +38,27 @@ Current source contract:
 - Ministral uses its 262144 native-context ceiling where no smaller model generation ceiling is declared;
 - every real request is additionally clamped to the independently qualified AI Core runtime context;
 - the compatibility `1000` token value is a runtime input reserve used by that runtime-context clamp, not a claim that every model has `native context - 1000` as its model generation maximum;
+- `max_tokens` remains a maximum request allowance, not a requirement to consume all tokens;
 - `finish_reason=length` is rejected as `AI_CORE_OUTPUT_TRUNCATED` rather than accepted as a successful visible partial response.
 
-Context pressure is also connected to the real Tool Loop. Below 85% measured prompt pressure, the prompt can use the existing bounded Active Evidence Window. At or above 85%, the next working context keeps only the five most recent detailed tool results. Older raw tool results remain in durable runtime state; compact historical evidence pointers are retained and may be rehydrated only through admitted `evidence.read`.
+Context pressure is connected to the real Tool Loop. Below 85% measured prompt pressure, the prompt can use the existing bounded Active Evidence Window. At or above 85%, the next working context keeps only the five most recent detailed tool results. Older raw tool results remain in durable runtime state; compact historical evidence pointers are retained and may be rehydrated only through admitted `evidence.read`.
 
-The runtime regression test on source `023ae8f7...` proves that measured 85% prompt pressure changes the next AI call to five detailed recent observations while older evidence remains referenced. This does not claim a current live Server PASS because the source has not been reflected.
+Prompt caching is now explicit source behavior rather than provider-default behavior:
 
-Researcher A→E durable Work Unit reuse is implemented. A general Block Core execution path for every workflow is not connected and remains a separate unfinished capability; it is not counted as completed by the context/token correction.
+- AI Core requests `cache_prompt=true` explicitly;
+- current llama.cpp-style `timings.cache_n` and `timings.prompt_n` are read as observed cache-hit and processed-prompt token counts, while existing compatible telemetry forms remain supported;
+- prompt-evaluation and decode timing remain separately observable;
+- Tool Loop keeps its System/Skill/role prefix stable across rounds;
+- dynamic final-round control is not written into the canonical Tool Loop user payload; the AI Core transport appends a bounded wire-only final-round control only on the final tool-budget round;
+- role telemetry exposes measured `cache_hit_ratio`, cache telemetry completeness, observed prefix hashes, and `prefix_stable` without inventing missing values.
+
+Cache reuse is acceleration only. It does not become evidence, does not bypass current-source/repository binding, does not relax output-schema validation, does not turn a truncated response into success, and does not replace deterministic verification, Local Reviewer, External Final Review, or Strict Completion. A cache hit cannot promote an unverified result.
+
+The current regression suite proves source behavior for 85% pressure compaction, explicit prompt-cache request, current cache telemetry parsing, measured cache-hit ratio, stable Tool Loop prefix, wire-only final-round control, and preservation of the existing canonical user/evidence payload contract. Exact source-behavior CI on `c9aa6f28...` is green.
+
+The last measured live AI Core runtime context remains `8192`. The source can preserve larger model-native/output capability, but prompt caching does not enlarge runtime `n_ctx`. Raising the live runtime context above the measured 8192 boundary is a separate Server/resource change and must be based on fresh RAM, cache, prompt-eval, decode, and end-to-end latency evidence before Master approval. Do not trade reliability or speed for a larger nominal context number.
+
+Researcher A→E durable Work Unit reuse is implemented. A general Block Core execution path for every workflow is not connected and remains a separate unfinished capability; it is not counted as completed by the context/token/cache correction.
 
 ## Resumable Skill-effect source contract
 
@@ -63,7 +77,7 @@ The source contract:
 - binds checkpoint reuse to a source fingerprint and fails closed when incompatible source is detected;
 - does not grant production promotion authority.
 
-The resumable runner is deployed and qualified at approved b30649a. The current context/token correction is source-side only and is not yet reflected.
+The resumable runner is deployed and qualified at approved b30649a. The current context/token/cache correction is source-side only and is not yet reflected.
 
 ## Current live DebugAI Server boundary
 
@@ -87,7 +101,7 @@ checkpoint recreate durability  = PASS / separate runner-written checkpoint prob
 new runner deployed             = YES at approved b30649a
 benchmark command               = node server/control/resumable-skill-effect-suite.js
 checkpoint path                 = /app/runtime/benchmarks/skill-effect-suite-checkpoint.json
-current context/token source live = NOT_DEPLOYED
+current context/token/cache source live = NOT_DEPLOYED
 production profile change       = NONE
 Search skip activation           = NO
 ```
@@ -113,6 +127,8 @@ models/router                 = unchanged
 ```
 
 Measured recovery included approximately Granite 7.31 tok/s, Qwen3 5.61 tok/s, Ministral 7.45 tok/s, Coder 8.05 tok/s, and a 128-token Ministral retest near 6.12 tok/s. The final tested serial path produced zero new parent High/Max/OOM/OOM-kill events. DebugAI role timeout was not extended as a workaround.
+
+The new cache source contract does not claim a new live cache hit rate, new live latency, or a larger live context. Those require reflection of one approved exact SHA and fresh real runtime measurement.
 
 ## Local Reviewer defect history and closure
 
@@ -182,6 +198,9 @@ Implemented/verified source boundary includes:
 - Evidence Projection / Active Evidence Window;
 - telemetry-driven 85% context-pressure compaction in the real Tool Loop;
 - durable historical evidence pointers with admitted `evidence.read` rehydration;
+- explicit prompt-cache requests with current cache-hit/miss telemetry parsing;
+- stable Tool Loop System prefix and wire-only final-round control;
+- measured cache-hit ratio/prefix-stability telemetry without fabricated values;
 - model-profile output ceilings plus qualified runtime-context clamp;
 - fail-closed `AI_CORE_OUTPUT_TRUNCATED` handling;
 - durable RunAuthority, native writer lock, generation/epoch fencing;
@@ -204,6 +223,8 @@ Not completed by this source boundary:
 
 - a general Block Core execution path wired across every workflow;
 - current-source live Server reflection and runtime verification;
+- fresh real cache-hit/prompt-eval/decode/latency measurement on the approved Server runtime;
+- any approved increase of live AI Core context above the last measured 8192 setting;
 - fresh current-source six-role real measurement;
 - fresh current-source Model A/B real measurement;
 - current-source real integration/MCP continuation/self-debug/production-equivalent E2E.
@@ -225,7 +246,7 @@ Metadata-only reproduction established token exhaustion with thinking=true: at 6
 
 Further candidate measurement on source `1e7d907ca706068a7d8cb20e790750e961548050` failed at `cross_refutation / OFF`: HTTP 200, finish_reason=length, 1024 completion tokens, and only 2 visible characters. A one-variable benchmark-only 1536-token candidate completed that unit at 1292 completion tokens with finish_reason=stop and complete JSON, scoring 1/5. The 1536 candidate later completed 7/8 modes and failed at correlation_insufficient/ON: finish_reason=length, completion_tokens=1536, content_chars=382, reasoning_chars=7166. Its role measurement remains INCOMPLETE, with no total/winner. The isolated failed-ON retry at 2048 completed; seven DONE 1536 modes are preserved and are not remeasured or merged across budgets.
 
-The intermediate fixed-2048 source kept `AI_CORE_OUTPUT_TRUNCATED` fail-closed and proved that the historical low allowance could truncate valid work. Source `023ae8f7...` supersedes the fixed low-cap policy itself: role output ceilings now come from model profiles and are then clamped by qualified runtime context. The historical 1024/1536/2048 data remains evidence explaining the correction; it is not the current runtime limit.
+The intermediate fixed-2048 source kept `AI_CORE_OUTPUT_TRUNCATED` fail-closed and proved that the historical low allowance could truncate valid work. Source `c9aa6f28...` preserves the model-profile policy established on `023ae8f7...` and adds cache/context-speed operation without reintroducing low output caps. The historical 1024/1536/2048 data remains evidence explaining the correction; it is not the current runtime limit.
 
 | Diagnoser case | 1536 OFF | 1536 ON |
 | --- | ---: | ---: |
@@ -245,25 +266,30 @@ Live MCP stdio on approved b30649a passed initialize, the exact ordered nine-too
 ## Current qualification state
 
 ```text
-CURRENT_SOURCE_BEHAVIOR_HEAD                = 023ae8f7fc08632d9c0a4f1046f5b809cf1c096b
+CURRENT_SOURCE_BEHAVIOR_HEAD                = c9aa6f28ee5c0e4560f6c06ffa667462653c8125
 CURRENT_SOURCE_BEHAVIOR_CI                  = PASS_4_OF_4
-CURRENT_SOURCE_PUBLIC_READINESS             = SUCCESS_457
-CURRENT_SOURCE_VERIFY                       = SUCCESS_492
-CURRENT_SOURCE_RUNTIME_VOLUME_GATE          = SUCCESS_88
-CURRENT_SOURCE_CORE_VERIFY                  = SUCCESS_493
-CURRENT_SOURCE_DOCUMENT_SYNC                = PASS
-CURRENT_SOURCE_PR_SYNC                      = PASS
+CURRENT_SOURCE_PUBLIC_READINESS             = SUCCESS_471
+CURRENT_SOURCE_VERIFY                       = SUCCESS_506
+CURRENT_SOURCE_RUNTIME_VOLUME_GATE          = SUCCESS_102
+CURRENT_SOURCE_CORE_VERIFY                  = SUCCESS_507
+CURRENT_SOURCE_DOCUMENT_SYNC                = IN_PROGRESS
+CURRENT_SOURCE_PR_SYNC                      = NO
 CURRENT_SOURCE_REFLECTION                   = NOT_EXECUTED
 APPROVED_LIVE_SERVER_HEAD                   = b30649a19cd97929a595c639f51fae44c74d4185
 APPROVED_LIVE_SOURCE_CI                     = PASS
 APPROVED_LIVE_HEALTH                        = PASS
 APPROVED_LIVE_EXACT_SHIPPED_PARITY          = PASS_219_FILES
 CHECKPOINT_RECREATE_DURABILITY              = PASS_FOR_TESTED_PATH
-CONTEXT_PRESSURE_85_SOURCE                  = PASS_ON_023AE8F7
+CONTEXT_PRESSURE_85_SOURCE                  = PASS_ON_C9AA6F28
 CONTEXT_PRESSURE_85_LIVE                    = NOT_EXECUTED
-MODEL_PROFILE_OUTPUT_CEILING_SOURCE         = PASS_ON_023AE8F7
-RUNTIME_CONTEXT_CLAMP_SOURCE                = PASS_ON_023AE8F7
-TRUNCATION_FAIL_CLOSED_SOURCE               = PASS_ON_023AE8F7
+PROMPT_CACHE_EXPLICIT_SOURCE                = PASS_ON_C9AA6F28
+PROMPT_CACHE_TELEMETRY_SOURCE               = PASS_ON_C9AA6F28
+PROMPT_CACHE_LIVE_MEASUREMENT               = NOT_EXECUTED
+TOOL_LOOP_PREFIX_STABILITY_SOURCE           = PASS_ON_C9AA6F28
+MODEL_PROFILE_OUTPUT_CEILING_SOURCE         = PASS_ON_C9AA6F28
+RUNTIME_CONTEXT_CLAMP_SOURCE                = PASS_ON_C9AA6F28
+TRUNCATION_FAIL_CLOSED_SOURCE               = PASS_ON_C9AA6F28
+LIVE_RUNTIME_CONTEXT_ABOVE_8192             = NOT_AUTHORIZED_NOT_EXECUTED
 RESEARCHER_WORK_UNIT_REUSE                  = IMPLEMENTED
 GENERAL_BLOCK_CORE_ALL_WORKFLOWS            = NOT_CONNECTED
 LOCAL_REVIEWER_CANONICAL_REAL               = PASS_3_OF_3_ON_4C7E727_EXISTING_EVIDENCE
@@ -277,8 +303,8 @@ REAL_INTEGRATION_E2E                        = NOT_EXECUTED
 MCP_EXACT_NINE_AND_LIVE_HEALTH             = PASS_ON_APPROVED_B30649A
 MCP_CONTINUATION_WORKFLOW                   = NOT_VERIFIED
 SEARCH_GATE_SHADOW_REAL                     = NOT_VERIFIED_AT_THIS_BOUNDARY
-FALSE_SKIP_ZERO_PROVEN                      = NO
-SEARCH_SKIP_ACTIVATION                      = NO
+FALSE_SKIP_ZERO_PROVEN                     = NO
+SEARCH_SKIP_ACTIVATION                     = NO
 FRESH_CURRENT_RUNTIME_SELF_DEBUG            = NOT_EXECUTED
 FINAL_PRODUCTION_EQUIVALENT_E2E             = NOT_EXECUTED
 MAIN_MERGE                                  = NOT_EXECUTED
@@ -287,23 +313,26 @@ PRODUCTION_PROFILE_CHANGE                   = NONE
 
 ## Mutation and approval boundary
 
-The completed b30649a reflection does not authorize reflection of a different SHA. Source-side corrections, documentation, existing Draft PR synchronization, and exact-head CI may proceed on the existing feature branch. Keep the existing Server checkout at its explicitly approved revision until Master approves one exact new SHA. Preserve historical checkpoints; do not rebind incompatible data. No profile promotion, Search Gate activation, Secret/provider/model change, persistent-state deletion, or unrelated project mutation is permitted by a benchmark result.
+The completed b30649a reflection does not authorize reflection of a different SHA. Source-side corrections, documentation, existing Draft PR synchronization, and exact-head CI may proceed on the existing feature branch. Keep the existing Server checkout at its explicitly approved revision until Master approves one exact new SHA. Preserve historical checkpoints; do not rebind incompatible data. No profile promotion, live context increase, Search Gate activation, Secret/provider/model change, persistent-state deletion, or unrelated project mutation is permitted by this source result.
 
 ## Required next-work order
 
 ```text
-1. require exact current documentation-head GitHub CI PASS
+1. synchronize current cache/context source facts into required documentation and PR, then require exact documentation-head GitHub CI PASS
 2. obtain explicit Master approval for one exact reflection SHA; keep Server at approved b30649a until then
 3. reflect only that approved SHA, preserving .debugai-input, unmanaged state, both volumes, and historical checkpoints
 4. rebuild/recreate only debug-ai and repeat init/health/cleanliness/parity/durability verification
-5. use a separate source-bound checkpoint on the existing runtime volume; never rebind incompatible old data
-6. complete current-source six-role Skill ON/OFF measurement and retain OFF wins/ties
-7. Thinking A/B only for explicit boolean roles
-8. Sampling A/B one axis at a time using model-bound source candidates
-9. token-cap optimization only if preceding measurements justify a smaller candidate
-10. real allowed-repository integration, exact-nine MCP continuation, and fresh self-debug
-11. Search Gate shadow remains read-only, with zero observations not proving zero false skips
-12. final production-equivalent closed loop and Strict Completion
+5. measure real cache hit/miss, prompt-eval, decode, total role latency, prefix stability, RAM events, and current 8192 runtime-context behavior
+6. keep cache as acceleration-only; any correctness or verification regression fails the candidate regardless of speed gain
+7. consider a larger live AI Core context only from measured RAM/speed/quality evidence and separate Master approval; never enlarge n_ctx from model spec alone
+8. use a separate source-bound checkpoint on the existing runtime volume; never rebind incompatible old data
+9. complete current-source six-role Skill ON/OFF measurement and retain OFF wins/ties
+10. Thinking A/B only for explicit boolean roles
+11. Sampling A/B one axis at a time using model-bound source candidates
+12. token-cap optimization only if preceding measurements justify a smaller candidate
+13. real allowed-repository integration, exact-nine MCP continuation, and fresh self-debug
+14. Search Gate shadow remains read-only, with zero observations not proving zero false skips
+15. final production-equivalent closed loop and Strict Completion
 ```
 
 Unexecuted, failed, incomplete, and source/runtime-unmatched items retain their actual state.
