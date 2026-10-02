@@ -25,7 +25,7 @@ test("role telemetry preserves partial provider usage without inventing missing 
 });
 
 test("single-shot role exposes telemetry through existing workflow-visible progress audit",async()=>{
-  const aiCore={call:async()=>({content:JSON.stringify({verdict:"UNKNOWN"}),telemetry:{queue_wait_ms:0,prepare_ms:0,upstream_request_wall_ms:2,parse_validate_ms:0,role_wall_ms:2,request_bytes:50,response_bytes:20,prompt_tokens:7,completion_tokens:2,total_tokens:9},control_plane:{selected_skill_ids:["fresh-context-review"]}})};
+  const aiCore={call:async()=>({content:JSON.stringify({verdict:"UNKNOWN",decision:"CONTINUE",claims:[]}),telemetry:{queue_wait_ms:0,prepare_ms:0,upstream_request_wall_ms:2,parse_validate_ms:0,role_wall_ms:2,request_bytes:50,response_bytes:20,prompt_tokens:7,completion_tokens:2,total_tokens:9},control_plane:{selected_skill_ids:["fresh-context-review"]}})};
   const out=await runRoleWithReadOnlyTools({aiCore,role:"local_reviewer",user:"review",toolRuntime:null});
   assert.equal(out.tool_loop.telemetry.llm_calls,1);
   assert.equal(out.tool_loop.telemetry.prompt_tokens_complete,true);
