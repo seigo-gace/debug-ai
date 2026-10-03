@@ -36,8 +36,8 @@ jobs:
         continue-on-error: true
         env:
           LEGACY_TGSERVER_URL: https://tgserver.asterav8.jp
-          TGS_CF_ACCESS_CLIENT_ID: ${{ secrets.LEGACY_TGSERVER_CF_ACCESS_CLIENT_ID }}
-          TGS_CF_ACCESS_CLIENT_SECRET: ${{ secrets.LEGACY_TGSERVER_CF_ACCESS_CLIENT_SECRET }}
+          TGS_CF_ACCESS_CLIENT_ID: ${{ secrets.LEGACY_TGSERVER_CF_ACCESS_CLIENT_ID || secrets.DEBUGAI_CF_ACCESS_CLIENT_ID }}
+          TGS_CF_ACCESS_CLIENT_SECRET: ${{ secrets.LEGACY_TGSERVER_CF_ACCESS_CLIENT_SECRET || secrets.DEBUGAI_CF_ACCESS_CLIENT_SECRET }}
           TGS_PROJECT_ID: P004
           TGS_JOB_STATUS: ${{ job.status }}
           TGS_WORKFLOW: ${{ github.workflow }}
