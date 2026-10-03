@@ -1,0 +1,117 @@
+name: ChatGPT TGserver Log Read
+
+on:
+  push:
+    branches:
+      - automation/chatgpt-verify
+    paths:
+      - .github/chatgpt-tgserver-query.json
+      - .github/workflows/chatgpt-tgserver-log-read.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chatgpt-tgserver-log-read
+  cancel-in-progress: true
+
+jobs:
+  read-tgserver-logs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      TGSERVER_BASE_URL: ${{ vars.DEBUG_AI_TGSERVER_URL }}
+    steps:
+      - name: Checkout automation branch
+        uses: actions/checkout@v4
+
+      - name: Validate bounded read configuration
+        id: config
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${TGSERVER_BASE_URL:-}" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "TGSERVER_PUBLIC_URL_CONFIGURED=FALSE"
+            exit 0
+          fi
+          node <<'NODE'
+          const fs=require('node:fs');
+          const url=new URL(process.env.TGSERVER_BASE_URL);
+          if(url.protocol!=='https:') throw new Error('TGSERVER_PUBLIC_URL_MUST_USE_HTTPS');
+          const h=url.hostname.toLowerCase();
+          const privateHost=h==='localhost'||h==='127.0.0.1'||h==='::1'||h.startsWith('10.')||h.startsWith('192.168.')||/^172\.(1[6-9]|2\d|3[01])\./.test(h);
+          if(privateHost) throw new Error('TGSERVER_PUBLIC_URL_IS_NOT_PUBLIC');
+          const cfg=JSON.parse(fs.readFileSync('.github/chatgpt-tgserver-query.json','utf8'));
+          if(!/^P\d+$/.test(String(cfg.project_id||''))) throw new Error('INVALID_PROJECT_ID');
+          if(typeof cfg.query!=='string') throw new Error('INVALID_QUERY');
+          const limit=Number(cfg.limit??50);
+          if(!Number.isInteger(limit)||limit<1||limit>100) throw new Error('INVALID_LIMIT');
+          fs.writeFileSync('tgserver-request.json',JSON.stringify({query:cfg.query,project_id:cfg.project_id,limit}));
+          NODE
+          echo "configured=true" >> "$GITHUB_OUTPUT"
+          echo "TGSERVER_PUBLIC_URL_CONFIGURED=TRUE"
+          echo "TGSERVER_QUERY_MODE=READ_ONLY"
+
+      - name: TGserver health
+        if: steps.config.outputs.configured == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="${TGSERVER_BASE_URL%/}"
+          code="$(curl --silent --show-error --connect-timeout 5 --max-time 15 -o tgserver-health.json -w '%{http_code}' "$base/health")"
+          echo "TGSERVER_HEALTH_HTTP=$code"
+          [[ "$code" =~ ^2[0-9][0-9]$ ]]
+          node -e 'const x=JSON.parse(require("node:fs").readFileSync("tgserver-health.json","utf8")); if(!x||typeof x!=="object") process.exit(2); console.log("TGSERVER_HEALTH_JSON=VALID")'
+
+      - name: Search bounded DebugAI logs
+        if: steps.config.outputs.configured == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="${TGSERVER_BASE_URL%/}"
+          code="$(curl --silent --show-error --connect-timeout 5 --max-time 20 -H 'content-type: application/json' --data-binary @tgserver-request.json -o tgserver-search-raw.json -w '%{http_code}' "$base/search")"
+          echo "TGSERVER_SEARCH_HTTP=$code"
+          [[ "$code" =~ ^2[0-9][0-9]$ ]]
+          node <<'NODE'
+          const fs=require('node:fs');
+          const cfg=JSON.parse(fs.readFileSync('.github/chatgpt-tgserver-query.json','utf8'));
+          const body=JSON.parse(fs.readFileSync('tgserver-search-raw.json','utf8'));
+          const forbidden=/(authorization|cookie|api[_-]?key|secret|password|private[_-]?key|access[_-]?token|refresh[_-]?token)/i;
+          function scrub(v){
+            if(v==null)return v;
+            if(typeof v==='string')return v.replace(/Bearer\s+\S+/gi,'Bearer [REDACTED]').replace(/(?:api[_-]?key|secret|password|token)\s*[:=]\s*\S+/gi,m=>m.split(/[:=]/)[0]+'=[REDACTED]');
+            if(Array.isArray(v))return v.map(scrub);
+            if(typeof v==='object'){const o={};for(const [k,x] of Object.entries(v))o[k]=forbidden.test(k)?'[REDACTED]':scrub(x);return o;}
+            return v;
+          }
+          const hits=Array.isArray(body?.hits)?body.hits:[];
+          const limit=Math.min(Number(cfg.limit||50),100);
+          const safeHits=scrub(hits.slice(0,limit));
+          const out={schema:'debugai.github-tgserver-log-read/v1',project_id:cfg.project_id,query:cfg.query,retrieved_at:new Date().toISOString(),hit_count:hits.length,returned_count:safeHits.length,hits:safeHits};
+          fs.writeFileSync('tgserver-log-read.json',JSON.stringify(out,null,2));
+          console.log(`TGSERVER_HIT_COUNT=${hits.length}`);
+          console.log(`TGSERVER_RETURNED_COUNT=${safeHits.length}`);
+          for(const [i,hit] of safeHits.slice(0,20).entries()) console.log(`TGSERVER_SAFE_HIT_${i+1}=${JSON.stringify(hit)}`);
+          NODE
+          rm -f tgserver-search-raw.json tgserver-request.json tgserver-health.json
+
+      - name: Upload sanitized TGserver readback
+        if: steps.config.outputs.configured == 'true' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chatgpt-tgserver-log-read-${{ github.run_id }}
+          path: tgserver-log-read.json
+          if-no-files-found: ignore
+          retention-days: 3
+
+      - name: Safety summary
+        if: always()
+        shell: bash
+        run: |
+          echo "TGSERVER_LANE=READ_ONLY"
+          echo "TGSERVER_INGEST_CALLED=FALSE"
+          echo "TGSERVER_BULK_INGEST_CALLED=FALSE"
+          echo "SOURCE_MUTATION=NONE"
+          echo "SECRET_VALUE_OUTPUT=NONE"
