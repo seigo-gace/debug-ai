@@ -18,9 +18,9 @@ GitHub source, exact-head CI, shared AI Core runtime, live DebugAI Server state,
 
 ## Current repository state
 
-The approved live revision is `fa690041349c6dd7bfb8dae3121b2e1f724dff87`. Its exact-head GitHub CI passed Public Readiness #483, Verify #518, Runtime Volume Gate #114, and Core Verify #519. PR #34 remains OPEN / DRAFT / UNMERGED.
+The approved live revision is `83424901502491c6b1dcc8fd223990f91a750d7d`. Its exact-head GitHub CI passed Public Readiness #484, Verify #519, Runtime Volume Gate #115, and Core Verify #520. PR #34 remains OPEN / DRAFT / UNMERGED.
 
-The current feature-branch candidate preserves the MCP raw request as task data through all four analysis roles and search, adds an explicit production Causal Scout final-output contract, and exposes the existing Local Reviewer Tool Loop telemetry in the benchmark result. These corrections are source-side only; they are not present in the approved live image. Local verification passed 415 tests, including the real TypeScript 7 gate, with zero failures and zero skips. The final candidate head still requires fresh exact-head CI and separate exact-SHA reflection approval.
+The approved live source now propagates the MCP request as task data, specifies canonical Causal Scout final output, and forwards Local Reviewer benchmark telemetry. Fresh runtime evidence confirms the request-backed search query and accepted canonical Causal Scout claims with UNKNOWN; broader semantic quality and Strict Completion remain unqualified. The new source-side candidate repairs sandbox test fixtures and narrowly preserves typed canonical telemetry counts during secret scrubbing. Its runtime reflection requires separate exact-SHA authorization.
 
 ## Current context / token / cache source contract
 
@@ -75,7 +75,7 @@ The source contract:
 - binds checkpoint reuse to a source fingerprint and fails closed when incompatible source is detected;
 - does not grant production promotion authority.
 
-The resumable runner and context/token/cache correction are deployed at the approved fa690041 revision. The production Causal Scout/output-telemetry candidate remains source-side only.
+The resumable runner, context/token/cache correction and MCP task/Causal Scout/output-telemetry correction are deployed at approved revision 83424901502491c6b1dcc8fd223990f91a750d7d. Sandbox fixture and typed telemetry-retention repairs remain source-side only.
 
 ## Current live DebugAI Server boundary
 
@@ -84,7 +84,7 @@ Fresh readback after the approved reflection:
 ```text
 checkout path                    = /home/admin1/projects/debug-ai
 checkout mode                    = detached HEAD
-approved checkout HEAD           = fa690041349c6dd7bfb8dae3121b2e1f724dff87
+approved checkout HEAD           = 83424901502491c6b1dcc8fd223990f91a750d7d
 tracked worktree                 = CLEAN
 .debugai-input and unmanaged state = content hashes preserved
 runtime-init                     = exited / exit=0 / same container and image
@@ -97,7 +97,7 @@ historical checkpoints          = all pre-reflection hashes preserved
 checkpoint recreate durability  = runner-written probe loaded with identical hash
 qualified runtime context       = 8192 / existing .env owner
 AI Core backend context         = 8192 on all four unchanged backends
-existing environment            = unchanged except added context qualification key
+existing environment            = all environment hashes unchanged from pre-reflection
 production profile change       = NONE
 Search skip activation           = NO
 ```
@@ -106,13 +106,25 @@ The checkpoint probe remains retained as evidence. No old checkpoint was rebound
 
 ### Current live MCP investigation
 
-Real stdio initialize, exact ordered nine-tool discovery, health, start, status, bounded wait, and inspect were executed against the approved live source. No approve/apply shortcut exists. Exact run ID: `run_murmrr7b_62f93013f4`.
+Fresh stdio initialize, exact nine-tool discovery, health, start, status, bounded wait and inspect were executed on the approved live revision. No approve/apply shortcut exists.
 
-The run is RETRY_WAIT with `ROLE_SEMANTIC_INVALID:causal_scout:EXPECTED_SHAPE_MISSING:candidates|hypotheses|causal_chain|claims`. No completed analysis or evidence-backed diagnosis is claimed. Source inspection confirmed that the production caller did not specify a required final role-shape field; the candidate now explicitly requires canonical claims, preserves UNKNOWN, and leaves validation fail-closed. A second source defect was reproduced deterministically: MCP start supplies rawRequest with failure=null, but the production caller omitted rawRequest from all analysis-role inputs and used the generic search query "debug failure". The candidate now forwards the original task as JSON data through scouts, durable/non-durable Researcher and Diagnoser, and uses it as the search fallback without moving it into system instructions. The runtime failures are not yet closed. Resume must retain this run ID and must not be reported successful before real execution.
+Retained run `run_murmrr7b_62f93013f4` cannot continue across the reflection: startup recovery preserved its input but failed closed with REPOSITORY_REVISION_MISMATCH against its saved source-tree binding. It is now BLOCKED, not resumable. No snapshot binding or historical checkpoint was overwritten to force reuse. Startup logged 24 incompatible runs; this is a recovery consequence, not successful continuation.
 
-The full repository package.test inside the unchanged sandbox failed: test fixtures call chmod, which sandbox-exec intentionally denies with EPERM. This is separate from the passing repository verification outside that sandbox. The sandbox policy, tests, and existing runner were not weakened or recreated. Read-only MCP verify was invoked; its client timed out, so MCP transport completion is not claimed. Server evidence later proved verification_id `verify_211e3f83-43e0-4452-a1a6-0156813ddc2a`, verdict FAIL, Local Reviewer FAIL/BLOCKED, and source-immutability invariants PASS for both selected paths. No patch was applied.
+New serial run `run_murr1d8u_a6fb01c3d9` investigates sandbox chmod EPERM. Its saved research-context digest is valid; the search query exactly matches its retained request. The Causal Scout stage passed the unchanged validator with canonical claims/type/statement and UNKNOWN. This closes the previously measured final-output shape failure for this execution. It does not prove a completed diagnosis or semantic quality: Codex rejected logically reversed falsification conditions and any suggestion requiring seccomp relaxation. Researcher A→E completed with a durable FINAL result: INSUFFICIENT_EVIDENCE, answer UNKNOWN, no claimed source evidence. Diagnoser later reached AI_CORE_TIMEOUT; job status is RETRY_WAIT at the DIAGNOSER cursor with the same completed researcher execution/checkpoint retained. No completed analysis or final diagnosis is claimed. Repeating the unchanged timed-out model call is not a repair.
 
-### Current Local Reviewer cache measurement
+The saved runtime telemetry exposed a new persistence defect: numeric token counts and completeness flags are redacted by the broad secret-field rule. New source also states that a falsification observation must contradict a hypothesis and must stay within existing read-only/security controls; this addresses the measured inverted/unsafe suggestions but remains unqualified until real new-source execution. New source permits only typed nonnegative integer/null counters and boolean completeness fields in the exact canonical v2 telemetry schema. Credentials, private reasoning, strings/objects/arrays, invalid numeric values, other schemas and untagged token fields remain redacted. Missing historical counts are not reconstructed. Full repository regression for the new candidate passes 418/418, including real TS7, zero skips. A second request-only defect was reproduced directly in the deployed hook: UNKNOWN analysis with failure=null throws REJECTED_HISTORY_FAILURE_RECORD_REQUIRED even without rejected hypotheses. New source requires a failure identity only when persisting actual structured REJECTED history; request-only analysis can retain UNKNOWN without fabricating a failure, while unbound rejection still fails closed. Real model completion on this source fix remains pending reflection.
+
+Sandbox self-test compatibility is a separate unresolved defect, tracked in [SANDBOX_SUITE_COMPATIBILITY.md](SANDBOX_SUITE_COMPATIBILITY.md). Fixtures are corrected without syscall-policy relaxation or deleted/skipped tests. A real sandbox retest still exposed missing native addon and timestamp operations; native/dependency provisioning and SIGKILL crash supervision remain unresolved. Previous fa690041 read-only verification `verify_211e3f83-43e0-4452-a1a6-0156813ddc2a` returned FAIL/BLOCKED with source immutability PASS; its old client timeout remains historical transport evidence.
+
+### Current read-only verification and performance boundary
+
+MCP verify completed end-to-end on 83424901502491c6b1dcc8fd223990f91a750d7d: verification_id verify_7a9881cb-0f96-493f-925f-aa5fae9b9bbc, verdict FAIL, Local Reviewer BLOCKED/BLOCKED, local_review_error=null. Sandbox job JOB_1c7d810498e2daa468a3a9a9 returned code 1 in 28730 ms. Read-only source immutability passed for all three selected paths; patch_applied=false. This is successful transport of a failed verification, not qualification PASS.
+
+The partial run/verify measurement window recorded parent cgroup High/Max/OOM/OOM-kill deltas 0/1705/0/0. Performance qualification therefore fails the zero-Max-delta requirement. Qwen3 was observed at 9660715008 bytes against its unchanged 9663676416-byte ceiling; resource pressure contributing to the diagnosis timeout is an INFERENCE, not a proven exclusive cause. RAM samples are observations, not a full-run peak. Context, all four backend resources/models and production configuration remain unchanged. No paid fallback, new model or larger context was used.
+
+Saved Scout telemetry reports Code Scout prompt-eval/decode/role-wall 84406.971/33858.678/118420 ms, cache hit ratio 0.4092465753424658 over one call; Causal Scout totals 373163.799/297818.43700000003/671370 ms, ratio 0.3601138057173825 over two calls with a stable observed prefix. Prompt/completion/cache-hit/cache-miss counts were redacted in durable persistence and remain UNKNOWN; they are not reconstructed. These measurements do not establish semantic-quality or speed qualification. The exact source-side repairs must pass their own CI and receive separate reflection approval before future-runtime closure can be measured.
+
+### Historical fa690041 Local Reviewer cache measurement
 
 Actual local-model inference uses the fixed benchmark fixture through the deployed production adapter, with existing telemetry captured without storing hidden reasoning. This is a real-model contract/cache measurement with fixture input, not a successful full repository verification or Strict Completion.
 
@@ -138,7 +150,7 @@ models/router                 = unchanged
 
 Measured recovery included approximately Granite 7.31 tok/s, Qwen3 5.61 tok/s, Ministral 7.45 tok/s, Coder 8.05 tok/s, and a 128-token Ministral retest near 6.12 tok/s. The final tested serial path produced zero new parent High/Max/OOM/OOM-kill events. DebugAI role timeout was not extended as a workaround.
 
-Current observed cache and timing measurements on approved fa690041 are reported above. The runtime context remains 8192; broader semantic-quality improvement is not proven by those measurements.
+Historical cache and timing measurements on fa690041 are reported above. The runtime context remains 8192; broader semantic-quality improvement is not proven by those measurements.
 
 ## Local Reviewer defect history and closure
 

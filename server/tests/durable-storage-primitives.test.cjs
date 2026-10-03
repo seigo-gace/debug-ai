@@ -28,7 +28,7 @@ const {
 function fixture(t, { faultInjector = null } = {}) {
   assert.equal(process.platform, "linux", "この試験はLinuxで実行する");
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "debugai-durable-io-"));
-  fs.chmodSync(root, 0o700);
+  assert.equal(fs.statSync(root).mode & 0o777,0o700);
   const writerLock = DurableWriterLock.acquire({ root });
   const io = new DurableFileIO({ writerLock, faultInjector });
   t.after(() => { try { writerLock.close(); } finally { fs.rmSync(root, { recursive: true, force: true }); } });
@@ -39,14 +39,16 @@ function record(value) { return { schema: "debugai.storage-test/v1", value }; }
 
 test("runtime rootのgroup/other権限を拒否する", t => {
   assert.equal(process.platform, "linux");
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "debugai-perm-"));
-  t.after(() => { try { fs.chmodSync(root, 0o700); } catch {} fs.rmSync(root, { recursive: true, force: true }); });
-  fs.chmodSync(root, 0o755);
-  assert.throws(() => DurableWriterLock.acquire({ root }), /DURABLE_ROOT_PERMISSIONS_TOO_OPEN/);
-  fs.chmodSync(root, 0o750);
-  assert.throws(() => DurableWriterLock.acquire({ root }), /DURABLE_ROOT_PERMISSIONS_TOO_OPEN/);
-  fs.chmodSync(root, 0o700);
-  const lock = DurableWriterLock.acquire({ root }); lock.close();
+  const parent = fs.mkdtempSync(path.join(os.tmpdir(), "debugai-perm-"));
+  t.after(() => fs.rmSync(parent, { recursive: true, force: true }));
+  for (const mode of [0o755, 0o750, 0o700]) {
+    const root = path.join(parent, mode.toString(8));
+    const previousMask = process.umask(0);
+    try { fs.mkdirSync(root, { mode }); } finally { process.umask(previousMask); }
+    assert.equal(fs.statSync(root).mode & 0o777, mode);
+    if (mode === 0o700) { const lock = DurableWriterLock.acquire({ root }); lock.close(); }
+    else assert.throws(() => DurableWriterLock.acquire({ root }), /DURABLE_ROOT_PERMISSIONS_TOO_OPEN/);
+  }
 });
 
 test("recordファイルのgroup/other権限を拒否する", t => {
@@ -54,9 +56,16 @@ test("recordファイルのgroup/other権限を拒否する", t => {
   const relative = "durable/record/item.json";
   io.writeImmutableRecord(relative, record(42));
   const absolute = path.join(root, relative);
-  fs.chmodSync(absolute, 0o644);
+  const original = `${absolute}.original`;
+  fs.renameSync(absolute, original);
+  const previousMask = process.umask(0);
+  try { fs.writeFileSync(absolute, fs.readFileSync(original), { mode: 0o644, flag: "wx" }); }
+  finally { process.umask(previousMask); }
+  assert.equal(fs.statSync(absolute).mode & 0o777, 0o644);
   assert.throws(() => io.readRecord(relative), /DURABLE_FILE_PERMISSIONS_UNSAFE/);
-  fs.chmodSync(absolute, 0o600);
+  fs.unlinkSync(absolute);
+  fs.renameSync(original, absolute);
+  assert.equal(fs.statSync(absolute).mode & 0o777, 0o600);
   assert.deepEqual(io.readRecord(relative), record(42));
 });
 

@@ -13,7 +13,7 @@ const {runRoleWithReadOnlyTools}=require("../control/tool-loop.js");
 const {STATUS,DECISION,verifySourceBoundary}=require("../control/source-verifier.js");
 
 function fixture(){
-  const root=fs.mkdtempSync(path.join(os.tmpdir(),"debugai-source-verify-"));fs.chmodSync(root,0o700);
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),"debugai-source-verify-"));assert.equal(fs.statSync(root).mode & 0o777,0o700);
   const repo=path.join(root,"repo");fs.mkdirSync(repo);fs.writeFileSync(path.join(repo,"package.json"),JSON.stringify({scripts:{test:"node --test"}}));
   const repoPolicy=new RepoPolicy({workspaceRoot:root}),runtime=createReadOnlyToolRuntime({repo,repoPolicy});
   return{root,repo,repoPolicy,runtime,cleanup:()=>fs.rmSync(root,{recursive:true,force:true})};

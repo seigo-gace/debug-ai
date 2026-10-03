@@ -27,7 +27,8 @@ function wrapRuntimeEvidenceForRejectedHistory(runtimeEvidence,authority){
         const result=Reflect.apply(value,target,[runId,type,payload]);
         if(type==="analysis"&&payload?.diagnosis){
           const failure=latestFailure(target,runId);
-          if(!failure)throw new Error("REJECTED_HISTORY_FAILURE_RECORD_REQUIRED");
+          const hypotheses=Array.isArray(payload.diagnosis.hypotheses)?payload.diagnosis.hypotheses:[];
+          if(!failure&&hypotheses.some(item=>String(item?.status||"")==="REJECTED"))throw new Error("REJECTED_HISTORY_FAILURE_RECORD_REQUIRED");
           const registry=payload.evidence_registry||{},snapshot=[...(registry.evidence_ids||[]),...(registry.tool_evidence_ids||[])];
           persistRejectedFromDiagnosis({authority,runId,failure,diagnosis:payload.diagnosis,evidenceSnapshotRefs:snapshot,repositoryRevision:null});
         }

@@ -22,7 +22,6 @@ function writeProtectedFile(root, relative, content) {
   const file = path.join(root, relative);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, content);
-  fs.utimesSync(file, 1, 1);
   return { file, bytes: fs.readFileSync(file) };
 }
 
@@ -61,7 +60,6 @@ test("runtime recordでもrun_idが不一致なら削除しない", t => {
   const stored = JSON.parse(fs.readFileSync(written.path, "utf8"));
   stored.run_id = "run_b";
   fs.writeFileSync(written.path, JSON.stringify(stored));
-  fs.utimesSync(written.path, 1, 1);
   store.rotate(Date.now() + 10000);
   assert.equal(fs.existsSync(written.path), true);
   assert.deepEqual(store.list("run_a"), []);
@@ -105,6 +103,29 @@ test("scrubでprototype setterを起動しない", () => {
   assert.equal(Object.getPrototypeOf(result), Object.prototype);
   assert.equal(Object.hasOwn(result, "__proto__"), true);
   assert.equal({}.polluted, undefined);
+});
+
+test("persisted telemetry keeps typed counts and UNKNOWN while credentials remain redacted", t => {
+  const root = fixture(t), store = new RuntimeEvidenceStore(root);
+  const telemetry = {
+    schema: "debugai.role-runtime-telemetry/v2",
+    prompt_tokens_known_sum: 1508, prompt_tokens_measured_calls: 1, prompt_tokens_complete: true,
+    completion_tokens_known_sum: 702, completion_tokens_measured_calls: 1, completion_tokens_complete: true,
+    total_tokens_known_sum: 2210, total_tokens_measured_calls: 1, total_tokens_complete: true,
+    cache_hit_tokens_known_sum: null, cache_hit_tokens_measured_calls: 0,
+    cache_miss_tokens_known_sum: null, cache_miss_tokens_measured_calls: 0,
+    api_key: "fixture-value", access_token: 12345, reasoning_content: "private fixture",
+  };
+  const written = store.write("run_a", "analysis", { tool_audit: { runtime_telemetry: telemetry } });
+  const actual = JSON.parse(fs.readFileSync(written.path)).payload.tool_audit.runtime_telemetry;
+  for (const key of Object.keys(telemetry).filter(key => /_(known_sum|measured_calls|complete)$/.test(key))) assert.equal(actual[key], telemetry[key]);
+  for (const key of ["api_key", "access_token", "reasoning_content"]) assert.equal(actual[key], "[REDACTED]");
+  for (const value of ["fixture-value", { access_token: "fixture-value" }, [42], -1, 1.5, Infinity]) {
+    assert.equal(scrub({ schema: telemetry.schema, prompt_tokens_known_sum: value }).prompt_tokens_known_sum, "[REDACTED]");
+  }
+  assert.equal(scrub({ prompt_tokens_known_sum: 1508 }).prompt_tokens_known_sum, "[REDACTED]");
+  assert.equal(scrub({ schema: "other/v1", prompt_tokens_known_sum: 1508 }).prompt_tokens_known_sum, "[REDACTED]");
+  assert.equal(scrub({ schema: telemetry.schema, prompt_tokens_complete: "fixture-value" }).prompt_tokens_complete, "[REDACTED]");
 });
 
 test("orphan runtime tempをrotateで回収する", t => {

@@ -12,6 +12,18 @@ const RECORD_FILENAME = /^([0-9]{1,16})-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f
 const TEMP_FILENAME = /^\.runtime-evidence-[a-f0-9]{32}\.tmp$/;
 const DEFAULT_MAX_RECORD_BYTES = 2 * 1024 * 1024;
 const FORBIDDEN_PERMISSION_MASK = 0o077;
+const TELEMETRY_COUNT_FIELDS = new Set([
+  "prompt_tokens", "completion_tokens", "total_tokens", "cache_hit_tokens", "cache_miss_tokens",
+].flatMap(name => [`${name}_known_sum`, `${name}_measured_calls`]));
+const TELEMETRY_COMPLETE_FIELDS = new Set([
+  "prompt_tokens_complete", "completion_tokens_complete", "total_tokens_complete",
+]);
+
+function isPublicTelemetryMetric(record, key, value) {
+  if (record.schema !== "debugai.role-runtime-telemetry/v2") return false;
+  if (TELEMETRY_COUNT_FIELDS.has(key)) return value === null || (Number.isSafeInteger(value) && value >= 0);
+  return TELEMETRY_COMPLETE_FIELDS.has(key) && typeof value === "boolean";
+}
 
 function scrub(value) {
   const ancestors = new Set();
@@ -24,7 +36,8 @@ function scrub(value) {
       if (Array.isArray(current)) return current.map(visit);
       const out = {};
       for (const [key, item] of Object.entries(current)) {
-        const safeValue = SECRET_FIELD.test(key) || PRIVATE_REASONING_FIELD.test(key) ? "[REDACTED]" : visit(item);
+        const sensitive = (SECRET_FIELD.test(key) && !isPublicTelemetryMetric(current, key, item)) || PRIVATE_REASONING_FIELD.test(key);
+        const safeValue = sensitive ? "[REDACTED]" : visit(item);
         Object.defineProperty(out, String(key), { enumerable: true, configurable: true, writable: true, value: safeValue });
       }
       return out;

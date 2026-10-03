@@ -15,7 +15,7 @@ const {candidatePolicy,evaluateFalseSkip}=require("../control/search-gate-candid
 const {createWorkflow}=require("../workflow-observed.js");
 
 function fixture(){
-  const root=fs.mkdtempSync(path.join(os.tmpdir(),"debugai-search-shadow-"));fs.chmodSync(root,0o700);
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),"debugai-search-shadow-"));assert.equal(fs.statSync(root).mode & 0o777,0o700);
   const repo=path.join(root,"repo");fs.mkdirSync(repo);fs.writeFileSync(path.join(repo,"a.js"),"module.exports=1;\n");fs.writeFileSync(path.join(repo,"package.json"),JSON.stringify({scripts:{test:"node --test"}}));
   return{root,repo,cleanup:()=>fs.rmSync(root,{recursive:true,force:true})};
 }

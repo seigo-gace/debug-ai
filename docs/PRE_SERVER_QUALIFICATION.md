@@ -10,9 +10,9 @@ Server/VPS/Docker mutation is governed by current `G-ACE-inc/server-core` author
 
 ## Source qualification and live boundary
 
-The approved live revision is `fa690041349c6dd7bfb8dae3121b2e1f724dff87`. Its exact-head GitHub CI passed Public Readiness #483, Verify #518, Runtime Volume Gate #114, and Core Verify #519. PR #34 remains OPEN / DRAFT / UNMERGED.
+The approved live revision is `83424901502491c6b1dcc8fd223990f91a750d7d`. Its exact-head GitHub CI passed Public Readiness #484, Verify #519, Runtime Volume Gate #115, and Core Verify #520. PR #34 remains OPEN / DRAFT / UNMERGED.
 
-The current feature-branch candidate preserves the MCP raw request as task data through all four analysis roles and search, adds an explicit production Causal Scout final-output contract, and exposes the existing Local Reviewer Tool Loop telemetry in the benchmark result. These corrections are source-side only; they are not present in the approved live image. Local verification passed 415 tests, including the real TypeScript 7 gate, with zero failures and zero skips. The final candidate head still requires fresh exact-head CI and separate exact-SHA reflection approval.
+The approved live source now propagates the MCP request as task data, specifies canonical Causal Scout final output, and forwards Local Reviewer benchmark telemetry. Fresh runtime evidence confirms the request-backed search query and accepted canonical Causal Scout claims with UNKNOWN; broader semantic quality and Strict Completion remain unqualified. The new source-side candidate repairs sandbox test fixtures and request-only history handling, and narrowly preserves typed canonical telemetry counts during secret scrubbing. Its runtime reflection requires separate exact-SHA authorization.
 
 The approved live runtime has exact shipped parity across 223 files and qualified context 8192. Both persistent volumes, historical checkpoints, unmanaged state, init containers and sandbox-runner were preserved. Current Causal Scout real failure, cache measurement limits and read-only verification state are detailed in [`CURRENT_STATE.md`](CURRENT_STATE.md). Source tests do not promote the failed sandbox verification or pending runtime candidate to PASS.
 
@@ -73,7 +73,7 @@ models/router                 = unchanged
 
 Measured recovery included approximately Granite 7.31 tok/s, Qwen3 5.61 tok/s, Ministral 7.45 tok/s, Coder 8.05 tok/s, and a 128-token Ministral retest near 6.12 tok/s. The final tested serial path produced zero new High/Max/OOM/OOM-kill events. DebugAI timeout was not extended as a workaround.
 
-Current observed cache/timing measurements on approved fa690041 are recorded in `CURRENT_STATE.md`. Complete qualification must record cache hit/miss, prompt-eval time, decode time, role wall time, prefix stability, prompt/completion tokens, and RAM/cgroup events. A speed improvement is valid only when deterministic and semantic quality gates do not regress; broader semantic-quality improvement is not yet proven.
+Historical observed cache/timing measurements on fa690041 are recorded in `CURRENT_STATE.md`. Complete qualification must record cache hit/miss, prompt-eval time, decode time, role wall time, prefix stability, prompt/completion tokens, and RAM/cgroup events. A speed improvement is valid only when deterministic and semantic quality gates do not regress; broader semantic-quality improvement is not yet proven.
 
 The last measured live context remains 8192. Prompt caching does not enlarge `n_ctx`. A larger live context is a separate Server/resource candidate and must not be promoted from model-native context specifications alone; it requires measured RAM, cache behavior, prompt-eval/decode speed, quality, and end-to-end latency plus separate Master approval.
 
@@ -376,11 +376,11 @@ Do not manufacture provider traffic solely to mark a box PASS.
 ## Required live order from the current boundary
 
 ```text
-1. require exact candidate-head GitHub CI PASS for the MCP task/Causal Scout/output-telemetry corrections
-2. obtain separate Master approval for that exact new SHA; preserve the approved live fa690041349c6dd7bfb8dae3121b2e1f724dff87 until then
+1. require exact candidate-head GitHub CI PASS for the sandbox fixture/typed telemetry-retention corrections
+2. obtain separate Master approval for that exact new SHA; preserve the approved live 83424901502491c6b1dcc8fd223990f91a750d7d until then
 3. reflect only the approved candidate while preserving both volumes, checkpoints, unmanaged state and existing auxiliary containers
-4. reverify exact parity and resume the retained MCP run only when compatible and actually resumable
-5. close the measured causal-output defect with real runtime evidence; do not relax the validator or sandbox
+4. reverify exact parity; retained runs may continue only when source-bound compatibility and resumable status both hold
+5. retain canonical Causal Scout closure evidence; finish semantic quality and sandbox compatibility without relaxing validation or safety
 6. finish serial Local Reviewer/cache qualification and keep contested samples labeled
 7. use a separate compatible source-bound checkpoint for current six-role Skill ON/OFF measurement
 8. retain Skill OFF wins/ties; run Thinking A/B only for explicit boolean roles

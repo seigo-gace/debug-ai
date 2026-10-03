@@ -13,7 +13,7 @@ const {wrapAuthorityForRunObservation}=require("../control/run-observation-conte
 const {createRunObservationProvider}=require("../control/run-observation-provider.js");
 const {createWorkflow}=require("../workflow-observed.js");
 
-function workspace(){const root=fs.mkdtempSync(path.join(os.tmpdir(),"debugai-run-observe-"));fs.chmodSync(root,0o700);const repo=path.join(root,"repo");fs.mkdirSync(repo);fs.writeFileSync(path.join(repo,"a.js"),"module.exports=1;\n");fs.writeFileSync(path.join(repo,"package.json"),JSON.stringify({scripts:{test:"node --test"}}));return{root,repo,cleanup:()=>fs.rmSync(root,{recursive:true,force:true})};}
+function workspace(){const root=fs.mkdtempSync(path.join(os.tmpdir(),"debugai-run-observe-"));assert.equal(fs.statSync(root).mode & 0o777,0o700);const repo=path.join(root,"repo");fs.mkdirSync(repo);fs.writeFileSync(path.join(repo,"a.js"),"module.exports=1;\n");fs.writeFileSync(path.join(repo,"package.json"),JSON.stringify({scripts:{test:"node --test"}}));return{root,repo,cleanup:()=>fs.rmSync(root,{recursive:true,force:true})};}
 function sleep(ms){return new Promise(resolve=>setTimeout(resolve,ms));}
 
 test("current-run provider exposes bounded state and forbids caller-selected run ids",()=>{
