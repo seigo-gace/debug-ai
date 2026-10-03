@@ -43,7 +43,7 @@ function configured(env=process.env){
 }
 
 async function publish(env=process.env,{fetchImpl=globalThis.fetch}={}){
-  if(!configured(env))return {ok:true,summary:"TGS_INGEST_CONFIGURED=FALSE"};
+  if(!configured(env))return {ok:false,summary:"TGS_INGEST_CONFIGURED=FALSE"};
   if(typeof fetchImpl!=="function")throw new Error("TGS_FETCH_REQUIRED");
   const base=String(env.LEGACY_TGSERVER_URL||DEFAULT_TGS_URL).trim().replace(/\/+$/,"")||DEFAULT_TGS_URL;
   const payload=buildPayload(env);
