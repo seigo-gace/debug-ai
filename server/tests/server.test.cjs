@@ -162,22 +162,30 @@ test('TGserver adapter uses existing ingest/search APIs, separates P004/P005, an
   const a=createTgserverAdapter({baseUrl:'http://tg.internal:3000',logProjectId:'P004',kbProjectId:'P005',fetchImpl:async(u,o)=>{
     const b=JSON.parse(o.body);calls.push({u,b});
     if(u.endsWith('/search'))return new Response(JSON.stringify({hits:[{project_id:'P005',message:'known fix'}]}),{status:200});
+    if(u.endsWith('/ingest/bulk'))return new Response(JSON.stringify({results:b.logs.map(()=>({status:'accepted'}))}),{status:200});
     return new Response(JSON.stringify({status:'accepted',hash:'h1'}),{status:200});
   }});
-  await a.log({kind:'gate',severity:'warn',authorization:'Bearer abc',summary:'runtime'});
+  const queued=await a.log({kind:'gate',severity:'warn',authorization:'Bearer abc',summary:'runtime'});
+  assert.equal(queued.status,'queued');
   await a.promote({kind:'accepted_fix',confirmed:true,summary:'fixed',nested:{api_key:'xyz'},supersedes:'old'});
+  assert.equal(await a.flushLogs(500),true);
   const hits=await a.search('known fix');
-  assert.equal(calls[0].u,'http://tg.internal:3000/ingest');
-  assert.equal(calls[0].b.project_id,'P004');
-  assert.equal(calls[0].b.severity,'warn');
-  assert.equal(calls[1].b.project_id,'P005');
-  assert.equal(calls[2].u,'http://tg.internal:3000/search');
-  assert.equal(calls[2].b.project_id,'P005');
+  const bulk=calls.find(x=>x.u.endsWith('/ingest/bulk'));
+  const promote=calls.find(x=>x.u.endsWith('/ingest'));
+  const search=calls.find(x=>x.u.endsWith('/search'));
+  assert.ok(bulk);
+  assert.equal(bulk.b.logs.length,1);
+  assert.equal(bulk.b.logs[0].project_id,'P004');
+  assert.equal(bulk.b.logs[0].severity,'warn');
+  assert.ok(promote);
+  assert.equal(promote.b.project_id,'P005');
+  assert.ok(search);
+  assert.equal(search.b.project_id,'P005');
   assert.equal(hits.length,1);
   const wire=JSON.stringify(calls);
   assert.ok(!wire.includes('abc'));
   assert.ok(!wire.includes('xyz'));
-  assert.match(calls[1].b.message,/"event_type":"knowledge"/);
+  assert.match(promote.b.message,/"event_type":"knowledge"/);
 });
 
 const {assertPublicOpaque,createExternalReviewAdapter}=require('../adapters/external-review.js');
