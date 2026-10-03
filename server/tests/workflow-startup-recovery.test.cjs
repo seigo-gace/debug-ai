@@ -65,8 +65,9 @@ test("diagnoser timeout resume preserves redacted evidence identity and complete
     return{content:JSON.stringify({authority:"HINT_ONLY"})};
   }};
   const workflow=createWorkflow({aiCore,authority,repoPolicy:policy,repositorySnapshot:()=>"git_fixture",externalReview:{hypothesis:async()=>({provider:"fixture",json:{verdict:"PASS"}})}});
-  let interrupted;try{await workflow.runAnalysis({repo,projectId:"P",rawRequest:"investigate auth timeout",failure:{message:"fixture failure"},localEvidence:[{id:"L1",observation:"token=should-never-persist"}]});assert.fail("expected diagnoser timeout");}catch(error){interrupted=error;}
-  const runId=interrupted.durable.run_id;assert.match(interrupted.message,/AI_CORE_TIMEOUT/);assert.equal(authority.loadDurable(runId).state.job_status,"RETRY_WAIT");const callsBeforeResume=diagnoserCalls;assert.ok(callsBeforeResume>=1);timeoutDiagnoser=false;
+  const accepted=await workflow.startAnalysis({repo,projectId:"P",rawRequest:"investigate auth timeout",failure:{message:"fixture failure"},localEvidence:[{id:"L1",observation:"token=should-never-persist"}]});const runId=accepted.run_id;
+  for(let i=0;i<200;i++){if(workflow.status(runId).durable.job_status==="RETRY_WAIT")break;await new Promise(resolve=>setTimeout(resolve,10));}
+  const interruptedStatus=workflow.status(runId);assert.equal(interruptedStatus.durable.job_status,"RETRY_WAIT");assert.match(String(interruptedStatus.durable.last_execution_error||""),/AI_CORE_TIMEOUT/);const callsBeforeResume=diagnoserCalls;assert.ok(callsBeforeResume>=1);timeoutDiagnoser=false;
   const resumed=await workflow.resumeAnalysis({runId});assert.equal(resumed.run_id,runId);
   for(let i=0;i<200;i++){const job=workflow.status(runId).durable.job_status;if(["DONE","BLOCKED","FAILED"].includes(job))break;await new Promise(resolve=>setTimeout(resolve,10));}
   const status=workflow.status(runId);assert.equal(status.durable.job_status,"DONE");assert.notMatch(String(status.durable.last_execution_error||""),/EVIDENCE_VIEW_ID_MISMATCH/);assert.ok(diagnoserCalls>callsBeforeResume);
