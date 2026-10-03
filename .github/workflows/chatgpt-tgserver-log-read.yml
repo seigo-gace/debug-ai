@@ -44,11 +44,13 @@ jobs:
           const privateHost=h==='localhost'||h==='127.0.0.1'||h==='::1'||h.startsWith('10.')||h.startsWith('192.168.')||/^172\.(1[6-9]|2\d|3[01])\./.test(h);
           if(privateHost) throw new Error('TGSERVER_PUBLIC_URL_IS_NOT_PUBLIC');
           const cfg=JSON.parse(fs.readFileSync('.github/chatgpt-tgserver-query.json','utf8'));
-          if(!/^P\d+$/.test(String(cfg.project_id||''))) throw new Error('INVALID_PROJECT_ID');
-          if(typeof cfg.query!=='string') throw new Error('INVALID_QUERY');
-          const limit=Number(cfg.limit??50);
-          if(!Number.isInteger(limit)||limit<1||limit>100) throw new Error('INVALID_LIMIT');
-          fs.writeFileSync('tgserver-request.json',JSON.stringify({query:cfg.query,project_id:cfg.project_id,limit}));
+          if(!Array.isArray(cfg.queries)||cfg.queries.length<1||cfg.queries.length>10) throw new Error('INVALID_QUERY_SET');
+          for(const [i,q] of cfg.queries.entries()){
+            if(!/^P\d+$/.test(String(q.project_id||''))) throw new Error(`INVALID_PROJECT_ID_${i}`);
+            if(typeof q.query!=='string'||!q.query.trim()) throw new Error(`INVALID_QUERY_${i}`);
+            const limit=Number(q.limit??50);
+            if(!Number.isInteger(limit)||limit<1||limit>100) throw new Error(`INVALID_LIMIT_${i}`);
+          }
           NODE
           echo "configured=true" >> "$GITHUB_OUTPUT"
           echo "TGSERVER_PUBLIC_URL_CONFIGURED=TRUE"
@@ -65,19 +67,17 @@ jobs:
           [[ "$code" =~ ^2[0-9][0-9]$ ]]
           node -e 'const x=JSON.parse(require("node:fs").readFileSync("tgserver-health.json","utf8")); if(!x||typeof x!=="object") process.exit(2); console.log("TGSERVER_HEALTH_JSON=VALID")'
 
-      - name: Search bounded DebugAI logs
+      - name: Search existing P004 and P005 streams
         if: steps.config.outputs.configured == 'true'
         shell: bash
         run: |
           set -euo pipefail
           base="${TGSERVER_BASE_URL%/}"
-          code="$(curl --silent --show-error --connect-timeout 5 --max-time 20 -H 'content-type: application/json' --data-binary @tgserver-request.json -o tgserver-search-raw.json -w '%{http_code}' "$base/search")"
-          echo "TGSERVER_SEARCH_HTTP=$code"
-          [[ "$code" =~ ^2[0-9][0-9]$ ]]
+          export TGSERVER_BASE_URL="$base"
           node <<'NODE'
           const fs=require('node:fs');
+          const {execFileSync}=require('node:child_process');
           const cfg=JSON.parse(fs.readFileSync('.github/chatgpt-tgserver-query.json','utf8'));
-          const body=JSON.parse(fs.readFileSync('tgserver-search-raw.json','utf8'));
           const forbidden=/(authorization|cookie|api[_-]?key|secret|password|private[_-]?key|access[_-]?token|refresh[_-]?token)/i;
           function scrub(v){
             if(v==null)return v;
@@ -86,16 +86,22 @@ jobs:
             if(typeof v==='object'){const o={};for(const [k,x] of Object.entries(v))o[k]=forbidden.test(k)?'[REDACTED]':scrub(x);return o;}
             return v;
           }
-          const hits=Array.isArray(body?.hits)?body.hits:[];
-          const limit=Math.min(Number(cfg.limit||50),100);
-          const safeHits=scrub(hits.slice(0,limit));
-          const out={schema:'debugai.github-tgserver-log-read/v1',project_id:cfg.project_id,query:cfg.query,retrieved_at:new Date().toISOString(),hit_count:hits.length,returned_count:safeHits.length,hits:safeHits};
-          fs.writeFileSync('tgserver-log-read.json',JSON.stringify(out,null,2));
-          console.log(`TGSERVER_HIT_COUNT=${hits.length}`);
-          console.log(`TGSERVER_RETURNED_COUNT=${safeHits.length}`);
-          for(const [i,hit] of safeHits.slice(0,20).entries()) console.log(`TGSERVER_SAFE_HIT_${i+1}=${JSON.stringify(hit)}`);
+          const sources=[];
+          for(const q of cfg.queries){
+            const req=JSON.stringify({query:q.query,project_id:q.project_id,limit:Number(q.limit||50)});
+            const out=execFileSync('curl',['--silent','--show-error','--fail-with-body','--connect-timeout','5','--max-time','20','-H','content-type: application/json','--data-binary',req,process.env.TGSERVER_BASE_URL+'/search'],{encoding:'utf8'});
+            const body=JSON.parse(out);
+            const hits=Array.isArray(body?.hits)?body.hits:[];
+            const safeHits=scrub(hits.slice(0,Math.min(Number(q.limit||50),100)));
+            sources.push({purpose:String(q.purpose||''),project_id:q.project_id,query:q.query,hit_count:hits.length,returned_count:safeHits.length,hits:safeHits});
+            console.log(`TGSERVER_${q.project_id}_HIT_COUNT=${hits.length}`);
+            console.log(`TGSERVER_${q.project_id}_RETURNED_COUNT=${safeHits.length}`);
+            for(const [i,hit] of safeHits.slice(0,10).entries()) console.log(`TGSERVER_${q.project_id}_SAFE_HIT_${i+1}=${JSON.stringify(hit)}`);
+          }
+          const result={schema:'debugai.github-tgserver-log-read/v2',retrieved_at:new Date().toISOString(),sources};
+          fs.writeFileSync('tgserver-log-read.json',JSON.stringify(result,null,2));
           NODE
-          rm -f tgserver-search-raw.json tgserver-request.json tgserver-health.json
+          rm -f tgserver-health.json
 
       - name: Upload sanitized TGserver readback
         if: steps.config.outputs.configured == 'true' && always()
@@ -111,6 +117,7 @@ jobs:
         shell: bash
         run: |
           echo "TGSERVER_LANE=READ_ONLY"
+          echo "TGSERVER_PROJECTS=P004,P005"
           echo "TGSERVER_INGEST_CALLED=FALSE"
           echo "TGSERVER_BULK_INGEST_CALLED=FALSE"
           echo "SOURCE_MUTATION=NONE"
