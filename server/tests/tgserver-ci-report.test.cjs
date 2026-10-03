@@ -38,10 +38,10 @@ test("CI payload preserves searchable GitHub metadata in legacy message contract
   assert.equal(payload.hint,"https://github.com/seigo-gace/debug-ai/actions/runs/12345");
 });
 
-test("producer is a no-op when Cloudflare Access secrets are absent",async()=>{
+test("producer fails closed when Cloudflare Access secrets are absent",async()=>{
   assert.equal(configured({}),false);
   const out=await publish({}, {fetchImpl:async()=>{throw new Error("must not call");}});
-  assert.deepEqual(out,{ok:true,summary:"TGS_INGEST_CONFIGURED=FALSE"});
+  assert.deepEqual(out,{ok:false,summary:"TGS_INGEST_CONFIGURED=FALSE"});
 });
 
 test("producer authenticates through Cloudflare Access and accepts TGserver receipt",async()=>{
