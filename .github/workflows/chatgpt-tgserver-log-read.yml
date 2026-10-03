@@ -5,7 +5,7 @@ on:
     branches:
       - automation/chatgpt-verify
     paths:
-      - .github/chatgpt-tgserver-query.json
+      - .github/tgserver-evidence-queries.json
       - .github/workflows/chatgpt-tgserver-log-read.yml
   workflow_dispatch:
 
@@ -17,25 +17,36 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  prepare:
+  read-tgserver-logs:
     runs-on: ubuntu-latest
-    outputs:
-      configured: ${{ steps.config.outputs.configured }}
-      queries: ${{ steps.config.outputs.queries }}
+    timeout-minutes: 5
+    env:
+      TGSERVER_BASE_URL: ${{ vars.TGSERVER_BASE_URL || vars.DEBUG_AI_TGSERVER_URL }}
+      CF_ACCESS_CLIENT_ID: ${{ secrets.TGSERVER_CF_ACCESS_CLIENT_ID || secrets.DEBUGAI_CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.TGSERVER_CF_ACCESS_CLIENT_SECRET || secrets.DEBUGAI_CF_ACCESS_CLIENT_SECRET }}
+      TGSERVER_BEARER_TOKEN: ${{ secrets.TGSERVER_API_TOKEN }}
     steps:
       - name: Checkout automation branch
         uses: actions/checkout@v4
 
-      - name: Validate project query set
+      - name: Validate bounded read configuration
         id: config
         shell: bash
-        env:
-          TGSERVER_BASE_URL: ${{ vars.DEBUG_AI_TGSERVER_URL }}
         run: |
           set -euo pipefail
+          if [ -z "${TGSERVER_BASE_URL:-}" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "TGSERVER_PUBLIC_URL_CONFIGURED=FALSE"
+            exit 0
+          fi
           node <<'NODE'
           const fs=require('node:fs');
-          const cfg=JSON.parse(fs.readFileSync('.github/chatgpt-tgserver-query.json','utf8'));
+          const url=new URL(process.env.TGSERVER_BASE_URL);
+          if(url.protocol!=='https:') throw new Error('TGSERVER_PUBLIC_URL_MUST_USE_HTTPS');
+          const h=url.hostname.toLowerCase();
+          const privateHost=h==='localhost'||h==='127.0.0.1'||h==='::1'||h.startsWith('10.')||h.startsWith('192.168.')||/^172\.(1[6-9]|2\d|3[01])\./.test(h);
+          if(privateHost) throw new Error('TGSERVER_PUBLIC_URL_IS_NOT_PUBLIC');
+          const cfg=JSON.parse(fs.readFileSync('.github/tgserver-evidence-queries.json','utf8'));
           if(!Array.isArray(cfg.queries)||cfg.queries.length<1||cfg.queries.length>20) throw new Error('INVALID_QUERY_SET');
           for(const [i,q] of cfg.queries.entries()){
             if(!/^P\d+$/.test(String(q.project_id||''))) throw new Error(`INVALID_PROJECT_ID_${i}`);
@@ -43,48 +54,73 @@ jobs:
             const limit=Number(q.limit??50);
             if(!Number.isInteger(limit)||limit<1||limit>100) throw new Error(`INVALID_LIMIT_${i}`);
           }
-          fs.writeFileSync('tgserver-queries.compact.json',JSON.stringify(cfg.queries));
+          console.log(`TGSERVER_QUERY_COUNT=${cfg.queries.length}`);
           NODE
-          {
-            echo 'queries<<EOF'
-            cat tgserver-queries.compact.json
-            echo 'EOF'
-          } >> "$GITHUB_OUTPUT"
-          if [ -n "${TGSERVER_BASE_URL:-}" ]; then
-            echo 'configured=true' >> "$GITHUB_OUTPUT"
-            echo 'TGSERVER_PUBLIC_URL_CONFIGURED=TRUE'
-          else
-            echo 'configured=false' >> "$GITHUB_OUTPUT"
-            echo 'TGSERVER_PUBLIC_URL_CONFIGURED=FALSE'
-          fi
-          echo 'TGSERVER_SHARED_READER=seigo-gace/TGserver/.github/workflows/tgserver-read-evidence-reusable.yml'
-          echo 'TGSERVER_MODE=READ_ONLY'
+          echo "configured=true" >> "$GITHUB_OUTPUT"
+          echo "TGSERVER_PUBLIC_URL_CONFIGURED=TRUE"
+          echo "TGSERVER_QUERY_MODE=READ_ONLY"
 
-  read-tgserver-evidence:
-    needs: prepare
-    if: needs.prepare.outputs.configured == 'true'
-    uses: seigo-gace/TGserver/.github/workflows/tgserver-read-evidence-reusable.yml@feat/tgserver-vnext-capability-20261002
-    with:
-      base_url: ${{ vars.DEBUG_AI_TGSERVER_URL }}
-      queries_json: ${{ needs.prepare.outputs.queries }}
-      artifact_prefix: debugai-tgserver-evidence
-    secrets:
-      cf_access_client_id: ${{ secrets.DEBUGAI_CF_ACCESS_CLIENT_ID }}
-      cf_access_client_secret: ${{ secrets.DEBUGAI_CF_ACCESS_CLIENT_SECRET }}
-      tgserver_bearer_token: ${{ secrets.TGSERVER_API_TOKEN }}
-
-  boundary-summary:
-    needs: [prepare, read-tgserver-evidence]
-    if: always()
-    runs-on: ubuntu-latest
-    steps:
-      - name: Safety boundary
+      - name: TGserver health and bounded evidence read
+        if: steps.config.outputs.configured == 'true'
         shell: bash
         run: |
-          echo "TGSERVER_REUSABLE_READER=ENABLED"
-          echo "TGSERVER_CONFIGURED=${{ needs.prepare.outputs.configured }}"
-          echo "TGSERVER_PROJECTS=P004,P005"
+          set -euo pipefail
+          base="${TGSERVER_BASE_URL%/}"
+          args=(--silent --show-error --connect-timeout 5 --max-time 20 -H 'accept: application/json')
+          if [ -n "${CF_ACCESS_CLIENT_ID:-}" ]; then args+=(-H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}"); fi
+          if [ -n "${CF_ACCESS_CLIENT_SECRET:-}" ]; then args+=(-H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}"); fi
+          if [ -n "${TGSERVER_BEARER_TOKEN:-}" ]; then args+=(-H "Authorization: Bearer ${TGSERVER_BEARER_TOKEN}"); fi
+          code="$(curl "${args[@]}" -o tgserver-health.json -w '%{http_code}' "$base/health")"
+          echo "TGSERVER_HEALTH_HTTP=$code"
+          [[ "$code" =~ ^2[0-9][0-9]$ ]]
+          mkdir -p tgserver-raw
+          count="$(node -p "JSON.parse(require('node:fs').readFileSync('.github/tgserver-evidence-queries.json','utf8')).queries.length")"
+          for ((i=0;i<count;i++)); do
+            node -e 'const fs=require("node:fs");const q=JSON.parse(fs.readFileSync(".github/tgserver-evidence-queries.json","utf8")).queries[Number(process.argv[1])];fs.writeFileSync("tgserver-request.json",JSON.stringify({query:q.query,project_id:q.project_id,limit:Number(q.limit||50)}));' "$i"
+            code="$(curl "${args[@]}" -H 'content-type: application/json' --data-binary @tgserver-request.json -o "tgserver-raw/$i.json" -w '%{http_code}' "$base/search")"
+            echo "TGSERVER_SEARCH_${i}_HTTP=$code"
+            [[ "$code" =~ ^2[0-9][0-9]$ ]]
+          done
+          node <<'NODE'
+          const fs=require('node:fs');
+          const cfg=JSON.parse(fs.readFileSync('.github/tgserver-evidence-queries.json','utf8'));
+          const forbidden=/(authorization|cookie|api[_-]?key|secret|password|private[_-]?key|access[_-]?token|refresh[_-]?token)/i;
+          function scrub(v){
+            if(v==null)return v;
+            if(typeof v==='string')return v.replace(/Bearer\s+\S+/gi,'Bearer [REDACTED]').replace(/(?:api[_-]?key|secret|password|token)\s*[:=]\s*\S+/gi,m=>m.split(/[:=]/)[0]+'=[REDACTED]');
+            if(Array.isArray(v))return v.map(scrub);
+            if(typeof v==='object'){const o={};for(const [k,x] of Object.entries(v))o[k]=forbidden.test(k)?'[REDACTED]':scrub(x);return o;}
+            return v;
+          }
+          const streams=[];
+          for(let i=0;i<cfg.queries.length;i++){
+            const q=cfg.queries[i];
+            const raw=JSON.parse(fs.readFileSync(`tgserver-raw/${i}.json`,'utf8'));
+            const hits=Array.isArray(raw?.hits)?raw.hits:[];
+            const safeHits=scrub(hits.slice(0,Math.min(Number(q.limit||50),100)));
+            streams.push({purpose:String(q.purpose||q.project_id).slice(0,80),project_id:q.project_id,query:q.query,hit_count:hits.length,returned_count:safeHits.length,hits:safeHits});
+            console.log(`TGSERVER_${q.project_id}_HIT_COUNT=${hits.length}`);
+            console.log(`TGSERVER_${q.project_id}_RETURNED_COUNT=${safeHits.length}`);
+          }
+          fs.writeFileSync('tgserver-log-read.json',JSON.stringify({schema:'tgserver.github-evidence-read/v1',repository:process.env.GITHUB_REPOSITORY,retrieved_at:new Date().toISOString(),streams},null,2));
+          NODE
+          rm -rf tgserver-raw tgserver-request.json tgserver-health.json
+
+      - name: Upload sanitized TGserver readback
+        if: steps.config.outputs.configured == 'true' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chatgpt-tgserver-log-read-${{ github.run_id }}
+          path: tgserver-log-read.json
+          if-no-files-found: ignore
+          retention-days: 3
+
+      - name: Safety summary
+        if: always()
+        shell: bash
+        run: |
           echo "TGSERVER_LANE=READ_ONLY"
+          echo "TGSERVER_PROJECTS=P004,P005"
           echo "TGSERVER_INGEST_CALLED=FALSE"
           echo "TGSERVER_BULK_INGEST_CALLED=FALSE"
           echo "SOURCE_MUTATION=NONE"
