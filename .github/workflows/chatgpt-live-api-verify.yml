@@ -36,16 +36,19 @@ jobs:
           run_id="$(jq -r '.run_id // ""' .github/chatgpt-live-api-target.json)"
           repo="$(jq -r '.repo // "/workspace/debug-ai"' .github/chatgpt-live-api-target.json)"
           request="$(jq -r '.request // ""' .github/chatgpt-live-api-target.json)"
+          verify_after="$(jq -r '.verify_after_dogfood // true' .github/chatgpt-live-api-target.json)"
           [[ "$base" == "https://debugai.asterav8.jp" ]]
           [[ "$mode" == "readonly" || "$mode" == "dogfood" ]]
           [[ -z "$run_id" || "$run_id" =~ ^run_[A-Za-z0-9_]+$ ]]
           [[ "$repo" == /workspace/* ]]
           [[ ${#request} -le 1000 ]]
+          [[ "$verify_after" == "true" || "$verify_after" == "false" ]]
           {
             echo "base=$base"
             echo "mode=$mode"
             echo "run_id=$run_id"
             echo "repo=$repo"
+            echo "verify_after=$verify_after"
             echo "request<<EOF"
             echo "$request"
             echo "EOF"
@@ -54,6 +57,7 @@ jobs:
           echo "LIVE_MODE=$mode"
           echo "LIVE_RUN_ID_PRESENT=$([[ -n "$run_id" ]] && echo true || echo false)"
           echo "LIVE_REPO=$repo"
+          echo "VERIFY_AFTER_DOGFOOD=$verify_after"
 
       - name: Require non-interactive Cloudflare Access credentials
         shell: bash
@@ -106,7 +110,7 @@ jobs:
           test "$code" = "200"
           jq -e 'type == "object"' /tmp/inspect.json >/dev/null
           jq -r '"INSPECT_RUN_ID_PRESENT=" + ((.run.run_id != null)|tostring), "ANALYSIS_ARTIFACT_PRESENT=" + ((.artifacts.analysis != null)|tostring)' /tmp/inspect.json
-          jq -r '(.artifacts.analysis.payload // {}) as $a | "ANALYSIS_STATE=" + (($a.state // "UNKNOWN")|tostring), "DETERMINISTIC_STATUS=" + (($a.deterministic_verification.status // "UNKNOWN")|tostring), "DETERMINISTIC_CHECK_COUNT=" + (($a.deterministic_verification.checks // [])|length|tostring), "DIAGNOSIS_PRESENT=" + (($a.diagnosis != null)|tostring), "EVIDENCE_GAP=" + (($a.evidence_gap // "UNKNOWN")|tostring), "EVIDENCE_STATUS=" + (($a.evidence_status // "UNKNOWN")|tostring), "EXTERNAL_HYPOTHESIS_VERDICT=" + (($a.external_hypothesis_review.json.verdict // "UNKNOWN")|tostring)' /tmp/inspect.json
+          jq -r '(.artifacts.analysis.payload // {}) as $a | ($a.diagnosis|tostring|ascii_downcase) as $d | "ANALYSIS_STATE=" + (($a.state // "UNKNOWN")|tostring), "DETERMINISTIC_STATUS=" + (($a.deterministic_verification.status // "UNKNOWN")|tostring), "DETERMINISTIC_CHECK_COUNT=" + (($a.deterministic_verification.checks // [])|length|tostring), "DIAGNOSIS_PRESENT=" + (($a.diagnosis != null)|tostring), "EVIDENCE_GAP=" + (($a.evidence_gap // "UNKNOWN")|tostring), "EVIDENCE_STATUS=" + (($a.evidence_status // "UNKNOWN")|tostring), "EXTERNAL_HYPOTHESIS_VERDICT=" + (($a.external_hypothesis_review.json.verdict // "UNKNOWN")|tostring), "DIAGNOSIS_SIGNAL_524=" + ($d|contains("524")|tostring), "DIAGNOSIS_SIGNAL_TIMEOUT=" + ($d|contains("timeout")|tostring), "DIAGNOSIS_SIGNAL_CLOUDFLARE=" + ($d|contains("cloudflare")|tostring), "DIAGNOSIS_CLAIM_COUNT=" + (($a.diagnosis.claims // [])|length|tostring)' /tmp/inspect.json
 
       - name: Start bounded real DebugAI dogfood run
         id: dogfood
@@ -117,10 +121,7 @@ jobs:
         run: |
           set -euo pipefail
           [[ -n "$LIVE_REQUEST" ]]
-          jq -n \
-            --arg repo "${{ steps.target.outputs.repo }}" \
-            --arg request "$LIVE_REQUEST" \
-            '{repo:$repo,projectId:"debug-ai",failure:{message:$request},localEvidence:[]}' > /tmp/start-body.json
+          jq -n --arg repo "${{ steps.target.outputs.repo }}" --arg request "$LIVE_REQUEST" '{repo:$repo,projectId:"debug-ai",failure:{message:$request},localEvidence:[]}' > /tmp/start-body.json
           code="$(curl --silent --show-error --max-time 60 --output /tmp/start.json --write-out '%{http_code}' \
             -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
             -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
@@ -150,13 +151,8 @@ jobs:
             job="$(jq -r '.durable.job_status // empty' /tmp/dogfood-status.json)"
             state="$(jq -r '.state // "UNKNOWN"' /tmp/dogfood-status.json)"
             echo "DOGFOOD_STATE=$state JOB_STATUS=${job:-UNKNOWN}"
-            if [[ "$job" =~ ^(DONE|CANCELLED|BLOCKED|FAILED)$ || "$state" =~ ^(COMPLETE|BLOCKED)$ ]]; then
-              break
-            fi
-            if (( SECONDS >= deadline )); then
-              echo "DOGFOOD_BOUNDED_WAIT=TIMEOUT"
-              exit 13
-            fi
+            if [[ "$job" =~ ^(DONE|CANCELLED|BLOCKED|FAILED)$ || "$state" =~ ^(COMPLETE|BLOCKED)$ ]]; then break; fi
+            if (( SECONDS >= deadline )); then echo "DOGFOOD_BOUNDED_WAIT=TIMEOUT"; exit 13; fi
             sleep 10
           done
           echo "DOGFOOD_BOUNDED_WAIT=TERMINAL"
@@ -174,19 +170,16 @@ jobs:
           test "$code" = "200"
           jq -e 'type == "object"' /tmp/dogfood-inspect.json >/dev/null
           jq -r '"DOGFOOD_ANALYSIS_PRESENT=" + ((.artifacts.analysis != null)|tostring), "DOGFOOD_PATCH_CANDIDATE_PRESENT=" + ((.artifacts.patch_candidate != null)|tostring)' /tmp/dogfood-inspect.json
-          jq -r '(.artifacts.analysis.payload // {}) as $a | "DOGFOOD_ANALYSIS_STATE=" + (($a.state // "UNKNOWN")|tostring), "DOGFOOD_DETERMINISTIC_STATUS=" + (($a.deterministic_verification.status // "UNKNOWN")|tostring), "DOGFOOD_DETERMINISTIC_CHECK_COUNT=" + (($a.deterministic_verification.checks // [])|length|tostring), "DOGFOOD_DIAGNOSIS_PRESENT=" + (($a.diagnosis != null)|tostring), "DOGFOOD_EVIDENCE_GAP=" + (($a.evidence_gap // "UNKNOWN")|tostring), "DOGFOOD_EVIDENCE_STATUS=" + (($a.evidence_status // "UNKNOWN")|tostring), "DOGFOOD_EXTERNAL_HYPOTHESIS_VERDICT=" + (($a.external_hypothesis_review.json.verdict // "UNKNOWN")|tostring)' /tmp/dogfood-inspect.json
+          jq -r '(.artifacts.analysis.payload // {}) as $a | ($a.diagnosis|tostring|ascii_downcase) as $d | "DOGFOOD_ANALYSIS_STATE=" + (($a.state // "UNKNOWN")|tostring), "DOGFOOD_DETERMINISTIC_STATUS=" + (($a.deterministic_verification.status // "UNKNOWN")|tostring), "DOGFOOD_DETERMINISTIC_CHECK_COUNT=" + (($a.deterministic_verification.checks // [])|length|tostring), "DOGFOOD_DIAGNOSIS_PRESENT=" + (($a.diagnosis != null)|tostring), "DOGFOOD_EVIDENCE_GAP=" + (($a.evidence_gap // "UNKNOWN")|tostring), "DOGFOOD_EVIDENCE_STATUS=" + (($a.evidence_status // "UNKNOWN")|tostring), "DOGFOOD_EXTERNAL_HYPOTHESIS_VERDICT=" + (($a.external_hypothesis_review.json.verdict // "UNKNOWN")|tostring), "DOGFOOD_DIAGNOSIS_SIGNAL_524=" + ($d|contains("524")|tostring), "DOGFOOD_DIAGNOSIS_SIGNAL_TIMEOUT=" + ($d|contains("timeout")|tostring), "DOGFOOD_DIAGNOSIS_SIGNAL_CLOUDFLARE=" + ($d|contains("cloudflare")|tostring), "DOGFOOD_DIAGNOSIS_CLAIM_COUNT=" + (($a.diagnosis.claims // [])|length|tostring)' /tmp/dogfood-inspect.json
 
       - name: Read-only verify real Runtime
-        if: ${{ steps.target.outputs.mode == 'dogfood' }}
+        if: ${{ steps.target.outputs.mode == 'dogfood' && steps.target.outputs.verify_after == 'true' }}
         shell: bash
         env:
           LIVE_REQUEST: ${{ steps.target.outputs.request }}
         run: |
           set -euo pipefail
-          jq -n \
-            --arg repo "${{ steps.target.outputs.repo }}" \
-            --arg task "$LIVE_REQUEST" \
-            '{repo:$repo,selectedPaths:[],changeScope:[],task:$task}' > /tmp/verify-body.json
+          jq -n --arg repo "${{ steps.target.outputs.repo }}" --arg task "$LIVE_REQUEST" '{repo:$repo,selectedPaths:[],changeScope:[],task:$task}' > /tmp/verify-body.json
           code="$(curl --silent --show-error --max-time 1200 --output /tmp/verify.json --write-out '%{http_code}' \
             -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
             -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
