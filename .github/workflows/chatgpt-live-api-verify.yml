@@ -106,6 +106,7 @@ jobs:
           test "$code" = "200"
           jq -e 'type == "object"' /tmp/inspect.json >/dev/null
           jq -r '"INSPECT_RUN_ID_PRESENT=" + ((.run.run_id != null)|tostring), "ANALYSIS_ARTIFACT_PRESENT=" + ((.artifacts.analysis != null)|tostring)' /tmp/inspect.json
+          jq -r '(.artifacts.analysis.payload // {}) as $a | "ANALYSIS_STATE=" + (($a.state // "UNKNOWN")|tostring), "DETERMINISTIC_STATUS=" + (($a.deterministic_verification.status // "UNKNOWN")|tostring), "DETERMINISTIC_CHECK_COUNT=" + (($a.deterministic_verification.checks // [])|length|tostring), "DIAGNOSIS_PRESENT=" + (($a.diagnosis != null)|tostring), "EVIDENCE_GAP=" + (($a.evidence_gap // "UNKNOWN")|tostring), "EVIDENCE_STATUS=" + (($a.evidence_status // "UNKNOWN")|tostring), "EXTERNAL_HYPOTHESIS_VERDICT=" + (($a.external_hypothesis_review.json.verdict // "UNKNOWN")|tostring)' /tmp/inspect.json
 
       - name: Start bounded real DebugAI dogfood run
         id: dogfood
@@ -173,6 +174,7 @@ jobs:
           test "$code" = "200"
           jq -e 'type == "object"' /tmp/dogfood-inspect.json >/dev/null
           jq -r '"DOGFOOD_ANALYSIS_PRESENT=" + ((.artifacts.analysis != null)|tostring), "DOGFOOD_PATCH_CANDIDATE_PRESENT=" + ((.artifacts.patch_candidate != null)|tostring)' /tmp/dogfood-inspect.json
+          jq -r '(.artifacts.analysis.payload // {}) as $a | "DOGFOOD_ANALYSIS_STATE=" + (($a.state // "UNKNOWN")|tostring), "DOGFOOD_DETERMINISTIC_STATUS=" + (($a.deterministic_verification.status // "UNKNOWN")|tostring), "DOGFOOD_DETERMINISTIC_CHECK_COUNT=" + (($a.deterministic_verification.checks // [])|length|tostring), "DOGFOOD_DIAGNOSIS_PRESENT=" + (($a.diagnosis != null)|tostring), "DOGFOOD_EVIDENCE_GAP=" + (($a.evidence_gap // "UNKNOWN")|tostring), "DOGFOOD_EVIDENCE_STATUS=" + (($a.evidence_status // "UNKNOWN")|tostring), "DOGFOOD_EXTERNAL_HYPOTHESIS_VERDICT=" + (($a.external_hypothesis_review.json.verdict // "UNKNOWN")|tostring)' /tmp/dogfood-inspect.json
 
       - name: Read-only verify real Runtime
         if: ${{ steps.target.outputs.mode == 'dogfood' }}
@@ -192,12 +194,22 @@ jobs:
             --data-binary @/tmp/verify-body.json \
             "${{ steps.target.outputs.base }}/v1/verify")"
           echo "VERIFY_HTTP=$code"
-          test "$code" = "200"
-          verdict="$(jq -r '.verdict // "UNKNOWN"' /tmp/verify.json)"
-          echo "VERIFY_VERDICT=$verdict"
-          jq -e 'type == "object" and (.patch_applied == false or .patch_applied == null)' /tmp/verify.json >/dev/null
+          if [[ "$code" == "200" ]]; then
+            verdict="$(jq -r '.verdict // "UNKNOWN"' /tmp/verify.json)"
+            echo "VERIFY_VERDICT=$verdict"
+            jq -e 'type == "object" and (.patch_applied == false or .patch_applied == null)' /tmp/verify.json >/dev/null
+          elif [[ "$code" == "524" ]]; then
+            echo "VERIFY_VERDICT=UNKNOWN"
+            echo "VERIFY_TRANSPORT=CF_524"
+            exit 24
+          else
+            echo "VERIFY_VERDICT=UNKNOWN"
+            echo "VERIFY_TRANSPORT=HTTP_$code"
+            exit 25
+          fi
 
       - name: Safety assertion
+        if: ${{ always() }}
         shell: bash
         run: |
           echo "SOURCE_MUTATION_ENDPOINTS_CALLED=NO"
