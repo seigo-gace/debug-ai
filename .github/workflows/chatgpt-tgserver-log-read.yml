@@ -8,6 +8,37 @@ on:
       - .github/tgserver-evidence-queries.json
       - .github/workflows/chatgpt-tgserver-log-read.yml
   workflow_dispatch:
+    inputs:
+      project_id:
+        description: TGserver project id
+        required: true
+        default: P004
+        type: string
+      query:
+        description: Full-text query; blank means all matching logs
+        required: false
+        default: ""
+        type: string
+      severity:
+        description: error, warn, info, debug, trace, or blank
+        required: false
+        default: ""
+        type: string
+      from:
+        description: ISO8601 lower bound or blank
+        required: false
+        default: ""
+        type: string
+      to:
+        description: ISO8601 upper bound or blank
+        required: false
+        default: ""
+        type: string
+      limit:
+        description: Number of rows to display (1-100)
+        required: true
+        default: "50"
+        type: string
 
 permissions:
   contents: read
@@ -25,42 +56,70 @@ jobs:
       CF_ACCESS_CLIENT_ID: ${{ secrets.TGSERVER_CF_ACCESS_CLIENT_ID || secrets.DEBUGAI_CF_ACCESS_CLIENT_ID }}
       CF_ACCESS_CLIENT_SECRET: ${{ secrets.TGSERVER_CF_ACCESS_CLIENT_SECRET || secrets.DEBUGAI_CF_ACCESS_CLIENT_SECRET }}
       TGSERVER_BEARER_TOKEN: ${{ secrets.TGSERVER_API_TOKEN }}
+      MANUAL_PROJECT_ID: ${{ inputs.project_id }}
+      MANUAL_QUERY: ${{ inputs.query }}
+      MANUAL_SEVERITY: ${{ inputs.severity }}
+      MANUAL_FROM: ${{ inputs.from }}
+      MANUAL_TO: ${{ inputs.to }}
+      MANUAL_LIMIT: ${{ inputs.limit }}
     steps:
       - name: Checkout automation branch
         uses: actions/checkout@v4
 
-      - name: Validate bounded read configuration
+      - name: Build and validate read query
         id: config
         shell: bash
         run: |
           set -euo pipefail
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            node <<'NODE'
+          const fs=require('node:fs');
+          const q={
+            purpose:'manual-log-view',
+            project_id:process.env.MANUAL_PROJECT_ID||'P004',
+            query:process.env.MANUAL_QUERY||'',
+            limit:Number(process.env.MANUAL_LIMIT||50),
+          };
+          if(process.env.MANUAL_SEVERITY) q.severity=process.env.MANUAL_SEVERITY;
+          if(process.env.MANUAL_FROM) q.from=process.env.MANUAL_FROM;
+          if(process.env.MANUAL_TO) q.to=process.env.MANUAL_TO;
+          fs.writeFileSync('.github/tgserver-query-runtime.json',JSON.stringify({queries:[q]},null,2));
+          NODE
+          else
+            cp .github/tgserver-evidence-queries.json .github/tgserver-query-runtime.json
+          fi
+          node <<'NODE'
+          const fs=require('node:fs');
+          const cfg=JSON.parse(fs.readFileSync('.github/tgserver-query-runtime.json','utf8'));
+          if(!Array.isArray(cfg.queries)||cfg.queries.length<1||cfg.queries.length>20) throw new Error('INVALID_QUERY_SET');
+          const sevs=new Set(['error','warn','info','debug','trace']);
+          for(const [i,q] of cfg.queries.entries()){
+            if(!/^P\d+$/.test(String(q.project_id||''))) throw new Error(`INVALID_PROJECT_ID_${i}`);
+            if(typeof q.query!=='string'||q.query.length>256) throw new Error(`INVALID_QUERY_${i}`);
+            if(q.severity!==undefined&&!sevs.has(q.severity)) throw new Error(`INVALID_SEVERITY_${i}`);
+            for(const k of ['from','to']) if(q[k]!==undefined && !Number.isFinite(Date.parse(q[k]))) throw new Error(`INVALID_${k.toUpperCase()}_${i}`);
+            const limit=Number(q.limit??50);
+            if(!Number.isInteger(limit)||limit<1||limit>100) throw new Error(`INVALID_LIMIT_${i}`);
+          }
+          console.log(`TGSERVER_QUERY_COUNT=${cfg.queries.length}`);
+          NODE
           if [ -z "${TGSERVER_BASE_URL:-}" ]; then
             echo "configured=false" >> "$GITHUB_OUTPUT"
             echo "TGSERVER_PUBLIC_URL_CONFIGURED=FALSE"
             exit 0
           fi
           node <<'NODE'
-          const fs=require('node:fs');
           const url=new URL(process.env.TGSERVER_BASE_URL);
           if(url.protocol!=='https:') throw new Error('TGSERVER_PUBLIC_URL_MUST_USE_HTTPS');
           const h=url.hostname.toLowerCase();
           const privateHost=h==='localhost'||h==='127.0.0.1'||h==='::1'||h.startsWith('10.')||h.startsWith('192.168.')||/^172\.(1[6-9]|2\d|3[01])\./.test(h);
           if(privateHost) throw new Error('TGSERVER_PUBLIC_URL_IS_NOT_PUBLIC');
-          const cfg=JSON.parse(fs.readFileSync('.github/tgserver-evidence-queries.json','utf8'));
-          if(!Array.isArray(cfg.queries)||cfg.queries.length<1||cfg.queries.length>20) throw new Error('INVALID_QUERY_SET');
-          for(const [i,q] of cfg.queries.entries()){
-            if(!/^P\d+$/.test(String(q.project_id||''))) throw new Error(`INVALID_PROJECT_ID_${i}`);
-            if(typeof q.query!=='string'||q.query.length>256) throw new Error(`INVALID_QUERY_${i}`);
-            const limit=Number(q.limit??50);
-            if(!Number.isInteger(limit)||limit<1||limit>100) throw new Error(`INVALID_LIMIT_${i}`);
-          }
-          console.log(`TGSERVER_QUERY_COUNT=${cfg.queries.length}`);
           NODE
           echo "configured=true" >> "$GITHUB_OUTPUT"
           echo "TGSERVER_PUBLIC_URL_CONFIGURED=TRUE"
           echo "TGSERVER_QUERY_MODE=READ_ONLY"
 
-      - name: TGserver health and bounded evidence read
+      - name: Read TGserver logs
         if: steps.config.outputs.configured == 'true'
         shell: bash
         run: |
@@ -74,16 +133,16 @@ jobs:
           echo "TGSERVER_HEALTH_HTTP=$code"
           [[ "$code" =~ ^2[0-9][0-9]$ ]]
           mkdir -p tgserver-raw
-          count="$(node -p "JSON.parse(require('node:fs').readFileSync('.github/tgserver-evidence-queries.json','utf8')).queries.length")"
+          count="$(node -p "JSON.parse(require('node:fs').readFileSync('.github/tgserver-query-runtime.json','utf8')).queries.length")"
           for ((i=0;i<count;i++)); do
-            node -e 'const fs=require("node:fs");const q=JSON.parse(fs.readFileSync(".github/tgserver-evidence-queries.json","utf8")).queries[Number(process.argv[1])];fs.writeFileSync("tgserver-request.json",JSON.stringify({query:q.query,project_id:q.project_id,limit:Number(q.limit||50)}));' "$i"
+            node -e 'const fs=require("node:fs");const q=JSON.parse(fs.readFileSync(".github/tgserver-query-runtime.json","utf8")).queries[Number(process.argv[1])];const body={query:q.query,project_id:q.project_id};for(const k of ["severity","from","to"])if(q[k])body[k]=q[k];fs.writeFileSync("tgserver-request.json",JSON.stringify(body));' "$i"
             code="$(curl "${args[@]}" -H 'content-type: application/json' --data-binary @tgserver-request.json -o "tgserver-raw/$i.json" -w '%{http_code}' "$base/search")"
             echo "TGSERVER_SEARCH_${i}_HTTP=$code"
             [[ "$code" =~ ^2[0-9][0-9]$ ]]
           done
           node <<'NODE'
           const fs=require('node:fs');
-          const cfg=JSON.parse(fs.readFileSync('.github/tgserver-evidence-queries.json','utf8'));
+          const cfg=JSON.parse(fs.readFileSync('.github/tgserver-query-runtime.json','utf8'));
           const forbidden=/(authorization|cookie|api[_-]?key|secret|password|private[_-]?key|access[_-]?token|refresh[_-]?token)/i;
           function scrub(v){
             if(v==null)return v;
@@ -92,19 +151,39 @@ jobs:
             if(typeof v==='object'){const o={};for(const [k,x] of Object.entries(v))o[k]=forbidden.test(k)?'[REDACTED]':scrub(x);return o;}
             return v;
           }
+          const esc=s=>String(s??'').replace(/\r?\n/g,' ↩ ').replace(/\|/g,'\\|');
           const streams=[];
+          const summary=['# TGserver Log View',''];
           for(let i=0;i<cfg.queries.length;i++){
             const q=cfg.queries[i];
             const raw=JSON.parse(fs.readFileSync(`tgserver-raw/${i}.json`,'utf8'));
             const hits=Array.isArray(raw?.hits)?raw.hits:[];
             const safeHits=scrub(hits.slice(0,Math.min(Number(q.limit||50),100)));
-            streams.push({purpose:String(q.purpose||q.project_id).slice(0,80),project_id:q.project_id,query:q.query,hit_count:hits.length,returned_count:safeHits.length,hits:safeHits});
+            streams.push({purpose:String(q.purpose||q.project_id).slice(0,80),project_id:q.project_id,query:q.query,severity:q.severity||'',from:q.from||'',to:q.to||'',hit_count:hits.length,returned_count:safeHits.length,hits:safeHits});
             console.log(`TGSERVER_${q.project_id}_HIT_COUNT=${hits.length}`);
             console.log(`TGSERVER_${q.project_id}_RETURNED_COUNT=${safeHits.length}`);
+            summary.push(`## ${esc(q.project_id)} ${q.severity?`/ ${esc(q.severity)}`:''}`,'',`Query: \`${esc(q.query)}\`  `,`Range: \`${esc(q.from||'-')} .. ${esc(q.to||'-')}\`  `,`Hits returned: **${safeHits.length}**`,'','| timestamp | severity | message |','|---|---|---|');
+            for(const [n,h] of safeHits.entries()){
+              const msg=esc(h.message??h.text??JSON.stringify(h)).slice(0,1200);
+              summary.push(`| ${esc(h.timestamp||'')} | ${esc(h.severity||'')} | ${msg} |`);
+              console.log(`TGSERVER_LOG_${q.project_id}_${n+1}=${JSON.stringify(h)}`);
+            }
+            if(!safeHits.length) summary.push('| - | - | no matching logs |');
+            summary.push('');
           }
-          fs.writeFileSync('tgserver-log-read.json',JSON.stringify({schema:'tgserver.github-evidence-read/v1',repository:process.env.GITHUB_REPOSITORY,retrieved_at:new Date().toISOString(),streams},null,2));
+          fs.writeFileSync('tgserver-log-read.json',JSON.stringify({schema:'tgserver.github-log-view/v2',repository:process.env.GITHUB_REPOSITORY,retrieved_at:new Date().toISOString(),streams},null,2));
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,summary.join('\n')+'\n');
           NODE
-          rm -rf tgserver-raw tgserver-request.json tgserver-health.json
+          rm -rf tgserver-raw tgserver-request.json tgserver-health.json .github/tgserver-query-runtime.json
+
+      - name: Explain missing public URL
+        if: steps.config.outputs.configured != 'true'
+        shell: bash
+        run: |
+          echo '## TGserver Log View' >> "$GITHUB_STEP_SUMMARY"
+          echo '' >> "$GITHUB_STEP_SUMMARY"
+          echo 'TGserver public base URL is not configured in this repository yet.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'TGSERVER_LOG_VIEW_STATUS=PUBLIC_URL_NOT_CONFIGURED'
 
       - name: Upload sanitized TGserver readback
         if: steps.config.outputs.configured == 'true' && always()
@@ -120,7 +199,6 @@ jobs:
         shell: bash
         run: |
           echo "TGSERVER_LANE=READ_ONLY"
-          echo "TGSERVER_PROJECTS=P004,P005"
           echo "TGSERVER_INGEST_CALLED=FALSE"
           echo "TGSERVER_BULK_INGEST_CALLED=FALSE"
           echo "SOURCE_MUTATION=NONE"
