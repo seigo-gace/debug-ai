@@ -1,0 +1,257 @@
+name: ChatGPT TGserver Log Read
+
+on:
+  push:
+    branches:
+      - feat/tgserver-async-log-sink-20261003
+    paths:
+      - .github/tgserver-evidence-queries.json
+      - .github/workflows/chatgpt-tgserver-log-read.yml
+  workflow_dispatch:
+    inputs:
+      project_id:
+        description: TGserver project id
+        required: true
+        default: P004
+        type: string
+      query:
+        description: Full-text query; blank means all matching logs
+        required: false
+        default: ""
+        type: string
+      severity:
+        description: error, warn, info, debug, trace, or blank
+        required: false
+        default: ""
+        type: string
+      from:
+        description: ISO8601 lower bound or blank
+        required: false
+        default: ""
+        type: string
+      to:
+        description: ISO8601 upper bound or blank
+        required: false
+        default: ""
+        type: string
+      source:
+        description: Evidence source filter or blank
+        required: false
+        default: ""
+        type: string
+      repo:
+        description: Repository filter or blank
+        required: false
+        default: ""
+        type: string
+      branch:
+        description: Branch filter or blank
+        required: false
+        default: ""
+        type: string
+      workflow:
+        description: Workflow filter or blank
+        required: false
+        default: ""
+        type: string
+      run_id:
+        description: Run id filter or blank
+        required: false
+        default: ""
+        type: string
+      module:
+        description: Module filter or blank
+        required: false
+        default: ""
+        type: string
+      limit:
+        description: Rows to expose after sanitization, 1-100
+        required: true
+        default: "50"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chatgpt-tgserver-log-read-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  read-tgserver-logs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      LEGACY_TGSERVER_URL: ${{ vars.LEGACY_TGSERVER_URL || vars.TGSERVER_BASE_URL || vars.DEBUG_AI_TGSERVER_URL || 'https://tgserver.asterav8.jp' }}
+      CF_ACCESS_CLIENT_ID: ${{ secrets.LEGACY_TGSERVER_CF_ACCESS_CLIENT_ID || secrets.TGSERVER_CF_ACCESS_CLIENT_ID || secrets.DEBUGAI_CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.LEGACY_TGSERVER_CF_ACCESS_CLIENT_SECRET || secrets.TGSERVER_CF_ACCESS_CLIENT_SECRET || secrets.DEBUGAI_CF_ACCESS_CLIENT_SECRET }}
+      TGSERVER_BEARER_TOKEN: ${{ secrets.TGSERVER_API_TOKEN }}
+      MANUAL_PROJECT_ID: ${{ inputs.project_id }}
+      MANUAL_QUERY: ${{ inputs.query }}
+      MANUAL_SEVERITY: ${{ inputs.severity }}
+      MANUAL_FROM: ${{ inputs.from }}
+      MANUAL_TO: ${{ inputs.to }}
+      MANUAL_SOURCE: ${{ inputs.source }}
+      MANUAL_REPO: ${{ inputs.repo }}
+      MANUAL_BRANCH: ${{ inputs.branch }}
+      MANUAL_WORKFLOW: ${{ inputs.workflow }}
+      MANUAL_RUN_ID: ${{ inputs.run_id }}
+      MANUAL_MODULE: ${{ inputs.module }}
+      MANUAL_LIMIT: ${{ inputs.limit }}
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Build and validate read request
+        id: config
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            node <<'NODE'
+          const fs = require('node:fs');
+          const q = {
+            purpose: 'manual-log-read',
+            project_id: process.env.MANUAL_PROJECT_ID || 'P004',
+            query: process.env.MANUAL_QUERY || '',
+            limit: Number(process.env.MANUAL_LIMIT || 50),
+          };
+          const fields = {
+            severity: process.env.MANUAL_SEVERITY,
+            from: process.env.MANUAL_FROM,
+            to: process.env.MANUAL_TO,
+            source: process.env.MANUAL_SOURCE,
+            repo: process.env.MANUAL_REPO,
+            branch: process.env.MANUAL_BRANCH,
+            workflow: process.env.MANUAL_WORKFLOW,
+            run_id: process.env.MANUAL_RUN_ID,
+            module: process.env.MANUAL_MODULE,
+          };
+          for (const [k, v] of Object.entries(fields)) if (v) q[k] = v;
+          fs.writeFileSync('.github/tgserver-query-runtime.json', JSON.stringify({queries:[q]}, null, 2));
+          NODE
+          else
+            cp .github/tgserver-evidence-queries.json .github/tgserver-query-runtime.json
+          fi
+
+          node <<'NODE'
+          const fs = require('node:fs');
+          const cfg = JSON.parse(fs.readFileSync('.github/tgserver-query-runtime.json','utf8'));
+          const stringFields = ['query','severity','from','to','source','repo','branch','workflow','run_id','module'];
+          if (!Array.isArray(cfg.queries) || cfg.queries.length < 1 || cfg.queries.length > 20) throw new Error('INVALID_QUERY_SET');
+          for (const [i, q] of cfg.queries.entries()) {
+            if (!/^P\d+$/.test(String(q.project_id || ''))) throw new Error(`INVALID_PROJECT_ID_${i}`);
+            if (typeof q.query !== 'string' || q.query.length > 1024) throw new Error(`INVALID_QUERY_${i}`);
+            if (q.severity !== undefined && !['error','warn','info','debug','trace'].includes(q.severity)) throw new Error(`INVALID_SEVERITY_${i}`);
+            for (const k of ['from','to']) if (q[k] !== undefined && !Number.isFinite(Date.parse(q[k]))) throw new Error(`INVALID_${k.toUpperCase()}_${i}`);
+            for (const k of stringFields) if (q[k] !== undefined && typeof q[k] !== 'string') throw new Error(`INVALID_${k.toUpperCase()}_${i}`);
+            for (const k of ['source','repo','branch','workflow','run_id','module']) if ((q[k] || '').length > 256) throw new Error(`INVALID_${k.toUpperCase()}_LENGTH_${i}`);
+            const limit = Number(q.limit ?? 50);
+            if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error(`INVALID_LIMIT_${i}`);
+          }
+          console.log(`TGSERVER_QUERY_COUNT=${cfg.queries.length}`);
+          NODE
+
+          node <<'NODE'
+          const u = new URL(process.env.LEGACY_TGSERVER_URL);
+          if (u.protocol !== 'https:') throw new Error('TGSERVER_URL_MUST_USE_HTTPS');
+          const h = u.hostname.toLowerCase();
+          if (h === 'localhost' || h === '127.0.0.1' || h === '::1' || h.startsWith('10.') || h.startsWith('192.168.') || /^172\.(1[6-9]|2\d|3[01])\./.test(h)) throw new Error('TGSERVER_URL_MUST_BE_PUBLIC');
+          NODE
+
+          if { [ -n "${CF_ACCESS_CLIENT_ID:-}" ] && [ -z "${CF_ACCESS_CLIENT_SECRET:-}" ]; } || { [ -z "${CF_ACCESS_CLIENT_ID:-}" ] && [ -n "${CF_ACCESS_CLIENT_SECRET:-}" ]; }; then
+            echo 'TGSERVER_ACCESS_SECRET_PAIR=INCOMPLETE'
+            exit 1
+          fi
+          echo "TGSERVER_PUBLIC_URL_CONFIGURED=TRUE"
+          echo "TGSERVER_CF_ACCESS_PAIR_PRESENT=$([ -n "${CF_ACCESS_CLIENT_ID:-}" ] && echo TRUE || echo FALSE)"
+          echo "TGSERVER_QUERY_MODE=READ_ONLY"
+
+      - name: Read TGserver logs
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="${LEGACY_TGSERVER_URL%/}"
+          args=(--silent --show-error --connect-timeout 5 --max-time 20 -H 'accept: application/json')
+          if [ -n "${CF_ACCESS_CLIENT_ID:-}" ]; then args+=(-H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}"); fi
+          if [ -n "${CF_ACCESS_CLIENT_SECRET:-}" ]; then args+=(-H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}"); fi
+          if [ -n "${TGSERVER_BEARER_TOKEN:-}" ]; then args+=(-H "Authorization: Bearer ${TGSERVER_BEARER_TOKEN}"); fi
+
+          health_code="$(curl "${args[@]}" -o tgserver-health.json -w '%{http_code}' "$base/health")"
+          echo "TGSERVER_HEALTH_HTTP=$health_code"
+          [[ "$health_code" =~ ^2[0-9][0-9]$ ]]
+
+          mkdir -p tgserver-raw
+          count="$(node -p "JSON.parse(require('node:fs').readFileSync('.github/tgserver-query-runtime.json','utf8')).queries.length")"
+          for ((i=0; i<count; i++)); do
+            node - "$i" <<'NODE'
+          const fs = require('node:fs');
+          const q = JSON.parse(fs.readFileSync('.github/tgserver-query-runtime.json','utf8')).queries[Number(process.argv[2])];
+          const allowed = ['query','project_id','severity','from','to','source','repo','branch','workflow','run_id','module'];
+          const body = {};
+          for (const k of allowed) if (q[k] !== undefined && q[k] !== null && q[k] !== '') body[k] = q[k];
+          if (!('query' in body)) body.query = '';
+          fs.writeFileSync('tgserver-request.json', JSON.stringify(body));
+          NODE
+            code="$(curl "${args[@]}" -H 'content-type: application/json' --data-binary @tgserver-request.json -o "tgserver-raw/$i.json" -w '%{http_code}' "$base/search")"
+            echo "TGSERVER_SEARCH_${i}_HTTP=$code"
+            [[ "$code" =~ ^2[0-9][0-9]$ ]]
+          done
+
+          node <<'NODE'
+          const fs = require('node:fs');
+          const cfg = JSON.parse(fs.readFileSync('.github/tgserver-query-runtime.json','utf8'));
+          const forbidden = /(authorization|cookie|api[_-]?key|secret|password|private[_-]?key|access[_-]?token|refresh[_-]?token)/i;
+          function scrub(v) {
+            if (v == null) return v;
+            if (typeof v === 'string') return v.replace(/Bearer\s+\S+/gi,'Bearer [REDACTED]').replace(/(?:api[_-]?key|secret|password|token)\s*[:=]\s*\S+/gi,m=>m.split(/[:=]/)[0]+'=[REDACTED]');
+            if (Array.isArray(v)) return v.map(scrub);
+            if (typeof v === 'object') { const o={}; for (const [k,x] of Object.entries(v)) o[k]=forbidden.test(k)?'[REDACTED]':scrub(x); return o; }
+            return v;
+          }
+          const esc = (s) => String(s ?? '').replace(/\r?\n/g,' ↩ ').replace(/\|/g,'\\|');
+          const streams = [];
+          const summary = ['# TGserver Log Readback',''];
+          for (let i=0; i<cfg.queries.length; i++) {
+            const q = cfg.queries[i];
+            const raw = JSON.parse(fs.readFileSync(`tgserver-raw/${i}.json`,'utf8'));
+            const hits = Array.isArray(raw?.hits) ? raw.hits : [];
+            const safeHits = scrub(hits.slice(0, Math.min(Number(q.limit || 50),100)));
+            streams.push({purpose:String(q.purpose||q.project_id).slice(0,80),project_id:q.project_id,filters:{query:q.query||'',severity:q.severity||'',from:q.from||'',to:q.to||'',source:q.source||'',repo:q.repo||'',branch:q.branch||'',workflow:q.workflow||'',run_id:q.run_id||'',module:q.module||''},hit_count:hits.length,returned_count:safeHits.length,hits:safeHits});
+            console.log(`TGSERVER_${q.project_id}_HIT_COUNT=${hits.length}`);
+            console.log(`TGSERVER_${q.project_id}_RETURNED_COUNT=${safeHits.length}`);
+            summary.push(`## ${esc(q.project_id)} — ${esc(q.purpose || 'read')}`,'',`Hits returned: **${safeHits.length}**`,'','| timestamp | severity | message |','|---|---|---|');
+            for (const [n,h] of safeHits.entries()) {
+              const msg = esc(h.message ?? h.text ?? JSON.stringify(h)).slice(0,1200);
+              summary.push(`| ${esc(h.timestamp||'')} | ${esc(h.severity||'')} | ${msg} |`);
+              console.log(`TGSERVER_LOG_${q.project_id}_${n+1}=${JSON.stringify(h)}`);
+            }
+            if (!safeHits.length) summary.push('| - | - | no matching logs |');
+            summary.push('');
+          }
+          fs.writeFileSync('tgserver-log-read.json', JSON.stringify({schema:'debugai.tgserver-log-read/v3',repository:process.env.GITHUB_REPOSITORY,retrieved_at:new Date().toISOString(),streams},null,2));
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,summary.join('\n')+'\n');
+          NODE
+
+          rm -rf tgserver-raw tgserver-request.json tgserver-health.json .github/tgserver-query-runtime.json
+
+      - name: Upload sanitized TGserver readback
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debugai-tgserver-log-read-${{ github.run_id }}
+          path: tgserver-log-read.json
+          if-no-files-found: ignore
+          retention-days: 3
+
+      - name: Safety summary
+        if: always()
+        shell: bash
+        run: |
+          echo "TGSERVER_GENERATION=LEGACY"
+          echo "TGSERVER_SEARCH_API=POST_/search"
+          echo "TGSERVER_LANE=READ_ONLY"
+          echo "TGSERVER_INGEST_CALLED=FALSE"
+          echo "TGSERVER_BULK_INGEST_CALLED=FALSE"
+          echo "SOURCE_MUTATION=NONE"
+          echo "SECRET_VALUE_OUTPUT=NONE"
