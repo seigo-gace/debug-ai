@@ -38,8 +38,9 @@ jobs:
           request="$(jq -r '.request // ""' .github/chatgpt-live-api-target.json)"
           verify_after="$(jq -r 'if has("verify_after_dogfood") then .verify_after_dogfood else true end' .github/chatgpt-live-api-target.json)"
           [[ "$base" == "https://debugai.asterav8.jp" ]]
-          [[ "$mode" == "readonly" || "$mode" == "dogfood" ]]
+          [[ "$mode" == "readonly" || "$mode" == "dogfood" || "$mode" == "resume" ]]
           [[ -z "$run_id" || "$run_id" =~ ^run_[A-Za-z0-9_]+$ ]]
+          [[ "$mode" != "resume" || -n "$run_id" ]]
           [[ "$repo" == /workspace/* ]]
           [[ ${#request} -le 1000 ]]
           [[ "$verify_after" == "true" || "$verify_after" == "false" ]]
@@ -136,12 +137,32 @@ jobs:
           echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
           echo "DOGFOOD_RUN_STARTED=YES"
 
-      - name: Bounded wait for dogfood run
-        if: ${{ steps.target.outputs.mode == 'dogfood' }}
+      - name: Resume existing DebugAI run
+        id: resume
+        if: ${{ steps.target.outputs.mode == 'resume' }}
         shell: bash
         run: |
           set -euo pipefail
-          run_id="${{ steps.dogfood.outputs.run_id }}"
+          jq -n --arg run_id "${{ steps.target.outputs.run_id }}" '{runId:$run_id}' > /tmp/resume-body.json
+          code="$(curl --silent --show-error --max-time 60 --output /tmp/resume.json --write-out '%{http_code}' \
+            -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
+            -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
+            -H 'content-type: application/json' \
+            --data-binary @/tmp/resume-body.json \
+            "${{ steps.target.outputs.base }}/v1/runs/resume")"
+          echo "RESUME_HTTP=$code"
+          test "$code" = "202"
+          run_id="$(jq -r '.run_id // empty' /tmp/resume.json)"
+          test "$run_id" = "${{ steps.target.outputs.run_id }}"
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+          echo "DOGFOOD_RUN_RESUMED=YES"
+
+      - name: Bounded wait for dogfood run
+        if: ${{ steps.target.outputs.mode == 'dogfood' || steps.target.outputs.mode == 'resume' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ steps.target.outputs.mode }}" == "resume" ]]; then run_id="${{ steps.target.outputs.run_id }}"; else run_id="${{ steps.dogfood.outputs.run_id }}"; fi
           deadline=$((SECONDS+900))
           while true; do
             code="$(curl --silent --show-error --max-time 30 --output /tmp/dogfood-status.json --write-out '%{http_code}' \
@@ -156,21 +177,22 @@ jobs:
             if (( SECONDS >= deadline )); then echo "DOGFOOD_BOUNDED_WAIT=TIMEOUT"; exit 13; fi
             sleep 10
           done
+          jq -r '"POST_WAIT_JOB_STATUS=" + ((.durable.job_status // "UNKNOWN")|tostring), "POST_WAIT_LAST_ERROR_CODE=" + (((.durable.last_execution_error // "NONE")|tostring|split(":")[0]|gsub("[^A-Za-z0-9_.-]";"_"))), "POST_WAIT_CURSOR_STEP=" + ((.durable.workflow_cursor.step_id // "UNKNOWN")|tostring), "POST_WAIT_CURSOR_PHASE=" + ((.durable.workflow_cursor.step_phase // "UNKNOWN")|tostring)' /tmp/dogfood-status.json
           echo "DOGFOOD_BOUNDED_WAIT=TERMINAL"
 
       - name: Inspect dogfood run without exposing payload
-        if: ${{ steps.target.outputs.mode == 'dogfood' }}
+        if: ${{ steps.target.outputs.mode == 'dogfood' || steps.target.outputs.mode == 'resume' }}
         shell: bash
         run: |
           set -euo pipefail
-          run_id="${{ steps.dogfood.outputs.run_id }}"
+          if [[ "${{ steps.target.outputs.mode }}" == "resume" ]]; then run_id="${{ steps.target.outputs.run_id }}"; else run_id="${{ steps.dogfood.outputs.run_id }}"; fi
           code="$(curl --silent --show-error --max-time 30 --output /tmp/dogfood-inspect.json --write-out '%{http_code}' \
             -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
             -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
             "${{ steps.target.outputs.base }}/v1/inspect/${run_id}")"
           test "$code" = "200"
           jq -e 'type == "object"' /tmp/dogfood-inspect.json >/dev/null
-          jq -r '"DOGFOOD_ANALYSIS_PRESENT=" + ((.artifacts.analysis != null)|tostring), "DOGFOOD_PATCH_CANDIDATE_PRESENT=" + ((.artifacts.patch_candidate != null)|tostring)' /tmp/dogfood-inspect.json
+          jq -r '"DOGFOOD_ANALYSIS_PRESENT=" + ((.artifacts.analysis != null)|tostring), "DOGFOOD_PATCH_CANDIDATE_PRESENT=" + ((.artifacts.patch_candidate != null)|tostring), "DOGFOOD_JOB_STATUS=" + ((.durable.job_status // "UNKNOWN")|tostring), "DOGFOOD_LAST_ERROR_CODE=" + (((.durable.last_execution_error // "NONE")|tostring|split(":")[0]|gsub("[^A-Za-z0-9_.-]";"_"))), "DOGFOOD_CURSOR_STEP=" + ((.durable.workflow_cursor.step_id // "UNKNOWN")|tostring), "DOGFOOD_CURSOR_PHASE=" + ((.durable.workflow_cursor.step_phase // "UNKNOWN")|tostring)' /tmp/dogfood-inspect.json
           jq -r '(.artifacts.analysis.payload // {}) as $a | ($a.diagnosis|tostring|ascii_downcase) as $d | "DOGFOOD_ANALYSIS_STATE=" + (($a.state // "UNKNOWN")|tostring), "DOGFOOD_DETERMINISTIC_STATUS=" + (($a.deterministic_verification.status // "UNKNOWN")|tostring), "DOGFOOD_DETERMINISTIC_CHECK_COUNT=" + (($a.deterministic_verification.checks // [])|length|tostring), "DOGFOOD_DIAGNOSIS_PRESENT=" + (($a.diagnosis != null)|tostring), "DOGFOOD_EVIDENCE_GAP=" + (($a.evidence_gap // "UNKNOWN")|tostring), "DOGFOOD_EVIDENCE_STATUS=" + (($a.evidence_status // "UNKNOWN")|tostring), "DOGFOOD_EXTERNAL_HYPOTHESIS_VERDICT=" + (($a.external_hypothesis_review.json.verdict // "UNKNOWN")|tostring), "DOGFOOD_DIAGNOSIS_SIGNAL_524=" + ($d|contains("524")|tostring), "DOGFOOD_DIAGNOSIS_SIGNAL_TIMEOUT=" + ($d|contains("timeout")|tostring), "DOGFOOD_DIAGNOSIS_SIGNAL_CLOUDFLARE=" + ($d|contains("cloudflare")|tostring), "DOGFOOD_DIAGNOSIS_CLAIM_COUNT=" + (($a.diagnosis.claims // [])|length|tostring)' /tmp/dogfood-inspect.json
 
       - name: Read-only verify real Runtime
