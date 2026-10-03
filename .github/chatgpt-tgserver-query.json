@@ -1,5 +1,16 @@
 {
-  "project_id": "P004",
-  "query": "debug-ai",
-  "limit": 50
+  "queries": [
+    {
+      "purpose": "runtime-verification",
+      "project_id": "P004",
+      "query": "debug-ai",
+      "limit": 50
+    },
+    {
+      "purpose": "knowledge-verification",
+      "project_id": "P005",
+      "query": "knowledge",
+      "limit": 50
+    }
+  ]
 }
