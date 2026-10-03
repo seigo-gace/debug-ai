@@ -1,0 +1,99 @@
+name: ChatGPT Live API Verify
+
+on:
+  push:
+    branches:
+      - automation/chatgpt-verify
+    paths:
+      - .github/chatgpt-live-api-target.json
+      - .github/workflows/chatgpt-live-api-verify.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chatgpt-live-api-verify
+  cancel-in-progress: true
+
+jobs:
+  live-api-readonly:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CF_ACCESS_CLIENT_ID: ${{ secrets.DEBUGAI_CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.DEBUGAI_CF_ACCESS_CLIENT_SECRET }}
+    steps:
+      - name: Checkout verifier branch
+        uses: actions/checkout@v4
+
+      - name: Read target
+        id: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="$(jq -r '.base_url' .github/chatgpt-live-api-target.json)"
+          run_id="$(jq -r '.run_id' .github/chatgpt-live-api-target.json)"
+          [[ "$base" == "https://debugai.asterav8.jp" ]]
+          [[ "$run_id" =~ ^run_[A-Za-z0-9_]+$ ]]
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+          echo "LIVE_API_BASE=$base"
+          echo "LIVE_RUN_ID=$run_id"
+
+      - name: Require non-interactive Cloudflare Access credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${CF_ACCESS_CLIENT_ID:-}" || -z "${CF_ACCESS_CLIENT_SECRET:-}" ]]; then
+            echo "LIVE_API_AUTH=NOT_CONFIGURED"
+            echo "Required GitHub Actions secrets: DEBUGAI_CF_ACCESS_CLIENT_ID and DEBUGAI_CF_ACCESS_CLIENT_SECRET"
+            exit 12
+          fi
+          echo "LIVE_API_AUTH=CONFIGURED"
+
+      - name: Live health through Cloudflare
+        shell: bash
+        run: |
+          set -euo pipefail
+          code="$(curl --silent --show-error --location --max-time 30 --output /tmp/health.json --write-out '%{http_code}' \
+            -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
+            -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
+            "${{ steps.target.outputs.base }}/health")"
+          echo "HEALTH_HTTP=$code"
+          test "$code" = "200"
+          jq -e '.ok == true and .service == "debug-ai"' /tmp/health.json >/dev/null
+          echo "HEALTH_CONTRACT=PASS"
+
+      - name: Live status through Cloudflare
+        shell: bash
+        run: |
+          set -euo pipefail
+          code="$(curl --silent --show-error --max-time 30 --output /tmp/status.json --write-out '%{http_code}' \
+            -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
+            -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
+            "${{ steps.target.outputs.base }}/v1/status/${{ steps.target.outputs.run_id }}")"
+          echo "STATUS_HTTP=$code"
+          test "$code" = "200"
+          jq -e 'type == "object"' /tmp/status.json >/dev/null
+          jq -r '"RUN_STATE=" + ((.state // "UNKNOWN")|tostring), "JOB_STATUS=" + ((.durable.job_status // "UNKNOWN")|tostring)' /tmp/status.json
+
+      - name: Live inspect through Cloudflare without exposing payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          code="$(curl --silent --show-error --max-time 30 --output /tmp/inspect.json --write-out '%{http_code}' \
+            -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
+            -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
+            "${{ steps.target.outputs.base }}/v1/inspect/${{ steps.target.outputs.run_id }}")"
+          echo "INSPECT_HTTP=$code"
+          test "$code" = "200"
+          jq -e 'type == "object"' /tmp/inspect.json >/dev/null
+          jq -r '"INSPECT_RUN_ID_PRESENT=" + ((.run.run_id != null)|tostring), "ANALYSIS_ARTIFACT_PRESENT=" + ((.artifacts.analysis != null)|tostring)' /tmp/inspect.json
+
+      - name: Safety assertion
+        shell: bash
+        run: |
+          echo "MUTATION_ENDPOINTS_CALLED=NO"
+          echo "APPROVE_APPLY_VERIFY_CALLED=NO"
+          echo "ASSET_PROMOTE_CALLED=NO"
+          echo "LIVE_API_READONLY_VERIFY=PASS"
