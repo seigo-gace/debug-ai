@@ -8,6 +8,7 @@ const path=require("node:path");
 const {RepoPolicy}=require("../repo-policy.js");
 const {makeEvidenceRecord}=require("../control/evidence-registry.js");
 const {makeDurableWorkflowStage}=require("../control/durable-workflow-stage.js");
+const {makeToolResult:makeBaseToolResult}=require("../control/read-only-tool-runtime-base.js");
 const {createReadOnlyToolRuntime,assertToolResultIntegrity,makeToolResult}=require("../control/read-only-tool-runtime.js");
 const {runRoleWithReadOnlyTools}=require("../control/tool-loop.js");
 
@@ -65,6 +66,19 @@ test("durable redaction preserves registered evidence identity for resumed evide
     const persisted=stage.payload.records[0];
     assert.equal(persisted.evidence_id,record.evidence_id);
     assert.equal(persisted.payload.api_key,"[REDACTED]");
+    const context=f.runtime.createEvidenceContext({user:JSON.stringify({evidence:[promptView(persisted)]}),baseEvidenceIds:[persisted.evidence_id]});
+    assert.doesNotThrow(()=>f.runtime.addEvidenceToContext(context,[persisted]));
+  }finally{f.cleanup();}
+});
+
+test("durable redaction preserves base tool evidence identity for resumed evidence views",()=>{
+  const f=fixture();try{
+    const record=makeBaseToolResult("source.read",{path:"a.js",content:"const api_key=should-never-persist",token:"should-never-persist",truncated:false});
+    assert.equal(record.data.token,"[REDACTED]");
+    assert.doesNotMatch(record.data.content,/should-never-persist/);
+    const stage=makeDurableWorkflowStage({runId:"run_tool_redaction",key:"research_context",payload:{records:[record]}});
+    const persisted=stage.payload.records[0];
+    assert.equal(persisted.evidence_id,record.evidence_id);
     const context=f.runtime.createEvidenceContext({user:JSON.stringify({evidence:[promptView(persisted)]}),baseEvidenceIds:[persisted.evidence_id]});
     assert.doesNotThrow(()=>f.runtime.addEvidenceToContext(context,[persisted]));
   }finally{f.cleanup();}
