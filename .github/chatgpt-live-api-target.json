@@ -1,7 +1,8 @@
 {
   "base_url": "https://debugai.asterav8.jp",
-  "mode": "readonly",
+  "mode": "dogfood",
+  "verify_after_dogfood": false,
   "run_id": "run_mus46v0y_9892d5fd5a",
   "repo": "/workspace/debug-ai",
-  "request": "Investigate one bounded DebugAI self-debug defect using only existing evidence. Do not apply changes. Return evidence-backed status and preserve UNKNOWN when evidence is insufficient."
+  "request": "Investigate the observed real integration failure: GitHub Actions can authenticate through Cloudflare Access and GET /health returns HTTP 200, but POST /v1/verify through https://debugai.asterav8.jp returns Cloudflare HTTP 524 after about 125 seconds. Determine the smallest evidence-backed root cause or preserve UNKNOWN. Do not apply changes. Distinguish Cloudflare transport timeout from an actual DebugAI verify verdict."
 }
