@@ -1,0 +1,16 @@
+{
+  "queries": [
+    {
+      "purpose": "runtime-log-readback",
+      "project_id": "P004",
+      "query": "",
+      "limit": 50
+    },
+    {
+      "purpose": "knowledge-log-readback",
+      "project_id": "P005",
+      "query": "",
+      "limit": 50
+    }
+  ]
+}
