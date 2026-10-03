@@ -20,43 +20,11 @@ The design document preserves architecture decisions. `CURRENT_STATE.md` owns cu
 
 ## Current verified boundary
 
-Current source behavior revision: `c9aa6f28ee5c0e4560f6c06ffa667462653c8125`.
+The approved live revision is `fa690041349c6dd7bfb8dae3121b2e1f724dff87`. Its exact-head GitHub CI passed Public Readiness #483, Verify #518, Runtime Volume Gate #114, and Core Verify #519. PR #34 remains OPEN / DRAFT / UNMERGED.
 
-Exact source-behavior CI on that revision passed:
+The current feature-branch candidate preserves the MCP raw request as task data through all four analysis roles and search, adds an explicit production Causal Scout final-output contract, and exposes the existing Local Reviewer Tool Loop telemetry in the benchmark result. These corrections are source-side only; they are not present in the approved live image. Local verification passed 415 tests, including the real TypeScript 7 gate, with zero failures and zero skips. The final candidate head still requires fresh exact-head CI and separate exact-SHA reflection approval.
 
-```text
-Public Readiness Audit #471 = SUCCESS
-Verify #506                = SUCCESS
-Runtime Volume Gate #102   = SUCCESS
-Core Verify #507           = SUCCESS
-```
-
-Approved deployed revision remains `b30649a19cd97929a595c639f51fae44c74d4185`. The current context/token/cache correction is not deployed. README, `docs/CURRENT_STATE.md`, and `docs/PRE_SERVER_QUALIFICATION.md` are synchronized to the current source contract; the final documentation head must pass its own exact-head CI before it can become the reflection candidate.
-
-```text
-checkout path                    = /home/admin1/projects/debug-ai
-checkout mode                    = detached HEAD
-approved checkout HEAD           = b30649a19cd97929a595c639f51fae44c74d4185
-tracked worktree                 = CLEAN
-.debugai-input/                  = PRESENT / PRESERVE
-unmanaged local files            = pre/post content hashes match
-runtime-init                     = exited / exit=0 / container unchanged
-sandbox-init                     = exited / exit=0 / container unchanged
-sandbox-runner                   = running / container unchanged
-debug-ai                         = running / healthy / rebuilt and recreated
-loopback /health                 = PASS / expected service and safety contract
-approved Host/Container parity   = PASS / 219 shipped tracked files / zero mismatches
-persistent volumes              = both identities and mountpoints preserved
-checkpoint recreate durability  = PASS / separate runner-written checkpoint probe
-new runner deployed             = YES at approved b30649a
-benchmark command               = node server/control/resumable-skill-effect-suite.js
-checkpoint path                 = /app/runtime/benchmarks/skill-effect-suite-checkpoint.json
-current context/token/cache source live = NOT_DEPLOYED
-production profile change       = NONE
-Search skip activation           = NO
-```
-
-No Runtime PASS for b30649a is promoted into a Runtime PASS for the current source. See `docs/CURRENT_STATE.md` for the complete current boundary and remaining work.
+Approved runtime reflection is healthy with exact parity across 223 shipped files, both persistent volumes and historical checkpoints preserved, and context fixed at 8192. Real MCP use exposed a Causal Scout output-shape failure; the retained run is RETRY_WAIT. Three Local Reviewer calls returned canonical PASS/HANDOFF with observed cache reuse; the third was contended and is excluded from serial speed evaluation. Read-only verification completed server-side with FAIL/BLOCKED and preserved source immutability; its MCP client timed out. Runtime defect closure and Strict Completion are not claimed. Detailed evidence and remaining work are owned by [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md).
 
 ## What DebugAI does
 
@@ -205,7 +173,7 @@ Rules:
 
 The validator was not weakened to accommodate model output. The invocation contract was tightened to match the canonical validator.
 
-## Current Local Reviewer real state
+## Historical Local Reviewer canonical closure
 
 The Local Reviewer qualification history has distinct causes:
 
@@ -257,7 +225,7 @@ models/router                 = unchanged
 
 Post-change short inference measured approximately Granite 7.31 tok/s, Qwen3 5.61 tok/s, Ministral 7.45 tok/s, and Coder 8.05 tok/s. A 128-token Ministral retest measured about 6.12 tok/s with zero new parent High/Max/OOM/OOM-kill and zero Ministral max events. The DebugAI role timeout was not extended as a workaround.
 
-The prompt-cache source work does not claim a new live cache-hit ratio or latency until the exact source is reflected and measured.
+Current observed cache/timing measurements on approved fa690041 are recorded in `docs/CURRENT_STATE.md`. They do not prove broader semantic-quality improvement or a larger runtime context.
 
 ## Six-role Skill ON/OFF measurement
 
@@ -564,21 +532,16 @@ The final documentation head requires its own exact-head CI before it can be use
 Current-state owner: [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md).
 
 ```text
-1. require exact final documentation-head GitHub CI PASS
-2. obtain explicit Master approval for one exact reflection SHA; keep Server at approved b30649a until then
-3. reflect only that approved SHA, preserving .debugai-input, unmanaged state, both volumes, and historical checkpoints
-4. rebuild/recreate only debug-ai and repeat init/health/cleanliness/parity/durability verification
-5. measure real cache hit/miss, prompt-eval, decode, total role latency, prefix stability, RAM events, and current 8192 runtime-context behavior
-6. cache remains acceleration-only; any correctness regression fails regardless of speed gain
-7. consider a larger live AI Core context only from measured RAM/speed/quality evidence and separate Master approval
-8. use a separate source-bound checkpoint on the existing runtime volume; never rebind incompatible old data
-9. complete current-source six-role Skill ON/OFF measurement and retain OFF wins/ties
-10. Thinking A/B only for explicit boolean roles
-11. Sampling A/B one axis at a time using model-bound source candidates
-12. token-cap optimization only if preceding measurements justify a smaller candidate
-13. real allowed-repository integration, exact-nine MCP continuation, and fresh self-debug
-14. Search Gate shadow remains read-only, with zero observations not proving zero false skips
-15. final production-equivalent closed loop and Strict Completion
+1. require exact candidate-head GitHub CI PASS for the MCP task/Causal Scout/output-telemetry corrections
+2. obtain separate Master approval for that exact new SHA; preserve the approved live fa690041349c6dd7bfb8dae3121b2e1f724dff87 until then
+3. reflect only the approved candidate while preserving both volumes, checkpoints, unmanaged state and existing auxiliary containers
+4. reverify exact parity and resume the retained MCP run only when compatible and actually resumable
+5. close the measured causal-output defect with real runtime evidence; do not relax the validator or sandbox
+6. finish serial Local Reviewer/cache qualification and keep contested samples labeled
+7. use a separate compatible source-bound checkpoint for current six-role Skill ON/OFF measurement
+8. retain Skill OFF wins/ties; run Thinking A/B only for explicit boolean roles
+9. perform Sampling A/B one axis at a time and token-cap optimization only from prior evidence
+10. complete real integration, MCP durable continuation, self-debug, read-only Search shadow and Strict Completion
 ```
 
 ## Safety boundaries

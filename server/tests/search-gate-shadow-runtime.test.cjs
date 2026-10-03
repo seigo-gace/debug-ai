@@ -99,7 +99,7 @@ test("production workflow executes both searches and stores shadow comparisons w
   }finally{f.cleanup();}
 });
 
-test("production fallback query creates candidates but still executes both searches",async()=>{
+test("production generic task query creates candidates but still executes both searches",async()=>{
   const f=fixture();try{
     const repoPolicy=new RepoPolicy({workspaceRoot:f.root}),runtimeRoot=path.join(f.root,"runtime"),authority=new RunAuthority({runtimeRoot,repoPolicy}),runtimeEvidence=new RuntimeEvidenceStore(runtimeRoot,{requirePrivateRoot:false});let kbCalls=0,officialCalls=0;
     const tgserver={log:async()=>({}),search:async()=>{kbCalls++;return[];}};
@@ -112,7 +112,7 @@ test("production fallback query creates candidates but still executes both searc
       throw new Error(`UNEXPECTED_ROLE:${role}`);
     }};
     const workflow=createWorkflow({aiCore,tgserver,evidenceSearch,runtimeEvidence,authority,repoPolicy,repositorySnapshot:()=>"git_fixture"});
-    const out=await workflow.runAnalysis({rawRequest:"inspect generic failure",failure:{},localEvidence:[],repo:f.repo});
+    const out=await workflow.runAnalysis({rawRequest:"debug failure",failure:{},localEvidence:[],repo:f.repo});
     assert.equal(kbCalls,1);assert.equal(officialCalls,1);
     const records=runtimeEvidence.list(out.run_id,{types:["search_gate_shadow"],limit:8});assert.equal(records.length,2);
     for(const record of records){assert.equal(record.payload.shadow_disposition.decision,"NOT_APPLICABLE");assert.equal(record.payload.candidate_skip,true);assert.equal(record.payload.actual_search_executed,true);assert.equal(record.payload.false_skip_evaluable,true);assert.equal(record.payload.false_skip,false);assert.equal(record.payload.activation_eligible,false);}

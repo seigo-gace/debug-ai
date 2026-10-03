@@ -18,11 +18,9 @@ GitHub source, exact-head CI, shared AI Core runtime, live DebugAI Server state,
 
 ## Current repository state
 
-Repository: `seigo-gace/debug-ai`; existing branch: `feat/pre-server-benchmark-gates-20261001`; PR #34 remains OPEN / DRAFT / UNMERGED.
+The approved live revision is `fa690041349c6dd7bfb8dae3121b2e1f724dff87`. Its exact-head GitHub CI passed Public Readiness #483, Verify #518, Runtime Volume Gate #114, and Core Verify #519. PR #34 remains OPEN / DRAFT / UNMERGED.
 
-Current source behavior revision is `c9aa6f28ee5c0e4560f6c06ffa667462653c8125`. Exact source-behavior CI on that revision passed Public Readiness Audit #471, Verify #506, Runtime Volume Gate #102, and Core Verify #507. The approved deployed revision remains `b30649a19cd97929a595c639f51fae44c74d4185`; no result from that older live revision is promoted into a Runtime PASS for the current source.
-
-README, this Current State document, and `PRE_SERVER_QUALIFICATION.md` are synchronized to the prompt-cache/context-speed source contract. The final documentation head created by this status closure requires its own exact-head CI before it can be considered the Server reflection candidate. PR #34 is synchronized again after this final documentation commit without changing the repository head.
+The current feature-branch candidate preserves the MCP raw request as task data through all four analysis roles and search, adds an explicit production Causal Scout final-output contract, and exposes the existing Local Reviewer Tool Loop telemetry in the benchmark result. These corrections are source-side only; they are not present in the approved live image. Local verification passed 415 tests, including the real TypeScript 7 gate, with zero failures and zero skips. The final candidate head still requires fresh exact-head CI and separate exact-SHA reflection approval.
 
 ## Current context / token / cache source contract
 
@@ -77,38 +75,50 @@ The source contract:
 - binds checkpoint reuse to a source fingerprint and fails closed when incompatible source is detected;
 - does not grant production promotion authority.
 
-The resumable runner is deployed and qualified at approved b30649a. The current context/token/cache correction is source-side only and is not yet reflected.
+The resumable runner and context/token/cache correction are deployed at the approved fa690041 revision. The production Causal Scout/output-telemetry candidate remains source-side only.
 
 ## Current live DebugAI Server boundary
 
-Measured after the explicitly approved reflection:
+Fresh readback after the approved reflection:
 
 ```text
 checkout path                    = /home/admin1/projects/debug-ai
 checkout mode                    = detached HEAD
-approved checkout HEAD           = b30649a19cd97929a595c639f51fae44c74d4185
+approved checkout HEAD           = fa690041349c6dd7bfb8dae3121b2e1f724dff87
 tracked worktree                 = CLEAN
-.debugai-input/                  = PRESENT / PRESERVE
-unmanaged local files            = pre/post content hashes match
-runtime-init                     = exited / exit=0 / container unchanged
-sandbox-init                     = exited / exit=0 / container unchanged
-sandbox-runner                   = running / container unchanged
-debug-ai                         = running / healthy / rebuilt and recreated
-loopback /health                 = PASS / expected service and safety contract
-approved Host/Container parity   = PASS / 219 shipped tracked files / zero mismatches
+.debugai-input and unmanaged state = content hashes preserved
+runtime-init                     = exited / exit=0 / same container and image
+sandbox-init                     = exited / exit=0 / same container and image
+sandbox-runner                   = running / same container and image
+debug-ai                         = running / healthy / only recreated service
+Host/Container shipped parity    = PASS / 223 tracked files / zero mismatches
 persistent volumes              = both identities and mountpoints preserved
-checkpoint recreate durability  = PASS / separate runner-written checkpoint probe
-new runner deployed             = YES at approved b30649a
-benchmark command               = node server/control/resumable-skill-effect-suite.js
-checkpoint path                 = /app/runtime/benchmarks/skill-effect-suite-checkpoint.json
-current context/token/cache source live = NOT_DEPLOYED
+historical checkpoints          = all pre-reflection hashes preserved
+checkpoint recreate durability  = runner-written probe loaded with identical hash
+qualified runtime context       = 8192 / existing .env owner
+AI Core backend context         = 8192 on all four unchanged backends
+existing environment            = unchanged except added context qualification key
 production profile change       = NONE
 Search skip activation           = NO
 ```
 
-Only `debug-ai` was rebuilt/recreated during the last approved reflection. Both init containers and sandbox-runner were retained. A separate checkpoint written with the runner save routine before recreation loaded after recreation with the identical SHA-256; only that owned probe was removed. Environment hashes, mounts, and production/profile/Search source remained unchanged. Stopped old host Docker clients were retained because no contention requiring cleanup was established.
+The checkpoint probe remains retained as evidence. No old checkpoint was rebound to a new source fingerprint. Related current-source regression tests passed 62/62 in the existing container using a complete temporary source archive; Compose contract tests require compose.yaml, which is not shipped in /app. Production environment variables were isolated only in test child processes.
 
-No Runtime PASS for b30649a is promoted into a Runtime PASS for the current source.
+### Current live MCP investigation
+
+Real stdio initialize, exact ordered nine-tool discovery, health, start, status, bounded wait, and inspect were executed against the approved live source. No approve/apply shortcut exists. Exact run ID: `run_murmrr7b_62f93013f4`.
+
+The run is RETRY_WAIT with `ROLE_SEMANTIC_INVALID:causal_scout:EXPECTED_SHAPE_MISSING:candidates|hypotheses|causal_chain|claims`. No completed analysis or evidence-backed diagnosis is claimed. Source inspection confirmed that the production caller did not specify a required final role-shape field; the candidate now explicitly requires canonical claims, preserves UNKNOWN, and leaves validation fail-closed. A second source defect was reproduced deterministically: MCP start supplies rawRequest with failure=null, but the production caller omitted rawRequest from all analysis-role inputs and used the generic search query "debug failure". The candidate now forwards the original task as JSON data through scouts, durable/non-durable Researcher and Diagnoser, and uses it as the search fallback without moving it into system instructions. The runtime failures are not yet closed. Resume must retain this run ID and must not be reported successful before real execution.
+
+The full repository package.test inside the unchanged sandbox failed: test fixtures call chmod, which sandbox-exec intentionally denies with EPERM. This is separate from the passing repository verification outside that sandbox. The sandbox policy, tests, and existing runner were not weakened or recreated. Read-only MCP verify was invoked; its client timed out, so MCP transport completion is not claimed. Server evidence later proved verification_id `verify_211e3f83-43e0-4452-a1a6-0156813ddc2a`, verdict FAIL, Local Reviewer FAIL/BLOCKED, and source-immutability invariants PASS for both selected paths. No patch was applied.
+
+### Current Local Reviewer cache measurement
+
+Actual local-model inference uses the fixed benchmark fixture through the deployed production adapter, with existing telemetry captured without storing hidden reasoning. This is a real-model contract/cache measurement with fixture input, not a successful full repository verification or Strict Completion.
+
+Two calls completed with canonical output, strict evidence binding, verdict PASS, and decision HANDOFF. They do not establish decision DONE. Provider-observed prompt tokens were 2466 in both calls; completion tokens were 480 and 481. Cache hit/miss were 257/2209 and 2465/1; prompt-evaluation times were 161306.757 ms and 528.389 ms; decode times were 115949.636 ms and 102498.591 ms; total role elapsed times were 277563 ms and 103067 ms. The observed prefix hash was identical. The third call also returned canonical PASS/HANDOFF (7 claims, 2466 prompt tokens, 481 completion tokens, hit/miss 2465/1, prompt-eval 185.765 ms, decode 88746.433 ms, elapsed 402251 ms). Its request overlapped the Local Reviewer invoked by verification; the additional upstream time is consistent with server queueing (INFERENCE, not separately measured). It is excluded from uncontended serial speed evaluation. No additional call was made merely to hide that contention.
+
+Measurement artifact: `/app/runtime/benchmarks/cache-local-reviewer-fa690041.json`. Parent and all four backend cgroup High/Max/OOM/OOM-kill deltas were zero across the measured window. A later bounded 98-sample parent RAM window observed 33890037760–34465808384 bytes; this is a sampled window, not the complete-run peak. All three prefixes were identical. Canonical acceptance remains separate from semantic-quality qualification and Strict Completion. Cache remains acceleration-only, and broader semantic-quality regression remains unproven.
 
 ## AI Core resource incident and closure
 
@@ -128,7 +138,7 @@ models/router                 = unchanged
 
 Measured recovery included approximately Granite 7.31 tok/s, Qwen3 5.61 tok/s, Ministral 7.45 tok/s, Coder 8.05 tok/s, and a 128-token Ministral retest near 6.12 tok/s. The final tested serial path produced zero new parent High/Max/OOM/OOM-kill events. DebugAI role timeout was not extended as a workaround.
 
-The new cache source contract does not claim a new live cache hit rate, new live latency, or a larger live context. Those require reflection of one approved exact SHA and fresh real runtime measurement.
+Current observed cache and timing measurements on approved fa690041 are reported above. The runtime context remains 8192; broader semantic-quality improvement is not proven by those measurements.
 
 ## Local Reviewer defect history and closure
 
@@ -142,7 +152,7 @@ The Local Reviewer qualification history has distinct causes and must not be col
 6. The validator remained strict. The invocation contract was repaired to explicitly require `type = FACT | INFERENCE | HYPOTHESIS | UNKNOWN | REJECTED` and the corresponding evidence/falsification/counter-evidence rules.
 7. That fixed source was reflected to Server revision `4c7e7273424d097fc4bfb60a727824c944ef374b` and measured three consecutive times through the real role path.
 
-Current measured Local Reviewer result on `4c7e727...`:
+Historical measured Local Reviewer result on `4c7e727...`:
 
 ```text
 run 1: RC=0 / completed=true / elapsed_ms=161769
@@ -266,73 +276,48 @@ Live MCP stdio on approved b30649a passed initialize, the exact ordered nine-too
 ## Current qualification state
 
 ```text
-CURRENT_SOURCE_BEHAVIOR_HEAD                = c9aa6f28ee5c0e4560f6c06ffa667462653c8125
-CURRENT_SOURCE_BEHAVIOR_CI                  = PASS_4_OF_4
-CURRENT_SOURCE_PUBLIC_READINESS             = SUCCESS_471
-CURRENT_SOURCE_VERIFY                       = SUCCESS_506
-CURRENT_SOURCE_RUNTIME_VOLUME_GATE          = SUCCESS_102
-CURRENT_SOURCE_CORE_VERIFY                  = SUCCESS_507
-CURRENT_SOURCE_DOCUMENT_SYNC                = PASS
-CURRENT_SOURCE_PR_SYNC                      = PASS
-CURRENT_SOURCE_REFLECTION                   = NOT_EXECUTED
-APPROVED_LIVE_SERVER_HEAD                   = b30649a19cd97929a595c639f51fae44c74d4185
-APPROVED_LIVE_SOURCE_CI                     = PASS
-APPROVED_LIVE_HEALTH                        = PASS
-APPROVED_LIVE_EXACT_SHIPPED_PARITY          = PASS_219_FILES
-CHECKPOINT_RECREATE_DURABILITY              = PASS_FOR_TESTED_PATH
-CONTEXT_PRESSURE_85_SOURCE                  = PASS_ON_C9AA6F28
-CONTEXT_PRESSURE_85_LIVE                    = NOT_EXECUTED
-PROMPT_CACHE_EXPLICIT_SOURCE                = PASS_ON_C9AA6F28
-PROMPT_CACHE_TELEMETRY_SOURCE               = PASS_ON_C9AA6F28
-PROMPT_CACHE_LIVE_MEASUREMENT               = NOT_EXECUTED
-TOOL_LOOP_PREFIX_STABILITY_SOURCE           = PASS_ON_C9AA6F28
-MODEL_PROFILE_OUTPUT_CEILING_SOURCE         = PASS_ON_C9AA6F28
-RUNTIME_CONTEXT_CLAMP_SOURCE                = PASS_ON_C9AA6F28
-TRUNCATION_FAIL_CLOSED_SOURCE               = PASS_ON_C9AA6F28
-LIVE_RUNTIME_CONTEXT_ABOVE_8192             = NOT_AUTHORIZED_NOT_EXECUTED
-RESEARCHER_WORK_UNIT_REUSE                  = IMPLEMENTED
-GENERAL_BLOCK_CORE_ALL_WORKFLOWS            = NOT_CONNECTED
-LOCAL_REVIEWER_CANONICAL_REAL               = PASS_3_OF_3_ON_4C7E727_EXISTING_EVIDENCE
-SKILL_EFFECT_ALL_REAL_ON_B30649A            = INCOMPLETE_5_OF_6_AI_CORE_EMPTY
-AI_CORE_HIGH_MAX_OOM_OOM_KILL_SUITE_DELTA  = 0_0_0_0
-CURRENT_SOURCE_SIX_ROLE_MEASUREMENT         = NOT_EXECUTED
-MODEL_AB_THINKING_REAL                      = NOT_EXECUTED
-MODEL_AB_SAMPLING_REAL                      = NOT_EXECUTED
-MODEL_AB_TOKEN_CAP_REAL                     = NOT_EXECUTED
-REAL_INTEGRATION_E2E                        = NOT_EXECUTED
-MCP_EXACT_NINE_AND_LIVE_HEALTH             = PASS_ON_APPROVED_B30649A
-MCP_CONTINUATION_WORKFLOW                   = NOT_VERIFIED
-SEARCH_GATE_SHADOW_REAL                     = NOT_VERIFIED_AT_THIS_BOUNDARY
-FALSE_SKIP_ZERO_PROVEN                      = NO
-SEARCH_SKIP_ACTIVATION                     = NO
-FRESH_CURRENT_RUNTIME_SELF_DEBUG            = NOT_EXECUTED
-FINAL_PRODUCTION_EQUIVALENT_E2E             = NOT_EXECUTED
-MAIN_MERGE                                  = NOT_EXECUTED
-PRODUCTION_PROFILE_CHANGE                   = NONE
+APPROVED_LIVE_SERVER_HEAD = fa690041349c6dd7bfb8dae3121b2e1f724dff87
+APPROVED_LIVE_EXACT_SHIPPED_PARITY = PASS_223_FILES
+CHECKPOINT_RECREATE_DURABILITY = PASS_FOR_TESTED_PATH
+CONTEXT_TOKENS = 8192
+CANDIDATE_SOURCE_TESTS = PASS_415_OF_415_ZERO_SKIP
+CANDIDATE_EXACT_HEAD_CI = FRESH_READBACK_REQUIRED
+CANDIDATE_SOURCE_REFLECTION = NOT_EXECUTED_NOT_AUTHORIZED
+LOCAL_REVIEWER_CURRENT_REAL = THREE_CANONICAL_PASS_HANDOFF_THIRD_CONTENDED
+PROMPT_CACHE_CURRENT_REAL = OBSERVED_THREE_CALLS_TWO_SERIAL_SAMPLES
+MCP_EXACT_NINE_AND_HEALTH = PASS_ON_FA690041
+MCP_START_STATUS_WAIT_INSPECT = EXECUTED
+MCP_ANALYSIS = RETRY_WAIT_CAUSAL_SHAPE_FAILURE
+MCP_VERIFY = CLIENT_TIMEOUT_SERVER_VERDICT_FAIL_REVIEW_BLOCKED
+FULL_PACKAGE_TEST_IN_SANDBOX = FAIL_EPERM_CHMOD
+CURRENT_SOURCE_SIX_ROLE_MEASUREMENT = NOT_EXECUTED
+MODEL_AB_THINKING_SAMPLING_TOKEN_CAP = NOT_EXECUTED
+REAL_INTEGRATION_E2E = NOT_EXECUTED
+GENERAL_BLOCK_CORE_ALL_WORKFLOWS = NOT_CONNECTED
+SEARCH_GATE_SHADOW_REAL = NOT_VERIFIED_AT_THIS_BOUNDARY
+SEARCH_SKIP_ACTIVATION = NO
+STRICT_COMPLETION = NOT_VERIFIED
+MAIN_MERGE = NOT_EXECUTED
+PRODUCTION_PROFILE_CHANGE = NONE
 ```
 
 ## Mutation and approval boundary
 
-The completed b30649a reflection does not authorize reflection of a different SHA. Source-side corrections, documentation, existing Draft PR synchronization, and exact-head CI may proceed on the existing feature branch. Keep the existing Server checkout at its explicitly approved revision until Master approves one exact new SHA. Preserve historical checkpoints; do not rebind incompatible data. No profile promotion, live context increase, Search Gate activation, Secret/provider/model change, persistent-state deletion, or unrelated project mutation is permitted by this source result.
+The completed fa690041 reflection does not authorize reflection of a different SHA. Source-side corrections, documentation, existing Draft PR synchronization, and exact-head CI may proceed on the existing feature branch. Keep the existing Server checkout at its explicitly approved revision until Master approves one exact new SHA. Preserve historical checkpoints; do not rebind incompatible data. No profile promotion, live context increase, Search Gate activation, Secret/provider/model change, persistent-state deletion, or unrelated project mutation is permitted by this source result.
 
 ## Required next-work order
 
 ```text
-1. require exact final documentation-head GitHub CI PASS
-2. obtain explicit Master approval for one exact reflection SHA; keep Server at approved b30649a until then
-3. reflect only that approved SHA, preserving .debugai-input, unmanaged state, both volumes, and historical checkpoints
-4. rebuild/recreate only debug-ai and repeat init/health/cleanliness/parity/durability verification
-5. measure real cache hit/miss, prompt-eval, decode, total role latency, prefix stability, RAM events, and current 8192 runtime-context behavior
-6. keep cache as acceleration-only; any correctness or verification regression fails the candidate regardless of speed gain
-7. consider a larger live AI Core context only from measured RAM/speed/quality evidence and separate Master approval; never enlarge n_ctx from model spec alone
-8. use a separate source-bound checkpoint on the existing runtime volume; never rebind incompatible old data
-9. complete current-source six-role Skill ON/OFF measurement and retain OFF wins/ties
-10. Thinking A/B only for explicit boolean roles
-11. Sampling A/B one axis at a time using model-bound source candidates
-12. token-cap optimization only if preceding measurements justify a smaller candidate
-13. real allowed-repository integration, exact-nine MCP continuation, and fresh self-debug
-14. Search Gate shadow remains read-only, with zero observations not proving zero false skips
-15. final production-equivalent closed loop and Strict Completion
+1. require exact candidate-head GitHub CI PASS for the MCP task/Causal Scout/output-telemetry corrections
+2. obtain separate Master approval for that exact new SHA; preserve the approved live fa690041349c6dd7bfb8dae3121b2e1f724dff87 until then
+3. reflect only the approved candidate while preserving both volumes, checkpoints, unmanaged state and existing auxiliary containers
+4. reverify exact parity and resume the retained MCP run only when compatible and actually resumable
+5. close the measured causal-output defect with real runtime evidence; do not relax the validator or sandbox
+6. finish serial Local Reviewer/cache qualification and keep contested samples labeled
+7. use a separate compatible source-bound checkpoint for current six-role Skill ON/OFF measurement
+8. retain Skill OFF wins/ties; run Thinking A/B only for explicit boolean roles
+9. perform Sampling A/B one axis at a time and token-cap optimization only from prior evidence
+10. complete real integration, MCP durable continuation, self-debug, read-only Search shadow and Strict Completion
 ```
 
 Unexecuted, failed, incomplete, and source/runtime-unmatched items retain their actual state.
