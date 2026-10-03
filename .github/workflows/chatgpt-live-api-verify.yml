@@ -16,9 +16,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  live-api-readonly:
+  live-api:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 35
     env:
       CF_ACCESS_CLIENT_ID: ${{ secrets.DEBUGAI_CF_ACCESS_CLIENT_ID }}
       CF_ACCESS_CLIENT_SECRET: ${{ secrets.DEBUGAI_CF_ACCESS_CLIENT_SECRET }}
@@ -32,13 +32,28 @@ jobs:
         run: |
           set -euo pipefail
           base="$(jq -r '.base_url' .github/chatgpt-live-api-target.json)"
-          run_id="$(jq -r '.run_id' .github/chatgpt-live-api-target.json)"
+          mode="$(jq -r '.mode // "readonly"' .github/chatgpt-live-api-target.json)"
+          run_id="$(jq -r '.run_id // ""' .github/chatgpt-live-api-target.json)"
+          repo="$(jq -r '.repo // "/workspace/debug-ai"' .github/chatgpt-live-api-target.json)"
+          request="$(jq -r '.request // ""' .github/chatgpt-live-api-target.json)"
           [[ "$base" == "https://debugai.asterav8.jp" ]]
-          [[ "$run_id" =~ ^run_[A-Za-z0-9_]+$ ]]
-          echo "base=$base" >> "$GITHUB_OUTPUT"
-          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+          [[ "$mode" == "readonly" || "$mode" == "dogfood" ]]
+          [[ -z "$run_id" || "$run_id" =~ ^run_[A-Za-z0-9_]+$ ]]
+          [[ "$repo" == /workspace/* ]]
+          [[ ${#request} -le 1000 ]]
+          {
+            echo "base=$base"
+            echo "mode=$mode"
+            echo "run_id=$run_id"
+            echo "repo=$repo"
+            echo "request<<EOF"
+            echo "$request"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
           echo "LIVE_API_BASE=$base"
-          echo "LIVE_RUN_ID=$run_id"
+          echo "LIVE_MODE=$mode"
+          echo "LIVE_RUN_ID_PRESENT=$([[ -n "$run_id" ]] && echo true || echo false)"
+          echo "LIVE_REPO=$repo"
 
       - name: Require non-interactive Cloudflare Access credentials
         shell: bash
@@ -61,10 +76,11 @@ jobs:
             "${{ steps.target.outputs.base }}/health")"
           echo "HEALTH_HTTP=$code"
           test "$code" = "200"
-          jq -e '.ok == true and .service == "debug-ai"' /tmp/health.json >/dev/null
+          jq -e '.ok == true and .service == "debug-ai" and .read_only_verify == true' /tmp/health.json >/dev/null
           echo "HEALTH_CONTRACT=PASS"
 
-      - name: Live status through Cloudflare
+      - name: Live existing-run status through Cloudflare
+        if: ${{ steps.target.outputs.run_id != '' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -77,7 +93,8 @@ jobs:
           jq -e 'type == "object"' /tmp/status.json >/dev/null
           jq -r '"RUN_STATE=" + ((.state // "UNKNOWN")|tostring), "JOB_STATUS=" + ((.durable.job_status // "UNKNOWN")|tostring)' /tmp/status.json
 
-      - name: Live inspect through Cloudflare without exposing payload
+      - name: Live existing-run inspect without exposing payload
+        if: ${{ steps.target.outputs.run_id != '' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -90,10 +107,101 @@ jobs:
           jq -e 'type == "object"' /tmp/inspect.json >/dev/null
           jq -r '"INSPECT_RUN_ID_PRESENT=" + ((.run.run_id != null)|tostring), "ANALYSIS_ARTIFACT_PRESENT=" + ((.artifacts.analysis != null)|tostring)' /tmp/inspect.json
 
+      - name: Start bounded real DebugAI dogfood run
+        id: dogfood
+        if: ${{ steps.target.outputs.mode == 'dogfood' }}
+        shell: bash
+        env:
+          LIVE_REQUEST: ${{ steps.target.outputs.request }}
+        run: |
+          set -euo pipefail
+          [[ -n "$LIVE_REQUEST" ]]
+          jq -n \
+            --arg repo "${{ steps.target.outputs.repo }}" \
+            --arg request "$LIVE_REQUEST" \
+            '{repo:$repo,projectId:"debug-ai",failure:{message:$request},localEvidence:[]}' > /tmp/start-body.json
+          code="$(curl --silent --show-error --max-time 60 --output /tmp/start.json --write-out '%{http_code}' \
+            -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
+            -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
+            -H 'content-type: application/json' \
+            --data-binary @/tmp/start-body.json \
+            "${{ steps.target.outputs.base }}/v1/runs/start")"
+          echo "DOGFOOD_START_HTTP=$code"
+          test "$code" = "202"
+          run_id="$(jq -r '.run_id // empty' /tmp/start.json)"
+          [[ "$run_id" =~ ^run_[A-Za-z0-9_]+$ ]]
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+          echo "DOGFOOD_RUN_STARTED=YES"
+
+      - name: Bounded wait for dogfood run
+        if: ${{ steps.target.outputs.mode == 'dogfood' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          run_id="${{ steps.dogfood.outputs.run_id }}"
+          deadline=$((SECONDS+900))
+          while true; do
+            code="$(curl --silent --show-error --max-time 30 --output /tmp/dogfood-status.json --write-out '%{http_code}' \
+              -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
+              -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
+              "${{ steps.target.outputs.base }}/v1/status/${run_id}")"
+            test "$code" = "200"
+            job="$(jq -r '.durable.job_status // empty' /tmp/dogfood-status.json)"
+            state="$(jq -r '.state // "UNKNOWN"' /tmp/dogfood-status.json)"
+            echo "DOGFOOD_STATE=$state JOB_STATUS=${job:-UNKNOWN}"
+            if [[ "$job" =~ ^(DONE|CANCELLED|BLOCKED|FAILED)$ || "$state" =~ ^(COMPLETE|BLOCKED)$ ]]; then
+              break
+            fi
+            if (( SECONDS >= deadline )); then
+              echo "DOGFOOD_BOUNDED_WAIT=TIMEOUT"
+              exit 13
+            fi
+            sleep 10
+          done
+          echo "DOGFOOD_BOUNDED_WAIT=TERMINAL"
+
+      - name: Inspect dogfood run without exposing payload
+        if: ${{ steps.target.outputs.mode == 'dogfood' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          run_id="${{ steps.dogfood.outputs.run_id }}"
+          code="$(curl --silent --show-error --max-time 30 --output /tmp/dogfood-inspect.json --write-out '%{http_code}' \
+            -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
+            -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
+            "${{ steps.target.outputs.base }}/v1/inspect/${run_id}")"
+          test "$code" = "200"
+          jq -e 'type == "object"' /tmp/dogfood-inspect.json >/dev/null
+          jq -r '"DOGFOOD_ANALYSIS_PRESENT=" + ((.artifacts.analysis != null)|tostring), "DOGFOOD_PATCH_CANDIDATE_PRESENT=" + ((.artifacts.patch_candidate != null)|tostring)' /tmp/dogfood-inspect.json
+
+      - name: Read-only verify real Runtime
+        if: ${{ steps.target.outputs.mode == 'dogfood' }}
+        shell: bash
+        env:
+          LIVE_REQUEST: ${{ steps.target.outputs.request }}
+        run: |
+          set -euo pipefail
+          jq -n \
+            --arg repo "${{ steps.target.outputs.repo }}" \
+            --arg task "$LIVE_REQUEST" \
+            '{repo:$repo,selectedPaths:[],changeScope:[],task:$task}' > /tmp/verify-body.json
+          code="$(curl --silent --show-error --max-time 1200 --output /tmp/verify.json --write-out '%{http_code}' \
+            -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
+            -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
+            -H 'content-type: application/json' \
+            --data-binary @/tmp/verify-body.json \
+            "${{ steps.target.outputs.base }}/v1/verify")"
+          echo "VERIFY_HTTP=$code"
+          test "$code" = "200"
+          verdict="$(jq -r '.verdict // "UNKNOWN"' /tmp/verify.json)"
+          echo "VERIFY_VERDICT=$verdict"
+          jq -e 'type == "object" and (.patch_applied == false or .patch_applied == null)' /tmp/verify.json >/dev/null
+
       - name: Safety assertion
         shell: bash
         run: |
-          echo "MUTATION_ENDPOINTS_CALLED=NO"
+          echo "SOURCE_MUTATION_ENDPOINTS_CALLED=NO"
           echo "APPROVE_APPLY_VERIFY_CALLED=NO"
           echo "ASSET_PROMOTE_CALLED=NO"
-          echo "LIVE_API_READONLY_VERIFY=PASS"
+          echo "PATCH_CANDIDATE_ENDPOINT_CALLED=NO"
+          echo "LIVE_API_LANE_SAFETY=PASS"
