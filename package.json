@@ -8,10 +8,10 @@
   "devDependencies":{"@modelcontextprotocol/client":"2.2.0"},
   "scripts":{
     "build:durable-native":"node scripts/build-durable-native.cjs",
-    "check":"find server orchestrator tests mcp bin -type f \\( -name '*.js' -o -name '*.mjs' -o -name '*.cjs' \\) -print0 | xargs -0 -n1 node --check",
+    "check":"find server orchestrator tests mcp bin scripts -type f \\( -name '*.js' -o -name '*.mjs' -o -name '*.cjs' \\) -print0 | xargs -0 -n1 node --check",
     "test":"node --test tests/*.test.cjs server/tests/*.test.cjs mcp/tests/*.test.mjs",
-    "verify":"npm run build:durable-native && npm run check && npm test",
-    "verify:core":"npm run build:durable-native && npm run check && npm test",
+    "verify":"npm run build:durable-native && npm run check && npm test && npm run audit:pre-server-qualification",
+    "verify:core":"npm run build:durable-native && npm run check && npm test && npm run audit:pre-server-qualification",
     "debugai":"node bin/debugai.js",
     "debugai:mcp":"node bin/debugai-mcp.mjs",
     "test:e2e-fixture":"node --test server/tests/full-debugai-e2e-fixture.test.cjs",
@@ -23,9 +23,12 @@
     "benchmark:researcher-skill-effect":"node server/control/researcher-skill-effect-benchmark.js",
     "benchmark:diagnoser-skill-effect":"node server/control/diagnoser-skill-effect-benchmark.js",
     "benchmark:patch-engineer-skill-effect":"node server/control/patch-engineer-skill-effect-benchmark.js",
+    "benchmark:skill-effect-all":"node server/control/resumable-skill-effect-suite.js",
+    "benchmark:model-ab":"node server/control/model-ab-benchmark.js",
     "audit:control-plane-gaps":"node server/control/control-plane-gap-audit.js",
     "audit:docker-storage":"node scripts/docker-storage-audit.cjs",
     "audit:search-gate-shadow":"node scripts/search-gate-shadow-audit.cjs",
+    "audit:pre-server-qualification":"node scripts/pre-server-qualification-audit.cjs",
     "audit:live-runtime":"node scripts/live-runtime-readback.cjs",
     "start":"node server/main.js"
   }

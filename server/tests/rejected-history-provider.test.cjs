@@ -16,7 +16,7 @@ const {selectSkills}=require("../control/invocation-compiler.js");
 const {appendRejectedHistory,readRejectedHistory,withRejectedHistoryContext}=require("../control/rejected-history-provider.js");
 
 function fixture(){
-  const root=fs.mkdtempSync(path.join(os.tmpdir(),"debugai-rejected-history-"));fs.chmodSync(root,0o700);
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),"debugai-rejected-history-"));assert.equal(fs.statSync(root).mode & 0o777,0o700);
   const storeRoot=path.join(root,"store"),repo=path.join(root,"repo");fs.mkdirSync(repo);fs.writeFileSync(path.join(repo,"package.json"),JSON.stringify({scripts:{test:"node --test"}}));fs.writeFileSync(path.join(repo,"a.js"),"module.exports=1;\n");
   const store=new Store(storeRoot),run={run_id:"run_history",project_id:"project_history",project_dir:repo,state:"RESOLVING"},authority={store,load:runId=>{assert.equal(runId,run.run_id);return run;}};
   return{root,store,repo,run,authority,cleanup:()=>fs.rmSync(root,{recursive:true,force:true})};

@@ -1,125 +1,124 @@
 # DebugAI MCP Adapter
 
-Status: SOURCE + CI + REAL STDIO PROTOCOL VERIFIED — LIVE DEBUGAI RUNTIME / VS CODEX REGISTRATION NOT YET VERIFIED
+Status: **SOURCE + CI + REAL STDIO PROTOCOL + RUNTIME-IMAGE ASSET CONTRACT VERIFIED; LIVE CURRENT-RUNTIME CALLS NOT YET VERIFIED**
+
+Read [`CURRENT_STATE.md`](CURRENT_STATE.md) for the exact current repository/runtime boundary.
 
 ## Purpose
 
-Expose the existing DebugAI parent-agent interface through Model Context Protocol without creating a second orchestrator, second workflow, or independent mutation path.
-
-The MCP adapter is transport/integration only:
+Expose the existing DebugAI parent-agent interface through Model Context Protocol without creating a second orchestrator, workflow, state engine, or mutation path.
 
 ```text
 Parent AI / Codex
-  -> DebugAI MCP stdio adapter
-  -> existing `bin/debugai.js` execute contract
-  -> existing DebugAI HTTP API
-  -> existing RunAuthority / durable continuation / workflow / approval gates
+  -> bin/debugai-mcp.mjs
+  -> mcp/server.mjs
+  -> existing bin/debugai.js execute contract
+  -> http://127.0.0.1:8787
+  -> existing DebugAI RunAuthority/workflow/approval gates
 ```
 
-The MCP adapter therefore does not replace Durable Continuation. It exposes the existing continuation-capable runtime to the parent AI.
+MCP is transport/integration only.
 
 ## Implementation
 
-- MCP factory: `mcp/server.mjs`
+- factory: `mcp/server.mjs`
 - stdio entry: `bin/debugai-mcp.mjs`
-- existing delegated client: `bin/debugai.js`
-- unit/contract tests: `mcp/tests/mcp-adapter.test.mjs`
+- delegated client: `bin/debugai.js`
+- contract tests: `mcp/tests/mcp-adapter.test.mjs`
 - real stdio protocol regression: `mcp/tests/mcp-stdio.test.mjs`
 
-The adapter is a dedicated ESM entry because the MCP TypeScript SDK v2 is ESM. The existing DebugAI runtime/CLI remains CommonJS and is not converted merely to support MCP.
+The MCP entry is ESM because the MCP SDK is ESM; the existing runtime/CLI remains CommonJS where already designed.
 
-## Exposed tools
+## Exact tool surface
 
-Exactly nine MCP tools are exposed:
+Exactly nine tools:
 
-- `debugai_health`
-- `debugai_analyze`
-- `debugai_start`
-- `debugai_resume`
-- `debugai_wait`
-- `debugai_patch_candidate`
-- `debugai_verify`
-- `debugai_status`
-- `debugai_inspect`
+```text
+debugai_health
+debugai_analyze
+debugai_start
+debugai_resume
+debugai_wait
+debugai_patch_candidate
+debugai_verify
+debugai_status
+debugai_inspect
+```
 
-The continuation path is available over MCP:
+No approve/apply shortcut is allowed.
+
+Run-scoped tools require explicit `run_id`. Repository-scoped operations require an explicit repository path.
+
+## Durable continuation surface
 
 ```text
 debugai_start
-  -> returns exact run_id
-  -> debugai_status
-  -> debugai_resume when continuation is required
-  -> debugai_wait for terminal/blocked state
-  -> debugai_inspect for retained/redacted run evidence
+-> returns exact run_id
+-> debugai_status
+-> debugai_resume only when the run is actually resumable/interrupted
+-> bounded debugai_wait
+-> debugai_inspect
 ```
 
-Run-scoped MCP tools require explicit `run_id`; the MCP surface does not rely on implicit session state for selecting a run.
+The adapter does not own continuation state; it delegates to the existing runtime.
 
-Repository-scoped analysis/verification requires an explicit `repo` path to avoid accidentally acting on the MCP process working directory.
+## Mutation boundary
 
-## Mutation / approval boundary
+`debugai_patch_candidate` creates a candidate only.
 
-The MCP surface intentionally does **not** expose an approve/apply shortcut.
+Patch application remains behind the established approval boundary:
 
-`debugai_patch_candidate` creates a candidate only. Patch application remains behind the existing explicit approval decision, exact candidate identity binding, repository revision validation, apply receipt, retest, review, and Strict Completion path.
+```text
+explicit Master approval
++ exact candidate identity
++ repository revision validation
++ apply receipt
++ deterministic retest
++ reviews
++ Strict Completion
+```
 
-Do not add a mutation-capable MCP tool unless the existing approval contract can be preserved end-to-end and separately verified.
+MCP must not weaken or bypass this contract.
 
 ## Output
 
-Successful tools return an MCP text result containing JSON with:
-
-```text
-schema = debugai.mcp-result/v1
-tool
-exit_code
-result
-```
-
-Adapter/delegated execution failures return `isError=true` with `debugai.mcp-error/v1`.
-
-A DebugAI verification verdict other than PASS remains a valid DebugAI result and is not converted into a fabricated MCP transport success claim.
+Successful tools return MCP text containing `debugai.mcp-result/v1` JSON. Transport/delegated execution failures return `isError=true` with the MCP error schema. A DebugAI verdict other than PASS is not rewritten into transport PASS semantics.
 
 ## Dependencies
 
-- `@modelcontextprotocol/server` 2.2.0
-- `@modelcontextprotocol/client` 2.2.0 (protocol regression test only)
-- `zod` 4.6.5
-
-Node runtime remains the repository authority version.
-
-## Current verified source / protocol boundary
-
-Current exact source head before this documentation update:
-
 ```text
-44f5dcdb6e52e9c0061d732724fc0b4a28ab27b5
+@modelcontextprotocol/server 2.2.0
+@modelcontextprotocol/client 2.2.0 (test only)
+zod 4.6.5
+Node 24.20.0
 ```
 
-GitHub Actions for that exact SHA:
+## Current verified source/protocol boundary
+
+Implementation anchor before the current documentation synchronization:
 
 ```text
-Public Readiness Audit #321 = SUCCESS
-Verify                 #356 = SUCCESS
-Core Verify            #357 = SUCCESS
-repository tests            = 355/355 PASS
+source anchor                    = c2355f8dd7628e717db1bba83725b33360796828
+Public Readiness Audit #359      = SUCCESS
+Verify #394                      = SUCCESS
+repository tests                 = 373/373 PASS
+Core Verify #395                 = SUCCESS
+MCP factory                      = PASS
+MCP stdio initialize/handshake   = PASS
+tools/list                       = PASS
+exact exposed tools              = 9
+health fixture call              = PASS
+approve/apply MCP tool           = ABSENT
+runtime-image MCP assets         = PASS
 ```
 
-The current Verify run includes MCP contract and real-protocol regressions. It proved:
+The stdio regression uses an official MCP client against the real MCP entry with a controlled loopback HTTP fixture. This proves the transport -> adapter -> delegated client boundary, not live Contabo Current-runtime operation.
 
-```text
-MCP factory construction     = PASS
-MCP surface guarded          = PASS
-stdio initialize/handshake   = PASS
-tools/list                   = PASS
-exact exposed tools          = 9
-approve/apply MCP tool       = ABSENT
-health tool call             = PASS
-```
+## Runtime-image contract
 
-The real stdio test uses an official MCP client against `bin/debugai-mcp.mjs`. The downstream DebugAI health endpoint is a controlled loopback fixture in CI. This proves the stdio transport -> MCP adapter -> existing CLI/HTTP client boundary without claiming that the Contabo live runtime or VS Codex registration has already been verified.
+The Current Docker runtime now explicitly contains `bin/`, `mcp/`, `scripts/`, and `docs/` needed for live MCP/qualification. A regression test protects that packaging contract.
 
-Historical exact MCP implementation SHA `078203e61073be99a48444ba0c3467a7143102f4` also passed its then-current 286/286 suite and real stdio regression. The current boundary above supersedes it for source/CI status.
+The preceding deployed old image did not contain Current MCP/qualification source assets despite being healthy. Source packaging was corrected at `c2355f8...`; live Current deployment remained unexecuted at this documentation boundary.
 
 ## Current state separation
 
@@ -129,58 +128,65 @@ MCP_UNIT_CONTRACT=PASS
 MCP_STDIO_PROTOCOL=PASS
 MCP_TOOLS_9_OF_9=PASS
 MCP_DURABLE_CONTINUATION_SURFACE=PASS
-MCP_CI=PASS
+MCP_RUNTIME_IMAGE_ASSETS=PASS
 MCP_LIVE_DEBUGAI_RUNTIME=NOT_VERIFIED
 VS_CODEX_MCP_REGISTRATION=NOT_VERIFIED
 REAL_SERVER_TOOL_CALLS=NOT_VERIFIED
-SERVER_DEPLOY=NOT_EXECUTED
+CURRENT_SOURCE_SERVER_REFLECTION=NOT_EXECUTED
 MAIN_MERGE=NOT_EXECUTED
 ```
 
-Source/CI/stdio protocol PASS is not production/runtime deployment PASS.
+## Server/Codex execution context
 
-## Codex / VS runtime handoff boundary
-
-OpenAI Codex currently supports stdio MCP servers through `mcp_servers.<id>.command`, `args`, and `cwd` in Codex configuration. Codex CLI and the IDE extension share MCP configuration.
-
-For the intended server-side DebugAI checkout, the verified source expects the MCP process to launch from the real checkout and delegate to the loopback DebugAI API:
+Known intended live checkout:
 
 ```text
-checkout = /home/admin1/projects/debug-ai
-MCP entry = /home/admin1/projects/debug-ai/bin/debugai-mcp.mjs
-DebugAI API default = http://127.0.0.1:8787
-server workspace = /workspace
+/home/admin1/projects/debug-ai
 ```
 
-The exact live Codex registration must be created only after reading the actual server/Codex environment. Do not invent an SSH alias, Windows path, remote-host wrapper, or existing Codex config. If Codex is running in a server/Remote-SSH context, a direct stdio `node .../bin/debugai-mcp.mjs` registration is the intended shape. If Codex is local on Windows, first determine the existing remote execution/SSH arrangement instead of guessing it.
-
-The first real Codex verification should be read-only/continuation-safe:
+MCP entry:
 
 ```text
-1. MCP discovery sees exactly the nine DebugAI tools.
-2. debugai_health succeeds against the real loopback runtime.
-3. Start one bounded diagnostic run with debugai_start and capture its run_id.
-4. Read it with debugai_status.
-5. Exercise debugai_resume only if the run is actually resumable/interrupted.
-6. Use debugai_wait with a bounded timeout.
-7. Inspect with debugai_inspect.
-8. Do not expose or add approve/apply mutation tools.
+/home/admin1/projects/debug-ai/bin/debugai-mcp.mjs
 ```
 
-Server runtime readback, deployment, restart/recreate, and live Search Gate measurement remain outside the source/CI claim and are to be performed by the explicitly authorized VS Codex server-side workflow.
-
-## Workspace registration
-
-Do not register DebugAI as `AVAILABLE_VERIFIED` in server-core/Workspace until the intended runtime is present and a Workspace/Codex MCP host successfully performs discovery and representative calls against that real DebugAI runtime.
-
-Before that point, the correct narrower state is:
+Delegated API:
 
 ```text
-SOURCE_CI_STDIO_VERIFIED
-LIVE_RUNTIME_NOT_VERIFIED
+http://127.0.0.1:8787
 ```
 
-References for current Codex MCP configuration behavior:
+Container repository root:
 
-- OpenAI Codex configuration reference: https://developers.openai.com/docs/config-file/config-reference
-- OpenAI Docs MCP quickstart (Codex CLI/IDE shared configuration): https://developers.openai.com/learn/docs-mcp
+```text
+/workspace
+```
+
+Do not invent an SSH alias, Windows wrapper, or Codex config. Read the actual execution context first.
+
+## Representative live proof
+
+After Current source/runtime parity is proven:
+
+```text
+1. discover exactly nine tools
+2. debugai_health
+3. debugai_start on an explicitly allowed repository
+4. capture exact run_id
+5. debugai_status with that run_id
+6. debugai_resume only if actually applicable
+7. bounded debugai_wait
+8. debugai_inspect
+9. optional read-only debugai_verify
+10. confirm no approve/apply MCP shortcut exists
+```
+
+Do not mark Workspace MCP `AVAILABLE_VERIFIED` before representative real-runtime calls pass.
+
+## References
+
+- `README.md`
+- `CURRENT_STATE.md`
+- `PRE_SERVER_QUALIFICATION.md`
+- `CODEX_MCP_LIVE_HANDOFF.md`
+- `../DEBUGAI.md`

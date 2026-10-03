@@ -1,39 +1,10 @@
 "use strict";
 const test=require("node:test");
 const assert=require("node:assert/strict");
-const {CASES,buildSystemsForCase,scoreCase,runCausalScoutSkillEffectBenchmark}=require("../control/causal-scout-skill-effect-benchmark.js");
+const {MAX_TOKENS,CASES,buildSystemsForCase,scoreCase,runCausalScoutSkillEffectBenchmark}=require("../control/causal-scout-skill-effect-benchmark.js");
 
-test("Causal Scout benchmark respects max three fixed skills and removes only skill directives/procedures for OFF",()=>{
-  for(const c of CASES){
-    const systems=buildSystemsForCase(c);
-    assert.equal(systems.selected_skill_ids.length,3);
-    assert.deepEqual(systems.selected_skill_ids,[...c.skills]);
-    assert.match(systems.on,/SELECTED_SKILLS=/);
-    assert.doesNotMatch(systems.off,/SELECTED_SKILLS=/);
-    assert.match(systems.off,/ROLE=causal_scout/);
-    assert.match(systems.off,/Do not claim a confirmed root cause/i);
-  }
-});
+test("Causal Scout benchmark preserves case-declared skills and full model headroom",()=>{assert.equal(MAX_TOKENS,32768);for(const c of CASES){const systems=buildSystemsForCase(c);assert.deepEqual(systems.selected_skill_ids,[...c.skills]);assert.match(systems.on,/SELECTED_SKILLS=/);assert.doesNotMatch(systems.off,/SELECTED_SKILLS=/);assert.match(systems.off,/ROLE=causal_scout/);assert.match(systems.off,/Do not claim a confirmed root cause/i);}});
 
-test("Causal Scout deterministic scorer awards 5 only for exact bounded causal output",()=>{
-  const c=CASES[0];
-  const good={failure_family:c.expected.family,causal_chain:[...c.expected.chain],unsupported_links:[c.expected.unsupported],alternate_hypotheses:[c.expected.alternate],confidence:"MEDIUM"};
-  assert.equal(scoreCase(c,good).score,5);
-  const bad={...good,causal_chain:["invented"],alternate_hypotheses:[]};
-  assert.ok(scoreCase(c,bad).score<5);
-});
+test("Causal Scout deterministic scorer awards 5 only for exact bounded causal output",()=>{const c=CASES[0];const good={failure_family:c.expected.family,causal_chain:[...c.expected.chain],unsupported_links:[c.expected.unsupported],alternate_hypotheses:[c.expected.alternate],confidence:"MEDIUM"};assert.equal(scoreCase(c,good).score,5);const bad={...good,causal_chain:["invented"],alternate_hypotheses:[]};assert.ok(scoreCase(c,bad).score<5);});
 
-test("Causal Scout benchmark derives winner from measured scores and never forces Skill ON",async()=>{
-  const calls=[];
-  const outputs=new Map();
-  for(const c of CASES){
-    outputs.set(`off:${c.id}`,JSON.stringify({failure_family:"wrong",causal_chain:[],unsupported_links:[],alternate_hypotheses:[],confidence:"LOW"}));
-    outputs.set(`on:${c.id}`,JSON.stringify({failure_family:c.expected.family,causal_chain:[...c.expected.chain],unsupported_links:[c.expected.unsupported],alternate_hypotheses:[c.expected.alternate],confidence:"MEDIUM"}));
-  }
-  const result=await runCausalScoutSkillEffectBenchmark({callModel:async({mode,user})=>{const parsed=JSON.parse(user);calls.push({mode,user});return {content:outputs.get(`${mode}:${parsed.benchmark_case}`)};},clock:{now:(()=>{let n=0;return()=>++n;})()}});
-  assert.equal(result.skill_selection_boundary,"MAX_3_PER_INVOCATION");
-  assert.equal(result.score.skill_on,15);
-  assert.ok(result.score.skill_off<15);
-  assert.equal(result.score.winner,"SKILL_ON");
-  for(let i=0;i<calls.length;i+=2)assert.equal(calls[i].user,calls[i+1].user);
-});
+test("Causal Scout benchmark derives winner from measured scores and never forces Skill ON",async()=>{const calls=[],outputs=new Map();for(const c of CASES){outputs.set(`off:${c.id}`,JSON.stringify({failure_family:"wrong",causal_chain:[],unsupported_links:[],alternate_hypotheses:[],confidence:"LOW"}));outputs.set(`on:${c.id}`,JSON.stringify({failure_family:c.expected.family,causal_chain:[...c.expected.chain],unsupported_links:[c.expected.unsupported],alternate_hypotheses:[c.expected.alternate],confidence:"MEDIUM"}));}const result=await runCausalScoutSkillEffectBenchmark({callModel:async({mode,user})=>{const parsed=JSON.parse(user);calls.push({mode,user});return{content:outputs.get(`${mode}:${parsed.benchmark_case}`)};},clock:{now:(()=>{let n=0;return()=>++n;})()}});assert.equal(result.skill_selection_boundary,"CASE_DECLARED_SKILLS");assert.equal(result.max_tokens,32768);assert.equal(result.score.skill_on,15);assert.ok(result.score.skill_off<15);assert.equal(result.score.winner,"SKILL_ON");for(let i=0;i<calls.length;i+=2)assert.equal(calls[i].user,calls[i+1].user);});

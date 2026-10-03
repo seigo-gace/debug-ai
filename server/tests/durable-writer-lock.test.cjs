@@ -268,10 +268,11 @@ test("保持中のロックファイル置換を検出する", t => {
 });
 
 test("groupまたはotherから書き込めるrootを拒否する", t => {
-  const root = makeRoot(t);
-  fs.chmodSync(root, 0o777);
+  const root = path.join(makeRoot(t), "unsafe-root");
+  const previousMask = process.umask(0);
+  try { fs.mkdirSync(root, { mode: 0o777 }); } finally { process.umask(previousMask); }
+  assert.equal(fs.statSync(root).mode & 0o777, 0o777);
   assert.throws(() => DurableWriterLock.acquire({ root }), /DURABLE_ROOT_PERMISSIONS_TOO_OPEN/);
-  fs.chmodSync(root, 0o700);
 });
 
 test("closeは冪等でロックファイル自体を削除しない", t => {

@@ -1,5 +1,6 @@
 "use strict";
 const crypto=require("node:crypto");
+const {scrub}=require("../runtime-evidence.js");
 
 const SOURCE_TYPES=new Set(["LOCAL_RUNTIME","INTERNAL_KB","OFFICIAL_EXTERNAL"]);
 function stableStringify(value){
@@ -16,7 +17,8 @@ function sourceTrust(sourceType){
 }
 function makeEvidenceRecord(sourceType,payload,{sourceRef=null}={}){
   if(!SOURCE_TYPES.has(sourceType))throw new Error(`EVIDENCE_SOURCE_TYPE_INVALID:${sourceType}`);
-  const safePayload=payload&&typeof payload==="object"?payload:{value:payload};
+  const normalizedPayload=payload&&typeof payload==="object"?payload:{value:payload};
+  const safePayload=scrub(normalizedPayload);
   const material={source_type:sourceType,payload:safePayload};
   const contentSha256=sha256(Buffer.from(stableStringify(material),"utf8"));
   const inferredRef=sourceRef||safePayload.id||safePayload.source_ref||safePayload.candidate_id||safePayload.url||null;

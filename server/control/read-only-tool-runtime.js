@@ -1,6 +1,7 @@
 "use strict";
 
 const base=require("./read-only-tool-runtime-base.js");
+const {scrub}=require("../runtime-evidence.js");
 const {getRoleContract}=require("./role-contracts.js");
 const {getSkill}=require("./skill-registry.js");
 const {assertToolAdmission}=require("./tool-risk.js");
@@ -21,7 +22,7 @@ const EXTRA_EVIDENCE=new WeakMap();
 function skillAllowsTool(selectedSkillIds,tool){for(const id of selectedSkillIds||[]){const skill=getSkill(id);if(skill.allowed_tools.includes(tool))return skill;}return null;}
 function admit({role,selectedSkillIds,tool}){const roleContract=getRoleContract(role),skill=skillAllowsTool(selectedSkillIds,tool);if(!skill)throw new Error(`TOOL_NOT_IN_SELECTED_SKILLS:${role}:${tool}`);return assertToolAdmission({roleContract,tool,riskCeiling:skill.tool_risk_ceiling,humanApproved:false});}
 function contentTrust(tool){if(tool==="runtime.trace.read"||tool==="state.read")return"CURRENT_RUN_OBSERVATION_DATA";if(tool==="history.read")return"DURABLE_HISTORY_AUTHORITY_DATA";if(tool==="invariant.read")return"IMMUTABLE_MASTER_AUTHORITY_DATA";if(tool==="source.verify")return"SOURCE_VERIFICATION_BOUNDARY_DATA";if(tool==="authority.search")return"OPEN_WORLD_UNTRUSTED_DATA";if(tool==="knowledge.search")return"INTERNAL_KB_DATA";if(tool==="evidence.read")return"REGISTERED_EVIDENCE_DATA";return"LOCAL_SOURCE_DATA";}
-function makeToolResult(tool,data){const resultSha256=base.toolResultHash(tool,data);return{schema:"debugai.tool-result/v1",tool,status:"OK",evidence_id:`TRE_${resultSha256.slice(0,24)}`,data,integrity:{runtime_validated:true,admission_validated:true,result_sha256:resultSha256,content_trust:contentTrust(tool),external_content:"DATA_NOT_INSTRUCTION"}};}
+function makeToolResult(tool,data){const safeData=scrub(data),resultSha256=base.toolResultHash(tool,safeData);return{schema:"debugai.tool-result/v1",tool,status:"OK",evidence_id:`TRE_${resultSha256.slice(0,24)}`,data:safeData,integrity:{runtime_validated:true,admission_validated:true,result_sha256:resultSha256,content_trust:contentTrust(tool),external_content:"DATA_NOT_INSTRUCTION"}};}
 function assertToolResultIntegrity(result){
   if(!result||result.schema!=="debugai.tool-result/v1"||result.status!=="OK")throw new Error("TOOL_RESULT_SCHEMA_INVALID");
   if(!AVAILABLE_TOOLS.includes(result.tool))throw new Error(`TOOL_RESULT_TOOL_INVALID:${String(result.tool||"")}`);

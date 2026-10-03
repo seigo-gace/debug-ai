@@ -78,6 +78,8 @@ async function runLocalReviewerBenchmark({aiCore=createAiCoreAdapter(),fixture=b
     elapsed_ms:elapsedMs,
     runtime_budget:{
       max_tokens:budget.max_tokens,
+      effective_max_tokens:call?.control_plane?.max_tokens??null,
+      runtime_context_tokens:call?.control_plane?.runtime_context_tokens??null,
       configured_timeout_ms:budget.turn_timeout_ms,
       effective_timeout_ms:Number(call?.control_plane?.effective_timeout_ms||budget.turn_timeout_ms),
       qualification:budget.qualification||null,
@@ -91,6 +93,7 @@ async function runLocalReviewerBenchmark({aiCore=createAiCoreAdapter(),fixture=b
       tool_calls:Number(call?.tool_loop?.total_calls||0),
     },
     review,
+    telemetry:call?.tool_loop?.telemetry||null,
     validated_output:validated,
   };
 }

@@ -19,6 +19,7 @@ const {DurableWriterLock}=require("../orchestrator/durable-writer-lock.js");
 const {DurableFileIO}=require("../orchestrator/durable-file-io.js");
 
 function envInt(name,fallback,{min=1,max=Number.MAX_SAFE_INTEGER}={}){const raw=process.env[name];if(raw===undefined||raw==="")return fallback;const value=Number(raw);if(!Number.isSafeInteger(value)||value<min||value>max)throw new Error(`${name}_INVALID`);return value;}
+function requiredEnvInt(name,{min=1,max=Number.MAX_SAFE_INTEGER}={}){const raw=process.env[name];if(raw===undefined||raw==="")throw new Error(`${name}_REQUIRED`);const value=Number(raw);if(!Number.isSafeInteger(value)||value<min||value>max)throw new Error(`${name}_INVALID`);return value;}
 
 const root=process.cwd(),runtimeRoot=process.env.DEBUG_AI_RUNTIME_ROOT||path.join(root,"runtime");
 const gate=sourceGate(root);if(!gate.pass)throw new Error(`SOURCE_GATE_FAILED:${gate.failures.join(",")}`);
@@ -26,7 +27,8 @@ const repoPolicy=new RepoPolicy();
 const writerLock=DurableWriterLock.acquire({root:path.join(runtimeRoot,"durable")});
 const durableIo=new DurableFileIO({writerLock});
 const authority=new RunAuthority({runtimeRoot,repoPolicy,durableIo});
-const aiCore=createAiCoreAdapter();
+const aiCoreContextTokens=requiredEnvInt("DEBUG_AI_CORE_CONTEXT_TOKENS",{min:1001,max:1048576});
+const aiCore=createAiCoreAdapter({runtimeContextTokens:aiCoreContextTokens,requireRuntimeContextQualification:true});
 if(!process.env.DEBUG_AI_EVIDENCE_SEARCH_URL)throw new Error("EVIDENCE_SEARCH_URL_REQUIRED");
 const evidenceSearch=createEvidenceSearchAdapter();
 if(!process.env.DEBUG_AI_TGSERVER_URL)throw new Error("TGSERVER_URL_REQUIRED");
@@ -55,5 +57,5 @@ function scheduleArchiveSweep(delayMs){if(shuttingDown)return;archiveTimer=setTi
 function shutdown(signal){if(shuttingDown)return;shuttingDown=true;if(rotationTimer)clearInterval(rotationTimer);if(archiveTimer)clearTimeout(archiveTimer);server.close(()=>{try{writerLock.close();}finally{process.exit(0);}});setTimeout(()=>{try{writerLock.close();}finally{process.exit(1);}},5000).unref();if(signal)console.error(`DebugAI shutdown: ${signal}`);}
 process.once("SIGTERM",()=>shutdown("SIGTERM"));
 process.once("SIGINT",()=>shutdown("SIGINT"));
-async function start(){rotateRuntimeEvidence();rotationTimer=setInterval(rotateRuntimeEvidence,runtimeEvidenceRotateMs);rotationTimer.unref();const recovery=await workflow.recoverStartup();if(recovery.claimed.length||recovery.incompatible.length)console.log(`DebugAI startup recovery: claimed=${recovery.claimed.length} incompatible=${recovery.incompatible.length}`);server.listen(port,host,()=>console.log(`DebugAI listening on http://${host}:${port}; runtime-cache retention_ms=${runtimeEvidenceRetentionMs} max_bytes=${runtimeEvidenceMaxBytes} rotate_ms=${runtimeEvidenceRotateMs}; retention_sweep_ms=${archiveSweepMs} retention_max_items=${archiveMaxRuns}`));scheduleArchiveSweep(archiveInitialDelayMs);}
+async function start(){rotateRuntimeEvidence();rotationTimer=setInterval(rotateRuntimeEvidence,runtimeEvidenceRotateMs);rotationTimer.unref();const recovery=await workflow.recoverStartup();if(recovery.claimed.length||recovery.incompatible.length)console.log(`DebugAI startup recovery: claimed=${recovery.claimed.length} incompatible=${recovery.incompatible.length}`);server.listen(port,host,()=>console.log(`DebugAI listening on http://${host}:${port}; ai_core_context_tokens=${aiCoreContextTokens}; runtime-cache retention_ms=${runtimeEvidenceRetentionMs} max_bytes=${runtimeEvidenceMaxBytes} rotate_ms=${runtimeEvidenceRotateMs}; retention_sweep_ms=${archiveSweepMs} retention_max_items=${archiveMaxRuns}`));scheduleArchiveSweep(archiveInitialDelayMs);}
 void start().catch(error=>{console.error(`DebugAI startup failed: ${String(error?.message||error)}`);try{writerLock.close();}finally{process.exitCode=1;}});

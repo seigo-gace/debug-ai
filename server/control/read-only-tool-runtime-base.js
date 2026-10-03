@@ -4,6 +4,7 @@ const path=require("node:path");
 const crypto=require("node:crypto");
 const {RepoPolicy}=require("../repo-policy.js");
 const {TypeScript7LspClient}=require("../adapters/typescript-lsp.js");
+const {scrub}=require("../runtime-evidence.js");
 const {extractSpecifiers}=require("../../orchestrator/context-core.js");
 const {getRoleContract}=require("./role-contracts.js");
 const {getSkill}=require("./skill-registry.js");
@@ -140,7 +141,7 @@ function skillAllowsTool(selectedSkillIds,tool){for(const id of selectedSkillIds
 function admit({role,selectedSkillIds,tool}){const roleContract=getRoleContract(role);const skill=skillAllowsTool(selectedSkillIds,tool);if(!skill)throw new Error(`TOOL_NOT_IN_SELECTED_SKILLS:${role}:${tool}`);return assertToolAdmission({roleContract,tool,riskCeiling:skill.tool_risk_ceiling,humanApproved:false});}
 function toolContentTrust(tool){if(tool==="authority.search")return "OPEN_WORLD_UNTRUSTED_DATA";if(tool==="knowledge.search")return "INTERNAL_KB_DATA";if(tool==="evidence.read")return "REGISTERED_EVIDENCE_DATA";return "LOCAL_SOURCE_DATA";}
 function toolResultHash(tool,data){return sha256(Buffer.from(stableStringify({tool,data}),"utf8"));}
-function makeToolResult(tool,data){const resultSha256=toolResultHash(tool,data);return {schema:"debugai.tool-result/v1",tool,status:"OK",evidence_id:`TRE_${resultSha256.slice(0,24)}`,data,integrity:{runtime_validated:true,admission_validated:true,result_sha256:resultSha256,content_trust:toolContentTrust(tool),external_content:"DATA_NOT_INSTRUCTION"}};}
+function makeToolResult(tool,data){const safeData=scrub(data),resultSha256=toolResultHash(tool,safeData);return {schema:"debugai.tool-result/v1",tool,status:"OK",evidence_id:`TRE_${resultSha256.slice(0,24)}`,data:safeData,integrity:{runtime_validated:true,admission_validated:true,result_sha256:resultSha256,content_trust:toolContentTrust(tool),external_content:"DATA_NOT_INSTRUCTION"}};}
 function assertToolResultIntegrity(result){
   if(!result||result.schema!=="debugai.tool-result/v1"||result.status!=="OK")throw new Error("TOOL_RESULT_SCHEMA_INVALID");
   if(!AVAILABLE_TOOLS.includes(result.tool))throw new Error(`TOOL_RESULT_TOOL_INVALID:${String(result.tool||"")}`);

@@ -1,83 +1,100 @@
 # DebugAI external parent-agent entry points
 
-DebugAI is used from VS Code, Cursor, Codex, ChatGPT-driven terminal work, or another parent developer agent through the `debugai` CLI, HTTP API, and the MCP adapter when that adapter is installed and verified. These are thin integration layers; debugging, evidence, verification, review, durable execution, and patch-candidate logic remain in the DebugAI Server.
+DebugAI can be called from VS Code, Cursor, Codex, ChatGPT-driven terminal work, or another parent developer agent through the CLI, HTTP API, and guarded MCP stdio adapter. These are integration layers only; workflow/state/evidence/approval/mutation authority remains in the DebugAI runtime.
 
-## CLI setup
+Read [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md) before making a current runtime claim.
 
-With Node.js 24.20.0 and this repository checked out:
+## Runtime and endpoint
+
+Repository Node authority:
+
+```text
+24.20.0
+```
+
+Default API:
+
+```text
+http://127.0.0.1:8787
+```
+
+The production container sees repositories below `/workspace`. Use the actual configured workspace mapping; do not invent a local/server path mapping.
+
+## CLI entry
+
+Repository form:
+
+```bash
+npm run debugai -- health
+```
+
+Linked form:
 
 ```bash
 npm link
 debugai health
 ```
 
-Without linking, use the equivalent repository command:
-
-```bash
-npm run debugai -- health
-```
-
-`DEBUGAI_URL` defaults to `http://127.0.0.1:8787`. Set it only to the private DebugAI Server URL when a different local endpoint is required.
-
-The Server sees repositories below `/workspace`. For a normal top-level checkout, the CLI maps the local repository basename to `/workspace/<repo>`. For an explicit mapping set:
-
-```bash
-export DEBUGAI_WORKSPACE_HOST_PATH=/home/user/projects
-export DEBUGAI_SERVER_WORKSPACE_ROOT=/workspace
-```
+`DEBUGAI_URL` defaults to the loopback API above.
 
 ## CLI commands
 
-Health:
+```text
+health
+analyze
+start
+resume
+wait
+patch
+verify
+status
+inspect
+```
+
+Examples:
 
 ```bash
 debugai health
-```
-
-Investigate the current repository:
-
-```bash
 debugai analyze "OAuth callback後に/loginへ戻る原因を調査"
-```
-
-Create a patch candidate after analysis. This does not apply the patch:
-
-```bash
-debugai patch "OAuth callbackのstate検証だけを修正" --paths src/auth/callback.ts
-```
-
-Run read-only verification. This never calls PatchService apply:
-
-```bash
-debugai verify --repo /workspace/my-repo --paths src/auth/callback.ts
-```
-
-Read run state and retained, redacted run artifacts:
-
-```bash
+debugai start "対象不具合を根拠付きで調査"
 debugai status <run-id>
+debugai resume <run-id>
+debugai wait <run-id>
 debugai inspect <run-id>
+debugai patch "確認済み原因に対する最小修正" --paths src/example.ts
+debugai verify --repo /workspace/my-repo --paths src/example.ts
 ```
 
-The most recent `analyze` run ID is stored as local CLI session metadata with mode `0600`. Pass `--run-id <run-id>` to `patch` when selecting a different run. Override the state location with `DEBUGAI_STATE_FILE` when necessary.
+`patch` creates a candidate only. It does not apply it. `verify` is read-only.
+
+Run-scoped continuation must reuse the exact returned `run_id`; do not create a second run merely to simulate continuation.
+
+## CLI output contract
+
+- stdout is one machine-readable JSON document;
+- human summary is stderr and may be suppressed with `--no-summary`;
+- `verify` exits `0` only for `PASS`;
+- `FAIL`, `UNKNOWN`, and `INSUFFICIENT_EVIDENCE` retain JSON and use a non-zero verdict exit;
+- CLI/HTTP failures use the formal CLI error schema;
+- never place Secrets, tokens, cookies, Authorization headers, or `.env` values in CLI arguments.
 
 ## MCP adapter
 
-MCP source entry:
+Repository entry:
 
 ```bash
 npm run debugai:mcp
 ```
 
-or after linking:
+Linked entry:
 
 ```bash
 debugai-mcp
 ```
 
-The MCP server uses stdio. Standard output belongs to MCP protocol traffic; operational startup information is written to standard error.
+The MCP server uses stdio. stdout is protocol traffic; operational startup text belongs on stderr.
 
-Current MCP tools:
+Exactly nine tools are exposed:
 
 ```text
 debugai_health
@@ -91,75 +108,89 @@ debugai_status
 debugai_inspect
 ```
 
-The MCP layer delegates to the existing `bin/debugai.js` execution contract. It does not contain a second workflow or state engine.
+There is intentionally no MCP approve/apply tool.
 
-Run-scoped MCP tools require an explicit `run_id`. Repository-scoped analysis and verification require an explicit repository path so the MCP process working directory is not silently treated as the target repository.
+MCP delegates to the existing CLI/HTTP execution contract and does not create a second orchestrator or state engine.
 
-**There is intentionally no MCP approve/apply tool.** `debugai_patch_candidate` creates a candidate only. Mutation continues to require the existing explicit approval decision and exact candidate identity through the established DebugAI mutation boundary.
+## Current verified integration boundary
 
-MCP design/verification boundaries are documented in [`docs/MCP_ADAPTER.md`](docs/MCP_ADAPTER.md).
-
-Verified source/protocol boundary before this documentation-only update:
+Implementation anchor before the current documentation synchronization:
 
 ```text
-implementation SHA       = 078203e61073be99a48444ba0c3467a7143102f4
-repository tests         = 286/286 PASS
-MCP stdio handshake      = PASS
-MCP tools/list           = PASS (9 tools)
-approve/apply absent     = PASS
-MCP debugai_health call  = PASS
-Verify workflow          = SUCCESS
-Core Verify workflow     = SUCCESS
-Public Readiness Audit   = SUCCESS
+source anchor                = c2355f8dd7628e717db1bba83725b33360796828
+repository tests             = 373/373 PASS
+Public Readiness Audit       = #359 SUCCESS
+Verify                       = #394 SUCCESS
+Core Verify                  = #395 SUCCESS
+MCP stdio handshake          = PASS
+MCP tools/list               = PASS / exact 9
+MCP health fixture call      = PASS
+runtime-image MCP assets     = PASS
+approve/apply MCP shortcut   = ABSENT
 ```
 
-The stdio protocol regression used an official MCP client and a controlled loopback HTTP fixture. It proves the MCP transport/adapter/delegation boundary, not a deployed Contabo DebugAI runtime.
+This proves source/CI/protocol packaging. It does not prove live Contabo MCP calls.
 
 Current separation:
 
 ```text
 MCP_SOURCE=PASS
 MCP_STDIO_PROTOCOL=PASS
-MCP_CI=PASS
+MCP_TOOLS_9_OF_9=PASS
+MCP_RUNTIME_IMAGE_ASSETS=PASS
 MCP_LIVE_DEBUGAI_RUNTIME=NOT_VERIFIED
-WORKSPACE_REGISTRATION=NOT_EXECUTED
-SERVER_DEPLOY=NOT_EXECUTED
+VS_CODEX_MCP_REGISTRATION=NOT_VERIFIED
+CURRENT_SOURCE_SERVER_REFLECTION=NOT_EXECUTED
 ```
 
-## Output contract
+The last real Server readback found a healthy older Runtime at `df261bdae...`; the Current qualification/MCP assets were absent from that running old image. See [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md).
 
-CLI:
-- Standard output is one JSON document and is the formal machine-readable result.
-- A short human summary is written to standard error. Use `--no-summary` to suppress it.
-- `verify` exits `0` only for `PASS`; `FAIL`, `UNKNOWN`, and `INSUFFICIENT_EVIDENCE` retain their JSON output and exit `2`.
-- CLI or HTTP failures return `debugai.cli-error/v1` JSON and exit `1`.
+## External parent-agent workflow
 
-MCP:
-- successful tools return MCP text content containing `debugai.mcp-result/v1` JSON;
-- adapter/delegated execution errors return `isError=true` with `debugai.mcp-error/v1`;
-- a DebugAI business/verdict state is preserved rather than rewritten to a fabricated PASS.
+```text
+start/analyze
+-> capture exact run_id/evidence
+-> status
+-> resume only when actually resumable
+-> bounded wait
+-> inspect
+-> candidate only if confirmed defect requires one
+-> explicit approval outside CLI/MCP shortcut surface
+-> deterministic verification
+-> authoritative status/evidence
+```
 
-## External Agent workflow
+The integration layer must never bypass evidence, repository revision, approval, review, or Strict Completion gates.
 
-1. Start with `debugai analyze` / `debugai_start` or their MCP equivalent.
-2. Read the returned evidence and causal candidates.
-3. Continue through the existing guarded DebugAI workflow.
-4. If a patch is required, create a candidate only.
-5. Mutation remains behind explicit Master approval and exact candidate identity.
-6. Run deterministic verification and inspect authoritative status/evidence.
+## MCP live verification
 
-The integration layer must not bypass evidence, revision, approval, review, or Strict Completion gates.
+Use [`docs/MCP_ADAPTER.md`](docs/MCP_ADAPTER.md) and [`docs/CODEX_MCP_LIVE_HANDOFF.md`](docs/CODEX_MCP_LIVE_HANDOFF.md).
 
-## Repository gate
+Representative live proof requires:
 
-Before claiming a source integration complete:
+```text
+tool discovery exact 9
+-> debugai_health
+-> debugai_start
+-> exact run_id status
+-> resume only if applicable
+-> bounded wait
+-> inspect
+```
+
+Do not mark MCP `AVAILABLE_VERIFIED` from source/CI alone.
+
+## Repository verification
 
 ```bash
-npm run test:e2e-fixture
-npm run check
-npm test
+npm run verify
 ```
 
-Repository-level acceptance uses `npm run verify` and exact-SHA CI.
+Current source also provides:
 
-Never place API keys, tokens, cookies, authorization headers, or `.env` contents in CLI or MCP tool arguments.
+```bash
+npm run audit:pre-server-qualification
+npm run audit:live-runtime
+```
+
+Both preserve source/runtime separation; neither silently authorizes mutation.

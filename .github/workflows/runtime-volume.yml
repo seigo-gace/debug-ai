@@ -1,0 +1,33 @@
+name: Runtime Volume Gate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  runtime-volume:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build runtime images
+        run: |
+          docker build --target sandbox-runner -t debug-ai-sandbox-volume-ci .
+          docker build --target debug-ai -t debug-ai-app-volume-ci .
+      - name: Repair production-style named volume and exercise RuntimeEvidenceStore
+        shell: bash
+        run: |
+          set -euo pipefail
+          volume="debug_ai_runtime_ci_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
+          cleanup() { docker volume rm -f "$volume" >/dev/null 2>&1 || true; }
+          cleanup
+          trap cleanup EXIT
+          docker volume create "$volume" >/dev/null
+          docker run --rm --user 0:0 --network none --read-only --security-opt no-new-privileges:true --cap-drop ALL --cap-add CHOWN --cap-add FOWNER --cap-add DAC_OVERRIDE -v "$volume:/runtime" --entrypoint sh debug-ai-sandbox-volume-ci -lc 'touch /runtime/probe && chown 0:0 /runtime /runtime/probe && chmod 0755 /runtime && chmod 0644 /runtime/probe'
+          docker run --rm --user 0:0 --network none --read-only --security-opt no-new-privileges:true --cap-drop ALL --cap-add CHOWN --cap-add FOWNER --cap-add DAC_OVERRIDE -v "$volume:/runtime" --entrypoint sh debug-ai-sandbox-volume-ci -lc 'mkdir -p /runtime && chown -R 1000:1000 /runtime && chmod -R go-rwx /runtime && chmod 0700 /runtime'
+          docker run --rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=32m,mode=1777 -v "$volume:/app/runtime" --entrypoint node debug-ai-app-volume-ci -e 'const fs=require("node:fs");const {RuntimeEvidenceStore}=require("/app/server/runtime-evidence.js");const stat=fs.statSync("/app/runtime");if(stat.uid!==process.geteuid())throw new Error(`OWNER:${stat.uid}:${process.geteuid()}`);if((stat.mode&0o077)!==0)throw new Error(`MODE:${(stat.mode&0o777).toString(8)}`);const store=new RuntimeEvidenceStore("/app/runtime");store.write("ci_run","runtime-volume-gate",{ok:true});console.log("RUNTIME_VOLUME_GATE=PASS")'

@@ -17,7 +17,7 @@ test("durable Researcher runner records fixed identity, per-inference checkpoint
   const result=await runDurableResearcherBenchmark({runDir,identity:identity(),callModel:async({case:c})=>({content:goodOutput(c)}),clock:fakeClock(),now:fakeNow(),pid:4101});
   assert.equal(result.score.skill_on,25);assert.equal(result.score.skill_off,25);
   const metadata=JSON.parse(fs.readFileSync(path.join(runDir,"metadata.json"),"utf8"));
-  assert.equal(metadata.exact_git_sha,"a".repeat(40));assert.equal(metadata.branch,"feat/test");assert.equal(metadata.benchmark_id,BENCHMARK_ID);assert.equal(metadata.model,identity().model);assert.equal(metadata.temperature,0);assert.equal(metadata.token_budget,400);assert.equal(metadata.pid,4101);assert.equal(metadata.fingerprint,fingerprint(identity()));assert.equal(metadata.attempts.length,1);
+  assert.equal(metadata.exact_git_sha,"a".repeat(40));assert.equal(metadata.branch,"feat/test");assert.equal(metadata.benchmark_id,BENCHMARK_ID);assert.equal(metadata.model,identity().model);assert.equal(metadata.temperature,0);assert.equal(metadata.token_budget,researcher.MAX_TOKENS);assert.equal(metadata.pid,4101);assert.equal(metadata.fingerprint,fingerprint(identity()));assert.equal(metadata.attempts.length,1);
   const checkpoints=fs.readFileSync(path.join(runDir,"checkpoints.jsonl"),"utf8").trim().split("\n").map(line=>JSON.parse(line));
   assert.equal(checkpoints.length,researcher.CASES.length*2);assert.ok(checkpoints.every(x=>x.status==="COMPLETED"));
   const state=JSON.parse(fs.readFileSync(path.join(runDir,"state.json"),"utf8"));

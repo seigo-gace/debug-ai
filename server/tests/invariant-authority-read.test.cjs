@@ -14,7 +14,7 @@ const {readInvariantAuthority,withInvariantAuthorityContext}=require("../control
 const {createReadOnlyToolRuntime}=require("../control/read-only-tool-runtime.js");
 
 function fixture(){
-  const root=fs.mkdtempSync(path.join(os.tmpdir(),"debugai-invariant-"));fs.chmodSync(root,0o700);
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),"debugai-invariant-"));assert.equal(fs.statSync(root).mode & 0o777,0o700);
   const repo=path.join(root,"repo");fs.mkdirSync(repo);fs.writeFileSync(path.join(repo,"package.json"),JSON.stringify({scripts:{test:"node --test"}}));
   const runtimeRoot=path.join(root,"runtime"),repoPolicy=new RepoPolicy({workspaceRoot:root}),authority=new RunAuthority({runtimeRoot,repoPolicy}),runtimeEvidence=new RuntimeEvidenceStore(runtimeRoot,{requirePrivateRoot:false});
   return{root,repo,runtimeRoot,repoPolicy,authority,runtimeEvidence,cleanup:()=>fs.rmSync(root,{recursive:true,force:true})};

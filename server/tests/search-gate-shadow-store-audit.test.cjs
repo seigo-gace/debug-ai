@@ -10,7 +10,7 @@ const {auditSearchGateShadowStore,WINDOW_STATUS,POLICY_WINDOW_STATUS}=require(".
 const {runSearchGateShadowAudit,parseArgs}=require("../../scripts/search-gate-shadow-audit.cjs");
 
 function fixture(){
-  const root=fs.mkdtempSync(path.join(os.tmpdir(),"debugai-search-audit-"));fs.chmodSync(root,0o700);
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),"debugai-search-audit-"));assert.equal(fs.statSync(root).mode & 0o777,0o700);
   const store=new RuntimeEvidenceStore(root,{requirePrivateRoot:true});
   return{root,store,cleanup:()=>fs.rmSync(root,{recursive:true,force:true})};
 }

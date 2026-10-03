@@ -10,7 +10,10 @@ test("tool observation prompt uses bounded projection while full observation rem
   const observations=[{round:1,results:[{request:{tool:"source.read",reason:"inspect source"},result,reused:false}]}];
   const before=JSON.stringify(observations);
   const view=observationPromptView(observations);
-  assert.equal(view.schema,"debugai.tool-observation-window/v1");
+  assert.equal(view.schema,"debugai.tool-observation-window/v2");
+  assert.equal(view.compressed_history.schema,"debugai.compressed-tool-history/v1");
+  assert.equal(view.compressed_history.historical_total,0);
+  assert.deepEqual(view.compressed_history.retained_refs,[]);
   assert.equal(view.evidence_window.items.length,1);
   const projection=view.evidence_window.items[0];
   assert.equal(projection.parent_evidence_id,result.evidence_id);
@@ -32,6 +35,7 @@ test("tool observation prompt uses bounded projection while full observation rem
 test("tool errors are bounded data-only summaries and do not require fake evidence ids",()=>{
   const observations=[{round:2,results:[{request:{tool:"source.read",reason:"x"},result:{schema:"debugai.tool-result/v1",status:"ERROR",error_code:"READ_FILE_NOT_FOUND"}}]}];
   const view=observationPromptView(observations);
+  assert.equal(view.schema,"debugai.tool-observation-window/v2");
   assert.equal(view.evidence_window.items.length,0);
   assert.deepEqual(view.evidence_window.required_evidence_ids,[]);
   assert.deepEqual(view.tool_errors,[{round:2,tool:"source.read",status:"ERROR",error_code:"READ_FILE_NOT_FOUND"}]);

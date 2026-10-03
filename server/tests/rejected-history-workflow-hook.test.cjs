@@ -11,7 +11,7 @@ const {wrapRuntimeEvidenceForRejectedHistory}=require("../workflow-observed.js")
 const {readRejectedHistory}=require("../control/rejected-history-provider.js");
 
 function fixture(){
-  const root=fs.mkdtempSync(path.join(os.tmpdir(),"debugai-history-hook-"));fs.chmodSync(root,0o700);
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),"debugai-history-hook-"));assert.equal(fs.statSync(root).mode & 0o777,0o700);
   const store=new Store(path.join(root,"store")),run={run_id:"run_hook",project_id:"project_hook",project_dir:path.join(root,"repo"),state:"RESOLVING"};fs.mkdirSync(run.project_dir);
   const authority={store,load:runId=>{assert.equal(runId,run.run_id);return run;}};
   const records=[];
@@ -38,6 +38,25 @@ test("history persistence fails closed when rejection cites evidence outside fin
   const f=fixture();try{
     const wrapped=wrapRuntimeEvidenceForRejectedHistory(f.runtimeEvidence,f.authority);wrapped.write(f.run.run_id,"failure",failure());
     assert.throws(()=>wrapped.write(f.run.run_id,"analysis",{diagnosis:{hypotheses:[{id:"H_BAD",status:"REJECTED",counter_evidence_refs:["EVI_NOT_REGISTERED"],falsification_condition:"counterexample"}]},evidence_registry:{evidence_ids:[],tool_evidence_ids:[]}}),/REJECTION_EVIDENCE_OUTSIDE_SNAPSHOT/);
+    assert.equal(fs.existsSync(f.store.historyFile),false);
+  }finally{f.cleanup();}
+});
+
+test("request-only analysis without rejected hypotheses needs no fabricated failure history",()=>{
+  const f=fixture();try{
+    const wrapped=wrapRuntimeEvidenceForRejectedHistory(f.runtimeEvidence,f.authority);
+    wrapped.write(f.run.run_id,"failure",null);
+    assert.doesNotThrow(()=>wrapped.write(f.run.run_id,"analysis",{diagnosis:{hypothesis:"Insufficient evidence",claims:[{type:"UNKNOWN",statement:"Failure identity is not supplied"}]},evidence_registry:{evidence_ids:[],tool_evidence_ids:[]}}));
+    assert.equal(f.runtimeEvidence.list(f.run.run_id,{types:["analysis"]}).length,1);
+    assert.equal(fs.existsSync(f.store.historyFile),false);
+  }finally{f.cleanup();}
+});
+
+test("request-only analysis still rejects failure-bound history without a failure record",()=>{
+  const f=fixture();try{
+    const wrapped=wrapRuntimeEvidenceForRejectedHistory(f.runtimeEvidence,f.authority);
+    wrapped.write(f.run.run_id,"failure",null);
+    assert.throws(()=>wrapped.write(f.run.run_id,"analysis",{diagnosis:{hypotheses:[{id:"H_UNBOUND",status:"REJECTED",counter_evidence_refs:["EVI_COUNTER"],falsification_condition:"counterexample"}]},evidence_registry:{evidence_ids:["EVI_COUNTER"],tool_evidence_ids:[]}}),/REJECTED_HISTORY_FAILURE_RECORD_REQUIRED/);
     assert.equal(fs.existsSync(f.store.historyFile),false);
   }finally{f.cleanup();}
 });
