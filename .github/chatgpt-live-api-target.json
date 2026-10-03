@@ -1,6 +1,6 @@
 {
   "base_url": "https://debugai.asterav8.jp",
-  "mode": "readonly",
+  "mode": "resume",
   "verify_after_dogfood": false,
   "run_id": "run_mus5069h_37904d4311",
   "repo": "/workspace/debug-ai",
