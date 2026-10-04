@@ -28,9 +28,13 @@ jobs:
        github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      SOURCE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_SHA }}
 
       - uses: actions/setup-node@v4
         with:
@@ -59,7 +63,7 @@ jobs:
           mkdir -p dev-probe-evidence
           {
             printf 'repository=%s\n' "$GITHUB_REPOSITORY"
-            printf 'sha=%s\n' "$GITHUB_SHA"
+            printf 'sha=%s\n' "$SOURCE_SHA"
             printf 'event=%s\n' "$GITHUB_EVENT_NAME"
             printf 'run_id=%s\n' "$GITHUB_RUN_ID"
             printf 'canonical_verify=%s\n' 'DEBUG_AI_REQUIRE_TS7_REAL=1 npm run verify'
