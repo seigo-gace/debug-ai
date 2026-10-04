@@ -8,6 +8,7 @@ For repository work:
 README.md
 -> docs/CURRENT_STATE.md
 -> docs/DURABLE-CONTINUATION-DESIGN.md when architecture/behavior is relevant
+-> docs/TGSERVER_ZERO_DEVELOPMENT_EVIDENCE.md when GitHub/TGserver development evidence is relevant
 -> task-specific source/tests/docs
 ```
 
@@ -20,6 +21,18 @@ For live Server work, read current `G-ACE-inc/server-core` authority first, then
 - Astera Evidence Search and TGserver are API dependencies.
 - GitHub source and live Server runtime are separate states.
 - Never convert an unexecuted/unknown state into PASS.
+
+## GitHub / TGserver ZERO development evidence
+
+For future CHAT-side development evidence retrieval, use [`docs/TGSERVER_ZERO_DEVELOPMENT_EVIDENCE.md`](docs/TGSERVER_ZERO_DEVELOPMENT_EVIDENCE.md).
+
+- Source/Test/Build/Verify evidence is produced by this repository's owner-only `.github/workflows/dev-probe.yml` using the existing canonical `npm run verify` path.
+- `[DEV-PROBE]` Issues are execution requests only. Their body never supplies a shell command, script path, URL, Secret, deploy target, or Server operation.
+- Runtime/Server Log search is not implemented in this repository's GitHub Actions. Use the central TGserver ZERO Reader in `seigo-gace/TGserver`.
+- TGserver ZERO mapping is `stream=runtime -> P004` and `stream=kb -> P005`; stream is mandatory for `debug-ai` searches.
+- Do not copy TGserver ZERO Cloudflare Access Secrets into this repository.
+- Development Probe and TGserver ZERO Reader never authorize deploy, restart, recreate, Secret change, Provider change, or arbitrary Server command execution.
+- TGserver vNext is not part of this evidence path.
 
 ## Current source/runtime boundary
 
