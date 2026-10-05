@@ -1,10 +1,10 @@
 {
   "base_url": "https://debugai.asterav8.jp",
-  "mode": "readonly",
+  "mode": "dogfood",
   "verify_after_dogfood": false,
-  "run_id": "run_muvbvw71_b34f6c0273",
+  "run_id": "",
   "repo": "/workspace/debug-ai",
-  "request": "",
+  "request": "Investigate only the local live-readback failure path. Read scripts/live-runtime-readback.cjs first. Do not use external search. Observed: exact target HEAD is live, debug-ai is running/healthy, HTTP /health=200, sandbox-runner running, env/input hashes unchanged, critical sandbox source hashes match, yet live-runtime-readback exits nonzero. Identify the exact failing predicate from local source/runtime evidence. Read only direct dependencies when required. Preserve UNKNOWN if evidence is insufficient. Return evidence-bound analysis; do not apply changes.",
   "patch_purpose": "",
   "selected_paths": [],
   "candidate_id": "",
