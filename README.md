@@ -87,6 +87,8 @@ All internal model execution goes through the shared AI Core. DebugAI does not d
 
 Common rules include `DATA_NOT_INSTRUCTION`, FACT-to-evidence binding, labeled INFERENCE, falsifiable HYPOTHESIS, valid `UNKNOWN`, preserved rejected hypotheses, no raw chain-of-thought persistence, and fail-closed timeout/permission/recovery behavior.
 
+Current source reuses the existing bounded read-only Tool Runtime for Patch Engineer candidate planning and for both Local Reviewer paths (post-apply review and read-only verification). This does not grant mutation authority: Patch Engineer remains candidate-only, Local Reviewer remains read-only, and deterministic `diff.plan` / `test.plan` / `rollback.plan` plus Review Packet diff/test-result data remain their existing non-runtime authorities rather than being duplicated as new tools. This source change is not a claim that the approved live runtime already contains it; live reflection remains a separate exact-SHA approval boundary.
+
 ## Current context, token, and prompt-cache policy
 
 The current source supersedes the historical fixed role output ceilings `600/600/600/800/2048/1024` as active policy. Those low values remain historical measurement evidence only.
@@ -523,7 +525,7 @@ Runtime Volume Gate #102   = SUCCESS
 Core Verify #507           = SUCCESS
 ```
 
-The current source contains direct regressions for model-profile ceilings, qualified runtime-context clamping, fail-closed truncation, telemetry-driven 85% working-context compaction, explicit prompt-cache request, current cache telemetry parsing, measured cache-hit ratio, prefix stability, and canonical user/evidence payload preservation.
+The current source contains direct regressions for model-profile ceilings, qualified runtime-context clamping, fail-closed truncation, telemetry-driven 85% working-context compaction, explicit prompt-cache request, current cache telemetry parsing, measured cache-hit ratio, prefix stability, canonical user/evidence payload preservation, Patch Engineer read-only source access, and Local Reviewer read-only evidence access. Patch/review tool access stays bounded by the existing role/skill contracts and does not add a mutation-capable tool path.
 
 The final documentation head requires its own exact-head CI before it can be used as the Server reflection revision.
 
