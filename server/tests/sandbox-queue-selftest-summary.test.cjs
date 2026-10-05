@@ -20,14 +20,14 @@ test("sandbox full-suite summary fails closed when a required counter is missing
   assert.throws(()=>requirePassingTestSummary(output),/SANDBOX_FULL_SUITE_SUMMARY_EVIDENCE_MISSING/);
 });
 
-test("sandbox full-suite summary rejects nonzero failures",()=>{
-  assert.throws(()=>requirePassingTestSummary(node24({tests:446,pass:445,fail:1,skipped:0})),/SANDBOX_FULL_SUITE_PASS_EVIDENCE_INVALID|SANDBOX_FULL_SUITE_ZERO_FAIL_EVIDENCE_MISSING/);
+test("sandbox full-suite summary reports nonzero failures with bounded numeric evidence",()=>{
+  assert.throws(()=>requirePassingTestSummary(node24({tests:446,pass:445,fail:1,skipped:0})),/SANDBOX_FULL_SUITE_ZERO_FAIL_EVIDENCE_MISSING:\{"tests":446,"pass":445,"fail":1,"skipped":0\}/);
 });
 
-test("sandbox full-suite summary rejects skipped tests",()=>{
-  assert.throws(()=>requirePassingTestSummary(node24({tests:446,pass:446,fail:0,skipped:1})),/SANDBOX_FULL_SUITE_ZERO_SKIP_EVIDENCE_MISSING/);
+test("sandbox full-suite summary reports skipped tests with bounded numeric evidence",()=>{
+  assert.throws(()=>requirePassingTestSummary(node24({tests:446,pass:445,fail:0,skipped:1})),/SANDBOX_FULL_SUITE_ZERO_SKIP_EVIDENCE_MISSING:\{"tests":446,"pass":445,"fail":0,"skipped":1\}/);
 });
 
-test("sandbox full-suite summary rejects pass count that does not equal tests",()=>{
-  assert.throws(()=>requirePassingTestSummary(legacy({tests:446,pass:445,fail:0,skipped:0})),/SANDBOX_FULL_SUITE_PASS_EVIDENCE_INVALID/);
+test("sandbox full-suite summary reports pass mismatch after zero fail and zero skip",()=>{
+  assert.throws(()=>requirePassingTestSummary(legacy({tests:446,pass:445,fail:0,skipped:0})),/SANDBOX_FULL_SUITE_PASS_EVIDENCE_INVALID:\{"tests":446,"pass":445,"fail":0,"skipped":0\}/);
 });

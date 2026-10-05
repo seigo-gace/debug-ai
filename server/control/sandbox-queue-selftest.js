@@ -27,12 +27,15 @@ function parseNodeTestSummary(output){
   if(!["tests","pass","fail","skipped"].every(key=>Number.isSafeInteger(summary[key])))return null;
   return Object.freeze(summary);
 }
+function summaryEvidence(summary){return JSON.stringify({tests:summary.tests,pass:summary.pass,fail:summary.fail,skipped:summary.skipped});}
 function requirePassingTestSummary(output){
   const summary=parseNodeTestSummary(output);
   if(!summary)throw new Error("SANDBOX_FULL_SUITE_SUMMARY_EVIDENCE_MISSING");
-  if(summary.tests<=0||summary.pass!==summary.tests)throw new Error("SANDBOX_FULL_SUITE_PASS_EVIDENCE_INVALID");
-  if(summary.fail!==0)throw new Error("SANDBOX_FULL_SUITE_ZERO_FAIL_EVIDENCE_MISSING");
-  if(summary.skipped!==0)throw new Error("SANDBOX_FULL_SUITE_ZERO_SKIP_EVIDENCE_MISSING");
+  const evidence=summaryEvidence(summary);
+  if(summary.tests<=0)throw new Error(`SANDBOX_FULL_SUITE_TEST_COUNT_INVALID:${evidence}`);
+  if(summary.fail!==0)throw new Error(`SANDBOX_FULL_SUITE_ZERO_FAIL_EVIDENCE_MISSING:${evidence}`);
+  if(summary.skipped!==0)throw new Error(`SANDBOX_FULL_SUITE_ZERO_SKIP_EVIDENCE_MISSING:${evidence}`);
+  if(summary.pass!==summary.tests)throw new Error(`SANDBOX_FULL_SUITE_PASS_EVIDENCE_INVALID:${evidence}`);
   return summary;
 }
 async function enqueue(){
