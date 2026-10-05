@@ -1,9 +1,0 @@
-[Unit]
-Description=DebugAI guarded GitOps request watcher
-
-[Path]
-PathExistsGlob=/home/admin1/projects/debug-ai/.debugai-input/gitops/requests/gitops_*.json
-Unit=debugai-gitops.service
-
-[Install]
-WantedBy=default.target
