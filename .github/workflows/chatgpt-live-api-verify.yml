@@ -36,23 +36,33 @@ jobs:
           run_id="$(jq -r '.run_id // ""' .github/chatgpt-live-api-target.json)"
           repo="$(jq -r '.repo // "/workspace/debug-ai"' .github/chatgpt-live-api-target.json)"
           request="$(jq -r '.request // ""' .github/chatgpt-live-api-target.json)"
+          patch_purpose="$(jq -r '.patch_purpose // ""' .github/chatgpt-live-api-target.json)"
+          selected_paths_json="$(jq -c '.selected_paths // []' .github/chatgpt-live-api-target.json)"
           verify_after="$(jq -r 'if has("verify_after_dogfood") then .verify_after_dogfood else true end' .github/chatgpt-live-api-target.json)"
           [[ "$base" == "https://debugai.asterav8.jp" ]]
-          [[ "$mode" == "readonly" || "$mode" == "dogfood" || "$mode" == "resume" ]]
+          [[ "$mode" =~ ^(readonly|dogfood|resume|patch)$ ]]
           [[ -z "$run_id" || "$run_id" =~ ^run_[A-Za-z0-9_]+$ ]]
           [[ "$mode" != "resume" || -n "$run_id" ]]
+          [[ "$mode" != "patch" || -n "$run_id" ]]
           [[ "$repo" == /workspace/* ]]
           [[ ${#request} -le 1000 ]]
+          [[ ${#patch_purpose} -le 1000 ]]
           [[ "$verify_after" == "true" || "$verify_after" == "false" ]]
+          jq -e 'type=="array" and length<=200 and all(.[]; type=="string" and length>0 and length<=512 and (startswith("/")|not) and (split("/")|all(.!=".." and .!="." and .!="")))' <<<"$selected_paths_json" >/dev/null
+          [[ "$mode" != "patch" || -n "$patch_purpose" ]]
           {
             echo "base=$base"
             echo "mode=$mode"
             echo "run_id=$run_id"
             echo "repo=$repo"
             echo "verify_after=$verify_after"
-            echo "request<<EOF"
+            echo "selected_paths_json=$selected_paths_json"
+            echo "request<<EOF_REQUEST"
             echo "$request"
-            echo "EOF"
+            echo "EOF_REQUEST"
+            echo "patch_purpose<<EOF_PATCH"
+            echo "$patch_purpose"
+            echo "EOF_PATCH"
           } >> "$GITHUB_OUTPUT"
           echo "LIVE_API_BASE=$base"
           echo "LIVE_MODE=$mode"
@@ -96,6 +106,7 @@ jobs:
           echo "STATUS_HTTP=$code"
           test "$code" = "200"
           jq -e 'type == "object"' /tmp/status.json >/dev/null
+          test "$(jq -r '.project_dir // ""' /tmp/status.json)" = "${{ steps.target.outputs.repo }}"
           jq -r '"RUN_STATE=" + ((.state // "UNKNOWN")|tostring), "JOB_STATUS=" + ((.durable.job_status // "UNKNOWN")|tostring), "ACTIVE_IN_PROCESS=" + ((.durable.active_in_process // false)|tostring), "LAST_EXECUTION_ERROR_CODE=" + (((.durable.last_execution_error // "NONE")|tostring|split(":")[0]|gsub("[^A-Za-z0-9_.-]";"_"))), "CURSOR_STEP=" + ((.durable.workflow_cursor.step_id // "UNKNOWN")|tostring), "CURSOR_PHASE=" + ((.durable.workflow_cursor.step_phase // "UNKNOWN")|tostring)' /tmp/status.json
           jq -r '(.durable.role_executions // {}) | to_entries[]? | "ROLE_EXECUTION=" + ((.value.role // "UNKNOWN")|tostring) + "|STATUS=" + ((.value.status // "UNKNOWN")|tostring) + "|ATTEMPT=" + ((.value.attempt_no // 0)|tostring)' /tmp/status.json
 
@@ -111,8 +122,8 @@ jobs:
           echo "INSPECT_HTTP=$code"
           test "$code" = "200"
           jq -e 'type == "object"' /tmp/inspect.json >/dev/null
-          jq -r '"INSPECT_RUN_ID_PRESENT=" + ((.run.run_id != null)|tostring), "ANALYSIS_ARTIFACT_PRESENT=" + ((.artifacts.analysis != null)|tostring)' /tmp/inspect.json
-          jq -r '(.artifacts.analysis.payload // {}) as $a | ($a.diagnosis|tostring|ascii_downcase) as $d | "ANALYSIS_STATE=" + (($a.state // "UNKNOWN")|tostring), "DETERMINISTIC_STATUS=" + (($a.deterministic_verification.status // "UNKNOWN")|tostring), "DETERMINISTIC_CHECK_COUNT=" + (($a.deterministic_verification.checks // [])|length|tostring), "DIAGNOSIS_PRESENT=" + (($a.diagnosis != null)|tostring), "EVIDENCE_GAP=" + (($a.evidence_gap // "UNKNOWN")|tostring), "EVIDENCE_STATUS=" + (($a.evidence_status // "UNKNOWN")|tostring), "EXTERNAL_HYPOTHESIS_VERDICT=" + (($a.external_hypothesis_review.json.verdict // "UNKNOWN")|tostring), "DIAGNOSIS_SIGNAL_524=" + ($d|contains("524")|tostring), "DIAGNOSIS_SIGNAL_TIMEOUT=" + ($d|contains("timeout")|tostring), "DIAGNOSIS_SIGNAL_CLOUDFLARE=" + ($d|contains("cloudflare")|tostring), "DIAGNOSIS_CLAIM_COUNT=" + (($a.diagnosis.claims // [])|length|tostring)' /tmp/inspect.json
+          jq -r '"INSPECT_RUN_ID_PRESENT=" + ((.run.run_id != null)|tostring), "ANALYSIS_ARTIFACT_PRESENT=" + ((.artifacts.analysis != null)|tostring), "PATCH_CANDIDATE_ARTIFACT_PRESENT=" + ((.artifacts.patch_candidate != null)|tostring)' /tmp/inspect.json
+          jq -r '(.artifacts.analysis.payload // {}) as $a | "ANALYSIS_STATE=" + (($a.state // "UNKNOWN")|tostring), "DIAGNOSIS_PRESENT=" + (($a.diagnosis != null)|tostring), "EVIDENCE_GAP=" + (($a.evidence_gap // "UNKNOWN")|tostring), "EVIDENCE_STATUS=" + (($a.evidence_status // "UNKNOWN")|tostring), "EXTERNAL_HYPOTHESIS_VERDICT=" + (($a.external_hypothesis_review.json.verdict // "UNKNOWN")|tostring)' /tmp/inspect.json
 
       - name: Start bounded real DebugAI dogfood run
         id: dogfood
@@ -181,7 +192,7 @@ jobs:
           echo "DOGFOOD_BOUNDED_WAIT=TERMINAL"
 
       - name: Inspect dogfood run without exposing payload
-        if: ${{ steps.target.outputs.mode == 'dogfood' || steps.target.outputs.mode == 'resume' }}
+        if: ${{ success() && (steps.target.outputs.mode == 'dogfood' || steps.target.outputs.mode == 'resume') }}
         shell: bash
         run: |
           set -euo pipefail
@@ -193,7 +204,29 @@ jobs:
           test "$code" = "200"
           jq -e 'type == "object"' /tmp/dogfood-inspect.json >/dev/null
           jq -r '"DOGFOOD_ANALYSIS_PRESENT=" + ((.artifacts.analysis != null)|tostring), "DOGFOOD_PATCH_CANDIDATE_PRESENT=" + ((.artifacts.patch_candidate != null)|tostring), "DOGFOOD_JOB_STATUS=" + ((.durable.job_status // "UNKNOWN")|tostring), "DOGFOOD_LAST_ERROR_CODE=" + (((.durable.last_execution_error // "NONE")|tostring|split(":")[0]|gsub("[^A-Za-z0-9_.-]";"_"))), "DOGFOOD_CURSOR_STEP=" + ((.durable.workflow_cursor.step_id // "UNKNOWN")|tostring), "DOGFOOD_CURSOR_PHASE=" + ((.durable.workflow_cursor.step_phase // "UNKNOWN")|tostring)' /tmp/dogfood-inspect.json
-          jq -r '(.artifacts.analysis.payload // {}) as $a | ($a.diagnosis|tostring|ascii_downcase) as $d | "DOGFOOD_ANALYSIS_STATE=" + (($a.state // "UNKNOWN")|tostring), "DOGFOOD_DETERMINISTIC_STATUS=" + (($a.deterministic_verification.status // "UNKNOWN")|tostring), "DOGFOOD_DETERMINISTIC_CHECK_COUNT=" + (($a.deterministic_verification.checks // [])|length|tostring), "DOGFOOD_DIAGNOSIS_PRESENT=" + (($a.diagnosis != null)|tostring), "DOGFOOD_EVIDENCE_GAP=" + (($a.evidence_gap // "UNKNOWN")|tostring), "DOGFOOD_EVIDENCE_STATUS=" + (($a.evidence_status // "UNKNOWN")|tostring), "DOGFOOD_EXTERNAL_HYPOTHESIS_VERDICT=" + (($a.external_hypothesis_review.json.verdict // "UNKNOWN")|tostring), "DOGFOOD_DIAGNOSIS_SIGNAL_524=" + ($d|contains("524")|tostring), "DOGFOOD_DIAGNOSIS_SIGNAL_TIMEOUT=" + ($d|contains("timeout")|tostring), "DOGFOOD_DIAGNOSIS_SIGNAL_CLOUDFLARE=" + ($d|contains("cloudflare")|tostring), "DOGFOOD_DIAGNOSIS_CLAIM_COUNT=" + (($a.diagnosis.claims // [])|length|tostring)' /tmp/dogfood-inspect.json
+
+      - name: Create DebugAI patch candidate
+        if: ${{ steps.target.outputs.mode == 'patch' }}
+        shell: bash
+        env:
+          PATCH_PURPOSE: ${{ steps.target.outputs.patch_purpose }}
+          SELECTED_PATHS_JSON: ${{ steps.target.outputs.selected_paths_json }}
+        run: |
+          set -euo pipefail
+          jq -e '.artifacts.analysis.payload != null' /tmp/inspect.json >/dev/null
+          jq -e '((.artifacts.analysis.payload.external_hypothesis_review.json.verdict // .artifacts.analysis.payload.external_review.verdict // "") == "PASS")' /tmp/inspect.json >/dev/null
+          analysis="$(jq -c '.artifacts.analysis.payload' /tmp/inspect.json)"
+          jq -n --arg run_id "${{ steps.target.outputs.run_id }}" --arg repo "${{ steps.target.outputs.repo }}" --arg purpose "$PATCH_PURPOSE" --argjson analysis "$analysis" --argjson paths "$SELECTED_PATHS_JSON" '{runId:$run_id,analysis:$analysis,repo:$repo,selectedPaths:$paths,context:$purpose,task:$purpose}' > /tmp/patch-body.json
+          code="$(curl --silent --show-error --max-time 1200 --output /tmp/patch.json --write-out '%{http_code}' \
+            -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
+            -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
+            -H 'content-type: application/json' \
+            --data-binary @/tmp/patch-body.json \
+            "${{ steps.target.outputs.base }}/v1/patch-candidate")"
+          echo "PATCH_HTTP=$code"
+          test "$code" = "200"
+          jq -e '.state == "WAITING_MASTER_APPROVAL" and (.candidate.id|type=="string") and (.candidate.diff_hash|test("^[a-f0-9]{64}$"))' /tmp/patch.json >/dev/null
+          jq -r '"PATCH_STATE=" + .state, "PATCH_CANDIDATE_ID=" + .candidate.id, "PATCH_CANDIDATE_HASH=" + .candidate.diff_hash, "PATCH_FILE_COUNT=" + ((.candidate.files // [])|length|tostring), "PATCH_SUMMARY=" + ((.candidate.summary // "")|tostring|gsub("[\r\n]";" ")|.[0:240])' /tmp/patch.json
 
       - name: Read-only verify real Runtime
         if: ${{ steps.target.outputs.mode == 'dogfood' && steps.target.outputs.verify_after == 'true' }}
@@ -228,8 +261,9 @@ jobs:
         if: ${{ always() }}
         shell: bash
         run: |
+          mode="${{ steps.target.outputs.mode }}"
           echo "SOURCE_MUTATION_ENDPOINTS_CALLED=NO"
           echo "APPROVE_APPLY_VERIFY_CALLED=NO"
           echo "ASSET_PROMOTE_CALLED=NO"
-          echo "PATCH_CANDIDATE_ENDPOINT_CALLED=NO"
+          echo "PATCH_CANDIDATE_ENDPOINT_CALLED=$([[ "$mode" == patch ]] && echo YES || echo NO)"
           echo "LIVE_API_LANE_SAFETY=PASS"
