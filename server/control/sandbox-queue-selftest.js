@@ -6,6 +6,7 @@ const {prepareSandboxJob,waitSandboxResult,normalizeJobRoot}=require("./sandbox-
 
 const jobRoot=normalizeJobRoot(process.env.DEBUG_AI_SANDBOX_JOB_ROOT||"/sandbox-jobs");
 const marker=path.join(jobRoot,"queue-selftest-job-id");
+const selfMarker=path.join(jobRoot,"queue-selftest-full-job-id");
 async function enqueue(){
   const source=fs.mkdtempSync(path.join(os.tmpdir(),"debugai-queue-source-"));
   try{
@@ -19,7 +20,15 @@ async function enqueue(){
     process.stdout.write(`SANDBOX_QUEUE_ENQUEUE_PASS|JOB=${job.job_id}\n`);
   }finally{fs.rmSync(source,{recursive:true,force:true});}
 }
-async function verify(){
+async function enqueueSelf(){
+  const source=fs.realpathSync(process.env.DEBUG_AI_SELFTEST_SOURCE_ROOT||"/app");
+  const pkg=JSON.parse(fs.readFileSync(path.join(source,"package.json"),"utf8"));
+  if(pkg?.name!=="debug-ai")throw new Error("SANDBOX_FULL_SUITE_SOURCE_INVALID");
+  const job=prepareSandboxJob({sourceRepo:source,jobRoot,action:"package.test",args:{},timeoutMs:240000});
+  fs.writeFileSync(selfMarker,job.job_id);
+  process.stdout.write(`SANDBOX_FULL_SUITE_ENQUEUE_PASS|JOB=${job.job_id}\n`);
+}
+async function verifyGeneric(){
   if(!fs.existsSync(marker))throw new Error("SANDBOX_QUEUE_MARKER_MISSING");
   const jobId=fs.readFileSync(marker,"utf8").trim();
   const result=await waitSandboxResult({jobRoot,jobId,timeoutMs:45000,pollMs:100});
@@ -28,7 +37,27 @@ async function verify(){
   if(!String(result.stdout||"").includes("QUEUE_TEST_PASS"))throw new Error("SANDBOX_QUEUE_STDOUT_MISSING");
   if(result?.isolation?.backend!=="sidecar+landlock+seccomp")throw new Error("SANDBOX_QUEUE_ISOLATION_BACKEND_INVALID");
   if(result?.isolation?.workspace_mount!=="ABSENT"||result?.isolation?.secret_mounts!=="ABSENT"||result?.isolation?.docker_socket!=="ABSENT")throw new Error("SANDBOX_QUEUE_BOUNDARY_INVALID");
+  if(result?.isolation?.supervised_sigkill!=="DISABLED")throw new Error("SANDBOX_QUEUE_GENERIC_SIGNAL_SUPERVISOR_EXPOSED");
   process.stdout.write(`SANDBOX_QUEUE_ROUNDTRIP_PASS|JOB=${jobId}|BACKEND=${result.isolation.backend}\n`);
 }
+async function verifySelf(){
+  if(!fs.existsSync(selfMarker))throw new Error("SANDBOX_FULL_SUITE_MARKER_MISSING");
+  const jobId=fs.readFileSync(selfMarker,"utf8").trim();
+  const result=await waitSandboxResult({jobRoot,jobId,timeoutMs:260000,pollMs:100});
+  if(result?.schema!=="debugai.sandbox-result/v1")throw new Error("SANDBOX_FULL_SUITE_RESULT_SCHEMA_INVALID");
+  if(result.pass!==true||result.code!==0)throw new Error(`SANDBOX_FULL_SUITE_RESULT_FAILED:${result.code}:${result.stderr||""}`);
+  if(result?.isolation?.backend!=="sidecar+landlock+seccomp")throw new Error("SANDBOX_FULL_SUITE_ISOLATION_BACKEND_INVALID");
+  if(result?.isolation?.workspace_mount!=="ABSENT"||result?.isolation?.secret_mounts!=="ABSENT"||result?.isolation?.docker_socket!=="ABSENT")throw new Error("SANDBOX_FULL_SUITE_BOUNDARY_INVALID");
+  if(result?.isolation?.supervised_sigkill!=="EXACT_SOURCE_BOUND_CHILD_ONLY")throw new Error("SANDBOX_FULL_SUITE_SIGNAL_SUPERVISION_INVALID");
+  const stdout=String(result.stdout||"");
+  if(!/# fail 0(?:\r?\n|$)/.test(stdout))throw new Error("SANDBOX_FULL_SUITE_ZERO_FAIL_EVIDENCE_MISSING");
+  if(!/# skipped 0(?:\r?\n|$)/.test(stdout))throw new Error("SANDBOX_FULL_SUITE_ZERO_SKIP_EVIDENCE_MISSING");
+  process.stdout.write(`SANDBOX_FULL_SUITE_PASS|JOB=${jobId}|BACKEND=${result.isolation.backend}|SIGNAL=${result.isolation.supervised_sigkill}\n`);
+}
+async function verify(){
+  await verifyGeneric();
+  await enqueueSelf();
+  await verifySelf();
+}
 const mode=process.argv[2];
-Promise.resolve(mode==="enqueue"?enqueue():mode==="verify"?verify():Promise.reject(new Error("SANDBOX_QUEUE_MODE_REQUIRED"))).catch(error=>{console.error(error.stack||String(error));process.exit(1);});
+Promise.resolve(mode==="enqueue"?enqueue():mode==="verify"?verify():mode==="enqueue-self"?enqueueSelf():mode==="verify-self"?verifySelf():Promise.reject(new Error("SANDBOX_QUEUE_MODE_REQUIRED"))).catch(error=>{console.error(error.stack||String(error));process.exit(1);});

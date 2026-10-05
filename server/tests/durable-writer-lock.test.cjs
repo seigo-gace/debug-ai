@@ -6,6 +6,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { fork } = require("node:child_process");
+const { requestSupervisedSigkill } = require("./helpers/sandbox-signal-client.cjs");
 
 const {
   DurableWriterLock,
@@ -147,7 +148,7 @@ function spawnOwner(t, root) {
       child.exitCode === null &&
       child.signalCode === null
     ) {
-      child.kill("SIGKILL");
+      await requestSupervisedSigkill(child);
       await waitForExit(child);
     }
   });
@@ -210,8 +211,9 @@ test("SIGKILL後にOSがロックを解放し同じinodeを再利用できる", 
   const lockFile = path.join(root, ".writer.lock");
   const before = fs.statSync(lockFile, { bigint: true });
   const exited = waitForExit(child);
-  child.kill("SIGKILL");
-  await exited;
+  assert.equal(await requestSupervisedSigkill(child), true);
+  const killed = await exited;
+  assert.equal(killed.signal, "SIGKILL");
   const replacement = DurableWriterLock.acquire({ root });
   try {
     const after = fs.statSync(lockFile, { bigint: true });
