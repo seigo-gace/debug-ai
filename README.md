@@ -4,27 +4,41 @@ DebugAI is a code-first, evidence-driven debugging runtime that operates as a sp
 
 This repository is the canonical source authority. GitHub source/CI, shared AI Core state, live Contabo checkout/container state, and production state are separate facts and must be read back independently before any live claim.
 
+## Current synchronization — 2026-10-05
+
+The current feature work is PR #40 (`feat/tgserver-async-log-sink-20261003`), OPEN / DRAFT / UNMERGED. Source `b9203e587781daa9c1869dffa6317764642e2742` is the implementation qualification anchor immediately before documentation synchronization.
+
+That source passed canonical exact-head Development Probe run `37299751542` with `454/454` tests, `FAIL=0`, `SKIP=0`, `source_ready=true`, and `server_mutation_authorized=false`. The same source change passed Verify `37299751510`, Public Readiness `37299751493`, Runtime Volume Gate `37299751497`, Targeted TGserver Logging `37299751459`, Development Probe `37299751542`, and Core Verify `37299751516`.
+
+Core Verify executed the existing isolated Sandbox full-suite and produced `TESTS=454 / PASS=454 / FAIL=0 / SKIPPED=0` with `BACKEND=sidecar+landlock+seccomp`, `SIGNAL=EXACT_SOURCE_BOUND_CHILD_ONLY`, `SANDBOX_DOCKER_SOCKET=ABSENT`, and unchanged source-repository hash. Therefore `FULL_SUITE_SANDBOX_REAL=PASS` is valid for the source/CI isolated-runtime boundary. The repair did not delete/skip tests, relax Landlock/seccomp, add arbitrary environment inheritance, or create a second Sandbox/service/runtime.
+
+The approved live DebugAI Server revision remains `83424901502491c6b1dcc8fd223990f91a750d7d`. The PR #40 source and subsequent documentation-only commits are **not** reflected live. Merge, Deploy/recreate/restart, Secret/provider/model/profile changes and persistent-state mutation remain separate approval boundaries. The final documentation head must pass its own exact-head CI before it can even be considered as a reflection candidate.
+
+For the latest source/CI qualification details use [`docs/CURRENT_SOURCE_QUALIFICATION.md`](docs/CURRENT_SOURCE_QUALIFICATION.md); for repository responsibility/location lookup use [`docs/PROJECT_TREE.md`](docs/PROJECT_TREE.md). Where lower sections preserve older PR numbers, candidate SHAs or an unresolved Sandbox state, those entries are historical evidence and do not override this synchronization block or the latest Current qualification record.
+
 ## Read this first
 
 Use the documents by responsibility, not as interchangeable status notes:
 
 1. [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md) — current verified repository/runtime boundary and next work.
-2. [`docs/DURABLE-CONTINUATION-DESIGN.md`](docs/DURABLE-CONTINUATION-DESIGN.md) — architecture/design authority and durable-continuation contract.
-3. [`docs/PRE_SERVER_QUALIFICATION.md`](docs/PRE_SERVER_QUALIFICATION.md) — benchmark/source/live qualification order and pass/fail states.
-4. [`docs/MCP_ADAPTER.md`](docs/MCP_ADAPTER.md) — MCP transport contract and nine-tool boundary.
-5. [`docs/CODEX_MCP_LIVE_HANDOFF.md`](docs/CODEX_MCP_LIVE_HANDOFF.md) — live parent-agent/MCP verification handoff.
-6. [`DEBUGAI.md`](DEBUGAI.md) — CLI/MCP usage surface.
-7. [`AGENTS.md`](AGENTS.md) — repository operating constraints for coding agents.
+2. [`docs/CURRENT_SOURCE_QUALIFICATION.md`](docs/CURRENT_SOURCE_QUALIFICATION.md) — latest source/CI qualification and isolated Sandbox closure.
+3. [`docs/PROJECT_TREE.md`](docs/PROJECT_TREE.md) — responsibility/location map for repository work.
+4. [`docs/DURABLE-CONTINUATION-DESIGN.md`](docs/DURABLE-CONTINUATION-DESIGN.md) — architecture/design authority and durable-continuation contract.
+5. [`docs/PRE_SERVER_QUALIFICATION.md`](docs/PRE_SERVER_QUALIFICATION.md) — benchmark/source/live qualification order and pass/fail states.
+6. [`docs/MCP_ADAPTER.md`](docs/MCP_ADAPTER.md) — MCP transport contract and nine-tool boundary.
+7. [`docs/CODEX_MCP_LIVE_HANDOFF.md`](docs/CODEX_MCP_LIVE_HANDOFF.md) — live parent-agent/MCP verification handoff.
+8. [`DEBUGAI.md`](DEBUGAI.md) — CLI/MCP usage surface.
+9. [`AGENTS.md`](AGENTS.md) — repository operating constraints for coding agents.
 
-The design document preserves architecture decisions. `CURRENT_STATE.md` owns current implementation/runtime status. Do not rewrite an old design decision merely to make it look like it was always the current implementation.
+The design document preserves architecture decisions. `CURRENT_STATE.md` owns current implementation/runtime history; `CURRENT_SOURCE_QUALIFICATION.md` owns the latest source/CI qualification checkpoint. Do not rewrite an old design or measurement decision merely to make it look like it was always the current implementation.
 
 ## Current verified boundary
 
-The approved live revision is `83424901502491c6b1dcc8fd223990f91a750d7d`. Its exact-head GitHub CI passed Public Readiness #484, Verify #519, Runtime Volume Gate #115, and Core Verify #520. PR #34 remains OPEN / DRAFT / UNMERGED.
+The approved live revision is `83424901502491c6b1dcc8fd223990f91a750d7d`. Its exact-head GitHub CI passed Public Readiness #484, Verify #519, Runtime Volume Gate #115, and Core Verify #520. This paragraph records the historical approved-live boundary; it does not describe the current feature-branch PR.
 
-The approved live source now propagates the MCP request as task data, specifies canonical Causal Scout final output, and forwards Local Reviewer benchmark telemetry. Fresh runtime evidence confirms the request-backed search query and accepted canonical Causal Scout claims with UNKNOWN; broader semantic quality and Strict Completion remain unqualified. The new source-side candidate repairs sandbox test fixtures and request-only history handling, and narrowly preserves typed canonical telemetry counts during secret scrubbing. Its runtime reflection requires separate exact-SHA authorization.
+The approved live source propagates the MCP request as task data, specifies canonical Causal Scout final output, and forwards Local Reviewer benchmark telemetry. Fresh runtime evidence on that live boundary confirmed the request-backed search query and accepted canonical Causal Scout claims with UNKNOWN; broader semantic quality and Strict Completion remain unqualified. Newer source-side candidates are not live until separately approved and reflected.
 
-Approved runtime reflection is healthy with exact parity across 223 shipped files, persistent volumes, historical checkpoints and auxiliary containers preserved, unchanged environment hashes, and context 8192. The old MCP run is correctly BLOCKED on repository revision mismatch. A new real run passes the Causal Scout canonical shape gate and preserves UNKNOWN; semantic quality and full sandbox verification remain unqualified. Source repairs and independent sandbox limitations are tracked in docs/CURRENT_STATE.md and docs/SANDBOX_SUITE_COMPATIBILITY.md.
+Approved runtime reflection is healthy with exact parity across 223 shipped files, persistent volumes, historical checkpoints and auxiliary containers preserved, unchanged environment hashes, and context 8192. The old MCP run is correctly BLOCKED on repository revision mismatch. A real run on the approved live boundary passed the Causal Scout canonical shape gate and preserved UNKNOWN. Newer source qualification, including the isolated Full-suite Sandbox closure, is tracked in `docs/CURRENT_SOURCE_QUALIFICATION.md` and `docs/SANDBOX_SUITE_COMPATIBILITY.md` and must not be promoted to live status without exact-SHA reflection evidence.
 
 ## What DebugAI does
 
@@ -516,34 +530,21 @@ npm install
 npm run verify
 ```
 
-Current source behavior revision `c9aa6f28...` passed:
+The implementation qualification anchor `b9203e587781daa9c1869dffa6317764642e2742` passed canonical direct exact-head verification and the existing isolated Full-suite Sandbox. Exact run/evidence identifiers are recorded in `docs/CURRENT_SOURCE_QUALIFICATION.md`.
 
-```text
-Public Readiness Audit #471 = SUCCESS
-Verify #506                = SUCCESS
-Runtime Volume Gate #102   = SUCCESS
-Core Verify #507           = SUCCESS
-```
-
-The current source contains direct regressions for model-profile ceilings, qualified runtime-context clamping, fail-closed truncation, telemetry-driven 85% working-context compaction, explicit prompt-cache request, current cache telemetry parsing, measured cache-hit ratio, prefix stability, canonical user/evidence payload preservation, Patch Engineer read-only source access, and Local Reviewer read-only evidence access. Patch/review tool access stays bounded by the existing role/skill contracts and does not add a mutation-capable tool path.
-
-The final documentation head requires its own exact-head CI before it can be used as the Server reflection revision.
+Documentation-only commits after that anchor require their own exact-head CI before the resulting documentation head may be considered a Server reflection candidate.
 
 ## Current next-work order
 
-Current-state owner: [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md).
+Current-state history owner: [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md). Latest source qualification owner: [`docs/CURRENT_SOURCE_QUALIFICATION.md`](docs/CURRENT_SOURCE_QUALIFICATION.md).
 
 ```text
-1. require exact candidate-head GitHub CI PASS for the sandbox fixture/typed telemetry-retention corrections
-2. obtain separate Master approval for that exact new SHA; preserve the approved live 83424901502491c6b1dcc8fd223990f91a750d7d until then
-3. reflect only the approved candidate while preserving both volumes, checkpoints, unmanaged state and existing auxiliary containers
-4. reverify exact parity; retained runs may continue only when source-bound compatibility and resumable status both hold
-5. retain canonical Causal Scout closure evidence; finish semantic quality and sandbox compatibility without relaxing validation or safety
-6. finish serial Local Reviewer/cache qualification and keep contested samples labeled
-7. use a separate compatible source-bound checkpoint for current six-role Skill ON/OFF measurement
-8. retain Skill OFF wins/ties; run Thinking A/B only for explicit boolean roles
-9. perform Sampling A/B one axis at a time and token-cap optimization only from prior evidence
-10. complete real integration, MCP durable continuation, self-debug, read-only Search shadow and Strict Completion
+1. finish documentation/PR/Notion synchronization and require exact final-documentation-head GitHub CI PASS
+2. stop at the live mutation boundary unless Master explicitly approves that exact SHA
+3. after approval, use current server-core authority and reflect only the approved SHA while preserving volumes, checkpoints, unmanaged state and auxiliary containers
+4. reverify exact host/container/source parity and runtime health
+5. run a fresh real DebugAI operation on the reflected source and retrieve its P004 evidence through the established shared TGserver Reader
+6. continue real current-runtime integration, MCP durable continuation, self-debug, semantic-quality/benchmark work and Strict Completion from observed evidence only
 ```
 
 ## Safety boundaries
