@@ -1,0 +1,12 @@
+[Unit]
+Description=DebugAI guarded GitOps host runner
+After=default.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/admin1/projects/debug-ai
+ExecStart=/usr/bin/node /home/admin1/projects/debug-ai/scripts/host-gitops-runner.cjs
+TimeoutStartSec=2100
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0077
