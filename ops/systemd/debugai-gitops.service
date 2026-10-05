@@ -5,7 +5,7 @@ After=default.target
 [Service]
 Type=oneshot
 WorkingDirectory=/home/admin1/projects/debug-ai
-ExecStart=/usr/bin/node /home/admin1/projects/debug-ai/scripts/host-gitops-runner.cjs
+ExecStart=/usr/bin/env node /home/admin1/projects/debug-ai/scripts/host-gitops-runner.cjs
 TimeoutStartSec=2100
 NoNewPrivileges=true
 PrivateTmp=true
