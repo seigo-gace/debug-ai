@@ -30,7 +30,7 @@ server/adapters/
   external/internal service adapters including AI Core, TGserver and Evidence Search boundaries
 
 server/tests/
-  server/control/adapter/security/regression tests
+  server/control/adapter/security/regression tests, including guarded GitOps host-executor policy contract
 
 orchestrator/
   platform-neutral canonical cores and durable primitives
@@ -45,7 +45,7 @@ bin/
   CLI and stdio entry points
 
 scripts/
-  build, audit and qualification scripts
+  build, audit and qualification scripts plus the bounded on-demand host GitOps executor
 
 docs/
   design, Current state, qualification, MCP/handoff and compatibility evidence
@@ -56,6 +56,14 @@ legacy/pc-authority/
 Dockerfile / compose.yaml
   container image, service residency, security and persistent-volume contract
 ```
+
+## Guarded GitOps execution boundary
+
+`server/control/gitops-request.js` owns the structured publish/deploy request queue inside the DebugAI source contract.
+
+`scripts/host-gitops-runner.sh` is the bounded **on-demand** host executor for those requests. It uses the existing host `git`/`docker` command path only when explicitly invoked; it is not a resident Host Node/Python process and no DebugAI-specific systemd watcher/service is installed by this source.
+
+Publish remains exact-current-HEAD, candidate-identity, file-scope and remote-readback gated. Deploy may start from a clean older server checkout, but only after exact remote/fetch target verification, a fast-forward ancestry check, and consumption of the exact request/SHA host approval file. This source contract does not itself authorize Production deployment.
 
 ## Current Sandbox verification path
 
@@ -81,4 +89,5 @@ At source `b9203e587781daa9c1869dffa6317764642e2742`, Core Verify run `372997515
 - Source/document/CI work on the existing feature branch does not authorize live Server reflection.
 - Merge, Deploy/recreate/restart, Secret/provider/model/profile changes and persistent-state deletion remain separate approval boundaries.
 - Never create a second orchestrator, Sandbox service or runtime merely to make verification pass.
+- Do not install Host Node/Python or a DebugAI-specific resident host service merely to execute Guarded GitOps.
 - Test deletion, skip relaxation, fake PASS and security-policy relaxation are prohibited fixes.
