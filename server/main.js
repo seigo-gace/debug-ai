@@ -13,6 +13,7 @@ const {createServer}=require("./http.js");
 const {sourceGate}=require("./gates.js");
 const {createSandboxVerificationLane}=require("./control/sandbox-verification.js");
 const {createDapEvidenceLane}=require("./control/dap-evidence-runtime.js");
+const {GitOpsRequestService}=require("./control/gitops-request.js");
 const {archiveTerminalRuns,gcArchivedTerminalRuns}=require("./control/storage-retention.js");
 const {sweepPatchRetention}=require("./control/patch-retention-gc.js");
 const {DurableWriterLock}=require("../orchestrator/durable-writer-lock.js");
@@ -48,8 +49,9 @@ if(!process.env.GROQ_API_KEY&&!process.env.GEMINI_API_KEY)throw new Error("EXTER
 const externalReview=createExternalReviewAdapter();
 const patchService=new PatchService({runtimeRoot,repoPolicy});
 const workflow=createWorkflow({aiCore,externalReview,evidenceSearch,runtimeEvidence,tgserver,patchService,authority,repoPolicy,sandboxVerification,dapEvidence});
+const gitOps=new GitOpsRequestService({repoPolicy});
 const host=process.env.DEBUG_AI_HOST||"127.0.0.1",port=Number(process.env.DEBUG_AI_PORT||8787);
-const server=createServer({workflow,host,port});
+const server=createServer({workflow,gitOps,host,port});
 let shuttingDown=false,rotationTimer=null,archiveTimer=null,archiveSweepRunning=false;
 function rotateRuntimeEvidence(){try{const result=runtimeEvidence.rotate();if(result.orphans_removed>0)console.warn(`DebugAI runtime cache cleanup: files=${result.files} bytes=${result.bytes} orphans_removed=${result.orphans_removed}`);}catch(error){console.error(`DebugAI runtime cache cleanup failed: ${String(error?.message||error)}`);}}
 async function runArchiveSweep(){if(shuttingDown||archiveSweepRunning)return;archiveSweepRunning=true;try{const archive=await archiveTerminalRuns({authority,tgserver,maxRuns:archiveMaxRuns}),gc=gcArchivedTerminalRuns({authority,maxRuns:archiveMaxRuns}),patchGc=sweepPatchRetention({runtimeRoot,maxDeletes:archiveMaxRuns});if(archive.archived.length||archive.errors.length||gc.deleted.length||gc.resumed.length||gc.errors.length||patchGc.backup_deleted.length||patchGc.candidate_deleted.length||patchGc.errors.length)console.warn(`DebugAI retention sweep: archived=${archive.archived.length} already=${archive.already_archived.length} archive_errors=${archive.errors.length} durable_gc_deleted=${gc.deleted.length} durable_gc_resumed=${gc.resumed.length} durable_gc_errors=${gc.errors.length} patch_backup_deleted=${patchGc.backup_deleted.length} patch_candidate_deleted=${patchGc.candidate_deleted.length} patch_gc_errors=${patchGc.errors.length}`);}catch(error){console.error(`DebugAI retention sweep failed: code=${String(error?.code||error?.name||"ERROR")}`);}finally{archiveSweepRunning=false;}}
