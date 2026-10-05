@@ -16,11 +16,7 @@ const NATIVE_SOURCE_BINDINGS = Object.freeze([
 ]);
 const SHA256_RE = /^[a-f0-9]{64}$/;
 
-function fail(code) {
-  const error = new Error(code);
-  error.code = code;
-  throw error;
-}
+function fail(code) { const error = new Error(code); error.code = code; throw error; }
 function sha256Buffer(value) { return crypto.createHash("sha256").update(value).digest("hex"); }
 function safeRegular(file) {
   try { const stat = fs.lstatSync(file); return stat.isFile() && !stat.isSymbolicLink(); }
@@ -52,6 +48,15 @@ function atomicJsonWrite(file, value) {
   fs.writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o444, flag: "wx" });
   fs.renameSync(temporary, file);
 }
+function writeBoundFile(source, destination, mode) {
+  if (!safeRegular(source)) fail("SANDBOX_PROVISION_FILE_UNSAFE");
+  const bytes = fs.readFileSync(source);
+  fs.writeFileSync(destination, bytes, { mode, flag: "wx" });
+  const stat = fs.lstatSync(destination);
+  if (!stat.isFile() || stat.isSymbolicLink()) fail("SANDBOX_PROVISION_DESTINATION_UNSAFE");
+  if ((stat.mode & 0o777) !== mode) fail("SANDBOX_PROVISION_MODE_MISMATCH");
+  return sha256Buffer(bytes);
+}
 function writeSandboxDependencyProvenance({ repositoryRoot = "/app", output = null } = {}) {
   const root = fs.realpathSync(repositoryRoot);
   const packageFile = path.join(root, "package.json");
@@ -60,14 +65,7 @@ function writeSandboxDependencyProvenance({ repositoryRoot = "/app", output = nu
   const declarations = packageDeclarations(pkg);
   const nodeModules = path.join(root, "node_modules");
   const versions = installedVersions(nodeModules, declarations);
-  const result = Object.freeze({
-    schema: DEPENDENCY_PROVENANCE_SCHEMA,
-    node: process.version,
-    platform: process.platform,
-    arch: process.arch,
-    package_json_sha256: sha256File(packageFile),
-    packages: versions,
-  });
+  const result = Object.freeze({ schema: DEPENDENCY_PROVENANCE_SCHEMA, node: process.version, platform: process.platform, arch: process.arch, package_json_sha256: sha256File(packageFile), packages: versions });
   const target = output ? path.resolve(output) : path.join(root, DEPENDENCY_PROVENANCE_FILE);
   atomicJsonWrite(target, result);
   return result;
@@ -115,32 +113,21 @@ function provisionSandboxPackageTest({ jobDir, runtimeRoot = "/app", nativeArtif
   if (request?.schema !== "debugai.sandbox-job/v1" || request.action !== "package.test") return Object.freeze({ status: "NOT_REQUIRED" });
   const snapshot = path.join(jobDir, "repo");
   if (!isDebugAiSelfTestSnapshot(snapshot)) return Object.freeze({ status: "NOT_REQUIRED" });
-
   const dependencies = validateDependencyBinding(snapshot, runtimeRoot);
   const native = validateNativeBinding(snapshot, nativeArtifactRoot);
   const nodeModulesLink = path.join(snapshot, "node_modules");
   if (fs.existsSync(nodeModulesLink)) fail("SANDBOX_DEPENDENCY_DESTINATION_EXISTS");
   fs.symlinkSync(dependencies.node_modules, nodeModulesLink, "dir");
-
   const buildRoot = path.join(snapshot, "build");
   if (fs.existsSync(buildRoot)) fail("SANDBOX_NATIVE_DESTINATION_EXISTS");
   const nativeDestination = path.join(buildRoot, "native");
   fs.mkdirSync(nativeDestination, { recursive: true, mode: 0o755 });
   const addonDestination = path.join(nativeDestination, NATIVE_ADDON_FILE);
   const provenanceDestination = path.join(nativeDestination, NATIVE_PROVENANCE_FILE);
-  fs.copyFileSync(native.addon_file, addonDestination, fs.constants.COPYFILE_EXCL);
-  fs.copyFileSync(native.provenance_file, provenanceDestination, fs.constants.COPYFILE_EXCL);
-  fs.chmodSync(addonDestination, 0o555);
-  fs.chmodSync(provenanceDestination, 0o444);
-  if (sha256File(addonDestination) !== native.addon_sha256) fail("SANDBOX_NATIVE_COPY_HASH_MISMATCH");
-
-  const result = Object.freeze({
-    schema: "debugai.sandbox-artifact-provision/v1",
-    status: "PROVISIONED_EXACT_SOURCE_BOUND",
-    dependency_package_json_sha256: dependencies.package_json_sha256,
-    native_addon_sha256: native.addon_sha256,
-    node_modules_read_only_target: dependencies.node_modules,
-  });
+  const copiedAddonHash = writeBoundFile(native.addon_file, addonDestination, 0o555);
+  writeBoundFile(native.provenance_file, provenanceDestination, 0o444);
+  if (copiedAddonHash !== native.addon_sha256 || sha256File(addonDestination) !== native.addon_sha256) fail("SANDBOX_NATIVE_COPY_HASH_MISMATCH");
+  const result = Object.freeze({ schema: "debugai.sandbox-artifact-provision/v1", status: "PROVISIONED_EXACT_SOURCE_BOUND", dependency_package_json_sha256: dependencies.package_json_sha256, native_addon_sha256: native.addon_sha256, node_modules_read_only_target: dependencies.node_modules });
   atomicJsonWrite(path.join(jobDir, "provisioning.json"), result);
   return result;
 }
@@ -148,7 +135,7 @@ function provisionSandboxPackageTest({ jobDir, runtimeRoot = "/app", nativeArtif
 module.exports = {
   NATIVE_PROVENANCE_SCHEMA, DEPENDENCY_PROVENANCE_SCHEMA, DEPENDENCY_PROVENANCE_FILE,
   NATIVE_PROVENANCE_FILE, NATIVE_ADDON_FILE, NATIVE_SOURCE_BINDINGS,
-  sha256Buffer, sha256File, packageDeclarations, installedVersions,
+  sha256Buffer, sha256File, packageDeclarations, installedVersions, writeBoundFile,
   writeSandboxDependencyProvenance, isDebugAiSelfTestSnapshot,
   validateDependencyBinding, validateNativeBinding, provisionSandboxPackageTest,
 };

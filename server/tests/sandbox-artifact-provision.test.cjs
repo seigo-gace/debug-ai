@@ -61,7 +61,11 @@ test("DebugAI package.test provisions only exact source-bound native and depende
     const nodeModules = fs.lstatSync(path.join(f.snapshot, "node_modules"));
     assert.equal(nodeModules.isSymbolicLink(), true);
     assert.equal(fs.realpathSync(path.join(f.snapshot, "node_modules")), fs.realpathSync(path.join(f.runtime, "node_modules")));
-    assert.equal(fs.readFileSync(path.join(f.snapshot, "build", "native", NATIVE_ADDON_FILE), "utf8"), "native-addon-fixture");
+    const addon = path.join(f.snapshot, "build", "native", NATIVE_ADDON_FILE);
+    const provenance = path.join(f.snapshot, "build", "native", NATIVE_PROVENANCE_FILE);
+    assert.equal(fs.readFileSync(addon, "utf8"), "native-addon-fixture");
+    assert.equal(fs.statSync(addon).mode & 0o777, 0o555);
+    assert.equal(fs.statSync(provenance).mode & 0o777, 0o444);
     assert.equal(JSON.parse(fs.readFileSync(path.join(f.jobDir, "provisioning.json"), "utf8")).status, "PROVISIONED_EXACT_SOURCE_BOUND");
   } finally { f.cleanup(); }
 });

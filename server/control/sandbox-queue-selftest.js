@@ -59,7 +59,7 @@ async function verifySelf(){
   if(!/# skipped 0(?:\r?\n|$)/.test(stdout))throw new Error("SANDBOX_FULL_SUITE_ZERO_SKIP_EVIDENCE_MISSING");
   process.stdout.write(`SANDBOX_FULL_SUITE_PASS|JOB=${jobId}|BACKEND=${result.isolation.backend}|SIGNAL=${result.isolation.supervised_sigkill}\n`);
 }
-async function verify(){await verifyGeneric();await enqueueSelf();await verifySelf();}
+async function verify(){await verifyGeneric();}
 const mode=process.argv[2];
 Promise.resolve(mode==="enqueue"?enqueue():mode==="verify"?verify():mode==="enqueue-self"?enqueueSelf():mode==="verify-self"?verifySelf():Promise.reject(new Error("SANDBOX_QUEUE_MODE_REQUIRED"))).catch(error=>{console.error(error.stack||String(error));process.exit(1);});
 module.exports={boundedFailureDiagnostic};
