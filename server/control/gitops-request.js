@@ -6,7 +6,9 @@ const path = require("node:path");
 
 const SCHEMA = "debugai.gitops-request/v1";
 const ACTIONS = new Set(["publish", "deploy"]);
-const SHA_RE = /^[0-9a-f]{40}$/;
+const GIT_SHA_RE = /^[0-9a-f]{40}$/;
+const HASH_RE = /^[0-9a-f]{64}$/;
+const CANDIDATE_ID_RE = /^patch_[0-9a-f]{24}$/;
 const BRANCH_RE = /^[A-Za-z0-9._\/-]{1,160}$/;
 const REQUEST_ID_RE = /^gitops_[0-9a-f]{24}$/;
 const FORBIDDEN_PATH_PARTS = new Set([".git", ".env", ".debugai-input"]);
@@ -31,7 +33,7 @@ function atomicJsonWrite(file, value) {
 
 function normalizeSha(value, code) {
   const sha = String(value || "").trim().toLowerCase();
-  if (!SHA_RE.test(sha)) fail(code);
+  if (!GIT_SHA_RE.test(sha)) fail(code);
   return sha;
 }
 
@@ -97,9 +99,9 @@ class GitOpsRequestService {
     if (action === "publish") {
       request.files = normalizeFiles(input.files);
       request.commit_message = normalizeMessage(input.commit_message);
-      request.candidate_id = String(input.candidate_id || "").trim();
+      request.candidate_id = String(input.candidate_id || "").trim().toLowerCase();
       request.candidate_hash = String(input.candidate_hash || "").trim().toLowerCase();
-      if (!request.candidate_id || !SHA_RE.test(request.candidate_hash)) fail("GITOPS_CANDIDATE_IDENTITY_INVALID");
+      if (!CANDIDATE_ID_RE.test(request.candidate_id) || !HASH_RE.test(request.candidate_hash) || request.candidate_id !== `patch_${request.candidate_hash.slice(0, 24)}`) fail("GITOPS_CANDIDATE_IDENTITY_INVALID");
     } else {
       request.sha = normalizeSha(input.sha, "GITOPS_DEPLOY_SHA_INVALID");
       if (request.sha !== expectedHead) fail("GITOPS_DEPLOY_SHA_HEAD_MISMATCH");
