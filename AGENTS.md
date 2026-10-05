@@ -7,6 +7,8 @@ For repository work:
 ```text
 README.md
 -> docs/CURRENT_STATE.md
+-> docs/CURRENT_SOURCE_QUALIFICATION.md for the latest source/CI qualification boundary
+-> docs/PROJECT_TREE.md for responsibility/location lookup
 -> docs/DURABLE-CONTINUATION-DESIGN.md when architecture/behavior is relevant
 -> docs/TGSERVER_ZERO_DEVELOPMENT_EVIDENCE.md when GitHub/TGserver development evidence is relevant
 -> task-specific source/tests/docs
@@ -36,18 +38,21 @@ For future CHAT-side development evidence retrieval, use [`docs/TGSERVER_ZERO_DE
 
 ## Current source/runtime boundary
 
-See `docs/CURRENT_STATE.md` for exact current state.
+See `docs/CURRENT_STATE.md` for the complete repository/runtime history and `docs/CURRENT_SOURCE_QUALIFICATION.md` for the latest source/CI qualification checkpoint.
 
 At the current documentation synchronization boundary:
 
 ```text
-implementation anchor       = c2355f8dd7628e717db1bba83725b33360796828
-PR                          = #34 OPEN / DRAFT / UNMERGED
-source/CI                   = PASS
-running old Server runtime  = healthy on df261bdae...
-Current source deployed     = NO
-live Current-source state   = RUNTIME_SOURCE_BEHIND_OR_UNKNOWN
+qualified implementation anchor before docs sync = b9203e587781daa9c1869dffa6317764642e2742
+PR                                                = #40 OPEN / DRAFT / UNMERGED
+source canonical verify                           = PASS / 454 tests / 454 pass / 0 fail / 0 skipped
+source isolated full-suite Sandbox                = PASS / sidecar+landlock+seccomp
+approved live Server revision                     = 83424901502491c6b1dcc8fd223990f91a750d7d
+Current source deployed                           = NO
+live Current-source state                         = NOT_REFLECTED
 ```
+
+Documentation-only commits after `b9203e...` require their own exact-head CI before becoming a reflection candidate. No documentation statement upgrades the live runtime.
 
 ## Server
 
@@ -58,8 +63,7 @@ live Current-source state   = RUNTIME_SOURCE_BEHIND_OR_UNKNOWN
 - Do not discard `.debugai-input/` or other local-only Server material merely to make a deploy/measurement pass.
 - Container start, HTTP 200, image build, or green CI alone is not Current Runtime PASS.
 - Server source reflection/rebuild/recreate remains governed by current server-core and explicit Master authorization.
-
-Master has authorized the Current DebugAI source-reflection phase after the current README/document synchronization. This does not authorize main merge, Secret changes, Search Gate activation, production profile promotion, new model download, or unrelated mutations.
+- The current feature-branch source has no implied deploy/recreate/restart authorization. Before reflection, bind approval to one exact post-documentation SHA and re-read the current server-core deployment authority.
 
 ## Evidence
 
@@ -92,6 +96,8 @@ Mutation-capable effects are never replayed automatically after restart.
 - CLI usage: `DEBUGAI.md`
 - MCP contract: `docs/MCP_ADAPTER.md`
 - qualification: `docs/PRE_SERVER_QUALIFICATION.md`
+- current source qualification: `docs/CURRENT_SOURCE_QUALIFICATION.md`
+- responsibility tree: `docs/PROJECT_TREE.md`
 - live MCP handoff: `docs/CODEX_MCP_LIVE_HANDOFF.md`
 
 MCP exposes exactly nine guarded tools and intentionally no approve/apply shortcut.
@@ -133,4 +139,4 @@ Rules:
 
 ## Completion
 
-Do not call DebugAI complete from source tests, CI, fixture PASS, health PASS, or external-review PASS alone. Project-level completion still requires the real current-runtime closed loop and Strict Completion evidence described in README/current state/design authority.
+Do not call DebugAI complete from source tests, CI, fixture PASS, health PASS, isolated Sandbox PASS, or external-review PASS alone. Project-level completion still requires the real current-runtime closed loop and Strict Completion evidence described in README/current state/design authority.
