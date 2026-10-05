@@ -1,8 +1,8 @@
 {
   "base_url": "https://debugai.asterav8.jp",
-  "mode": "resume",
+  "mode": "dogfood",
   "verify_after_dogfood": false,
-  "run_id": "run_muv9isty_2fac35907b",
+  "run_id": "",
   "repo": "/workspace/debug-ai",
-  "request": "Continue the existing DebugAI dogfood investigation for LIVE_READBACK_FAILED. Reuse the same run and existing evidence. Search/read the allowed repository files needed to identify the exact failing predicate and smallest responsible file/symbol. If the first search is insufficient, retry with narrower paths or alternate queries rather than declaring absence. Produce an evidence-backed root cause or preserve UNKNOWN. If a concrete source fix is justified, produce a patch candidate only; do not apply changes. Preserve token/context/tool-use/durable-continuation telemetry."
+  "request": "Investigate LIVE_READBACK_FAILED on current live DebugAI. Start local-source-first: inspect scripts/live-runtime-readback.cjs and only its direct dependencies. Focus on the final pass/fail path and checkoutProven, containerExecutionReadback, containerSourceReadback, healthOk, shadowAuditReadback. Observed live facts: exact target HEAD, debug-ai running/healthy, sandbox-runner running, HTTP 200, env/input hashes unchanged, sandbox source match PASS. Do not broaden to open-world research unless local source leaves a concrete evidence gap. If search misses, retry with narrower path/query. Identify the exact failing predicate and smallest responsible file/symbol, or preserve UNKNOWN. Produce a patch candidate only if source evidence justifies it. Do not apply. Preserve token/context/tool-use telemetry."
 }
