@@ -45,7 +45,9 @@ The crash-test compatibility gap is handled without permitting nonzero signal sy
 - malformed requests, wrong tokens, unsupported signals and unbound target PIDs fail closed without signaling;
 - no new service, Compose project, server directory, persistent runtime or external control path is introduced.
 
-The existing Core Verify queue gate is extended through the same helper so that, after the generic queue round-trip, it enqueues the exact DebugAI source as `package.test` and requires the isolated full repository suite to finish with zero failures and zero skips. Until exact-head CI executes that gate successfully, `FULL_SUITE_SANDBOX_REAL` remains `NOT_VERIFIED`.
+The existing Core Verify queue gate is extended through the same helper so that, after the generic queue round-trip, it enqueues the exact DebugAI source as `package.test` and requires the isolated full repository suite to finish with zero failures and zero skips.
+
+The first exact-source full-suite execution reached `result.pass=true`, `code=0`, the expected `sidecar+landlock+seccomp` boundary, and `EXACT_SOURCE_BOUND_CHILD_ONLY` supervision. Its final Core Verify gate still failed because the evidence parser recognized only legacy `# fail 0` / `# skipped 0` summary lines while Node 24 emits informational `ℹ fail 0` / `ℹ skipped 0` lines. The repair therefore parses the terminal test summary numerically rather than treating one presentation prefix as authority. It requires all four counters (`tests`, `pass`, `fail`, `skipped`) and accepts only `tests > 0`, `pass === tests`, `fail === 0`, and `skipped === 0`. Missing or inconsistent counters fail closed. Both Node 24 informational and legacy TAP-comment summary formats are regression-tested. Until exact-head Core Verify executes this repaired gate successfully, `FULL_SUITE_SANDBOX_REAL` remains `NOT_VERIFIED`.
 
 ## Correct repair constraints
 

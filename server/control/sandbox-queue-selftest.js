@@ -12,6 +12,29 @@ function boundedFailureDiagnostic(result){
   const selected=lines.filter(line=>/(?:^not ok\b|ERR_|Error:|error:|EPERM|EACCES|SIGKILL|SANDBOX_|DURABLE_)/i.test(line)).slice(-80).join("\n");
   return selected.replace(/[a-f0-9]{64}/gi,"<HEX64>").slice(-8000);
 }
+function parseNodeTestSummary(output){
+  const lines=String(output||"").split(/\r?\n/);
+  const linePattern=/^\s*(?:#|ℹ)\s+(tests|pass|fail|skipped)\s+(\d+)\s*$/u;
+  let start=-1;
+  for(let i=0;i<lines.length;i++){const match=lines[i].match(linePattern);if(match?.[1]==="tests")start=i;}
+  if(start<0)return null;
+  const summary={};
+  for(let i=start;i<lines.length;i++){
+    const match=lines[i].match(linePattern);if(!match)continue;
+    const key=match[1];if(Object.prototype.hasOwnProperty.call(summary,key))return null;
+    summary[key]=Number(match[2]);
+  }
+  if(!["tests","pass","fail","skipped"].every(key=>Number.isSafeInteger(summary[key])))return null;
+  return Object.freeze(summary);
+}
+function requirePassingTestSummary(output){
+  const summary=parseNodeTestSummary(output);
+  if(!summary)throw new Error("SANDBOX_FULL_SUITE_SUMMARY_EVIDENCE_MISSING");
+  if(summary.tests<=0||summary.pass!==summary.tests)throw new Error("SANDBOX_FULL_SUITE_PASS_EVIDENCE_INVALID");
+  if(summary.fail!==0)throw new Error("SANDBOX_FULL_SUITE_ZERO_FAIL_EVIDENCE_MISSING");
+  if(summary.skipped!==0)throw new Error("SANDBOX_FULL_SUITE_ZERO_SKIP_EVIDENCE_MISSING");
+  return summary;
+}
 async function enqueue(){
   const source=fs.mkdtempSync(path.join(os.tmpdir(),"debugai-queue-source-"));
   try{
@@ -54,12 +77,10 @@ async function verifySelf(){
   if(result?.isolation?.backend!=="sidecar+landlock+seccomp")throw new Error("SANDBOX_FULL_SUITE_ISOLATION_BACKEND_INVALID");
   if(result?.isolation?.workspace_mount!=="ABSENT"||result?.isolation?.secret_mounts!=="ABSENT"||result?.isolation?.docker_socket!=="ABSENT")throw new Error("SANDBOX_FULL_SUITE_BOUNDARY_INVALID");
   if(result?.isolation?.supervised_sigkill!=="EXACT_SOURCE_BOUND_CHILD_ONLY")throw new Error("SANDBOX_FULL_SUITE_SIGNAL_SUPERVISION_INVALID");
-  const stdout=String(result.stdout||"");
-  if(!/# fail 0(?:\r?\n|$)/.test(stdout))throw new Error("SANDBOX_FULL_SUITE_ZERO_FAIL_EVIDENCE_MISSING");
-  if(!/# skipped 0(?:\r?\n|$)/.test(stdout))throw new Error("SANDBOX_FULL_SUITE_ZERO_SKIP_EVIDENCE_MISSING");
-  process.stdout.write(`SANDBOX_FULL_SUITE_PASS|JOB=${jobId}|BACKEND=${result.isolation.backend}|SIGNAL=${result.isolation.supervised_sigkill}\n`);
+  const summary=requirePassingTestSummary(result.stdout);
+  process.stdout.write(`SANDBOX_FULL_SUITE_PASS|JOB=${jobId}|BACKEND=${result.isolation.backend}|SIGNAL=${result.isolation.supervised_sigkill}|TESTS=${summary.tests}|PASS=${summary.pass}|FAIL=${summary.fail}|SKIPPED=${summary.skipped}\n`);
 }
 async function verify(){await verifyGeneric();}
-const mode=process.argv[2];
-Promise.resolve(mode==="enqueue"?enqueue():mode==="verify"?verify():mode==="enqueue-self"?enqueueSelf():mode==="verify-self"?verifySelf():Promise.reject(new Error("SANDBOX_QUEUE_MODE_REQUIRED"))).catch(error=>{console.error(error.stack||String(error));process.exit(1);});
-module.exports={boundedFailureDiagnostic};
+function main(){const mode=process.argv[2];return mode==="enqueue"?enqueue():mode==="verify"?verify():mode==="enqueue-self"?enqueueSelf():mode==="verify-self"?verifySelf():Promise.reject(new Error("SANDBOX_QUEUE_MODE_REQUIRED"));}
+if(require.main===module)Promise.resolve(main()).catch(error=>{console.error(error.stack||String(error));process.exit(1);});
+module.exports={boundedFailureDiagnostic,parseNodeTestSummary,requirePassingTestSummary};
