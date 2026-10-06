@@ -1,16 +1,16 @@
 {
   "schema": "debugai.codegen-benchmark-trigger/v1",
-  "suite": "small-medium-hard-10-each",
+  "suite": "30-individual-cases",
   "cases_per_level": 10,
   "total_cases": 30,
+  "max_parallel": 3,
   "measure": [
-    "accuracy",
+    "semantic_accuracy",
     "scope_compliance",
     "candidate_generation_duration_ms"
   ],
   "apply": false,
   "deploy": false,
-  "rerun_reason": "live 77954ffd snapshot input exclusion reflected",
   "live_source": "77954ffdb6591c3e3c57840e55da7dd40058ae88",
-  "nonce": "rerun-20261006-1519"
+  "nonce": "individual-20261006-1524"
 }
