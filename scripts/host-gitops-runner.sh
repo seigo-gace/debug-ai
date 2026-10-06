@@ -13,10 +13,6 @@ DOCKER_BIN="${DEBUG_AI_GITOPS_DOCKER_BIN:-docker}"
 JQ_BIN="${DEBUG_AI_GITOPS_JQ_BIN:-jq}"
 CURL_BIN="${DEBUG_AI_GITOPS_CURL_BIN:-curl}"
 TIMEOUT_BIN="${DEBUG_AI_GITOPS_TIMEOUT_BIN:-timeout}"
-GH_BIN="${DEBUG_AI_GITOPS_GH_BIN:-gh}"
-PROJECT_OWNER="seigo-gace"
-PROJECT_NUMBER="1"
-PROJECT_ID="PVT_kwHODOQFoM4BEJII"
 
 err_code=""
 request_id=""
@@ -76,7 +72,7 @@ common_validate() {
   "$JQ_BIN" -e '
     .schema=="debugai.gitops-request/v1" and
     (.id|type=="string" and test("^gitops_[0-9a-f]{24}$")) and
-    (.action=="publish" or .action=="deploy" or .action=="project_update") and
+    (.action=="publish" or .action=="deploy") and
     (.expected_head|type=="string" and test("^[0-9a-f]{40}$")) and
     .repo=="/workspace/debug-ai" and
     .branch=="feat/tgserver-async-log-sink-20261003" and
@@ -202,84 +198,6 @@ deploy_request() {
   result_json="$("$JQ_BIN" -n --arg before "$before_head" --arg sha "$request_sha" --arg health "$health_http" --arg state "$state" '{before_head:$before,deployed_sha:$sha,health_http:$health,container_state:$state}')"
 }
 
-project_update_request() {
-  local file="$1" owner number content_url project_view project_id field_view items count item_id added fields_json field_count idx name value field_id option_id readback item_json actual
-  common_validate "$file" || return 1
-  "$JQ_BIN" -e '
-    .project_owner=="seigo-gace" and
-    .project_number==1 and
-    (.content_url|type=="string" and test("^https://github\\.com/(seigo-gace|G-ACE-inc)/[A-Za-z0-9_.-]+/(issues|pull)/[1-9][0-9]*$")) and
-    (.fields|type=="object") and
-    ([.fields|keys[]|select(.!="Status" and .!="Gate" and .!="Change Unit" and .!="Mutation Owner")]|length==0) and
-    ([.fields[]|select((type!="string") or length<1 or length>160)]|length==0)
-  ' "$file" >/dev/null || fail PROJECT_UPDATE_REQUEST_INVALID || return 1
-
-  owner="$("$JQ_BIN" -r '.project_owner' "$file")"
-  number="$("$JQ_BIN" -r '.project_number' "$file")"
-  content_url="$("$JQ_BIN" -r '.content_url' "$file")"
-  [ "$owner" = "$PROJECT_OWNER" ] && [ "$number" = "$PROJECT_NUMBER" ] || fail PROJECT_TARGET_MISMATCH || return 1
-
-  project_view="$(run_timed 30s "$GH_BIN" project view "$number" --owner "$owner" --format json 2>/dev/null)" || fail PROJECT_VIEW_FAILED || return 1
-  project_id="$(printf '%s' "$project_view" | "$JQ_BIN" -r '.id // empty')" || fail PROJECT_ID_READ_FAILED || return 1
-  [ "$project_id" = "$PROJECT_ID" ] || fail PROJECT_ID_MISMATCH || return 1
-
-  field_view="$(run_timed 30s "$GH_BIN" project field-list "$number" --owner "$owner" --format json 2>/dev/null)" || fail PROJECT_FIELD_LIST_FAILED || return 1
-  items="$(run_timed 30s "$GH_BIN" project item-list "$number" --owner "$owner" --limit 200 --format json 2>/dev/null)" || fail PROJECT_ITEM_LIST_FAILED || return 1
-  count="$(printf '%s' "$items" | "$JQ_BIN" -r --arg u "$content_url" '[.items[]|select(.content.url==$u)]|length')" || fail PROJECT_ITEM_COUNT_FAILED || return 1
-
-  if [ "$count" = "0" ]; then
-    added="$(run_timed 30s "$GH_BIN" project item-add "$number" --owner "$owner" --url "$content_url" --format json 2>/dev/null)" || fail PROJECT_ITEM_ADD_FAILED || return 1
-    item_id="$(printf '%s' "$added" | "$JQ_BIN" -r '.id // empty')" || fail PROJECT_ITEM_ID_READ_FAILED || return 1
-  elif [ "$count" = "1" ]; then
-    item_id="$(printf '%s' "$items" | "$JQ_BIN" -r --arg u "$content_url" '.items[]|select(.content.url==$u)|.id')" || fail PROJECT_ITEM_ID_READ_FAILED || return 1
-  else
-    fail PROJECT_ITEM_DUPLICATE
-    return 1
-  fi
-  [[ "$item_id" =~ ^PVTI_ ]] || fail PROJECT_ITEM_ID_INVALID || return 1
-
-  fields_json="$("$JQ_BIN" -c '.fields' "$file")"
-  field_count="$(printf '%s' "$fields_json" | "$JQ_BIN" -r 'length')"
-  for ((idx=0; idx<field_count; idx++)); do
-    name="$(printf '%s' "$fields_json" | "$JQ_BIN" -r --argjson i "$idx" 'keys_unsorted[$i]')"
-    value="$(printf '%s' "$fields_json" | "$JQ_BIN" -r --arg n "$name" '.[$n]')"
-    field_id="$(printf '%s' "$field_view" | "$JQ_BIN" -r --arg n "$name" '.fields[]? | select(.name==$n) | .id' | head -n1)"
-    [ -n "$field_id" ] || fail "PROJECT_FIELD_NOT_FOUND:$name" || return 1
-    case "$name" in
-      Status|Gate)
-        option_id="$(printf '%s' "$field_view" | "$JQ_BIN" -r --arg n "$name" --arg v "$value" '.fields[]? | select(.name==$n) | .options[]? | select(.name==$v) | .id' | head -n1)"
-        [ -n "$option_id" ] || fail "PROJECT_OPTION_NOT_FOUND:$name:$value" || return 1
-        run_timed 30s "$GH_BIN" project item-edit --id "$item_id" --project-id "$project_id" --field-id "$field_id" --single-select-option-id "$option_id" >/dev/null 2>&1 || fail "PROJECT_FIELD_EDIT_FAILED:$name" || return 1
-        ;;
-      "Change Unit"|"Mutation Owner")
-        run_timed 30s "$GH_BIN" project item-edit --id "$item_id" --project-id "$project_id" --field-id "$field_id" --text "$value" >/dev/null 2>&1 || fail "PROJECT_FIELD_EDIT_FAILED:$name" || return 1
-        ;;
-      *)
-        fail PROJECT_FIELD_FORBIDDEN
-        return 1
-        ;;
-    esac
-  done
-
-  readback="$(run_timed 30s "$GH_BIN" project item-list "$number" --owner "$owner" --limit 200 --format json 2>/dev/null)" || fail PROJECT_READBACK_FAILED || return 1
-  item_json="$(printf '%s' "$readback" | "$JQ_BIN" -c --arg u "$content_url" '[.items[]|select(.content.url==$u)] | if length==1 then .[0] else null end')" || fail PROJECT_READBACK_PARSE_FAILED || return 1
-  [ "$item_json" != "null" ] || fail PROJECT_READBACK_ITEM_MISSING || return 1
-
-  for ((idx=0; idx<field_count; idx++)); do
-    name="$(printf '%s' "$fields_json" | "$JQ_BIN" -r --argjson i "$idx" 'keys_unsorted[$i]')"
-    value="$(printf '%s' "$fields_json" | "$JQ_BIN" -r --arg n "$name" '.[$n]')"
-    case "$name" in
-      Status) actual="$(printf '%s' "$item_json" | "$JQ_BIN" -r '.status // empty')" ;;
-      Gate) actual="$(printf '%s' "$item_json" | "$JQ_BIN" -r '.gate // empty')" ;;
-      "Change Unit") actual="$(printf '%s' "$item_json" | "$JQ_BIN" -r '."change Unit" // empty')" ;;
-      "Mutation Owner") actual="$(printf '%s' "$item_json" | "$JQ_BIN" -r '."mutation Owner" // empty')" ;;
-    esac
-    [ "$actual" = "$value" ] || fail "PROJECT_READBACK_MISMATCH:$name" || return 1
-  done
-
-  result_json="$("$JQ_BIN" -n --arg project_id "$project_id" --arg item_id "$item_id" --arg content_url "$content_url" --argjson fields "$fields_json" --argjson readback "$item_json" '{project_id:$project_id,item_id:$item_id,content_url:$content_url,fields:$fields,readback:$readback}')"
-}
-
 process_file() {
   local source="$1" processing done_dir failed_dir started finished status id_for_status
   started="$(date +%s%3N)"
@@ -307,8 +225,6 @@ process_file() {
       publish_request "$processing" || true
     elif [ "$request_action" = "deploy" ]; then
       deploy_request "$processing" || true
-    elif [ "$request_action" = "project_update" ]; then
-      project_update_request "$processing" || true
     else
       err_code="REQUEST_ACTION_INVALID"
     fi
@@ -331,7 +247,7 @@ process_file() {
 
 main() {
   local lock_dir request_dir name count=0 cmd
-  for cmd in "$GIT_BIN" "$DOCKER_BIN" "$JQ_BIN" "$CURL_BIN" "$TIMEOUT_BIN" "$GH_BIN"; do
+  for cmd in "$GIT_BIN" "$DOCKER_BIN" "$JQ_BIN" "$CURL_BIN" "$TIMEOUT_BIN"; do
     command -v "$cmd" >/dev/null 2>&1 || { printf 'debugai-gitops-runner:DEPENDENCY_MISSING:%s\n' "$cmd" >&2; return 1; }
   done
   [ -d "$REPO/.git" ] || { printf 'debugai-gitops-runner:REPO_INVALID\n' >&2; return 1; }
