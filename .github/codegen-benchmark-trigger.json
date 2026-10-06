@@ -1,0 +1,14 @@
+{
+  "schema": "debugai.codegen-benchmark-trigger/v1",
+  "suite": "small-medium-hard-10-each",
+  "cases_per_level": 10,
+  "total_cases": 30,
+  "measure": [
+    "accuracy",
+    "scope_compliance",
+    "candidate_generation_duration_ms"
+  ],
+  "apply": false,
+  "deploy": false,
+  "generated_at": "2026-10-06T14:06:00Z"
+}
