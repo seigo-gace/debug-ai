@@ -101,7 +101,7 @@ function createReadOnlyToolRuntime(options={}){
       const commandId=String(args.command_id||"");
       await options.onServerCommandEvent(serverCommandAuditProjection({phase:"REQUESTED",status:"REQUESTED",command_id:commandId}));
       try{
-        data=await options.serverCommand.execute({command_id:commandId});
+        data=await options.serverCommand.execute({command_id:commandId,arguments:Array.isArray(args.arguments)?args.arguments:[]});
         await options.onServerCommandEvent(serverCommandAuditProjection({phase:"RESULT",status:"PASS",command_id:commandId,request_id:data?.request_id,exit_code:data?.exit_code,read_only:data?.read_only,stdout:data?.stdout}));
       }catch(error){
         await options.onServerCommandEvent(serverCommandAuditProjection({phase:"RESULT",status:"FAIL",command_id:commandId,request_id:error?.request_id,error_code:String(error?.code||error?.message||"SERVER_COMMAND_ERROR").split(":")[0]}));
