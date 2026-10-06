@@ -136,3 +136,32 @@ test("workflow binds server command events to run evidence and TGserver runtime 
     const local=evidence.filter(x=>x.type==="server_command");assert.equal(local.length,2);assert.equal(local[0].runId,commandLogs[0].run_id);assert.equal(local[1].runId,commandLogs[0].run_id);
   }finally{f.cleanup();}
 });
+
+test("analysis emits bounded workflow progress events to TGserver and RuntimeEvidence",async()=>{
+  const f=makeRepo();try{
+    const events=[],evidence=[];
+    const aiCore={call:async(role)=>{
+      if(role==="code_scout")return{content:JSON.stringify({facts:[],decision:"HANDOFF"})};
+      if(role==="causal_scout")return{content:JSON.stringify({candidates:[],decision:"HANDOFF"})};
+      if(role==="researcher")return{content:JSON.stringify({selected_evidence:[],decision:"HANDOFF"})};
+      if(role==="diagnoser")return{content:JSON.stringify({hypothesis:"bounded",public_statement:"bounded",cause_kind:"RUNTIME",decision:"HANDOFF"})};
+      throw new Error("UNEXPECTED_ROLE:"+role);
+    }};
+    const workflow=createWorkflow({
+      aiCore,
+      tgserver:{log:async e=>{events.push(e);return{status:"queued"};},search:async()=>[]},
+      runtimeEvidence:{write:(runId,type,payload)=>{evidence.push({runId,type,payload});return{id:"x",path:"x"};}},
+      evidenceSearch:{search:async()=>[]},
+      repoPolicy:new RepoPolicy({workspaceRoot:f.workspace})
+    });
+    const out=await workflow.runAnalysis({failure:{message:"progress test"},localEvidence:[],repo:f.repo});
+    const p=events.filter(e=>e.kind==="workflow_progress");
+    assert.ok(p.length>=6);
+    assert.ok(p.some(e=>e.step==="SCOUTS"&&e.phase==="RUNNING"));
+    assert.ok(p.some(e=>e.step==="SCOUTS"&&e.phase==="DONE"));
+    assert.ok(p.some(e=>e.step==="FINAL_ANALYSIS"&&e.phase==="DONE"));
+    assert.ok(evidence.some(e=>e.type==="workflow_progress"));
+    for(const e of p){assert.equal(Object.hasOwn(e,"failure"),false);assert.equal(Object.hasOwn(e,"stdout"),false);}
+    assert.equal(out.diagnosis.cause_kind,"RUNTIME");
+  }finally{f.cleanup();}
+});
