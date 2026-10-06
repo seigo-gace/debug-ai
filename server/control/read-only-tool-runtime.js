@@ -29,7 +29,7 @@ function serverCommandAuditProjection(event={}){
   if(Number.isInteger(event.exit_code))out.exit_code=event.exit_code;
   if(typeof event.read_only==="boolean")out.read_only=event.read_only;
   if(typeof event.error_code==="string"&&event.error_code)out.error_code=event.error_code.slice(0,120);
-  if(["project.pwd","project.git_head","project.git_status","project.git_changed_paths","project.git_recent_commits","service.debug_ai_state","service.sandbox_state","service.debug_ai_health","system.disk_usage","github.auth_status","github.repo_view","github.pr_current","github.actions_recent","github.control_current"].includes(commandId)&&typeof event.stdout==="string")out.stdout=event.stdout.slice(0,512);
+  if(["project.pwd","project.git_head","project.git_status","project.git_changed_paths","project.git_recent_commits","project.python_unittest","service.debug_ai_state","service.sandbox_state","service.debug_ai_health","system.disk_usage","github.auth_status","github.repo_view","github.pr_current","github.actions_recent","github.control_current"].includes(commandId)&&typeof event.stdout==="string")out.stdout=event.stdout.slice(0,512);
   return scrub(out);
 }
 
@@ -101,7 +101,7 @@ function createReadOnlyToolRuntime(options={}){
       const commandId=String(args.command_id||"");
       await options.onServerCommandEvent(serverCommandAuditProjection({phase:"REQUESTED",status:"REQUESTED",command_id:commandId}));
       try{
-        data=await options.serverCommand.execute({command_id:commandId,arguments:Array.isArray(args.arguments)?args.arguments:[]});
+        data=await options.serverCommand.execute({command_id:commandId,repo:args.repo,arguments:Array.isArray(args.arguments)?args.arguments:[]});
         await options.onServerCommandEvent(serverCommandAuditProjection({phase:"RESULT",status:"PASS",command_id:commandId,request_id:data?.request_id,exit_code:data?.exit_code,read_only:data?.read_only,stdout:data?.stdout}));
       }catch(error){
         await options.onServerCommandEvent(serverCommandAuditProjection({phase:"RESULT",status:"FAIL",command_id:commandId,request_id:error?.request_id,error_code:String(error?.code||error?.message||"SERVER_COMMAND_ERROR").split(":")[0]}));
