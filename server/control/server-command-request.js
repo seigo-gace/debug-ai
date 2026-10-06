@@ -4,14 +4,26 @@ const SCHEMA="debugai.server-command-request/v1",STATUS_SCHEMA="debugai.server-c
 function fail(code){const e=new Error(code);e.code=String(code).split(":")[0];throw e;}
 function ensureDir(d){fs.mkdirSync(d,{recursive:true,mode:0o700});}
 function atomicJsonWrite(file,value){const d=path.dirname(file);ensureDir(d);const tmp=`${file}.tmp-${process.pid}-${Date.now()}`;fs.writeFileSync(tmp,JSON.stringify(value,null,2),{encoding:"utf8",mode:0o600,flag:"wx"});fs.renameSync(tmp,file);}
-function normalizeCommandId(value){const id=String(value||"").trim();if(!COMMANDS.has(id))fail("SERVER_COMMAND_NOT_ALLOWED");return id;}
+function normalizeCommandId(value){const id=String(value||"").trim();if(!COMMANDS.has(id)&&id!=="github.gh_read")fail("SERVER_COMMAND_NOT_ALLOWED");return id;}
+function normalizeArguments(commandId,value){
+  if(commandId!=="github.gh_read")return[];
+  const args=Array.isArray(value)?value.map(v=>String(v)):fail("SERVER_COMMAND_ARGUMENTS_INVALID");
+  if(args.length<1||args.length>16)fail("SERVER_COMMAND_ARGUMENTS_INVALID");
+  for(const arg of args)if(!arg||arg.length>256||/[\r\n\0]/.test(arg))fail("SERVER_COMMAND_ARGUMENTS_INVALID");
+  const root=args[0],allowed=new Set(["api","repo","pr","issue","run","workflow","release","search","auth"]);
+  if(!allowed.has(root))fail("GITHUB_GH_READ_ROOT_NOT_ALLOWED");
+  const forbidden=new Set(["create","edit","delete","merge","close","reopen","comment","review","ready","lock","unlock","rerun","cancel","watch","enable","disable","run"]);
+  if(args.slice(1).some(a=>forbidden.has(a)))fail("GITHUB_GH_READ_MUTATION_FORBIDDEN");
+  if(root==="api"&&args.some((a,i)=>i>0&&(a==="--method"||a==="-X"||a.startsWith("--method=")||a.startsWith("-X"))))fail("GITHUB_GH_READ_METHOD_FORBIDDEN");
+  return args;
+}
 function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
 function executionError(code,q){const e=new Error(code);e.code=String(code).split(":")[0];e.request_id=q?.id||null;e.command_id=q?.command_id||null;return e;}
 class ServerCommandRequestService{
   constructor({repoPolicy,defaultRepo,pollIntervalMs=50,timeoutMs=5000}={}){if(!repoPolicy)fail("SERVER_COMMAND_REPO_POLICY_REQUIRED");const configured=String(defaultRepo||"").trim();if(!configured)fail("SERVER_COMMAND_DEFAULT_REPO_REQUIRED");this.repoPolicy=repoPolicy;this.defaultRepo=path.resolve(configured);this.pollIntervalMs=Math.max(20,Math.min(500,Number(pollIntervalMs)||50));this.timeoutMs=Math.max(500,Math.min(15000,Number(timeoutMs)||5000));}
   queueRoot(){return path.join(this.defaultRepo,".debugai-input","server-command");}
-  request(input={}){const repo=this.repoPolicy.assertRepo(input.repo||this.defaultRepo);if(path.resolve(repo)!==path.resolve(this.defaultRepo))fail("SERVER_COMMAND_REPO_SCOPE_INVALID");const commandId=normalizeCommandId(input.command_id),request={schema:SCHEMA,id:`cmd_${crypto.randomBytes(12).toString("hex")}`,action:"read",command_id:commandId,repo,created_at:Date.now(),expires_at:Date.now()+60000};const root=this.queueRoot();atomicJsonWrite(path.join(root,"requests",`${request.id}.json`),request);return{schema:SCHEMA,id:request.id,state:"QUEUED",action:"read",command_id:commandId,repo};}
+  request(input={}){const repo=this.repoPolicy.assertRepo(input.repo||this.defaultRepo);if(path.resolve(repo)!==path.resolve(this.defaultRepo))fail("SERVER_COMMAND_REPO_SCOPE_INVALID");const commandId=normalizeCommandId(input.command_id),args=normalizeArguments(commandId,input.arguments),request={schema:SCHEMA,id:`cmd_${crypto.randomBytes(12).toString("hex")}`,action:"read",command_id:commandId,arguments:args,repo,created_at:Date.now(),expires_at:Date.now()+60000};const root=this.queueRoot();atomicJsonWrite(path.join(root,"requests",`${request.id}.json`),request);return{schema:SCHEMA,id:request.id,state:"QUEUED",action:"read",command_id:commandId,arguments:args,repo};}
   status(id){const value=String(id||"").trim();if(!REQUEST_ID_RE.test(value))fail("SERVER_COMMAND_REQUEST_ID_INVALID");const root=this.queueRoot(),statusFile=path.join(root,"status",`${value}.json`),requestFile=path.join(root,"requests",`${value}.json`),processingFile=path.join(root,"processing",`${value}.json`);if(fs.existsSync(statusFile)){const out=JSON.parse(fs.readFileSync(statusFile,"utf8"));if(out.schema!==STATUS_SCHEMA)fail("SERVER_COMMAND_STATUS_SCHEMA_INVALID");return out;}if(fs.existsSync(processingFile))return{schema:STATUS_SCHEMA,id:value,state:"RUNNING"};if(fs.existsSync(requestFile))return{schema:STATUS_SCHEMA,id:value,state:"QUEUED"};fail("SERVER_COMMAND_REQUEST_NOT_FOUND");}
   async execute(input={}){const q=this.request(input),deadline=Date.now()+this.timeoutMs;while(Date.now()<deadline){const s=this.status(q.id);if(s.state==="PASS")return{request_id:q.id,...(s.result||{})};if(s.state==="FAIL")throw executionError(`SERVER_COMMAND_EXEC_FAILED:${String(s.error||"UNKNOWN").slice(0,120)}`,q);await sleep(this.pollIntervalMs);}throw executionError("SERVER_COMMAND_TIMEOUT",q);}
 }
-module.exports={SCHEMA,STATUS_SCHEMA,COMMANDS,ServerCommandRequestService,normalizeCommandId};
+module.exports={SCHEMA,STATUS_SCHEMA,COMMANDS,ServerCommandRequestService,normalizeCommandId,normalizeArguments};
