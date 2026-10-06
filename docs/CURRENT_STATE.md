@@ -56,6 +56,24 @@ Shared Deploy Bridge extraction is a separate shared-capability workstream and d
 
 Latest source/CI evidence is summarized in [`CURRENT_SOURCE_QUALIFICATION.md`](CURRENT_SOURCE_QUALIFICATION.md). Repository responsibility mapping is in [`PROJECT_TREE.md`](PROJECT_TREE.md). Historical records below remain evidence only for their recorded revisions.
 
+## Canonical staged dogfood / learning-corpus plan
+
+The fixed rollout plan is defined in [`STAGED_DOGFOOD_LEARNING_PLAN.md`](STAGED_DOGFOOD_LEARNING_PLAN.md).
+
+This plan is part of the current project purpose, not an optional later experiment:
+
+- bootstrap with Master copy/paste only while direct safe execution is unavailable;
+- then move real investigation to DebugAI;
+- then use DebugAI as verifier while ChatGPT controls repairs;
+- then allow evidence-bound patch candidate/apply;
+- then allow bounded small self-repair;
+- finally allow bounded Server actions through the approved shared executor;
+- collect every stage as structured learning/evaluation evidence.
+
+The shared Deploy Bridge is an enabling execution path for the later stages. It does not replace this DebugAI dogfood progression.
+
+P004 is the chronological sanitized runtime/dogfood evidence stream. RuntimeEvidenceStore preserves exact per-run evidence. P005 receives only confirmed reusable lessons, not raw unverified run dumps.
+
 ## Authority separation
 
 ```text

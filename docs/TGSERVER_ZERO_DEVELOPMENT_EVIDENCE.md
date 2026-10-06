@@ -138,6 +138,29 @@ The resulting route is:
 
 Runtime search evidence is a separate state from DebugAI Source/Test/CI evidence. A successful search does not prove that the current DebugAI source SHA is deployed.
 
+
+## 4. Dogfood learning/evaluation corpus
+
+The Runtime/Server evidence path is also the primary chronological source for staged DebugAI dogfood episodes.
+
+This is deliberate: real commands, real Server results, real diagnoses, failed fixes, accepted fixes, retests, regressions, invariants, reviewer outcomes, and parent-orchestrator interventions are high-value evidence for improving DebugAI.
+
+Storage contract:
+
+```text
+P004 = sanitized chronological runtime/dogfood events
+RuntimeEvidenceStore = exact bounded per-run evidence
+P005 = only confirmed reusable lessons/knowledge
+```
+
+P004 should preserve enough structure to reconstruct an episode without exposing secrets or private chain-of-thought. At minimum, events should carry stable run identity plus event kind/state and the bounded identifiers needed to relate instruction, evidence, candidate, action, verification and outcome.
+
+Raw failures are valuable and must not be discarded merely because the final run later succeeds. A failed fix followed by the successful fix is a stronger learning record than the final successful diff alone.
+
+Do not automatically call this model training. The collected corpus is first used for evaluation, prompt/routing/policy improvement, regression fixtures, benchmark cases, skill selection and instruction-quality measurement. Any future fine-tuning/training is a separate approved process.
+
+The canonical staged progression and full record model are defined in [`STAGED_DOGFOOD_LEARNING_PLAN.md`](STAGED_DOGFOOD_LEARNING_PLAN.md).
+
 ## 4. Security / mutation boundary
 
 The Development Probe and TGserver ZERO central Reader must never provide:
