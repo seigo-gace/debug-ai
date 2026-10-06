@@ -60,7 +60,7 @@ process_issue() {
     mv -f -- "$request_file.tmp" "$request_file"
   fi
 
-  run_timed 180s "$RUNNER" >/dev/null 2>&1 || true
+  run_timed 180s bash "$RUNNER" >/dev/null 2>&1 || true
   [ -f "$status_file" ] || { finish_issue "$number" FAIL "ERROR=CONTROL_STATUS_MISSING"; return 0; }
   status="$(cat "$status_file")"
   state="$(printf '%s' "$status" | "$JQ_BIN" -r '.state // "FAIL"')"
@@ -78,7 +78,7 @@ main() {
   for cmd in "$GH_BIN" "$JQ_BIN" "$TIMEOUT_BIN" git sha256sum; do
     command -v "$cmd" >/dev/null 2>&1 || { printf 'debugai-project-control:DEPENDENCY_MISSING:%s\n' "$cmd" >&2; return 1; }
   done
-  [ -d "$REPO/.git" ] && [ -x "$RUNNER" ] || { printf 'debugai-project-control:REPO_OR_RUNNER_INVALID\n' >&2; return 1; }
+  [ -d "$REPO/.git" ] && [ -f "$RUNNER" ] || { printf 'debugai-project-control:REPO_OR_RUNNER_INVALID\n' >&2; return 1; }
   lock="$QUEUE/.project-control.lock"
   mkdir -p -- "$QUEUE"
   if ! mkdir -- "$lock" 2>/dev/null; then return 0; fi
