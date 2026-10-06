@@ -10,7 +10,7 @@
   ],
   "apply": false,
   "deploy": false,
-  "rerun_reason": "live be28 snapshot fix reflected; rerun semantic codegen benchmark",
-  "live_source": "be28b807e099563b262d9fa3cf4bc86110e21b8c",
-  "nonce": "rerun-20261006-1454"
+  "rerun_reason": "live 77954ffd snapshot input exclusion reflected",
+  "live_source": "77954ffdb6591c3e3c57840e55da7dd40058ae88",
+  "nonce": "rerun-20261006-1519"
 }
