@@ -225,7 +225,7 @@ test('HTTP API exposes health and delegates analyze without public backend leaka
     let r=await fetch(`http://127.0.0.1:${port}/health`);
     assert.equal(r.status,200);
     const h=await r.json();
-    assert.equal(h.patch_apply_requires_master_approval,true);
+    assert.equal(h.patch_apply_requires_explicit_approval,true);assert.equal(h.patch_apply_approval_authority,"controlling_parent_orchestrator");assert.equal(h.patch_apply_requires_master_approval,false);
     r=await fetch(`http://127.0.0.1:${port}/v1/analyze`,{method:'POST',headers:{'content-type':'application/json'},body:'{"failure":{"message":"x"}}'});
     assert.equal(r.status,200);
     const b=await r.json();

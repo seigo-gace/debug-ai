@@ -21,7 +21,7 @@ AUTOMATIC_REFIX_CLOSED_LOOP  = PASS_SOURCE_CI
 
 Implementation source `d1ee3ffd...` adds the missing bounded automatic re-fix path after an approved patch fails deterministic retest. Instead of stopping at `FAILED_RETEST`, the same canonical run uses the existing state-machine cycle `FAILED -> RESOLVING -> PATCH_READY -> WAITING_APPROVAL`, registers fresh retest checks/invariants/gates as runtime evidence, re-runs Diagnoser, requires a fresh External Hypothesis Review PASS, and creates a new candidate inside the previous selected paths.
 
-Automatic re-fix is bounded to two attempts. It never applies its own candidate. Every new candidate returns to `WAITING_MASTER_APPROVAL`. External hypothesis non-PASS, missing evidence/scope, scope drift/forbidden operation, or attempt-budget exhaustion fails closed to `ESCALATION_REQUIRED`.
+Automatic re-fix is bounded to two attempts. It never applies its own candidate. Every new candidate returns to `WAITING_APPROVAL`. External hypothesis non-PASS, missing evidence/scope, scope drift/forbidden operation, or attempt-budget exhaustion fails closed to `ESCALATION_REQUIRED`.
 
 Implementation `d1ee3ffd...` is qualified through source/test head `71bc123...`:
 - Development Probe `37403103008`: SUCCESS; canonical `464/464`, `FAIL=0`, `SKIP=0`, `source_ready=true`, `server_mutation_authorized=false`.
@@ -281,7 +281,7 @@ Implemented/verified source boundary includes:
 - fresh External Hypothesis Review requirement before re-fix candidate generation;
 - re-fix candidate scope locked to the prior selected files;
 - maximum two automatic re-fix candidate-generation attempts;
-- mandatory Master approval for every newly generated candidate;
+- mandatory explicit controlling-orchestrator approval for every newly generated candidate; Master is only required for separately defined Master-gated operations;
 - fail-closed escalation on review failure, evidence/scope failure or retry-budget exhaustion;
 - runtime evidence inspection for re-fix attempts/analysis/failure/escalation;
 - guarded CLI/HTTP and exact nine-tool MCP stdio adapter;

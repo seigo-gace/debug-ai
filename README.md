@@ -8,7 +8,7 @@ This repository is the canonical source authority. GitHub source/CI, shared AI C
 
 The current feature work is PR #40 (`feat/tgserver-async-log-sink-20261003`), OPEN / DRAFT / UNMERGED. Implementation source `d1ee3ffd175fc530afe8f38e782859d1d63c8e61` closes the known post-apply deterministic-retest gap at the source/CI boundary.
 
-At `d1ee3ffd...`, a failed deterministic retest no longer terminates immediately as `FAILED_RETEST`. The same run transitions through the existing `FAILED -> RESOLVING -> PATCH_READY -> WAITING_APPROVAL` states, registers fresh retest evidence, re-runs Diagnoser, requires a fresh External Hypothesis Review PASS, and creates a new Patch Candidate inside the previous selected-file scope. Automatic re-fix is bounded to two attempts; non-PASS review, missing required evidence/scope, or budget exhaustion fails closed to `ESCALATION_REQUIRED`. Patch application is never automatic: every new candidate still requires explicit Master approval bound to the exact candidate identity.
+At `d1ee3ffd...`, a failed deterministic retest no longer terminates immediately as `FAILED_RETEST`. The same run transitions through the existing `FAILED -> RESOLVING -> PATCH_READY -> WAITING_APPROVAL` states, registers fresh retest evidence, re-runs Diagnoser, requires a fresh External Hypothesis Review PASS, and creates a new Patch Candidate inside the previous selected-file scope. Automatic re-fix is bounded to two attempts; non-PASS review, missing required evidence/scope, or budget exhaustion fails closed to `ESCALATION_REQUIRED`. Patch application is never automatic: every new candidate still requires explicit approval bound to the exact candidate identity. In this development workflow the controlling parent/orchestrator is ChatGPT; Master is involved only when a separately defined Master-gated operation is crossed.
 
 Qualification head `71bc123112e07859dce5b7ae24afaff7eec86a4f` adds an end-to-end same-run closure regression on top of implementation `d1ee3ffd...`. Canonical exact-head verification at `71bc123...` passed `464/464` tests with `FAIL=0` and `SKIP=0`, including four dedicated automatic re-fix regressions. The fourth regression proves: first approved candidate fails retest -> DebugAI creates a replacement candidate -> replacement waits for explicit approval -> approved replacement passes retest -> Local Review / External Final Review / Strict Completion -> `COMPLETE`. Development Probe run `37403103008` reported `source_ready=true` and `server_mutation_authorized=false`. Verify `37403103045`, Core Verify `37403103007`, Public Readiness `37403102991`, Runtime Volume Gate `37403103015`, Development Probe `37403103008`, and Targeted TGserver Logging `37403103011` all completed SUCCESS.
 
@@ -75,7 +75,7 @@ Researcher -> Diagnoser -> External Hypothesis Review
 Patch Engineer -> candidate only
         |
         v
-WAITING_MASTER_APPROVAL
+WAITING_APPROVAL
         |
         | explicit approval + exact candidate identity
         v
@@ -90,7 +90,7 @@ Patch apply -> deterministic retest + invariants
                          -> fresh External Hypothesis Review
                          -> Patch Engineer
                          -> new candidate
-                         -> WAITING_MASTER_APPROVAL
+                         -> WAITING_APPROVAL
                          -> at most 2 automatic re-fix attempts
                          -> otherwise ESCALATION_REQUIRED
 ```
@@ -347,7 +347,7 @@ Raw hidden chain-of-thought is never persisted.
 
 Patch generation and patch application remain separate operations.
 
-Patch Engineer produces a candidate only. Application requires explicit Master approval bound to the exact candidate ID/hash. After application, deterministic retest and invariants run before review.
+Patch Engineer produces a candidate only. Application requires explicit controlling-parent/orchestrator approval bound to the exact candidate ID/hash. This is a technical decision boundary, not automatically a Master/user decision. After application, deterministic retest and invariants run before review.
 
 If deterministic retest fails, current source may automatically perform at most two **candidate-generation** re-fix attempts using fresh failed-retest evidence. Each attempt:
 
@@ -356,7 +356,7 @@ If deterministic retest fails, current source may automatically perform at most 
 - requires a fresh External Hypothesis Review PASS;
 - permits only bounded replace/write operations inside that scope;
 - creates a new candidate without applying it;
-- returns to `WAITING_MASTER_APPROVAL`.
+- returns to `WAITING_APPROVAL`.
 
 Non-PASS external review, missing evidence/scope, unsupported operation/scope drift, or exhausted attempt budget fails closed to `ESCALATION_REQUIRED`.
 
@@ -555,7 +555,7 @@ Current-state history owner: [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md). L
 ```text
 1. synchronize this automatic re-fix source change through Current docs, PR #40, Issue #41 and exact final-head CI
 2. keep live Server at 3997812067fe2a76e7fb6aea246ea8b34aa564c0 until Master separately approves one exact newer SHA
-3. after an approved reflection, run a real failed-retest dogfood E2E and prove: fresh evidence -> re-diagnosis -> new candidate -> Master approval wait -> approved apply -> retest
+3. after an approved reflection, run a real failed-retest dogfood E2E and prove: fresh evidence -> re-diagnosis -> new candidate -> controlling-orchestrator approval wait -> approved apply -> retest
 4. continue remaining real current-runtime integration, MCP durable continuation, semantic-quality/benchmark qualification and Strict Completion from measured evidence
 5. keep shared Deploy Bridge extraction outside DebugAI product logic
 ```

@@ -70,7 +70,7 @@ The adapter does not own continuation state; it delegates to the existing runtim
 Patch application remains behind the established approval boundary:
 
 ```text
-explicit Master approval
+explicit controlling-parent/orchestrator approval
 + exact candidate identity
 + repository revision validation
 + apply receipt
@@ -79,7 +79,7 @@ explicit Master approval
 + Strict Completion
 ```
 
-MCP must not weaken or bypass this contract.
+MCP must not weaken or bypass this contract. In the current development workflow ChatGPT is the technical approval authority for ordinary candidate decisions; Master is asked only at separately defined Master-gated operations such as Production deploy/recreate, main merge, Secret/Provider/Model changes, or destructive state changes.
 
 ## Output
 

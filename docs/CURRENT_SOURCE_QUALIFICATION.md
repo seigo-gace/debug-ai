@@ -40,7 +40,7 @@ Safety properties:
 - candidate operations are limited to replace/write inside the prior selected-file scope;
 - create/delete and scope drift are rejected;
 - no automatic approval or apply exists;
-- every candidate returns to explicit Master approval;
+- every candidate returns to explicit controlling-parent/orchestrator approval;
 - evidence/scope/review/budget failures transition to `ESCALATION_REQUIRED`;
 - latest fresh re-fix analysis is stored as current analysis evidence for later Strict Completion evaluation.
 
@@ -62,7 +62,7 @@ server_mutation_authorized=false
 Dedicated automatic re-fix tests:
 
 ```text
-failed retest -> new bounded candidate -> WAITING_MASTER_APPROVAL         = PASS
+failed retest -> new bounded candidate -> WAITING_APPROVAL         = PASS
 fresh external hypothesis non-PASS -> ESCALATION_REQUIRED                 = PASS
 attempt budget exhausted -> ESCALATION_REQUIRED                           = PASS
 explicitly approved replacement -> retest PASS -> Strict Completion COMPLETE = PASS
@@ -113,6 +113,6 @@ Before any real automatic re-fix dogfood on Production:
 3. Current server-core deployment authority must be applied.
 4. Existing `.env`, `.debugai-input`, persistent volumes, checkpoints, unmanaged and auxiliary state must be preserved.
 5. After reflection, exact parity, health, Docker-socket absence, and automatic re-fix runtime behavior must be verified.
-6. A real failed-retest flow must prove that automatic work stops at a new candidate and waits for Master approval before mutation.
+6. A real failed-retest flow must prove that automatic work stops at a new candidate and waits for explicit controlling-orchestrator approval before mutation; Master is involved only when the subsequent operation is separately Master-gated.
 
 No main merge, Production deploy/recreate, Secret/provider/model/profile mutation, Search Gate activation, or destructive state change is authorized by this record.

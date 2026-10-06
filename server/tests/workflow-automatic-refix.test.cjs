@@ -46,11 +46,11 @@ function aiFixture(){
   return{calls,call:async role=>{calls.push(role);if(role==="diagnoser")return{content:JSON.stringify({hypothesis:"initial patch missed the failing branch",claims:[]})};if(role==="patch_engineer")return{content:JSON.stringify({operations:[{type:"replace",path:"src/a.js",old:"bad",new:"good"}],summary:"refined repair",claims:[]})};throw new Error("UNEXPECTED_ROLE:"+role);}};
 }
 
-test("failed deterministic retest automatically produces a bounded new candidate but still waits for Master approval",async()=>{
+test("failed deterministic retest automatically produces a bounded new candidate but still waits for controlling-orchestrator approval",async()=>{
   const repo=repoFixture(),authority=authorityFixture(),runtimeEvidence=evidenceFixture(),patchService=patchFixture(repo),aiCore=aiFixture();
   const workflow=createWorkflow({aiCore,externalReview:{hypothesis:async()=>({json:{verdict:"PASS"}})},runtimeEvidence,patchService,authority,repositorySnapshot:()=>"git_fixture"});
   const result=await workflow.approveAndVerify({runId:"run_1",candidateId:"patch_initial",candidateHash:"hash_initial",decision:"approve",repo});
-  assert.equal(result.state,"WAITING_MASTER_APPROVAL");
+  assert.equal(result.state,"WAITING_APPROVAL");
   assert.equal(result.refix_attempt,1);
   assert.equal(result.candidate.id,"patch_refix_1");
   assert.equal(result.failed_candidate.id,"patch_initial");
@@ -141,7 +141,7 @@ test("automatic refix closes the same run after the replacement candidate is exp
   };
   const workflow=createWorkflow({aiCore,externalReview,runtimeEvidence,patchService,authority,repositorySnapshot:()=>"git_after"});
   const first=await workflow.approveAndVerify({runId:"run_1",candidateId:"patch_initial",candidateHash:"hash_initial",decision:"approve",repo});
-  assert.equal(first.state,"WAITING_MASTER_APPROVAL");
+  assert.equal(first.state,"WAITING_APPROVAL");
   assert.equal(first.candidate.id,"patch_refix_1");
   assert.equal(authority.run.state,"WAITING_APPROVAL");
 

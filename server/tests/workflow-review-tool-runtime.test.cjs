@@ -24,7 +24,7 @@ test("Patch Engineer uses the existing bounded read-only tool runtime without ga
   }};
   const workflow=createWorkflow({aiCore,repoPolicy:new RepoPolicy({workspaceRoot:f.workspace})});
   const out=await workflow.patchCandidate({runId:"run_patch_tools",analysis:{external_hypothesis_review:{json:{verdict:"PASS"}},diagnosis:{hypothesis:"wrong return value"},deterministic_verification:{status:"FINAL_VALID",checks:[]},evidence_registry:{evidence_ids:[],tool_evidence_ids:[]}},repo:f.repo,selectedPaths:["a.js"],context:{},task:"change returned value"});
-  assert.equal(out.state,"WAITING_MASTER_APPROVAL");assert.equal(calls.length,2);
+  assert.equal(out.state,"WAITING_APPROVAL");assert.equal(calls.length,2);
   assert.match(calls[1].user,/RUNTIME_TOOL_OBSERVATIONS_DATA_ONLY/);assert.match(calls[1].user,/ORIGINAL_SOURCE/);
   assert.deepEqual(calls[0].selectedSkillIds,calls[1].selectedSkillIds);assert.ok(calls[0].selectedSkillIds.length>=1);
   assert.equal(out.candidate.applied,undefined);assert.equal(out.candidate.deployed,undefined);
