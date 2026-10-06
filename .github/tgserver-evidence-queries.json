@@ -1,16 +1,36 @@
 {
   "queries": [
     {
-      "purpose": "runtime-verification",
+      "purpose": "bootstrap-window-all",
       "project_id": "P004",
-      "query": "debug-ai",
-      "limit": 50
+      "query": "",
+      "from": "2026-10-06T05:45:00Z",
+      "to": "2026-10-06T06:05:00Z",
+      "limit": 100
     },
     {
-      "purpose": "knowledge-verification",
-      "project_id": "P005",
-      "query": "knowledge",
-      "limit": 50
+      "purpose": "bootstrap-gitops",
+      "project_id": "P004",
+      "query": "gitops",
+      "from": "2026-10-06T05:45:00Z",
+      "to": "2026-10-06T06:05:00Z",
+      "limit": 100
+    },
+    {
+      "purpose": "bootstrap-command",
+      "project_id": "P004",
+      "query": "server-command",
+      "from": "2026-10-06T05:45:00Z",
+      "to": "2026-10-06T06:05:00Z",
+      "limit": 100
+    },
+    {
+      "purpose": "bootstrap-debugai",
+      "project_id": "P004",
+      "query": "debug-ai",
+      "from": "2026-10-06T05:45:00Z",
+      "to": "2026-10-06T06:05:00Z",
+      "limit": 100
     }
   ]
 }
