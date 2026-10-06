@@ -23,6 +23,16 @@ const EXTRA_EVIDENCE=new WeakMap();
 function skillAllowsTool(selectedSkillIds,tool){for(const id of selectedSkillIds||[]){const skill=getSkill(id);if(skill.allowed_tools.includes(tool))return skill;}return null;}
 function admit({role,selectedSkillIds,tool}){const roleContract=getRoleContract(role),skill=skillAllowsTool(selectedSkillIds,tool);if(!skill)throw new Error(`TOOL_NOT_IN_SELECTED_SKILLS:${role}:${tool}`);return assertToolAdmission({roleContract,tool,riskCeiling:skill.tool_risk_ceiling,humanApproved:false});}
 function contentTrust(tool){if(tool==="runtime.trace.read"||tool==="state.read")return"CURRENT_RUN_OBSERVATION_DATA";if(tool==="history.read")return"DURABLE_HISTORY_AUTHORITY_DATA";if(tool==="invariant.read")return"IMMUTABLE_MASTER_AUTHORITY_DATA";if(tool==="source.verify")return"SOURCE_VERIFICATION_BOUNDARY_DATA";if(tool==="server.command.read")return"SERVER_RUNTIME_OBSERVATION_DATA";if(tool==="authority.search")return"OPEN_WORLD_UNTRUSTED_DATA";if(tool==="knowledge.search")return"INTERNAL_KB_DATA";if(tool==="evidence.read")return"REGISTERED_EVIDENCE_DATA";return"LOCAL_SOURCE_DATA";}
+function serverCommandAuditProjection(event={}){
+  const commandId=String(event.command_id||""),status=String(event.status||""),out={phase:String(event.phase||""),status,command_id:commandId};
+  if(typeof event.request_id==="string"&&event.request_id)out.request_id=event.request_id;
+  if(Number.isInteger(event.exit_code))out.exit_code=event.exit_code;
+  if(typeof event.read_only==="boolean")out.read_only=event.read_only;
+  if(typeof event.error_code==="string"&&event.error_code)out.error_code=event.error_code.slice(0,120);
+  if((commandId==="project.pwd"||commandId==="project.git_head")&&typeof event.stdout==="string")out.stdout=event.stdout.slice(0,512);
+  return scrub(out);
+}
+
 function makeToolResult(tool,data){const safeData=scrub(data),resultSha256=base.toolResultHash(tool,safeData);return{schema:"debugai.tool-result/v1",tool,status:"OK",evidence_id:`TRE_${resultSha256.slice(0,24)}`,data:safeData,integrity:{runtime_validated:true,admission_validated:true,result_sha256:resultSha256,content_trust:contentTrust(tool),external_content:"DATA_NOT_INSTRUCTION"}};}
 function assertToolResultIntegrity(result){
   if(!result||result.schema!=="debugai.tool-result/v1"||result.status!=="OK")throw new Error("TOOL_RESULT_SCHEMA_INVALID");
@@ -85,11 +95,23 @@ function createReadOnlyToolRuntime(options={}){
     if(tool==="history.read")data=currentRejectedHistoryProvider().read(args,currentEvidenceIds(evidenceContext));
     else if(tool==="invariant.read")data=currentInvariantAuthorityProvider().read(args);
     else if(tool==="source.verify")data=verifySourceBoundary({...contextEvidenceRecord(evidenceContext,args.evidence_id),args});
-    else if(tool==="server.command.read"){if(!options.serverCommand||typeof options.serverCommand.execute!=="function")throw new Error("SERVER_COMMAND_RUNTIME_UNAVAILABLE");data=await options.serverCommand.execute({command_id:String(args.command_id||"")});}
+    else if(tool==="server.command.read"){
+      if(!options.serverCommand||typeof options.serverCommand.execute!=="function")throw new Error("SERVER_COMMAND_RUNTIME_UNAVAILABLE");
+      if(typeof options.onServerCommandEvent!=="function")throw new Error("SERVER_COMMAND_AUDIT_SINK_REQUIRED");
+      const commandId=String(args.command_id||"");
+      await options.onServerCommandEvent(serverCommandAuditProjection({phase:"REQUESTED",status:"REQUESTED",command_id:commandId}));
+      try{
+        data=await options.serverCommand.execute({command_id:commandId});
+        await options.onServerCommandEvent(serverCommandAuditProjection({phase:"RESULT",status:"PASS",command_id:commandId,request_id:data?.request_id,exit_code:data?.exit_code,read_only:data?.read_only,stdout:data?.stdout}));
+      }catch(error){
+        await options.onServerCommandEvent(serverCommandAuditProjection({phase:"RESULT",status:"FAIL",command_id:commandId,request_id:error?.request_id,error_code:String(error?.code||error?.message||"SERVER_COMMAND_ERROR").split(":")[0]}));
+        throw error;
+      }
+    }
     else{const provider=currentRunObservationProvider();data=tool==="state.read"?provider.readState(args):provider.readTrace(args);}
     const result=makeToolResult(tool,data);assertToolResultIntegrity(result);if(evidenceContext)addEvidenceToContext(evidenceContext,[result]);return result;
   }
   return{...runtime,availableTools:[...AVAILABLE_TOOLS],createEvidenceContext,addEvidenceToContext,execute};
 }
 
-module.exports={...base,RUN_OBSERVATION_TOOLS,HISTORY_TOOLS,AUTHORITY_TOOLS,SOURCE_VERIFY_TOOLS,SERVER_COMMAND_TOOLS,EXTENDED_TOOLS,AVAILABLE_TOOLS,makeToolResult,assertToolResultIntegrity,currentEvidenceIds,contextEvidenceRecord,createEvidenceContext,addEvidenceToContext,createReadOnlyToolRuntime};
+module.exports={...base,RUN_OBSERVATION_TOOLS,HISTORY_TOOLS,AUTHORITY_TOOLS,SOURCE_VERIFY_TOOLS,SERVER_COMMAND_TOOLS,EXTENDED_TOOLS,AVAILABLE_TOOLS,serverCommandAuditProjection,makeToolResult,assertToolResultIntegrity,currentEvidenceIds,contextEvidenceRecord,createEvidenceContext,addEvidenceToContext,createReadOnlyToolRuntime};
