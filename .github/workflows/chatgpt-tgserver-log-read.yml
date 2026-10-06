@@ -52,7 +52,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
-      TGSERVER_BASE_URL: ${{ vars.TGSERVER_BASE_URL || vars.DEBUG_AI_TGSERVER_URL }}
+      TGSERVER_BASE_URL: ${{ vars.TGSERVER_BASE_URL || vars.DEBUG_AI_TGSERVER_URL || 'https://tgserver.asterav8.jp' }}
       CF_ACCESS_CLIENT_ID: ${{ secrets.TGSERVER_CF_ACCESS_CLIENT_ID || secrets.DEBUGAI_CF_ACCESS_CLIENT_ID }}
       CF_ACCESS_CLIENT_SECRET: ${{ secrets.TGSERVER_CF_ACCESS_CLIENT_SECRET || secrets.DEBUGAI_CF_ACCESS_CLIENT_SECRET }}
       TGSERVER_BEARER_TOKEN: ${{ secrets.TGSERVER_API_TOKEN }}
