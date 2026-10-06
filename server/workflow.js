@@ -19,6 +19,8 @@ const {makePatchPacket,makeReviewPacket,publicReviewPacketSummary}=require("./co
 const {repositorySnapshotId}=require("./control/repository-snapshot.js");
 const CAUSAL_SCOUT_OUTPUT_POLICY="Causal Scout. Return JSON only. Final output requires a top-level claims array. Every claims[] item requires type and statement. Causal candidates must use type HYPOTHESIS and a concrete falsification_condition; cite only registered evidence_refs when available. A falsification condition must name an observation that contradicts the hypothesis, rather than one that supports it. Keep proposed observations within existing read-only tools and security restrictions; never propose relaxing seccomp or other safety controls. Use type UNKNOWN for unresolved evidence gaps instead of inventing a cause, and retain rejected hypotheses with their counter_evidence_refs. An empty claims array is valid when no supported candidate or material unknown remains. Never emit confirmed_root_cause or patch/apply/deploy operations. Tool-request rounds use the existing tool_requests protocol; the claims requirement applies to final output.";
 
+const MAX_AUTOMATIC_REFIX_ATTEMPTS=2;
+
 function parseJson(c){if(typeof c!=="string")return c;return JSON.parse(c.trim().replace(/^```json\s*/i,"").replace(/```$/i,"").trim());}
 function roleOutput(call,role){if(call?.validated_output&&typeof call.validated_output==="object")return call.validated_output;return parseAndValidateRoleOutput(role,call?.content,{availableEvidenceIds:call?.tool_loop?.evidence_ids||[]});}
 function toolEvidenceRecords(call){
@@ -165,6 +167,95 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
   async function resumeAnalysis({runId}={}){if(typeof runId!=="string"||!runId)throw new Error("RUN_ID_REQUIRED");return startAnalysis({runId});}
   async function recoverStartup({awaitCompletion=false}={}){if(!authority?.durableEnabled?.())return{schema:"debugai.startup-recovery/v1",claimed:[],terminal:[],incompatible:[],completed:[]};const scan=authority.inspectDurableRuns(),claimed=[],scheduled=[];for(const item of scan.recoverable){let owned=false;try{await authority.claimRecoverableRun(item.run_id);owned=true;const prepared=await prepareAnalysis({runId:item.run_id});claimed.push(item.run_id);scheduled.push(executePrepared(prepared));}catch(error){if(owned)try{await recordExecutionFailure(item.run_id,error);}catch{}scan.incompatible.push({run_id:item.run_id,error:String(error?.code||error?.message||error)});}}const completed=awaitCompletion?await Promise.allSettled(scheduled):[];if(!awaitCompletion)for(const promise of scheduled)void promise.catch(()=>{});return{schema:"debugai.startup-recovery/v1",claimed,terminal:scan.terminal.map(x=>({run_id:x.run_id,reason:x.reason})),incompatible:scan.incompatible,completed:completed.map((x,index)=>({run_id:claimed[index],status:x.status,error:x.status==="rejected"?String(x.reason?.message||x.reason):null}))};}
   async function patchCandidate({runId,analysis,repo,selectedPaths,context,task}){const verdict=analysis?.external_hypothesis_review?.json?.verdict||analysis?.external_review?.verdict;if(verdict!=="PASS")throw new Error("PATCH_REQUIRES_EXTERNAL_HYPOTHESIS_REVIEW_PASS");const targetRepo=repoPolicy?repoPolicy.assertRepo(repo):repo,source=patchPacketSource(targetRepo,selectedPaths),inventory=verificationInventory(targetRepo),patchPacket=makePatchPacket({runId,diagnosisRef:`diagnosis_${contentHash(analysis?.diagnosis||{})}`,repositoryRevision:repositorySnapshot(targetRepo),paths:selectedPaths,sourceExcerpts:source.sourceExcerpts,preconditionHashes:source.preconditionHashes,reproductionSummary:{status:String(analysis?.deterministic_verification?.status||"UNKNOWN"),checks:analysis?.deterministic_verification?.checks||[]},testInventory:inventory.checks,invariants:[{name:"candidate-only-patch-engineer",status:"PASS"},{name:"master-approval-required",status:"PASS"}],prohibitedPaths:source.prohibitedPaths,evidenceRefs:patchPacketEvidenceRefs(analysis)});runtimeEvidence?.write(runId,"patch_packet",patchPacket);const out=await callReadOnlyRole("patch_engineer",{system:"Patch Engineer. Candidate only. Never apply. JSON only.",user:JSON.stringify({patch_packet:patchPacket,diagnosis:analysis.diagnosis,context,task})},makeReadOnlyToolRuntime(targetRepo),{baseEvidenceIds:patchPacketEvidenceRefs(analysis),strictEvidenceRefs:true});const candidateResult=roleOutput(out,"patch_engineer");const candidate=patchService?patchService.create({repo:targetRepo,selectedPaths,task,result:candidateResult}):candidateResult;if(authority){let run=authority.load(runId);run=authority.transition(run,"PATCH_READY");authority.transition(run,"WAITING_APPROVAL");}runtimeEvidence?.write(runId,"patch_candidate",{id:candidate.id,diff_hash:candidate.diff_hash,summary:candidate.summary,patch_packet_digest:patchPacket.packet_digest});await logRuntime({run_id:runId,severity:"info",kind:"patch_candidate",candidate_id:candidate.id,diff_hash:candidate.diff_hash,patch_packet_digest:patchPacket.packet_digest,summary:candidate.summary,state:"WAITING_MASTER_APPROVAL"});return{run_id:runId,state:"WAITING_MASTER_APPROVAL",candidate,patch_packet:{schema:patchPacket.schema,packet_digest:patchPacket.packet_digest}};}
+
+  function automaticRefixAttemptCount(runId){
+    if(!runtimeEvidence||typeof runtimeEvidence.list!=="function")return null;
+    return runtimeEvidence.list(runId,{types:["refix_attempt"],limit:128}).length;
+  }
+  async function automaticRefixCandidate({runId,run,out,targetRepo}){
+    const prior=automaticRefixAttemptCount(runId);
+    if(prior===null||!runtimeEvidence||typeof runtimeEvidence.write!=="function"||!targetRepo){
+      if(authority)run=authority.transition(run,"ESCALATION_REQUIRED");
+      await logRuntime({run_id:runId,severity:"error",kind:"automatic_refix",state:"REFIX_ESCALATION_REQUIRED",reason:"REFIX_EVIDENCE_OR_REPO_REQUIRED"});
+      return{run_id:runId,state:"REFIX_ESCALATION_REQUIRED",reason:"REFIX_EVIDENCE_OR_REPO_REQUIRED",...out};
+    }
+    if(prior>=MAX_AUTOMATIC_REFIX_ATTEMPTS){
+      if(authority)run=authority.transition(run,"ESCALATION_REQUIRED");
+      runtimeEvidence.write(runId,"refix_escalation",{reason:"ATTEMPT_BUDGET_EXHAUSTED",attempts:prior,max_attempts:MAX_AUTOMATIC_REFIX_ATTEMPTS});
+      await logRuntime({run_id:runId,severity:"warn",kind:"automatic_refix",state:"REFIX_ATTEMPT_BUDGET_EXHAUSTED",attempts:prior,max_attempts:MAX_AUTOMATIC_REFIX_ATTEMPTS});
+      return{run_id:runId,state:"REFIX_ATTEMPT_BUDGET_EXHAUSTED",refix_attempts:prior,max_refix_attempts:MAX_AUTOMATIC_REFIX_ATTEMPTS,...out};
+    }
+    const selectedPaths=[...new Set((out?.candidate?.files||[]).map(String).filter(Boolean))];
+    if(selectedPaths.length===0){
+      if(authority)run=authority.transition(run,"ESCALATION_REQUIRED");
+      runtimeEvidence.write(runId,"refix_escalation",{reason:"NO_SELECTED_PATHS",attempts:prior,max_attempts:MAX_AUTOMATIC_REFIX_ATTEMPTS});
+      await logRuntime({run_id:runId,severity:"error",kind:"automatic_refix",state:"REFIX_ESCALATION_REQUIRED",reason:"NO_SELECTED_PATHS"});
+      return{run_id:runId,state:"REFIX_ESCALATION_REQUIRED",reason:"NO_SELECTED_PATHS",...out};
+    }
+    if(authority)run=authority.transition(run,"RESOLVING");
+    const attempt=prior+1;
+    const retestRecords=registerEvidenceList("LOCAL_RUNTIME",[
+      ...(out.checks||[]).map(reviewableVerificationCheck),
+      {kind:"invariants",value:out.invariants},
+      {kind:"gates",value:out.gates},
+      {kind:"failed_candidate",value:{candidate_id:out?.candidate?.id||null,candidate_hash:out?.candidate?.candidate_hash||null,diff_hash:out?.candidate?.diff_hash||null,files:selectedPaths}}
+    ]);
+    const retestIds=evidenceIds(retestRecords);
+    runtimeEvidence.write(runId,"refix_attempt",{attempt,max_attempts:MAX_AUTOMATIC_REFIX_ATTEMPTS,previous_candidate_id:out?.candidate?.id||null,evidence_ids:retestIds});
+    try{
+      const toolRuntime=makeReadOnlyToolRuntime(targetRepo);
+      const diagnosisCall=await callReadOnlyRole("diagnoser",{
+        system:"Diagnoser. Re-diagnose only from the fresh failed deterministic retest evidence. Produce a falsifiable diagnosis. Never apply, publish, deploy, or bypass approval. JSON only.",
+        user:JSON.stringify({task:"Repair the failed deterministic retest within the existing changed-file scope.",failed_retest:evidencePromptView(retestRecords),selected_paths:selectedPaths,previous_candidate:{id:out?.candidate?.id||null,summary:out?.candidate?.summary||""}})
+      },toolRuntime,{baseEvidenceIds:retestIds,strictEvidenceRefs:true});
+      const diagnosisJson=roleOutput(diagnosisCall,"diagnoser");
+      const diagnosisToolEvidence=toolEvidenceRecords(diagnosisCall);
+      const diagnosisToolIds=diagnosisToolEvidence.map(item=>item.evidence_id);
+      const allIds=mergeEvidenceIds(retestIds,diagnosisToolIds);
+      const hypothesis={privacy_class:"PUBLIC",sanitized:true,opaque_evidence:true,statement:pickDiagnosisStatement(diagnosisJson),cause_class:String(diagnosisJson?.cause_kind||"UNKNOWN"),evidence_count:allIds.length,local_evidence_count:retestIds.length,local_evidence:[],evidence_gap:false,evidence_status:"FINAL_VALID",evidence_gap_scope:null};
+      const external=externalReview?await externalReview.hypothesis({privacy:{privacy_class:"PUBLIC",sanitized:true,opaque_evidence:true},hypothesis}):null;
+      const externalVerdict=String(external?.json?.verdict||"").toUpperCase();
+      if(externalVerdict!=="PASS"){
+        if(authority)run=authority.transition(run,"ESCALATION_REQUIRED");
+        runtimeEvidence.write(runId,"refix_escalation",{reason:"HYPOTHESIS_NOT_APPROVED",attempt,external_verdict:externalVerdict||"MISSING",evidence_ids:allIds});
+        await logRuntime({run_id:runId,severity:"warn",kind:"automatic_refix",state:"REFIX_HYPOTHESIS_NOT_APPROVED",attempt,external_verdict:externalVerdict||"MISSING"});
+        return{run_id:runId,state:"REFIX_HYPOTHESIS_NOT_APPROVED",refix_attempt:attempt,max_refix_attempts:MAX_AUTOMATIC_REFIX_ATTEMPTS,external_hypothesis_review:external,...out};
+      }
+      const refixRegistry=registrySummary({local:retestRecords});
+      refixRegistry.tool_evidence_ids=diagnosisToolIds;
+      refixRegistry.total_with_tools=refixRegistry.total+diagnosisToolIds.length;
+      const refixAnalysis={run_id:runId,refix_attempt:attempt,deterministic_verification:{status:"FINAL_INVALID",checks:out.checks||[]},evidence_gap:false,evidence_status:"FINAL_VALID",evidence_registry:refixRegistry,diagnosis:diagnosisJson,external_hypothesis_review:external,state:"HYPOTHESIS_APPROVED"};
+      runtimeEvidence.write(runId,"analysis",refixAnalysis);
+      runtimeEvidence.write(runId,"refix_analysis",refixAnalysis);
+      const source=patchPacketSource(targetRepo,selectedPaths),inventory=verificationInventory(targetRepo);
+      const patchPacket=makePatchPacket({runId,diagnosisRef:"diagnosis_"+contentHash(diagnosisJson||{}),repositoryRevision:repositorySnapshot(targetRepo),paths:selectedPaths,sourceExcerpts:source.sourceExcerpts,preconditionHashes:source.preconditionHashes,reproductionSummary:{status:"FAILED_RETEST",checks:out.checks||[]},testInventory:inventory.checks,invariants:[{name:"fresh-retest-evidence",status:"PASS"},{name:"candidate-only-patch-engineer",status:"PASS"},{name:"master-approval-required",status:"PASS"},{name:"automatic-refix-bounded",status:"PASS",attempt,max_attempts:MAX_AUTOMATIC_REFIX_ATTEMPTS}],prohibitedPaths:source.prohibitedPaths,evidenceRefs:allIds});
+      runtimeEvidence.write(runId,"patch_packet",patchPacket);
+      const patchCall=await callReadOnlyRole("patch_engineer",{
+        system:"Patch Engineer. Produce one new candidate from the fresh failed-retest evidence. Candidate only. Never apply, publish, or deploy. Stay inside the existing selected paths. Do not create or delete files. JSON only.",
+        user:JSON.stringify({patch_packet:patchPacket,diagnosis:diagnosisJson,failed_retest:evidencePromptView(retestRecords),task:"Repair failed deterministic retest within existing selected paths."})
+      },toolRuntime,{baseEvidenceIds:allIds,strictEvidenceRefs:true});
+      const candidateResult=roleOutput(patchCall,"patch_engineer");
+      const operations=Array.isArray(candidateResult?.operations)?candidateResult.operations:[];
+      const allowed=new Set(selectedPaths);
+      for(const operation of operations){
+        const type=String(operation?.type||""),rel=String(operation?.path||"");
+        if(!allowed.has(rel))throw new Error("REFIX_SCOPE_DRIFT:"+rel);
+        if(type!=="replace"&&type!=="write")throw new Error("REFIX_OPERATION_FORBIDDEN:"+type);
+      }
+      const candidate=patchService.create({repo:targetRepo,selectedPaths,task:"Repair failed deterministic retest within existing selected paths.",result:candidateResult,stage:"debug-refix"});
+      if(authority){run=authority.transition(run,"PATCH_READY");run=authority.transition(run,"WAITING_APPROVAL");}
+      runtimeEvidence.write(runId,"patch_candidate",{id:candidate.id,diff_hash:candidate.diff_hash,summary:candidate.summary,patch_packet_digest:patchPacket.packet_digest,refix_attempt:attempt,previous_candidate_id:out?.candidate?.id||null});
+      await logRuntime({run_id:runId,severity:"info",kind:"automatic_refix",state:"WAITING_MASTER_APPROVAL",attempt,candidate_id:candidate.id,previous_candidate_id:out?.candidate?.id||null});
+      return{run_id:runId,state:"WAITING_MASTER_APPROVAL",refix_attempt:attempt,max_refix_attempts:MAX_AUTOMATIC_REFIX_ATTEMPTS,failed_candidate:out?.candidate||null,...out,candidate,patch_packet:{schema:patchPacket.schema,packet_digest:patchPacket.packet_digest},external_hypothesis_review:external};
+    }catch(error){
+      const reason=String(error?.code||error?.message||error);
+      if(authority&&run?.state==="RESOLVING"){try{run=authority.transition(run,"ESCALATION_REQUIRED");}catch{}}
+      runtimeEvidence.write(runId,"refix_failure",{attempt,reason,previous_candidate_id:out?.candidate?.id||null});
+      await logRuntime({run_id:runId,severity:"error",kind:"automatic_refix",state:"REFIX_ESCALATION_REQUIRED",attempt,reason});
+      return{run_id:runId,state:"REFIX_ESCALATION_REQUIRED",reason,refix_attempt:attempt,max_refix_attempts:MAX_AUTOMATIC_REFIX_ATTEMPTS,...out};
+    }
+  }
+
   async function approveAndVerify({runId,candidateId,candidateHash,decision,repo}){
     if(!patchService)throw new Error("PATCH_SERVICE_REQUIRED");
     let run=null;if(authority)run=authority.load(runId);
@@ -176,7 +267,7 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
     const postApplyRepositoryRevision=targetRepo?repositorySnapshot(targetRepo):null;
     runtimeEvidence?.write(runId,"verification",{checks:out.checks,invariants:out.invariants,gates:out.gates,pass:out.pass,post_apply_repository_revision:postApplyRepositoryRevision});
     await logRuntime({run_id:runId,severity:out.pass?"info":"error",kind:"verification",pass:out.pass,checks:out.checks,invariants:out.invariants,gates:out.gates,post_apply_repository_revision:postApplyRepositoryRevision});
-    if(!out.pass){if(authority)authority.transition(run,"FAILED");return{run_id:runId,state:"FAILED_RETEST",...out};}
+    if(!out.pass){if(authority)run=authority.transition(run,"FAILED");return automaticRefixCandidate({runId,run,out,targetRepo});}
     const verificationRecords=registerEvidenceList("LOCAL_RUNTIME",[...(out.checks||[]),{kind:"invariants",value:out.invariants},{kind:"gates",value:out.gates}]),verificationIds=evidenceIds(verificationRecords),executedTests=(out.checks||[]).filter(check=>check?.executed===true),receipt=out?.applied?.receipt||null;
     const reviewPacket=makeReviewPacket({candidateRef:candidateId,applyReceiptRef:String(receipt?.transaction_id||receipt?.candidate_id||""),repositoryRevision:postApplyRepositoryRevision,changedPaths:out?.candidate?.files||[],diff:out?.candidate?.diff||"",prePostHashes:reviewPacketHashes(out?.candidate,receipt),executedTests,testResults:out.checks||[],invariants:reviewPacketInvariants(out),evidenceRefs:verificationIds});
     runtimeEvidence?.write(runId,"review_packet",reviewPacket);
@@ -202,7 +293,7 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
   async function verifyReadOnly({repo,selectedPaths=[],changeScope=[],task=""}={}){if(!sandboxVerification)throw new Error("SANDBOX_VERIFICATION_REQUIRED");const targetRepo=resolveVerificationRepo(repo),verificationId=`verify_${crypto.randomUUID()}`;const scopeBefore=verificationScope(targetRepo,selectedPaths),inventory=verificationInventory(targetRepo);const deterministic=await sandboxVerification.collect(targetRepo),scopeAfter=verificationScope(targetRepo,selectedPaths);const changed=scopeBefore.files.filter((file,index)=>scopeAfter.files[index]?.sha256!==file.sha256).map(file=>file.path);const invariants={pass:changed.length===0,failures:changed.map(file=>`SOURCE_MUTATED:${file}`),checked_paths:scopeBefore.files.length,checked_receipts:0,authority:"READ_ONLY_SOURCE_IMMUTABILITY"};const reviewerChecks=deterministic.checks.map(reviewableVerificationCheck);const records=registerEvidenceList("LOCAL_RUNTIME",[...reviewerChecks,{kind:"test_inventory",value:inventory},{kind:"file_change_scope",value:{selected_paths:scopeBefore.files.map(x=>x.path),change_scope:Array.isArray(changeScope)?changeScope.map(String):[],task:String(task||"")}},{kind:"invariants",value:invariants}]),ids=evidenceIds(records);let local_review=null,local_review_error=null;try{const review=await runRoleWithReadOnlyTools({aiCore,role:"local_reviewer",system:"Local Reviewer. Review read-only deterministic verification from fresh context. JSON only. Never claim patch application.",user:JSON.stringify({verification_evidence:records}),toolRuntime:makeReadOnlyToolRuntime(targetRepo),baseEvidenceIds:ids,strictEvidenceRefs:true});local_review=roleOutput(review,"local_reviewer");}catch(error){local_review_error=String(error?.code||error?.message||"LOCAL_REVIEW_UNAVAILABLE").split(":")[0];}const verdict=verificationVerdict(deterministic,local_review,local_review_error),result={schema:"debugai.verify-result/v1",verification_id:verificationId,read_only:true,patch_applied:false,repo:targetRepo,scope:{mode:scopeBefore.mode,files:scopeBefore.files,change_scope:Array.isArray(changeScope)?changeScope.map(String):[]},test_inventory:inventory,deterministic_verification:deterministic,invariants,local_review,local_review_error,verdict};runtimeEvidence?.write(verificationId,"read_only_verification",result);await logRuntime({run_id:verificationId,severity:verdict==="PASS"?"info":verdict==="FAIL"?"error":"warn",kind:"read_only_verification",verdict,check_count:deterministic.checks.length,patch_applied:false});return result;}
   function durableStatus(runId){if(!authority?.durableEnabled?.())return null;try{const {state,manifest}=authority.loadDurable(runId);return{generation:state.generation,execution_epoch:state.execution_epoch,job_status:state.job_status,active_in_process:activeRuns.has(runId),last_execution_error:backgroundErrors.get(runId)||null,workflow_cursor:manifest.workflow_cursor,role_executions:Object.fromEntries(Object.entries(manifest.role_execution_refs||{}).map(([id,ref])=>[id,{role:ref.role,status:ref.status,attempt_no:ref.attempt_no,latest_checkpoint_ref:ref.latest_checkpoint_ref||null,final_role_result_ref:ref.final_role_result_ref||null}]))};}catch(error){if(String(error?.message||error).includes("DURABLE_RECORD_NOT_FOUND")||String(error?.message||error).includes("ENOENT"))return null;throw error;}}
   function status(runId){if(!authority)throw new Error("RUN_AUTHORITY_REQUIRED");const run=authority.load(runId);return{schema:"debugai.run-status/v1",run_id:run.run_id,state:run.state,project_id:run.project_id,project_dir:run.project_dir,created_at:run.created_at,updated_at:run.updated_at,durable:durableStatus(runId)};}
-  function inspect(runId){const run=status(runId),durable=run.durable;if(!runtimeEvidence)return{schema:"debugai.run-inspection/v1",run,durable,artifacts:{}};const records=runtimeEvidence.list(runId,{types:["analysis","patch_packet","patch_candidate","verification","review_packet","completion_gate"],limit:16}),artifacts={};for(const record of records)if(!artifacts[record.type])artifacts[record.type]=record;return{schema:"debugai.run-inspection/v1",run,durable,artifacts};}
+  function inspect(runId){const run=status(runId),durable=run.durable;if(!runtimeEvidence)return{schema:"debugai.run-inspection/v1",run,durable,artifacts:{}};const records=runtimeEvidence.list(runId,{types:["analysis","patch_packet","patch_candidate","verification","refix_attempt","refix_analysis","refix_failure","refix_escalation","review_packet","completion_gate"],limit:16}),artifacts={};for(const record of records)if(!artifacts[record.type])artifacts[record.type]=record;return{schema:"debugai.run-inspection/v1",run,durable,artifacts};}
   async function promote(asset){assertPromotable(asset);if(!tgserver)throw new Error("TGSERVER_ADAPTER_REQUIRED");return tgserver.promote(asset);}
   async function searchKnowledge(query,opts={}){if(!tgserver)throw new Error("TGSERVER_ADAPTER_REQUIRED");return tgserver.search(query,opts);}
   return{runAnalysis,startAnalysis,resumeAnalysis,recoverStartup,patchCandidate,approveAndVerify,verifyReadOnly,status,inspect,promote,searchKnowledge};
