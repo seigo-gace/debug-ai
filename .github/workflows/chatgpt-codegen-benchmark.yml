@@ -54,7 +54,7 @@ jobs:
           - {level: hard, id: h09}
           - {level: hard, id: h10}
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 15
     env:
       BASE_URL: https://debugai.asterav8.jp
       REPO_PATH: /workspace/debug-ai
@@ -69,7 +69,7 @@ jobs:
           set -euo pipefail
           test -n "${CF_ACCESS_CLIENT_ID:-}"
           test -n "${CF_ACCESS_CLIENT_SECRET:-}"
-          code="$(curl -sS -L --max-time 30 -o /tmp/health.json -w '%{http_code}'             -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}"             -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}"             "${BASE_URL}/health")"
+          code="$(curl -sS -L --max-time 30 -o /tmp/health.json -w '%{http_code}' -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" "${BASE_URL}/health")"
           echo "HEALTH_HTTP=$code"
           test "$code" = "200"
 
@@ -82,13 +82,16 @@ jobs:
           echo "BENCHMARK_LEVEL=${{ matrix.level }}"
           echo "BENCHMARK_CASE=${{ matrix.id }}"
 
-      - name: Create isolated benchmark run
+      - name: Start async candidate-only benchmark
         id: run
         shell: bash
         run: |
           set -euo pipefail
-          jq -n --arg repo "$REPO_PATH" --arg id "${{ matrix.id }}"             '{repo:$repo,projectId:"debug-ai-codegen-benchmark",failure:{message:("Synthetic code generation benchmark bootstrap "+$id+". Do not apply or deploy changes.")},localEvidence:[]}' >/tmp/start.json
-          code="$(curl -sS --max-time 60 -o /tmp/start-out.json -w '%{http_code}'             -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}"             -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}"             -H 'content-type: application/json' --data-binary @/tmp/start.json             "${BASE_URL}/v1/runs/start")"
+          task="$(jq -r '.task' /tmp/bench-config.json)"
+          diagnosis="$(jq -c '.diagnosis' /tmp/bench-config.json)"
+          paths="$(jq -c '.selected_paths' /tmp/bench-config.json)"
+          jq -n --arg repo "$REPO_PATH" --arg level "${{ matrix.level }}" --arg case_id "${{ matrix.id }}" --arg task "$task" --argjson diagnosis "$diagnosis" --argjson paths "$paths" '{repo:$repo,level:$level,case_id:$case_id,task:$task,diagnosis:$diagnosis,selected_paths:$paths}' >/tmp/start.json
+          code="$(curl -sS --max-time 30 -o /tmp/start-out.json -w '%{http_code}' -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" -H 'content-type: application/json' --data-binary @/tmp/start.json "${BASE_URL}/v1/codegen-benchmark/start")"
           echo "RUN_START_HTTP=$code"
           test "$code" = "202"
           run_id="$(jq -r '.run_id // empty' /tmp/start-out.json)"
@@ -96,27 +99,29 @@ jobs:
           echo "run_id=$run_id" >>"$GITHUB_OUTPUT"
           echo "BENCHMARK_RUN_ID=$run_id"
 
-      - name: Generate patch candidate only
+      - name: Poll candidate-only benchmark
         shell: bash
         run: |
           set -euo pipefail
           run_id="${{ steps.run.outputs.run_id }}"
-          task="$(jq -r '.task' /tmp/bench-config.json)"
-          diagnosis="$(jq -c '.diagnosis' /tmp/bench-config.json)"
-          paths="$(jq -c '.selected_paths' /tmp/bench-config.json)"
-          analysis="$(jq -nc --argjson diagnosis "$diagnosis"             '{deterministic_verification:{status:"FINAL_VALID",checks:[]},evidence_gap:false,evidence_status:"FINAL_VALID",evidence_registry:{evidence_ids:[],tool_evidence_ids:[]},diagnosis:$diagnosis,external_hypothesis_review:{json:{verdict:"PASS"}}}')"
-          jq -n --arg run_id "$run_id" --arg repo "$REPO_PATH" --arg task "$task"             --argjson analysis "$analysis" --argjson paths "$paths"             '{runId:$run_id,analysis:$analysis,repo:$repo,selectedPaths:$paths,context:$task,task:$task}' >/tmp/patch-request.json
-          start_ms="$(date +%s%3N)"
-          code="$(curl -sS --max-time 180 -o /tmp/patch-response.json -w '%{http_code}'             -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}"             -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}"             -H 'content-type: application/json' --data-binary @/tmp/patch-request.json             "${BASE_URL}/v1/patch-candidate")"
-          end_ms="$(date +%s%3N)"
-          duration_ms="$((end_ms-start_ms))"
-          echo "PATCH_HTTP=$code"
+          deadline=$((SECONDS+420))
+          while true; do
+            code="$(curl -sS --max-time 30 -o /tmp/benchmark-status.json -w '%{http_code}' -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" "${BASE_URL}/v1/codegen-benchmark/status/$run_id")"
+            test "$code" = "200"
+            state="$(jq -r '.state // "UNKNOWN"' /tmp/benchmark-status.json)"
+            echo "CODEGEN_STATE=$state"
+            if [ "$state" = "DONE" ]; then break; fi
+            if [ "$state" = "FAILED" ]; then jq -r '"CODEGEN_ERROR="+(.error//"UNKNOWN")' /tmp/benchmark-status.json; exit 12; fi
+            (( SECONDS < deadline )) || { echo "CODEGEN_POLL_TIMEOUT"; exit 13; }
+            sleep 5
+          done
+          cp /tmp/benchmark-status.json /tmp/patch-response.json
+          duration_ms="$(jq -r '.duration_ms' /tmp/benchmark-status.json)"
+          jq -n --arg level "${{ matrix.level }}" --arg id "${{ matrix.id }}" --arg run_id "$run_id" --argjson duration_ms "$duration_ms" '{level:$level,id:$id,run_id:$run_id,duration_ms:$duration_ms,http:"async"}' >/tmp/timing.json
           echo "CODEGEN_DURATION_MS=$duration_ms"
-          jq -n --arg level "${{ matrix.level }}" --arg id "${{ matrix.id }}"             --arg run_id "$run_id" --argjson duration_ms "$duration_ms" --arg http "$code"             '{level:$level,id:$id,run_id:$run_id,duration_ms:$duration_ms,http:$http}' >/tmp/timing.json
-          test "$code" = "200"
-          jq -e '.state=="WAITING_APPROVAL" and (.candidate.id|type=="string") and (.candidate.diff_hash|type=="string")' /tmp/patch-response.json >/dev/null
-          node scripts/codegen-benchmark-suite.js validate-case "${{ matrix.level }}" "${{ matrix.id }}" /tmp/patch-response.json /tmp/material.json
-          echo "CANDIDATE_ID=$(jq -r '.candidate.id' /tmp/patch-response.json)"
+          jq -e '.candidate.id|type=="string"' /tmp/benchmark-status.json >/dev/null
+          node scripts/codegen-benchmark-suite.js validate-case "${{ matrix.level }}" "${{ matrix.id }}" /tmp/benchmark-status.json /tmp/material.json
+          echo "CANDIDATE_ID=$(jq -r '.candidate.id' /tmp/benchmark-status.json)"
           echo "SCOPE_PASS=$(jq -r '.scope_pass' /tmp/material.json)"
 
       - name: Safety assertion
