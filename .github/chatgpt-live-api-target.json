@@ -1,7 +1,7 @@
 {
   "base_url": "https://debugai.asterav8.jp",
   "mode": "readonly",
-  "run_id": "run_muwsvo6r_8bacf5823a",
+  "run_id": "run_muwu09gi_f8ea770973",
   "repo": "/workspace/debug-ai",
-  "request": "Read-only inspection of failed codegen benchmark run. Report durable last_execution_error, workflow cursor, and inspect metadata only. No mutation."
+  "request": "Read-only benchmark run inspection only. No mutation."
 }
