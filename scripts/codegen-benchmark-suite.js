@@ -39,35 +39,34 @@ hard:[
 {id:'h10',file:'.debugai_codegen_benchmark/h10.py',spec:'Define reconcile_replica_maps(replicas). replicas is a non-empty list of dicts. For every key in the union, treat a missing key as a distinct MISSING vote. A value or MISSING resolves only with strict majority (> n/2). Majority MISSING omits the key. No majority puts key in conflicts. Return {"resolved":dict,"conflicts":[sorted keys]}. Values are hashable. Inputs unmodified.'}
 ]};
 
-function build(level,out){
+function getCase(level,id){
  const cases=suites[level]; if(!cases) throw new Error('INVALID_LEVEL');
- const task=[
-   `Code generation benchmark level=${level}. Produce exactly one patch candidate containing exactly these ${cases.length} files. Each file must implement only the specified public function. Do not create tests, docs, helpers outside these files, or modify any existing file. Candidate only; never apply/publish/deploy.`,
-   ...cases.map((c,i)=>`${i+1}. FILE ${c.file}: ${c.spec}`)
- ].join('\n');
- const diagnosis={cause_kind:'SYNTHETIC_CODEGEN_BENCHMARK',public_statement:`Implement the ${cases.length} independent specifications exactly as written.`,cases:cases.map(c=>({id:c.id,file:c.file,spec:c.spec}))};
- fs.writeFileSync(out,JSON.stringify({level,task,diagnosis,selected_paths:cases.map(c=>c.file),cases},null,2));
+ const item=cases.find(x=>x.id===id); if(!item) throw new Error('INVALID_CASE');
+ return item;
 }
-function validate(level,candidatePath,out){
- const cases=suites[level]; if(!cases) throw new Error('INVALID_LEVEL');
+function buildCase(level,id,out){
+ const item=getCase(level,id);
+ const task=`Code generation benchmark case=${id} level=${level}. Produce exactly one patch candidate that creates only FILE ${item.file}. Implement exactly this specification: ${item.spec} Do not create tests, docs, helpers outside this file, or modify any existing file. Candidate only; never apply/publish/deploy.`;
+ const diagnosis={cause_kind:'SYNTHETIC_CODEGEN_BENCHMARK',public_statement:`Implement case ${id} exactly as written.`,case:{id:item.id,file:item.file,spec:item.spec}};
+ fs.writeFileSync(out,JSON.stringify({level,id,task,diagnosis,selected_paths:[item.file],case:item},null,2));
+}
+function validateCase(level,id,candidatePath,out){
+ const item=getCase(level,id);
  const response=JSON.parse(fs.readFileSync(candidatePath,'utf8'));
  const candidate=response.candidate||{};
  const ops=Array.isArray(candidate.operations)?candidate.operations:[];
- const allowed=new Set(cases.map(c=>c.file));
- const seen=new Set(); let scope=true;
- const material={};
- for(const op of ops){
-   const p=String(op.path||'');
-   if(!allowed.has(p)||seen.has(p)||!['create','write'].includes(String(op.type||''))){scope=false;continue;}
-   seen.add(p);
-   material[p]=String(op.content||'');
+ let scope=ops.length===1;
+ let material='';
+ if(scope){
+   const op=ops[0],p=String(op.path||'');
+   scope=p===item.file&&['create','write'].includes(String(op.type||''));
+   material=String(op.content||'');
  }
- for(const p of allowed) if(!seen.has(p)) scope=false;
- fs.writeFileSync(out,JSON.stringify({level,scope_pass:scope,candidate_id:candidate.id||null,diff_hash:candidate.diff_hash||null,files:candidate.files||[],material},null,2));
+ fs.writeFileSync(out,JSON.stringify({level,id,scope_pass:scope,candidate_id:candidate.id||null,diff_hash:candidate.diff_hash||null,file:item.file,material},null,2));
  if(!scope) process.exitCode=3;
 }
-const [mode,level,a,b]=process.argv.slice(2);
-if(mode==='build')build(level,a);
-else if(mode==='validate')validate(level,a,b);
+const [mode,level,id,a,b]=process.argv.slice(2);
+if(mode==='build-case')buildCase(level,id,a);
+else if(mode==='validate-case')validateCase(level,id,a,b);
 else throw new Error('USAGE');
-module.exports={suites};
+module.exports={suites,getCase};
