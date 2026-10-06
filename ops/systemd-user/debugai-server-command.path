@@ -1,0 +1,7 @@
+[Unit]
+Description=Watch DebugAI bounded server command queue
+[Path]
+PathExistsGlob=/home/admin1/projects/debug-ai/.debugai-input/server-command/requests/cmd_*.json
+Unit=debugai-server-command.service
+[Install]
+WantedBy=default.target

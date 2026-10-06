@@ -71,11 +71,11 @@ function reviewPacketInvariants(result){
   for(const [name,gate] of Object.entries(result?.gates||{}))out.push({name,status:String(gate?.status||"UNKNOWN").toUpperCase()});
   return out;
 }
-function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeEvidence=null,tgserver=null,patchService=null,authority=null,repoPolicy=null,sandboxVerification=null,dapEvidence=null,recoveryHooks=null,repositorySnapshot=repositorySnapshotId}={}){
+function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeEvidence=null,tgserver=null,patchService=null,authority=null,repoPolicy=null,sandboxVerification=null,dapEvidence=null,serverCommand=null,recoveryHooks=null,repositorySnapshot=repositorySnapshotId}={}){
   if(!aiCore)throw new Error("AI_CORE_ADAPTER_REQUIRED");
   const activeRuns=new Map(),backgroundErrors=new Map();
   async function logRuntime(event){if(tgserver)await tgserver.log(event);}
-  function makeReadOnlyToolRuntime(repoPath){if(!repoPolicy||!repoPath)return null;return createReadOnlyToolRuntime({repo:repoPath,repoPolicy,tgserver,evidenceSearch});}
+  function makeReadOnlyToolRuntime(repoPath){if(!repoPolicy||!repoPath)return null;return createReadOnlyToolRuntime({repo:repoPath,repoPolicy,tgserver,evidenceSearch,serverCommand});}
   async function callReadOnlyRole(role,{system,user},toolRuntime,{baseEvidenceIds=[],strictEvidenceRefs=true,continuationState=null,durableHooks=null}={}){return runRoleWithReadOnlyTools({aiCore,role,system,user,toolRuntime,baseEvidenceIds,strictEvidenceRefs,continuationState,durableHooks});}
   async function callDirectRole(role,{system,user}){const b=getRoleRuntimeBudget(role);return aiCore.call(role,{system,user,maxTokens:b.max_tokens,timeoutMsOverride:b.turn_timeout_ms,deadlineAt:Date.now()+b.turn_timeout_ms});}
   async function getOfficialEvidence(query){if(!evidenceSearch)return{official:[],evidenceGap:false,evidenceStatus:"NOT_CONFIGURED"};try{return{official:await evidenceSearch.search({query}),evidenceGap:false,evidenceStatus:"FINAL_VALID"};}catch(e){if(e?.code==="EVIDENCE_SEARCH_NOT_FINAL")return{official:[],evidenceGap:true,evidenceStatus:String(e?.meta?.status||"NOT_FINAL")};throw e;}}
