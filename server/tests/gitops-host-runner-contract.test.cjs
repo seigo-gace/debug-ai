@@ -53,3 +53,17 @@ test("publish keeps exact-head, candidate identity, file scope and remote readba
   assert.match(text, /PUBLISH_REMOTE_READBACK_MISMATCH/);
   assert.match(text, /\.debugai-input\//);
 });
+
+test("project_update is fixed to Project #1 and allowlisted fields with readback", () => {
+  const text = source();
+  assert.match(text, /PROJECT_OWNER="seigo-gace"/);
+  assert.match(text, /PROJECT_NUMBER="1"/);
+  assert.match(text, /PROJECT_ID="PVT_kwHODOQFoM4BEJII"/);
+  assert.match(text, /project_update_request/);
+  assert.match(text, /project item-add/);
+  assert.match(text, /project item-edit/);
+  assert.match(text, /PROJECT_READBACK_MISMATCH/);
+  assert.match(text, /Status\|Gate/);
+  assert.match(text, /"Change Unit"\|"Mutation Owner"/);
+  assert.doesNotMatch(text, /eval /);
+});
