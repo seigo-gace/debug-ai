@@ -7,7 +7,7 @@ const {contentHash}=require("../../orchestrator/durable-contracts.js");
 
 const MAX_FILES=10000;
 const MAX_TOTAL_BYTES=256*1024*1024;
-const EXCLUDED_DIRECTORIES=new Set([".git","node_modules","build","coverage","runtime","logs","tmp",".temp",".cache","patch-backups","patch-candidates","sandbox-jobs",".debugai-runtime"]);
+const EXCLUDED_DIRECTORIES=new Set([".git",".debugai-input","node_modules","build","coverage","runtime","logs","tmp",".temp",".cache","patch-backups","patch-candidates","sandbox-jobs",".debugai-runtime"]);
 const EMPTY_HASH=crypto.createHash("sha256").update("").digest("hex");
 
 function sha256(value){return crypto.createHash("sha256").update(value).digest("hex");}
