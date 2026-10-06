@@ -29,7 +29,7 @@ function serverCommandAuditProjection(event={}){
   if(Number.isInteger(event.exit_code))out.exit_code=event.exit_code;
   if(typeof event.read_only==="boolean")out.read_only=event.read_only;
   if(typeof event.error_code==="string"&&event.error_code)out.error_code=event.error_code.slice(0,120);
-  if(["project.pwd","project.git_head","project.git_status","service.debug_ai_state","service.sandbox_state"].includes(commandId)&&typeof event.stdout==="string")out.stdout=event.stdout.slice(0,512);
+  if(["project.pwd","project.git_head","project.git_status","project.git_changed_paths","project.git_recent_commits","service.debug_ai_state","service.sandbox_state","service.debug_ai_health","system.disk_usage"].includes(commandId)&&typeof event.stdout==="string")out.stdout=event.stdout.slice(0,512);
   return scrub(out);
 }
 
