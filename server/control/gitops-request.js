@@ -5,17 +5,13 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const SCHEMA = "debugai.gitops-request/v1";
-const ACTIONS = new Set(["publish", "deploy", "project_update"]);
+const ACTIONS = new Set(["publish", "deploy"]);
 const GIT_SHA_RE = /^[0-9a-f]{40}$/;
 const HASH_RE = /^[0-9a-f]{64}$/;
 const CANDIDATE_ID_RE = /^patch_[0-9a-f]{24}$/;
 const BRANCH_RE = /^[A-Za-z0-9._\/-]{1,160}$/;
 const REQUEST_ID_RE = /^gitops_[0-9a-f]{24}$/;
 const FORBIDDEN_PATH_PARTS = new Set([".git", ".env", ".debugai-input"]);
-const PROJECT_OWNER = "seigo-gace";
-const PROJECT_NUMBER = 1;
-const PROJECT_FIELD_NAMES = new Set(["Status", "Gate", "Change Unit", "Mutation Owner"]);
-const PROJECT_CONTENT_URL_RE = /^https:\/\/github\.com\/(seigo-gace|G-ACE-inc)\/[A-Za-z0-9_.-]+\/(issues|pull)\/[1-9][0-9]*$/;
 
 function fail(code) {
   const error = new Error(code);
@@ -72,24 +68,6 @@ function normalizeMessage(value) {
   return message;
 }
 
-function normalizeProjectUpdate(input = {}) {
-  const owner = String(input.project_owner || "").trim();
-  const number = Number(input.project_number);
-  const contentUrl = String(input.content_url || "").trim();
-  if (owner !== PROJECT_OWNER || number !== PROJECT_NUMBER) fail("GITOPS_PROJECT_TARGET_INVALID");
-  if (!PROJECT_CONTENT_URL_RE.test(contentUrl)) fail("GITOPS_PROJECT_CONTENT_URL_INVALID");
-  const fields = input.fields;
-  if (!fields || typeof fields !== "object" || Array.isArray(fields)) fail("GITOPS_PROJECT_FIELDS_INVALID");
-  const out = {};
-  for (const [name, raw] of Object.entries(fields)) {
-    if (!PROJECT_FIELD_NAMES.has(name)) fail("GITOPS_PROJECT_FIELD_FORBIDDEN");
-    const value = String(raw ?? "").trim().replace(/[\r\n\t]+/g, " ").replace(/\s{2,}/g, " ");
-    if (!value || value.length > 160) fail("GITOPS_PROJECT_FIELD_VALUE_INVALID");
-    out[name] = value;
-  }
-  return { project_owner: owner, project_number: number, content_url: contentUrl, fields: out };
-}
-
 class GitOpsRequestService {
   constructor({ repoPolicy } = {}) {
     if (!repoPolicy) fail("GITOPS_REPO_POLICY_REQUIRED");
@@ -124,11 +102,9 @@ class GitOpsRequestService {
       request.candidate_id = String(input.candidate_id || "").trim().toLowerCase();
       request.candidate_hash = String(input.candidate_hash || "").trim().toLowerCase();
       if (!CANDIDATE_ID_RE.test(request.candidate_id) || !HASH_RE.test(request.candidate_hash) || request.candidate_id !== `patch_${request.candidate_hash.slice(0, 24)}`) fail("GITOPS_CANDIDATE_IDENTITY_INVALID");
-    } else if (action === "deploy") {
+    } else {
       request.sha = normalizeSha(input.sha, "GITOPS_DEPLOY_SHA_INVALID");
       if (request.sha !== expectedHead) fail("GITOPS_DEPLOY_SHA_HEAD_MISMATCH");
-    } else {
-      Object.assign(request, normalizeProjectUpdate(input));
     }
     const root = this.queueRoot(repo);
     atomicJsonWrite(path.join(root, "requests", `${request.id}.json`), request);
@@ -154,9 +130,5 @@ module.exports = {
   normalizeBranch,
   normalizeFiles,
   normalizeMessage,
-  normalizeProjectUpdate,
   normalizeSha,
-  PROJECT_OWNER,
-  PROJECT_NUMBER,
-  PROJECT_FIELD_NAMES,
 };
