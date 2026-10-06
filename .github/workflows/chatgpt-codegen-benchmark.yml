@@ -27,7 +27,7 @@ jobs:
     timeout-minutes: 30
     env:
       BASE_URL: https://debugai.asterav8.jp
-      REPO_PATH: /workspace/debug-ai/.debugai-input/test-repos/AI-Numbers-easy01
+      REPO_PATH: /workspace/debug-ai
       CF_ACCESS_CLIENT_ID: ${{ secrets.DEBUGAI_CF_ACCESS_CLIENT_ID }}
       CF_ACCESS_CLIENT_SECRET: ${{ secrets.DEBUGAI_CF_ACCESS_CLIENT_SECRET }}
     steps:
