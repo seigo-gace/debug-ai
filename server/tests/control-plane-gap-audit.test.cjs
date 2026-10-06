@@ -28,7 +28,8 @@ test("control-plane gap audit distinguishes implemented providers from real unre
   assert.deepEqual(byRequirement.get("state.read"),{requirement:"state.read",type:CAPABILITY_TYPE.MODEL_TOOL,provider:"runtime-tool:state.read",status:"IMPLEMENTED"});
   assert.deepEqual(byRequirement.get("history.read"),{requirement:"history.read",type:CAPABILITY_TYPE.MODEL_TOOL,provider:"runtime-tool:history.read",status:"IMPLEMENTED"});
   assert.deepEqual(byRequirement.get("invariant.read"),{requirement:"invariant.read",type:CAPABILITY_TYPE.MODEL_TOOL,provider:"runtime-tool:invariant.read",status:"IMPLEMENTED"});
-  assert.deepEqual(byRequirement.get("source.verify"),{requirement:"source.verify",type:CAPABILITY_TYPE.MODEL_TOOL,provider:"runtime-tool:source.verify",status:"IMPLEMENTED"});\n  assert.deepEqual(byRequirement.get("server.command.read"),{requirement:"server.command.read",type:CAPABILITY_TYPE.MODEL_TOOL,provider:"runtime-tool:server.command.read",status:"IMPLEMENTED"});
+  assert.deepEqual(byRequirement.get("source.verify"),{requirement:"source.verify",type:CAPABILITY_TYPE.MODEL_TOOL,provider:"runtime-tool:source.verify",status:"IMPLEMENTED"});
+  assert.deepEqual(byRequirement.get("server.command.read"),{requirement:"server.command.read",type:CAPABILITY_TYPE.MODEL_TOOL,provider:"runtime-tool:server.command.read",status:"IMPLEMENTED"});
 
   assert.equal(nonRuntimeCapabilityImplemented("diff.plan"),true);
   assert.equal(nonRuntimeCapabilityImplemented("test.plan"),true);
