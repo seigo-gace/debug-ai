@@ -10,11 +10,16 @@ function normalizeArguments(commandId,value){
   const args=Array.isArray(value)?value.map(v=>String(v)):fail("SERVER_COMMAND_ARGUMENTS_INVALID");
   if(args.length<1||args.length>16)fail("SERVER_COMMAND_ARGUMENTS_INVALID");
   for(const arg of args)if(!arg||arg.length>256||/[\r\n\0]/.test(arg))fail("SERVER_COMMAND_ARGUMENTS_INVALID");
-  const root=args[0],allowed=new Set(["api","repo","pr","issue","run","workflow","release","search","auth"]);
+  const root=args[0],allowed=new Set(["api","repo","pr","issue","run","workflow","release","search","auth","project"]);
   if(!allowed.has(root))fail("GITHUB_GH_READ_ROOT_NOT_ALLOWED");
   const forbidden=new Set(["create","edit","delete","merge","close","reopen","comment","review","ready","lock","unlock","rerun","cancel","watch","enable","disable","run"]);
   if(args.slice(1).some(a=>forbidden.has(a)))fail("GITHUB_GH_READ_MUTATION_FORBIDDEN");
-  if(root==="api"&&args.some((a,i)=>i>0&&(a==="--method"||a==="-X"||a.startsWith("--method=")||a.startsWith("-X"))))fail("GITHUB_GH_READ_METHOD_FORBIDDEN");
+  if(root==="api"){
+    const apiArgs=args.slice(1);
+    if(apiArgs.some(a=>a==="-f"||a==="-F"||a==="--field"||a==="--raw-field"||a==="--input"||a.startsWith("--field=")||a.startsWith("--raw-field=")||a.startsWith("--input=")))fail("GITHUB_GH_READ_BODY_FORBIDDEN");
+    for(let i=0;i<apiArgs.length;i++){const a=apiArgs[i];if(a==="--method"||a==="-X"){if(String(apiArgs[i+1]||"").toUpperCase()!=="GET")fail("GITHUB_GH_READ_METHOD_FORBIDDEN");i+=1;}else if(a.startsWith("--method=")&&a.slice(9).toUpperCase()!=="GET")fail("GITHUB_GH_READ_METHOD_FORBIDDEN");}
+    if(apiArgs[0]==="graphql")fail("GITHUB_GH_READ_GRAPHQL_FORBIDDEN");
+  }
   return args;
 }
 function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
