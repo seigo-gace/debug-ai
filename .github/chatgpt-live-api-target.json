@@ -1,0 +1,7 @@
+{
+  "base_url": "https://debugai.asterav8.jp",
+  "mode": "dogfood",
+  "run_id": "",
+  "repo": "/workspace/debug-ai/.debugai-input/test-repos/AI-Numbers-easy01",
+  "request": "Stage 1 read-only dogfood. Investigate AI-Numbers Easy 01 only. Use the bounded server/GitHub investigation tools available to DebugAI. Read GitHub Issue #1 for seigo-gace/AI-Numbers, confirm repository exact HEAD 1520527d3b634837cc24a466cdebfd541591861e and clean status, reproduce debugai_dogfood/test_easy_version_bug.py with project.python_unittest, inspect the directly relevant source and test, and identify exactly one smallest root cause with evidence. The expected contract is numeric version ordering where v10 is newer than v2. Do not modify files, do not generate/apply a patch candidate, do not publish, merge, deploy, or mutate GitHub. Preserve UNKNOWN if evidence is insufficient."
+}
