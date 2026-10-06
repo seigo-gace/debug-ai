@@ -9,26 +9,29 @@ PROJECT                      = DebugAI
 REPOSITORY                   = seigo-gace/debug-ai
 BRANCH                       = feat/tgserver-async-log-sink-20261003
 PR                           = #40 OPEN / DRAFT / UNMERGED
-IMPLEMENTATION_QUALIFIED_SHA = d1ee3ffd175fc530afe8f38e782859d1d63c8e61
+IMPLEMENTATION_SHA           = d1ee3ffd175fc530afe8f38e782859d1d63c8e61
+SOURCE_QUALIFICATION_HEAD    = 71bc123112e07859dce5b7ae24afaff7eec86a4f
 LIVE_SERVER_SHA              = 3997812067fe2a76e7fb6aea246ea8b34aa564c0
 CURRENT_SOURCE_DEPLOYED      = NO
-CANONICAL_SOURCE_TESTS       = PASS_463_OF_463_ZERO_SKIP
-FULL_SUITE_SANDBOX_REAL      = PASS_463_OF_463_ZERO_SKIP
+CANONICAL_SOURCE_TESTS       = PASS_464_OF_464_ZERO_SKIP
+FULL_SUITE_SANDBOX_REAL      = PASS_464_OF_464_ZERO_SKIP
 AUTOMATIC_REFIX_SOURCE       = PASS
+AUTOMATIC_REFIX_CLOSED_LOOP  = PASS_SOURCE_CI
 ```
 
 Implementation source `d1ee3ffd...` adds the missing bounded automatic re-fix path after an approved patch fails deterministic retest. Instead of stopping at `FAILED_RETEST`, the same canonical run uses the existing state-machine cycle `FAILED -> RESOLVING -> PATCH_READY -> WAITING_APPROVAL`, registers fresh retest checks/invariants/gates as runtime evidence, re-runs Diagnoser, requires a fresh External Hypothesis Review PASS, and creates a new candidate inside the previous selected paths.
 
 Automatic re-fix is bounded to two attempts. It never applies its own candidate. Every new candidate returns to `WAITING_MASTER_APPROVAL`. External hypothesis non-PASS, missing evidence/scope, scope drift/forbidden operation, or attempt-budget exhaustion fails closed to `ESCALATION_REQUIRED`.
 
-At exact source `d1ee3ffd...`:
-- Development Probe `37401202502`: SUCCESS; canonical `463/463`, `FAIL=0`, `SKIP=0`, `source_ready=true`, `server_mutation_authorized=false`.
-- Verify `37401202488`: SUCCESS.
-- Core Verify `37401202476`: SUCCESS.
-- Public Readiness `37401202479`: SUCCESS.
-- Runtime Volume Gate `37401202508`: SUCCESS.
-- Targeted TGserver Logging `37401202497`: SUCCESS.
-- Dedicated automatic re-fix regressions: 3/3 PASS.
+Implementation `d1ee3ffd...` is qualified through source/test head `71bc123...`:
+- Development Probe `37403103008`: SUCCESS; canonical `464/464`, `FAIL=0`, `SKIP=0`, `source_ready=true`, `server_mutation_authorized=false`.
+- Verify `37403103045`: SUCCESS.
+- Core Verify `37403103007`: SUCCESS.
+- Public Readiness `37403102991`: SUCCESS.
+- Runtime Volume Gate `37403103015`: SUCCESS.
+- Targeted TGserver Logging `37403103011`: SUCCESS.
+- Dedicated automatic re-fix regressions: 4/4 PASS.
+- The fourth regression proves same-run closure after explicit approval of the generated replacement candidate, ending at Strict Completion `COMPLETE`.
 
 Core Verify real Sandbox evidence:
 
@@ -41,8 +44,8 @@ SANDBOX_DAP_LOOPBACK_ONLY=PASS
 SANDBOX_FULL_SUITE_PASS
 BACKEND=sidecar+landlock+seccomp
 SIGNAL=EXACT_SOURCE_BOUND_CHILD_ONLY
-TESTS=463
-PASS=463
+TESTS=464
+PASS=464
 FAIL=0
 SKIPPED=0
 ```
@@ -331,15 +334,17 @@ Live MCP stdio on approved b30649a passed initialize, the exact ordered nine-too
 ## Current qualification state
 
 ```text
-IMPLEMENTATION_QUALIFIED_SHA = d1ee3ffd175fc530afe8f38e782859d1d63c8e61
-IMPLEMENTATION_CANONICAL_TESTS = PASS_463_OF_463_ZERO_SKIP
-FULL_PACKAGE_TEST_IN_SANDBOX = PASS_463_OF_463_ZERO_SKIP
+IMPLEMENTATION_SHA = d1ee3ffd175fc530afe8f38e782859d1d63c8e61
+SOURCE_QUALIFICATION_HEAD = 71bc123112e07859dce5b7ae24afaff7eec86a4f
+IMPLEMENTATION_CANONICAL_TESTS = PASS_464_OF_464_ZERO_SKIP
+FULL_PACKAGE_TEST_IN_SANDBOX = PASS_464_OF_464_ZERO_SKIP
 SANDBOX_BACKEND = sidecar+landlock+seccomp
 SANDBOX_SIGNAL_SCOPE = EXACT_SOURCE_BOUND_CHILD_ONLY
 LIVE_SERVER_HEAD = 3997812067fe2a76e7fb6aea246ea8b34aa564c0
 CURRENT_SOURCE_REFLECTION = NOT_EXECUTED_FOR_D1EE3
 LIVE_CURRENT_SOURCE_STATE = LIVE_399781_SOURCE_D1EE3_NOT_REFLECTED
 AUTOMATIC_REFIX_SOURCE = PASS
+AUTOMATIC_REFIX_CLOSED_LOOP_SOURCE_CI = PASS
 AUTOMATIC_REFIX_LIVE_E2E = NOT_EXECUTED
 GENERAL_BLOCK_CORE_ALL_WORKFLOWS = NOT_CONNECTED
 SEARCH_SKIP_ACTIVATION = NO

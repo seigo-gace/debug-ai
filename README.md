@@ -10,9 +10,9 @@ The current feature work is PR #40 (`feat/tgserver-async-log-sink-20261003`), OP
 
 At `d1ee3ffd...`, a failed deterministic retest no longer terminates immediately as `FAILED_RETEST`. The same run transitions through the existing `FAILED -> RESOLVING -> PATCH_READY -> WAITING_APPROVAL` states, registers fresh retest evidence, re-runs Diagnoser, requires a fresh External Hypothesis Review PASS, and creates a new Patch Candidate inside the previous selected-file scope. Automatic re-fix is bounded to two attempts; non-PASS review, missing required evidence/scope, or budget exhaustion fails closed to `ESCALATION_REQUIRED`. Patch application is never automatic: every new candidate still requires explicit Master approval bound to the exact candidate identity.
 
-Canonical exact-head verification at `d1ee3ffd...` passed `463/463` tests with `FAIL=0` and `SKIP=0`, including all three dedicated automatic re-fix regressions. Development Probe run `37401202502` reported `source_ready=true` and `server_mutation_authorized=false`. Verify `37401202488`, Core Verify `37401202476`, Public Readiness `37401202479`, Runtime Volume Gate `37401202508`, Development Probe `37401202502`, and Targeted TGserver Logging `37401202497` all completed SUCCESS.
+Qualification head `71bc123112e07859dce5b7ae24afaff7eec86a4f` adds an end-to-end same-run closure regression on top of implementation `d1ee3ffd...`. Canonical exact-head verification at `71bc123...` passed `464/464` tests with `FAIL=0` and `SKIP=0`, including four dedicated automatic re-fix regressions. The fourth regression proves: first approved candidate fails retest -> DebugAI creates a replacement candidate -> replacement waits for explicit approval -> approved replacement passes retest -> Local Review / External Final Review / Strict Completion -> `COMPLETE`. Development Probe run `37403103008` reported `source_ready=true` and `server_mutation_authorized=false`. Verify `37403103045`, Core Verify `37403103007`, Public Readiness `37403102991`, Runtime Volume Gate `37403103015`, Development Probe `37403103008`, and Targeted TGserver Logging `37403103011` all completed SUCCESS.
 
-Core Verify executed the existing isolated Sandbox full-suite and produced `TESTS=463 / PASS=463 / FAIL=0 / SKIPPED=0` with `BACKEND=sidecar+landlock+seccomp`, `SIGNAL=EXACT_SOURCE_BOUND_CHILD_ONLY`, `SANDBOX_DOCKER_SOCKET=ABSENT`, real isolation PASS, strict socket deny PASS, DAP loopback-only PASS, and unchanged source-repository hash.
+Core Verify executed the existing isolated Sandbox full-suite and produced `TESTS=464 / PASS=464 / FAIL=0 / SKIPPED=0` with `BACKEND=sidecar+landlock+seccomp`, `SIGNAL=EXACT_SOURCE_BOUND_CHILD_ONLY`, `SANDBOX_DOCKER_SOCKET=ABSENT`, real isolation PASS, strict socket deny PASS, DAP loopback-only PASS, and unchanged source-repository hash.
 
 The currently reflected live DebugAI Server remains exact source `3997812067fe2a76e7fb6aea246ea8b34aa564c0`, previously verified running/healthy with `guarded_gitops=true`, request/status endpoints live, source parity PASS, and no DebugAI Docker socket. Source `d1ee3ffd...` is **not** live. Production reflection/recreate of a new exact SHA remains a separate Master approval boundary.
 
@@ -39,13 +39,15 @@ The design document preserves architecture decisions. `CURRENT_STATE.md` owns cu
 Live Server and current source are intentionally different states:
 
 ```text
-LIVE_SERVER_SHA          = 3997812067fe2a76e7fb6aea246ea8b34aa564c0
-CURRENT_SOURCE_SHA       = d1ee3ffd175fc530afe8f38e782859d1d63c8e61
-CURRENT_SOURCE_DEPLOYED  = NO
-CURRENT_SOURCE_TESTS     = 463/463 PASS / FAIL=0 / SKIP=0
-CURRENT_SOURCE_CI        = 6/6 SUCCESS
-AUTOMATIC_REFIX_SOURCE   = PASS
-STRICT_COMPLETION_LIVE   = NOT_VERIFIED_FOR_D1EE3
+LIVE_SERVER_SHA             = 3997812067fe2a76e7fb6aea246ea8b34aa564c0
+IMPLEMENTATION_SHA           = d1ee3ffd175fc530afe8f38e782859d1d63c8e61
+SOURCE_QUALIFICATION_HEAD    = 71bc123112e07859dce5b7ae24afaff7eec86a4f
+CURRENT_SOURCE_DEPLOYED      = NO
+SOURCE_QUALIFICATION_TESTS   = 464/464 PASS / FAIL=0 / SKIP=0
+SOURCE_QUALIFICATION_CI      = 6/6 SUCCESS
+AUTOMATIC_REFIX_SOURCE       = PASS
+AUTOMATIC_REFIX_CLOSED_LOOP  = PASS_SOURCE_CI
+STRICT_COMPLETION_LIVE       = NOT_VERIFIED_FOR_CURRENT_SOURCE
 ```
 
 The live `399781...` reflection remains the verified Guarded GitOps infrastructure boundary. The newer `d1ee3...` source adds bounded automatic re-fix after a failed deterministic retest and is qualified only at source/CI/Sandbox until separately approved and reflected.
@@ -542,7 +544,7 @@ npm install
 npm run verify
 ```
 
-The implementation qualification anchor `d1ee3ffd175fc530afe8f38e782859d1d63c8e61` passed canonical exact-head verification and the existing isolated Full-suite Sandbox with 463/463 PASS and zero skip. Exact run/evidence identifiers are recorded in `docs/CURRENT_SOURCE_QUALIFICATION.md`.
+Implementation `d1ee3ffd175fc530afe8f38e782859d1d63c8e61` plus qualification head `71bc123112e07859dce5b7ae24afaff7eec86a4f` passed canonical exact-head verification and the existing isolated Full-suite Sandbox with 464/464 PASS and zero skip. Exact run/evidence identifiers are recorded in `docs/CURRENT_SOURCE_QUALIFICATION.md`.
 
 Documentation-only commits after that anchor require their own exact-head CI before the resulting documentation head may be considered a Server reflection candidate.
 

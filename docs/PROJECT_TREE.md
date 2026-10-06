@@ -82,13 +82,13 @@ Core Verify
   -> require tests>0 / pass=tests / fail=0 / skipped=0
 ```
 
-At source `d1ee3ffd175fc530afe8f38e782859d1d63c8e61`, Core Verify run `37401202476` produced `TESTS=463 / PASS=463 / FAIL=0 / SKIPPED=0` with `BACKEND=sidecar+landlock+seccomp`, `SIGNAL=EXACT_SOURCE_BOUND_CHILD_ONLY`, `SANDBOX_DOCKER_SOCKET=ABSENT`, real isolation PASS, strict socket deny PASS and DAP loopback-only PASS.
+At qualification head `71bc123112e07859dce5b7ae24afaff7eec86a4f` for implementation `d1ee3ffd175fc530afe8f38e782859d1d63c8e61`, Core Verify run `37403103007` produced `TESTS=464 / PASS=464 / FAIL=0 / SKIPPED=0` with `BACKEND=sidecar+landlock+seccomp`, `SIGNAL=EXACT_SOURCE_BOUND_CHILD_ONLY`, `SANDBOX_DOCKER_SOCKET=ABSENT`, real isolation PASS, strict socket deny PASS and DAP loopback-only PASS.
 
 ## Automatic re-fix execution boundary
 
 `server/workflow.js` owns the bounded failed-retest recovery path. It reuses the existing canonical state machine rather than introducing a second orchestrator.
 
-`server/tests/workflow-automatic-refix.test.cjs` locks three contracts: fresh failed retest can produce a new candidate but must return to Master approval; fresh external hypothesis non-PASS escalates; retry-budget exhaustion escalates.
+`server/tests/workflow-automatic-refix.test.cjs` locks four contracts: fresh failed retest can produce a new candidate but must return to explicit approval; fresh external hypothesis non-PASS escalates; retry-budget exhaustion escalates; and an explicitly approved replacement candidate can pass retest and reach Strict Completion `COMPLETE` in the same run.
 
 Automatic re-fix is candidate-generation only. It does not own approval, apply, publish, deploy or shared Server-executor responsibilities.
 

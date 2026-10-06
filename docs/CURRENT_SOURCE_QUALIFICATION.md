@@ -8,7 +8,8 @@ This record is the source/CI qualification checkpoint for the current feature br
 repository = seigo-gace/debug-ai
 branch     = feat/tgserver-async-log-sink-20261003
 PR         = #40 OPEN / DRAFT / UNMERGED
-qualified implementation SHA before documentation sync = d1ee3ffd175fc530afe8f38e782859d1d63c8e61
+implementation SHA                                      = d1ee3ffd175fc530afe8f38e782859d1d63c8e61
+source qualification head                               = 71bc123112e07859dce5b7ae24afaff7eec86a4f
 live Server SHA                                      = 3997812067fe2a76e7fb6aea246ea8b34aa564c0
 qualified implementation deployed                   = NO
 ```
@@ -45,13 +46,13 @@ Safety properties:
 
 ## Canonical source evidence
 
-Development Probe run `37401202502` checked out exact `d1ee3ffd175fc530afe8f38e782859d1d63c8e61`.
+Development Probe run `37403103008` checked out exact qualification head `71bc123112e07859dce5b7ae24afaff7eec86a4f`, whose only change after the implementation/docs head is the closed-loop automatic re-fix regression.
 
 Observed canonical result:
 
 ```text
-tests=463
-pass=463
+tests=464
+pass=464
 fail=0
 skipped=0
 source_ready=true
@@ -61,23 +62,24 @@ server_mutation_authorized=false
 Dedicated automatic re-fix tests:
 
 ```text
-failed retest -> new bounded candidate -> WAITING_MASTER_APPROVAL = PASS
-fresh external hypothesis non-PASS -> ESCALATION_REQUIRED       = PASS
-attempt budget exhausted -> ESCALATION_REQUIRED                 = PASS
+failed retest -> new bounded candidate -> WAITING_MASTER_APPROVAL         = PASS
+fresh external hypothesis non-PASS -> ESCALATION_REQUIRED                 = PASS
+attempt budget exhausted -> ESCALATION_REQUIRED                           = PASS
+explicitly approved replacement -> retest PASS -> Strict Completion COMPLETE = PASS
 ```
 
 Exact implementation-head workflows all completed SUCCESS:
 
-- Verify `37401202488`
-- Core Verify `37401202476`
-- Public Readiness `37401202479`
-- Runtime Volume Gate `37401202508`
-- Development Probe `37401202502`
-- Targeted TGserver Logging `37401202497`
+- Verify `37403103045`
+- Core Verify `37403103007`
+- Public Readiness `37403102991`
+- Runtime Volume Gate `37403103015`
+- Development Probe `37403103008`
+- Targeted TGserver Logging `37403103011`
 
 ## Real isolated Sandbox evidence
 
-Core Verify `37401202476` produced:
+Core Verify `37403103007` produced:
 
 ```text
 SANDBOX_SOURCE_REPO_HASH=UNCHANGED
@@ -88,8 +90,8 @@ SANDBOX_DAP_LOOPBACK_ONLY=PASS
 SANDBOX_FULL_SUITE_PASS
 BACKEND=sidecar+landlock+seccomp
 SIGNAL=EXACT_SOURCE_BOUND_CHILD_ONLY
-TESTS=463
-PASS=463
+TESTS=464
+PASS=464
 FAIL=0
 SKIPPED=0
 ```
