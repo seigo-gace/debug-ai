@@ -1,0 +1,114 @@
+name: ChatGPT Codegen Benchmark
+
+on:
+  push:
+    branches:
+      - feat/tgserver-async-log-sink-20261003
+    paths:
+      - .github/codegen-benchmark-trigger.json
+      - .github/workflows/chatgpt-codegen-benchmark.yml
+      - scripts/codegen-benchmark-suite.js
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chatgpt-codegen-benchmark
+  cancel-in-progress: false
+
+jobs:
+  codegen:
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        level: [small, medium, hard]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      BASE_URL: https://debugai.asterav8.jp
+      REPO_PATH: /workspace/debug-ai/.debugai-input/test-repos/AI-Numbers-easy01
+      CF_ACCESS_CLIENT_ID: ${{ secrets.DEBUGAI_CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.DEBUGAI_CF_ACCESS_CLIENT_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Require bounded live access
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${CF_ACCESS_CLIENT_ID:-}"
+          test -n "${CF_ACCESS_CLIENT_SECRET:-}"
+          code="$(curl -sS -L --max-time 30 -o /tmp/health.json -w '%{http_code}'             -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}"             -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}"             "${BASE_URL}/health")"
+          echo "HEALTH_HTTP=$code"
+          test "$code" = "200"
+          jq -e '.ok==true and .service=="debug-ai"' /tmp/health.json >/dev/null
+
+      - name: Build benchmark request
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/codegen-benchmark-suite.js build "${{ matrix.level }}" /tmp/bench-config.json
+          jq -e '.selected_paths|length==10' /tmp/bench-config.json >/dev/null
+          echo "BENCHMARK_LEVEL=${{ matrix.level }}"
+          echo "BENCHMARK_CASES=10"
+
+      - name: Create isolated benchmark run
+        id: run
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -n --arg repo "$REPO_PATH" --arg level "${{ matrix.level }}"             '{repo:$repo,projectId:"debug-ai-codegen-benchmark",failure:{message:("Synthetic code generation benchmark bootstrap "+$level+". Do not apply or deploy changes.")},localEvidence:[]}' >/tmp/start.json
+          code="$(curl -sS --max-time 60 -o /tmp/start-out.json -w '%{http_code}'             -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}"             -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}"             -H 'content-type: application/json' --data-binary @/tmp/start.json             "${BASE_URL}/v1/runs/start")"
+          echo "RUN_START_HTTP=$code"
+          test "$code" = "202"
+          run_id="$(jq -r '.run_id // empty' /tmp/start-out.json)"
+          [[ "$run_id" =~ ^run_[A-Za-z0-9_]+$ ]]
+          echo "run_id=$run_id" >>"$GITHUB_OUTPUT"
+          echo "BENCHMARK_RUN_ID=$run_id"
+
+      - name: Generate patch candidate only
+        id: generate
+        shell: bash
+        run: |
+          set -euo pipefail
+          run_id="${{ steps.run.outputs.run_id }}"
+          task="$(jq -r '.task' /tmp/bench-config.json)"
+          diagnosis="$(jq -c '.diagnosis' /tmp/bench-config.json)"
+          paths="$(jq -c '.selected_paths' /tmp/bench-config.json)"
+          analysis="$(jq -nc --argjson diagnosis "$diagnosis"             '{deterministic_verification:{status:"FINAL_VALID",checks:[]},evidence_gap:false,evidence_status:"FINAL_VALID",evidence_registry:{evidence_ids:[],tool_evidence_ids:[]},diagnosis:$diagnosis,external_hypothesis_review:{json:{verdict:"PASS"}}}')"
+          jq -n --arg run_id "$run_id" --arg repo "$REPO_PATH" --arg task "$task"             --argjson analysis "$analysis" --argjson paths "$paths"             '{runId:$run_id,analysis:$analysis,repo:$repo,selectedPaths:$paths,context:$task,task:$task}' >/tmp/patch-request.json
+          start_ms="$(date +%s%3N)"
+          code="$(curl -sS --max-time 1200 -o /tmp/patch-response.json -w '%{http_code}'             -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}"             -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}"             -H 'content-type: application/json' --data-binary @/tmp/patch-request.json             "${BASE_URL}/v1/patch-candidate")"
+          end_ms="$(date +%s%3N)"
+          duration_ms="$((end_ms-start_ms))"
+          echo "PATCH_HTTP=$code"
+          echo "CODEGEN_DURATION_MS=$duration_ms"
+          jq -n --arg level "${{ matrix.level }}" --arg run_id "$run_id" --argjson duration_ms "$duration_ms" --arg http "$code"             '{level:$level,run_id:$run_id,duration_ms:$duration_ms,http:$http}' >/tmp/timing.json
+          test "$code" = "200"
+          jq -e '.state=="WAITING_APPROVAL" and (.candidate.id|type=="string") and (.candidate.diff_hash|type=="string")' /tmp/patch-response.json >/dev/null
+          node scripts/codegen-benchmark-suite.js validate "${{ matrix.level }}" /tmp/patch-response.json /tmp/material.json
+          echo "CANDIDATE_ID=$(jq -r '.candidate.id' /tmp/patch-response.json)"
+          echo "CANDIDATE_FILE_COUNT=$(jq '.candidate.files|length' /tmp/patch-response.json)"
+          echo "SCOPE_PASS=$(jq -r '.scope_pass' /tmp/material.json)"
+
+      - name: Safety assertion
+        if: always()
+        shell: bash
+        run: |
+          echo "PATCH_CANDIDATE_ONLY=YES"
+          echo "APPROVE_APPLY_VERIFY_CALLED=NO"
+          echo "PRODUCTION_DEPLOY_CALLED=NO"
+          echo "GITHUB_MUTATION_BY_DEBUGAI=NO"
+
+      - name: Upload benchmark candidate
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: codegen-benchmark-${{ matrix.level }}-${{ github.run_id }}
+          path: |
+            /tmp/patch-response.json
+            /tmp/material.json
+            /tmp/timing.json
+          if-no-files-found: warn
+          retention-days: 3
