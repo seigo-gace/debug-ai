@@ -59,11 +59,15 @@ Dockerfile / compose.yaml
 
 ## Guarded GitOps execution boundary
 
-`server/control/gitops-request.js` owns the structured publish/deploy request queue inside the DebugAI source contract.
+`server/control/gitops-request.js` owns the structured `publish`, `deploy`, and fixed-scope `project_update` request queue inside the DebugAI source contract.
 
-`scripts/host-gitops-runner.sh` is the bounded **on-demand** host executor for those requests. It uses the existing host `git`/`docker` command path only when explicitly invoked; it is not a resident Host Node/Python process and no DebugAI-specific systemd watcher/service is installed by this source.
+`scripts/host-gitops-runner.sh` is the bounded host executor. Publish/deploy preserve the existing exact-head, candidate, approval, fast-forward and Runtime gates. `project_update` is separately restricted to GitHub Project #1 owned by `seigo-gace`, Issue/PR content under `seigo-gace` or `G-ACE-inc`, and the allowlisted fields `Status`, `Gate`, `Change Unit`, and `Mutation Owner`. It performs post-write Project readback before PASS.
 
-Publish remains exact-current-HEAD, candidate-identity, file-scope and remote-readback gated. Deploy may start from a clean older server checkout, but only after exact remote/fetch target verification, a fast-forward ancestry check, and consumption of the exact request/SHA host approval file. This source contract does not itself authorize Production deployment.
+`scripts/github-project-control-poller.sh` is the CHAT/GitHub control ingress. It accepts only owner-authored open Issues with the exact title `[GACE-PROJECT]` and schema `gace.project-control/v1`, converts them to a bounded `project_update` request, invokes the same host runner, posts the sanitized result back to the control Issue, and closes that request.
+
+`ops/systemd/debugai-project-control.service` + `.timer` schedule that ingress as a short-lived Bash oneshot. They do not add Host Node/Python, arbitrary shell execution, or a Docker socket mount into DebugAI.
+
+This source contract does not itself authorize Production deploy/recreate. GitHub Project maintenance is a separate fixed control-plane mutation from Runtime deployment.
 
 ## Current Sandbox verification path
 
