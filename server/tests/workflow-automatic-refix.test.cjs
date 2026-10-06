@@ -83,3 +83,76 @@ test("automatic refix escalates after the bounded retry budget is exhausted",asy
   assert.deepEqual(aiCore.calls,[]);
   assert.equal(patchService.creates,0);
 });
+
+test("automatic refix closes the same run after the replacement candidate is explicitly approved and passes retest",async()=>{
+  const repo=repoFixture(),authority=authorityFixture(),runtimeEvidence=evidenceFixture();
+  let applies=0,creates=0;
+  const patchService={
+    get applies(){return applies;},
+    get creates(){return creates;},
+    apply({candidateId,candidateHash}){
+      applies++;
+      if(applies===1){
+        assert.equal(candidateId,"patch_initial");
+        assert.equal(candidateHash,"hash_initial");
+        return{
+          candidate:{id:"patch_initial",candidate_hash:"hash_initial",repo,files:["src/a.js"],diff_hash:"diff_initial",summary:"initial repair"},
+          applied:{receipt:{transaction_id:"tx_initial",candidate_id:"patch_initial"}},
+          checks:[{name:"fixture-test",status:"FAIL",configured:true,executed:true,code:1,stdout:"",stderr:"still bad"}],
+          invariants:{pass:false,failures:["fixture failure"]},
+          gates:{retest:{status:"FAIL"},regression:{status:"PASS"},invariant:{status:"FAIL"}},
+          pass:false
+        };
+      }
+      assert.equal(candidateId,"patch_refix_1");
+      assert.equal(candidateHash,"hash_refix_1");
+      return{
+        candidate:{id:"patch_refix_1",candidate_hash:"hash_refix_1",repo,files:["src/a.js"],diff:"--- a/src/a.js\n+++ b/src/a.js\n+good",preconditions:[{path:"src/a.js",sha256:"before"}],diff_hash:"diff_refix_1",summary:"refined repair"},
+        applied:{receipt:{schema:"patch-application/v2",transaction_id:"tx_refix_1",candidate_id:"patch_refix_1",candidate_hash:"hash_refix_1",files:[{path:"src/a.js",sha256:"after"}]}},
+        checks:[{name:"fixture-test",status:"PASS",configured:true,executed:true,code:0,stdout:"ok",stderr:""}],
+        invariants:{pass:true,failures:[]},
+        gates:[
+          {name:"deterministic-retest",status:"PASS"},
+          {name:"deterministic-regression",status:"PASS"},
+          {name:"deterministic-invariant",status:"PASS"}
+        ],
+        pass:true
+      };
+    },
+    create({selectedPaths,result,stage}){
+      creates++;
+      assert.deepEqual(selectedPaths,["src/a.js"]);
+      assert.equal(stage,"debug-refix");
+      assert.equal(result.operations.length,1);
+      return{id:"patch_refix_1",candidate_hash:"hash_refix_1",diff_hash:"diff_refix_1",summary:"refined repair",files:["src/a.js"]};
+    }
+  };
+  const calls=[];
+  const aiCore={call:async role=>{
+    calls.push(role);
+    if(role==="diagnoser")return{content:JSON.stringify({hypothesis:"initial patch missed the failing branch",claims:[]})};
+    if(role==="patch_engineer")return{content:JSON.stringify({operations:[{type:"replace",path:"src/a.js",old:"bad",new:"good"}],summary:"refined repair",claims:[]})};
+    if(role==="local_reviewer")return{content:JSON.stringify({verdict:"PASS",decision:"DONE",claims:[]})};
+    throw new Error("UNEXPECTED_ROLE:"+role);
+  }};
+  const externalReview={
+    hypothesis:async()=>({provider:"fixture",json:{verdict:"PASS"}}),
+    final:async()=>({provider:"fixture",json:{verdict:"PASS"}})
+  };
+  const workflow=createWorkflow({aiCore,externalReview,runtimeEvidence,patchService,authority,repositorySnapshot:()=>"git_after"});
+  const first=await workflow.approveAndVerify({runId:"run_1",candidateId:"patch_initial",candidateHash:"hash_initial",decision:"approve",repo});
+  assert.equal(first.state,"WAITING_MASTER_APPROVAL");
+  assert.equal(first.candidate.id,"patch_refix_1");
+  assert.equal(authority.run.state,"WAITING_APPROVAL");
+
+  const second=await workflow.approveAndVerify({runId:"run_1",candidateId:first.candidate.id,candidateHash:first.candidate.candidate_hash,decision:"approve",repo});
+  assert.equal(second.state,"COMPLETE");
+  assert.equal(second.completion_gate.complete,true);
+  assert.equal(authority.run.state,"COMPLETE");
+  assert.equal(applies,2);
+  assert.equal(creates,1);
+  assert.deepEqual(calls,["diagnoser","patch_engineer","local_reviewer"]);
+  assert.deepEqual(authority.transitions,["APPLYING","RETESTING","FAILED","RESOLVING","PATCH_READY","WAITING_APPROVAL","APPLYING","RETESTING","COMPLETE"]);
+  assert.ok(runtimeEvidence.writes.some(x=>x.type==="completion_gate"&&x.payload.complete===true));
+});
+
