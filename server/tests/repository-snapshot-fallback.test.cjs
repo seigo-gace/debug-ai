@@ -53,6 +53,19 @@ test("missing git marker fails closed",()=>{
   finally{fixture.cleanup();}
 });
 
+
+
+test("explicit allowMissingGitMarker permits deterministic policy-bound tree snapshot",()=>{
+  const fixture=makeTree();
+  try{
+    fs.rmSync(path.join(fixture.root,".git"),{recursive:true,force:true});
+    const first=treeSnapshot(fixture.root,{allowMissingGitMarker:true});
+    assert.match(first,/^tree_[a-f0-9]{64}$/);
+    fs.writeFileSync(path.join(fixture.root,"src","a.js"),"two\n");
+    assert.notEqual(treeSnapshot(fixture.root,{allowMissingGitMarker:true}),first);
+  }finally{fixture.cleanup();}
+});
+
 test("unsupported special file fails closed",()=>{
   const fixture=makeTree();
   try{
