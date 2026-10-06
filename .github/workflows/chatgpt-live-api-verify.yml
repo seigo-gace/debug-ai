@@ -76,7 +76,7 @@ jobs:
           code="$(curl -sS --max-time 30 -o /tmp/status.json -w '%{http_code}'             -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}"             -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}"             "${{ steps.target.outputs.base }}/v1/status/${{ steps.target.outputs.run_id }}")"
           echo "STATUS_HTTP=$code"
           test "$code" = "200"
-          jq -r '"RUN_STATE="+((.state//"UNKNOWN")|tostring), "JOB_STATUS="+((.durable.job_status//"UNKNOWN")|tostring), "CURSOR_STEP="+((.durable.workflow_cursor.step_id//"UNKNOWN")|tostring), "CURSOR_PHASE="+((.durable.workflow_cursor.step_phase//"UNKNOWN")|tostring)' /tmp/status.json
+          jq -r '"RUN_STATE="+((.state//"UNKNOWN")|tostring), "JOB_STATUS="+((.durable.job_status//"UNKNOWN")|tostring), "CURSOR_STEP="+((.durable.workflow_cursor.step_id//"UNKNOWN")|tostring), "CURSOR_PHASE="+((.durable.workflow_cursor.step_phase//"UNKNOWN")|tostring), "LAST_EXECUTION_ERROR="+((.durable.last_execution_error//"NONE")|tostring)' /tmp/status.json
 
       - name: Existing run inspect
         if: ${{ steps.target.outputs.run_id != '' }}
