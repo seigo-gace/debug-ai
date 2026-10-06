@@ -51,3 +51,38 @@ test("deploy requires exact approved target sha", () => {
   assert.equal(queued.action, "deploy");
   assert.equal(queued.expected_head, input.expected_head);
 });
+
+test("project_update queues only the fixed Project #1 target and allowlisted fields", () => {
+  const { repo, service } = fixture();
+  const queued = service.request({
+    ...base(repo),
+    action: "project_update",
+    project_owner: "seigo-gace",
+    project_number: 1,
+    content_url: "https://github.com/seigo-gace/debug-ai/issues/41",
+    fields: { Status: "In Progress", Gate: "CI_PASS", "Change Unit": "DebugAI Project bridge", "Mutation Owner": "DebugAI" },
+  });
+  assert.equal(queued.action, "project_update");
+  const file = path.join(repo, ".debugai-input", "gitops", "requests", `${queued.id}.json`);
+  const request = JSON.parse(fs.readFileSync(file, "utf8"));
+  assert.equal(request.project_owner, "seigo-gace");
+  assert.equal(request.project_number, 1);
+  assert.equal(request.content_url, "https://github.com/seigo-gace/debug-ai/issues/41");
+  assert.deepEqual(request.fields, { Status: "In Progress", Gate: "CI_PASS", "Change Unit": "DebugAI Project bridge", "Mutation Owner": "DebugAI" });
+});
+
+test("project_update rejects alternate projects, unsafe content URLs, and unknown fields", () => {
+  const { repo, service } = fixture();
+  const input = {
+    ...base(repo),
+    action: "project_update",
+    project_owner: "seigo-gace",
+    project_number: 1,
+    content_url: "https://github.com/G-ACE-inc/server-core/issues/1",
+    fields: {},
+  };
+  assert.throws(() => service.request({ ...input, project_number: 2 }), /GITOPS_PROJECT_TARGET_INVALID/);
+  assert.throws(() => service.request({ ...input, content_url: "https://example.com/issues/1" }), /GITOPS_PROJECT_CONTENT_URL_INVALID/);
+  assert.throws(() => service.request({ ...input, fields: { Repository: "x" } }), /GITOPS_PROJECT_FIELD_FORBIDDEN/);
+  assert.throws(() => service.request({ ...input, fields: { Status: "" } }), /GITOPS_PROJECT_FIELD_VALUE_INVALID/);
+});
