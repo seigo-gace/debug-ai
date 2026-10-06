@@ -27,12 +27,18 @@ function readRegularFile(file,fsImpl){
     return fsImpl.readFileSync(fd);
   }finally{fsImpl.closeSync(fd);}
 }
-function sourceTreeSnapshotId(repoPath,{fsImpl=fs,maxFiles=MAX_FILES,maxTotalBytes=MAX_TOTAL_BYTES}={}){
+function sourceTreeSnapshotId(repoPath,{fsImpl=fs,maxFiles=MAX_FILES,maxTotalBytes=MAX_TOTAL_BYTES,requireGitMarker=true}={}){
   const root=path.resolve(String(repoPath||""));
   const rootStat=fsImpl.lstatSync(root);
   if(!rootStat.isDirectory()||rootStat.isSymbolicLink())throw new Error("REPOSITORY_SNAPSHOT_ROOT_UNSAFE");
-  const marker=path.join(root,".git"),markerStat=fsImpl.lstatSync(marker);
-  if((!markerStat.isDirectory()&&!markerStat.isFile())||markerStat.isSymbolicLink())throw new Error("REPOSITORY_SNAPSHOT_GIT_MARKER_UNSAFE");
+  const marker=path.join(root,".git");
+  if(requireGitMarker){
+    const markerStat=fsImpl.lstatSync(marker);
+    if((!markerStat.isDirectory()&&!markerStat.isFile())||markerStat.isSymbolicLink())throw new Error("REPOSITORY_SNAPSHOT_GIT_MARKER_UNSAFE");
+  }else{
+    try{const markerStat=fsImpl.lstatSync(marker);if((!markerStat.isDirectory()&&!markerStat.isFile())||markerStat.isSymbolicLink())throw new Error("REPOSITORY_SNAPSHOT_GIT_MARKER_UNSAFE");}
+    catch(error){if(error?.code!=="ENOENT")throw error;}
+  }
   const entries=[];let fileCount=0,totalBytes=0;
   function add(type,relativePath,contentHashValue,byteLength){
     fileCount++;
@@ -68,7 +74,7 @@ function sourceTreeSnapshotId(repoPath,{fsImpl=fs,maxFiles=MAX_FILES,maxTotalByt
   entries.sort((a,b)=>a.relative_path<b.relative_path?-1:a.relative_path>b.relative_path?1:0);
   return `tree_${sha256(Buffer.from(JSON.stringify(entries),"utf8"))}`;
 }
-function repositorySnapshotId(repoPath,{execFileSyncImpl=execFileSync,fsImpl=fs,maxFiles=MAX_FILES,maxTotalBytes=MAX_TOTAL_BYTES}={}){
+function repositorySnapshotId(repoPath,{execFileSyncImpl=execFileSync,fsImpl=fs,maxFiles=MAX_FILES,maxTotalBytes=MAX_TOTAL_BYTES,allowMissingGitMarker=false}={}){
   if(typeof repoPath!=="string"||!repoPath){const error=new Error("DURABLE_REPO_SNAPSHOT_UNAVAILABLE");error.cause=new Error("DURABLE_REPO_SNAPSHOT_REPO_REQUIRED");throw error;}
   let gitError=null;
   try{
@@ -77,7 +83,7 @@ function repositorySnapshotId(repoPath,{execFileSyncImpl=execFileSync,fsImpl=fs,
     if(!/^[a-f0-9]{40}$/i.test(head))throw new Error("INVALID_HEAD");
     return `git_${contentHash({head,status})}`;
   }catch(error){gitError=error;}
-  try{return sourceTreeSnapshotId(repoPath,{fsImpl,maxFiles,maxTotalBytes});}
+  try{return sourceTreeSnapshotId(repoPath,{fsImpl,maxFiles,maxTotalBytes,requireGitMarker:!allowMissingGitMarker});}
   catch(error){const wrapped=new Error("DURABLE_REPO_SNAPSHOT_UNAVAILABLE");wrapped.cause=error;wrapped.git_cause=gitError;throw wrapped;}
 }
 
