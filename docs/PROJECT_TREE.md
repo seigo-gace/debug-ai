@@ -30,7 +30,7 @@ server/adapters/
   external/internal service adapters including AI Core, TGserver and Evidence Search boundaries
 
 server/tests/
-  server/control/adapter/security/regression tests, including guarded GitOps host-executor policy contract
+  server/control/adapter/security/regression tests, including guarded GitOps host-executor policy contract and bounded automatic re-fix regression
 
 orchestrator/
   platform-neutral canonical cores and durable primitives
@@ -82,7 +82,15 @@ Core Verify
   -> require tests>0 / pass=tests / fail=0 / skipped=0
 ```
 
-At source `b9203e587781daa9c1869dffa6317764642e2742`, Core Verify run `37299751516` produced `TESTS=454 / PASS=454 / FAIL=0 / SKIPPED=0` with `BACKEND=sidecar+landlock+seccomp` and `SIGNAL=EXACT_SOURCE_BOUND_CHILD_ONLY`.
+At source `d1ee3ffd175fc530afe8f38e782859d1d63c8e61`, Core Verify run `37401202476` produced `TESTS=463 / PASS=463 / FAIL=0 / SKIPPED=0` with `BACKEND=sidecar+landlock+seccomp`, `SIGNAL=EXACT_SOURCE_BOUND_CHILD_ONLY`, `SANDBOX_DOCKER_SOCKET=ABSENT`, real isolation PASS, strict socket deny PASS and DAP loopback-only PASS.
+
+## Automatic re-fix execution boundary
+
+`server/workflow.js` owns the bounded failed-retest recovery path. It reuses the existing canonical state machine rather than introducing a second orchestrator.
+
+`server/tests/workflow-automatic-refix.test.cjs` locks three contracts: fresh failed retest can produce a new candidate but must return to Master approval; fresh external hypothesis non-PASS escalates; retry-budget exhaustion escalates.
+
+Automatic re-fix is candidate-generation only. It does not own approval, apply, publish, deploy or shared Server-executor responsibilities.
 
 ## Mutation boundaries
 

@@ -2,24 +2,35 @@
 
 This document is the current-state companion to `README.md` and the design authority. It records the latest verified implementation/runtime boundary without rewriting historical design decisions.
 
-## Current synchronization — 2026-10-05
+## Current synchronization — 2026-10-06
 
 ```text
 PROJECT                      = DebugAI
 REPOSITORY                   = seigo-gace/debug-ai
 BRANCH                       = feat/tgserver-async-log-sink-20261003
 PR                           = #40 OPEN / DRAFT / UNMERGED
-IMPLEMENTATION_QUALIFIED_SHA = b9203e587781daa9c1869dffa6317764642e2742
-APPROVED_LIVE_SERVER_SHA     = 83424901502491c6b1dcc8fd223990f91a750d7d
+IMPLEMENTATION_QUALIFIED_SHA = d1ee3ffd175fc530afe8f38e782859d1d63c8e61
+LIVE_SERVER_SHA              = 3997812067fe2a76e7fb6aea246ea8b34aa564c0
 CURRENT_SOURCE_DEPLOYED      = NO
-FULL_SUITE_SANDBOX_REAL      = PASS_SOURCE_CI_ISOLATED_RUNTIME
+CANONICAL_SOURCE_TESTS       = PASS_463_OF_463_ZERO_SKIP
+FULL_SUITE_SANDBOX_REAL      = PASS_463_OF_463_ZERO_SKIP
+AUTOMATIC_REFIX_SOURCE       = PASS
 ```
 
-Implementation source `b9203e...` passed direct exact-head Development Probe run `37299751542` and canonical tests `454/454`, `FAIL=0`, `SKIP=0`. Artifact `11341055855` binds that run to exact SHA `b9203e...`, with `source_ready=true` and `server_mutation_authorized=false`.
+Implementation source `d1ee3ffd...` adds the missing bounded automatic re-fix path after an approved patch fails deterministic retest. Instead of stopping at `FAILED_RETEST`, the same canonical run uses the existing state-machine cycle `FAILED -> RESOLVING -> PATCH_READY -> WAITING_APPROVAL`, registers fresh retest checks/invariants/gates as runtime evidence, re-runs Diagnoser, requires a fresh External Hypothesis Review PASS, and creates a new candidate inside the previous selected paths.
 
-The same implementation change completed SUCCESS in Verify `37299751510`, Public Readiness `37299751493`, Runtime Volume Gate `37299751497`, Targeted TGserver Logging `37299751459`, Development Probe `37299751542`, and Core Verify `37299751516`.
+Automatic re-fix is bounded to two attempts. It never applies its own candidate. Every new candidate returns to `WAITING_MASTER_APPROVAL`. External hypothesis non-PASS, missing evidence/scope, scope drift/forbidden operation, or attempt-budget exhaustion fails closed to `ESCALATION_REQUIRED`.
 
-Core Verify executed the existing isolated Sandbox Full-suite and produced:
+At exact source `d1ee3ffd...`:
+- Development Probe `37401202502`: SUCCESS; canonical `463/463`, `FAIL=0`, `SKIP=0`, `source_ready=true`, `server_mutation_authorized=false`.
+- Verify `37401202488`: SUCCESS.
+- Core Verify `37401202476`: SUCCESS.
+- Public Readiness `37401202479`: SUCCESS.
+- Runtime Volume Gate `37401202508`: SUCCESS.
+- Targeted TGserver Logging `37401202497`: SUCCESS.
+- Dedicated automatic re-fix regressions: 3/3 PASS.
+
+Core Verify real Sandbox evidence:
 
 ```text
 SANDBOX_SOURCE_REPO_HASH=UNCHANGED
@@ -30,19 +41,17 @@ SANDBOX_DAP_LOOPBACK_ONLY=PASS
 SANDBOX_FULL_SUITE_PASS
 BACKEND=sidecar+landlock+seccomp
 SIGNAL=EXACT_SOURCE_BOUND_CHILD_ONLY
-TESTS=454
-PASS=454
+TESTS=463
+PASS=463
 FAIL=0
 SKIPPED=0
 ```
 
-This closes the previous source/CI Sandbox compatibility blocker without test deletion, skip acceptance, arbitrary environment inheritance, syscall-policy relaxation, or a second Sandbox/service/runtime. `DEBUG_AI_REQUIRE_TS7_REAL=1` is fixed only for provenance-qualified exact-source DebugAI `package.test` and is absent from ordinary Sandbox jobs.
+The live Server was previously reflected and verified at exact `3997812067fe2a76e7fb6aea246ea8b34aa564c0`, with DebugAI running/healthy, `guarded_gitops=true`, request/status endpoints live, source parity PASS and DebugAI Docker socket absent. That live reflection is preserved. `d1ee3ffd...` is not live and requires a separate exact-SHA approval before Production reflection/recreate.
 
-Documentation synchronization follows the implementation qualification anchor. These documentation-only commits do not change the live Server state and require their own exact-head CI before the resulting documentation SHA can become a reflection candidate.
+Shared Deploy Bridge extraction is a separate shared-capability workstream and does not move DebugAI's diagnosis, patch, automatic re-fix, review, or Strict Completion product logic out of this repository.
 
-The live Server remains at approved revision `83424901502491c6b1dcc8fd223990f91a750d7d`. No PR #40 source/documentation SHA has been reflected live in this phase. Merge, Deploy/recreate/restart, Secret/provider/model/profile changes, Search Gate activation and persistent-state mutation remain separate approval boundaries.
-
-Latest source/CI evidence is summarized in [`CURRENT_SOURCE_QUALIFICATION.md`](CURRENT_SOURCE_QUALIFICATION.md). Repository responsibility mapping is in [`PROJECT_TREE.md`](PROJECT_TREE.md). Where the historical record below contains earlier PR numbers, candidate SHAs, source test counts, or an unresolved Sandbox state, retain it as dated evidence; it does not override this synchronization section.
+Latest source/CI evidence is summarized in [`CURRENT_SOURCE_QUALIFICATION.md`](CURRENT_SOURCE_QUALIFICATION.md). Repository responsibility mapping is in [`PROJECT_TREE.md`](PROJECT_TREE.md). Historical records below remain evidence only for their recorded revisions.
 
 ## Authority separation
 
@@ -260,44 +269,30 @@ Do not infer any role winner from the aborted run.
 Implemented/verified source boundary includes:
 
 - six fixed internal roles through shared AI Core;
-- role-specific Skill procedures and bounded Tool Runtime;
-- deterministic evidence registry and claim/evidence binding;
-- canonical Local Reviewer top-level and claim-item output enforcement;
-- Evidence Projection / Active Evidence Window;
-- telemetry-driven 85% context-pressure compaction in the real Tool Loop;
-- durable historical evidence pointers with admitted `evidence.read` rehydration;
-- explicit prompt-cache requests with current cache-hit/miss telemetry parsing;
-- stable Tool Loop System prefix and wire-only final-round control;
-- measured cache-hit ratio/prefix-stability telemetry without fabricated values;
-- model-profile output ceilings plus qualified runtime-context clamp;
-- fail-closed `AI_CORE_OUTPUT_TRUNCATED` handling;
-- durable RunAuthority, native writer lock, generation/epoch fencing;
-- durable read-only effect reuse and Researcher continuation;
+- bounded Tool Runtime and deterministic evidence registry;
+- durable RunAuthority and existing fail-closed canonical state machine;
 - patch/review packets and exact approval/revision/application boundaries;
-- Strict Completion Gate;
-- runtime evidence retention/archive/GC safety;
-- guarded CLI/HTTP surface;
-- exact nine-tool MCP stdio adapter;
+- deterministic retest, invariants, Local Reviewer, External Final Review and Strict Completion Gate;
+- bounded automatic re-fix after failed deterministic retest;
+- fresh retest evidence registration and fresh Diagnoser execution;
+- fresh External Hypothesis Review requirement before re-fix candidate generation;
+- re-fix candidate scope locked to the prior selected files;
+- maximum two automatic re-fix candidate-generation attempts;
+- mandatory Master approval for every newly generated candidate;
+- fail-closed escalation on review failure, evidence/scope failure or retry-budget exhaustion;
+- runtime evidence inspection for re-fix attempts/analysis/failure/escalation;
+- guarded CLI/HTTP and exact nine-tool MCP stdio adapter;
 - Search Gate provider-preserving shadow instrumentation/audit;
-- Local Reviewer benchmark;
-- six-role Skill ON/OFF benchmark definitions;
-- resumable/checkpointed six-role Skill measurement orchestration;
-- one-variable Model A/B harness for `thinking`, `temperature`, `top_p`, `top_k`, `max_tokens`;
-- exact source/runtime live-readback gate;
-- runtime-image qualification/MCP asset packaging;
-- production named-volume initialization contract;
-- existing Sandbox sidecar Full-suite execution qualified for the current implementation anchor with 454/454 PASS and zero skip.
+- existing isolated Sandbox full-suite qualified at `463/463`, zero fail, zero skip.
 
 Not completed by this source boundary:
 
+- Production reflection of the post-`399781...` automatic re-fix source;
+- a real live failed-retest -> automatic re-diagnosis -> new candidate dogfood E2E;
 - a general Block Core execution path wired across every workflow;
-- current feature-branch source live Server reflection and runtime verification;
-- fresh real cache-hit/prompt-eval/decode/latency measurement on the current feature-branch source;
-- any approved increase of live AI Core context above the last measured 8192 setting;
-- fresh current-source six-role real measurement;
-- fresh current-source Model A/B real measurement;
-- current-source real integration/MCP continuation/self-debug/production-equivalent E2E;
-- Strict Completion on the current source.
+- fresh current-source six-role/model-A-B production measurements;
+- broader current-source MCP continuation/self-debug E2E;
+- Strict Completion on the newly reflected automatic re-fix source.
 
 ## Historical measurement and correction evidence
 
@@ -336,37 +331,37 @@ Live MCP stdio on approved b30649a passed initialize, the exact ordered nine-too
 ## Current qualification state
 
 ```text
-IMPLEMENTATION_QUALIFIED_SHA = b9203e587781daa9c1869dffa6317764642e2742
-IMPLEMENTATION_CANONICAL_TESTS = PASS_454_OF_454_ZERO_SKIP
-FULL_PACKAGE_TEST_IN_SANDBOX = PASS_454_OF_454_ZERO_SKIP
+IMPLEMENTATION_QUALIFIED_SHA = d1ee3ffd175fc530afe8f38e782859d1d63c8e61
+IMPLEMENTATION_CANONICAL_TESTS = PASS_463_OF_463_ZERO_SKIP
+FULL_PACKAGE_TEST_IN_SANDBOX = PASS_463_OF_463_ZERO_SKIP
 SANDBOX_BACKEND = sidecar+landlock+seccomp
 SANDBOX_SIGNAL_SCOPE = EXACT_SOURCE_BOUND_CHILD_ONLY
-APPROVED_LIVE_SERVER_HEAD = 83424901502491c6b1dcc8fd223990f91a750d7d
-CURRENT_SOURCE_REFLECTION = NOT_EXECUTED_NOT_AUTHORIZED
-LIVE_CURRENT_SOURCE_STATE = NOT_REFLECTED
-CURRENT_SOURCE_SIX_ROLE_MEASUREMENT = NOT_EXECUTED
-MODEL_AB_THINKING_SAMPLING_TOKEN_CAP = NOT_EXECUTED
-REAL_CURRENT_SOURCE_INTEGRATION_E2E = NOT_EXECUTED
+LIVE_SERVER_HEAD = 3997812067fe2a76e7fb6aea246ea8b34aa564c0
+CURRENT_SOURCE_REFLECTION = NOT_EXECUTED_FOR_D1EE3
+LIVE_CURRENT_SOURCE_STATE = LIVE_399781_SOURCE_D1EE3_NOT_REFLECTED
+AUTOMATIC_REFIX_SOURCE = PASS
+AUTOMATIC_REFIX_LIVE_E2E = NOT_EXECUTED
 GENERAL_BLOCK_CORE_ALL_WORKFLOWS = NOT_CONNECTED
 SEARCH_SKIP_ACTIVATION = NO
-STRICT_COMPLETION = NOT_VERIFIED
+STRICT_COMPLETION_ON_D1EE3 = NOT_VERIFIED_LIVE
 MAIN_MERGE = NOT_EXECUTED
 PRODUCTION_PROFILE_CHANGE = NONE
 ```
 
 ## Mutation and approval boundary
 
-The approved live reflection of `834249...` does not authorize reflection of a different SHA. Source-side corrections, documentation, existing Draft PR synchronization, and exact-head CI may proceed on the existing feature branch. Keep the existing Server checkout at its explicitly approved revision until Master approves one exact new SHA. Preserve historical checkpoints; do not rebind incompatible data. No profile promotion, live context increase, Search Gate activation, Secret/provider/model change, persistent-state deletion, or unrelated project mutation is permitted by the source result.
+The existing live reflection of `399781...` does not authorize reflection of `d1ee3...` or any documentation head derived from it. Source/test/docs/PR/CI work may proceed on the existing feature branch. Production deploy/recreate, main merge, Secret/provider/model/profile changes and destructive/persistent-state mutations remain separate explicit approval boundaries.
+
+Automatic re-fix does not relax the mutation boundary: it may automatically create a bounded new candidate, but it cannot approve or apply that candidate.
 
 ## Required next-work order
 
 ```text
-1. finish README / Current / Sandbox / Project Tree / PR / Notion synchronization and require exact final-documentation-head GitHub CI PASS
-2. obtain separate Master approval for that exact post-documentation SHA; preserve approved live 83424901502491c6b1dcc8fd223990f91a750d7d until then
-3. after approval, re-read current server-core deployment authority and reflect only the approved SHA while preserving volumes, checkpoints, unmanaged state and auxiliary containers
-4. reverify exact host/container/source parity and health
-5. run a fresh real DebugAI operation and retrieve fresh P004 evidence through the already-working shared TGserver Reader
-6. continue real current-runtime integration, MCP durable continuation, semantic-quality/benchmark qualification, self-debug and Strict Completion from measured evidence
+1. synchronize README / Current / Source Qualification / Project Tree / PR #40 / Issue #41 and require exact final-documentation-head CI PASS
+2. preserve live Server 3997812067fe2a76e7fb6aea246ea8b34aa564c0 until one exact newer SHA is separately approved
+3. after approved reflection, run real automatic re-fix dogfood and prove the approval boundary remains intact
+4. continue remaining current-runtime integration, MCP continuation, self-debug, semantic-quality/benchmark and Strict Completion work
+5. keep shared Deploy Bridge implementation outside DebugAI product responsibilities
 ```
 
 Unexecuted, failed, incomplete, source/runtime-unmatched, and approval-blocked items retain their actual state.
