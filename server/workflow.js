@@ -73,7 +73,7 @@ function reviewPacketInvariants(result){
 }
 function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeEvidence=null,tgserver=null,patchService=null,authority=null,repoPolicy=null,sandboxVerification=null,dapEvidence=null,serverCommand=null,recoveryHooks=null,repositorySnapshot=repositorySnapshotId}={}){
   if(!aiCore)throw new Error("AI_CORE_ADAPTER_REQUIRED");
-  const activeRuns=new Map(),backgroundErrors=new Map();
+  const activeRuns=new Map(),backgroundErrors=new Map(),activeCodegenBenchmarks=new Map();
   async function logRuntime(event){if(tgserver)await tgserver.log(event);}
   function snapshotRepo(repoPath){const approved=repoPolicy?repoPolicy.assertRepo(repoPath):repoPath;return repositorySnapshot(approved,{allowMissingGitMarker:Boolean(repoPolicy)});}
   async function logProgress(runId,step,phase){
@@ -307,9 +307,56 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
   async function verifyReadOnly({repo,selectedPaths=[],changeScope=[],task=""}={}){if(!sandboxVerification)throw new Error("SANDBOX_VERIFICATION_REQUIRED");const targetRepo=resolveVerificationRepo(repo),verificationId=`verify_${crypto.randomUUID()}`;const scopeBefore=verificationScope(targetRepo,selectedPaths),inventory=verificationInventory(targetRepo);const deterministic=await sandboxVerification.collect(targetRepo),scopeAfter=verificationScope(targetRepo,selectedPaths);const changed=scopeBefore.files.filter((file,index)=>scopeAfter.files[index]?.sha256!==file.sha256).map(file=>file.path);const invariants={pass:changed.length===0,failures:changed.map(file=>`SOURCE_MUTATED:${file}`),checked_paths:scopeBefore.files.length,checked_receipts:0,authority:"READ_ONLY_SOURCE_IMMUTABILITY"};const reviewerChecks=deterministic.checks.map(reviewableVerificationCheck);const records=registerEvidenceList("LOCAL_RUNTIME",[...reviewerChecks,{kind:"test_inventory",value:inventory},{kind:"file_change_scope",value:{selected_paths:scopeBefore.files.map(x=>x.path),change_scope:Array.isArray(changeScope)?changeScope.map(String):[],task:String(task||"")}},{kind:"invariants",value:invariants}]),ids=evidenceIds(records);let local_review=null,local_review_error=null;try{const review=await runRoleWithReadOnlyTools({aiCore,role:"local_reviewer",system:"Local Reviewer. Review read-only deterministic verification from fresh context. JSON only. Never claim patch application.",user:JSON.stringify({verification_evidence:records}),toolRuntime:makeReadOnlyToolRuntime(targetRepo,verificationId),baseEvidenceIds:ids,strictEvidenceRefs:true});local_review=roleOutput(review,"local_reviewer");}catch(error){local_review_error=String(error?.code||error?.message||"LOCAL_REVIEW_UNAVAILABLE").split(":")[0];}const verdict=verificationVerdict(deterministic,local_review,local_review_error),result={schema:"debugai.verify-result/v1",verification_id:verificationId,read_only:true,patch_applied:false,repo:targetRepo,scope:{mode:scopeBefore.mode,files:scopeBefore.files,change_scope:Array.isArray(changeScope)?changeScope.map(String):[]},test_inventory:inventory,deterministic_verification:deterministic,invariants,local_review,local_review_error,verdict};runtimeEvidence?.write(verificationId,"read_only_verification",result);await logRuntime({run_id:verificationId,severity:verdict==="PASS"?"info":verdict==="FAIL"?"error":"warn",kind:"read_only_verification",verdict,check_count:deterministic.checks.length,patch_applied:false});return result;}
   function durableStatus(runId){if(!authority?.durableEnabled?.())return null;try{const {state,manifest}=authority.loadDurable(runId);return{generation:state.generation,execution_epoch:state.execution_epoch,job_status:state.job_status,active_in_process:activeRuns.has(runId),last_execution_error:backgroundErrors.get(runId)||null,workflow_cursor:manifest.workflow_cursor,role_executions:Object.fromEntries(Object.entries(manifest.role_execution_refs||{}).map(([id,ref])=>[id,{role:ref.role,status:ref.status,attempt_no:ref.attempt_no,latest_checkpoint_ref:ref.latest_checkpoint_ref||null,final_role_result_ref:ref.final_role_result_ref||null}]))};}catch(error){if(String(error?.message||error).includes("DURABLE_RECORD_NOT_FOUND")||String(error?.message||error).includes("ENOENT"))return null;throw error;}}
   function status(runId){if(!authority)throw new Error("RUN_AUTHORITY_REQUIRED");const run=authority.load(runId);return{schema:"debugai.run-status/v1",run_id:run.run_id,state:run.state,project_id:run.project_id,project_dir:run.project_dir,created_at:run.created_at,updated_at:run.updated_at,durable:durableStatus(runId)};}
-  function inspect(runId){const run=status(runId),durable=run.durable;if(!runtimeEvidence)return{schema:"debugai.run-inspection/v1",run,durable,artifacts:{}};const records=runtimeEvidence.list(runId,{types:["analysis","workflow_progress","patch_packet","patch_candidate","verification","server_command","refix_attempt","refix_analysis","refix_failure","refix_escalation","review_packet","completion_gate"],limit:16}),artifacts={};for(const record of records)if(!artifacts[record.type])artifacts[record.type]=record;return{schema:"debugai.run-inspection/v1",run,durable,artifacts};}
+  function inspect(runId){const run=status(runId),durable=run.durable;if(!runtimeEvidence)return{schema:"debugai.run-inspection/v1",run,durable,artifacts:{}};const records=runtimeEvidence.list(runId,{types:["analysis","workflow_progress","patch_packet","patch_candidate","verification","server_command","refix_attempt","refix_analysis","refix_failure","refix_escalation","review_packet","completion_gate","codegen_benchmark"],limit:16}),artifacts={};for(const record of records)if(!artifacts[record.type])artifacts[record.type]=record;return{schema:"debugai.run-inspection/v1",run,durable,artifacts};}
+  function normalizeCodegenBenchmarkInput(input={}){
+    if(!authority)throw new Error("RUN_AUTHORITY_REQUIRED");
+    if(!patchService)throw new Error("PATCH_SERVICE_REQUIRED");
+    if(!runtimeEvidence||typeof runtimeEvidence.write!=="function"||typeof runtimeEvidence.list!=="function")throw new Error("RUNTIME_EVIDENCE_REQUIRED");
+    const repo=repoPolicy?repoPolicy.assertRepo(input.repo):path.resolve(String(input.repo||""));
+    const level=String(input.level||"").trim(),caseId=String(input.case_id||"").trim();
+    if(!["small","medium","hard"].includes(level))throw new Error("CODEGEN_BENCHMARK_LEVEL_INVALID");
+    if(!/^[smh][0-9]{2}$/.test(caseId))throw new Error("CODEGEN_BENCHMARK_CASE_INVALID");
+    const expectedPrefix=level==="small"?"s":level==="medium"?"m":"h";
+    if(!caseId.startsWith(expectedPrefix))throw new Error("CODEGEN_BENCHMARK_CASE_LEVEL_MISMATCH");
+    const selectedPaths=Array.isArray(input.selected_paths)?input.selected_paths.map(String):[];
+    if(selectedPaths.length!==1||selectedPaths[0]!==`.debugai_codegen_benchmark/${caseId}.py`)throw new Error("CODEGEN_BENCHMARK_PATH_INVALID");
+    const task=String(input.task||"").trim();
+    if(!task||task.length>5000)throw new Error("CODEGEN_BENCHMARK_TASK_INVALID");
+    const diagnosis=input.diagnosis&&typeof input.diagnosis==="object"&&!Array.isArray(input.diagnosis)?input.diagnosis:null;
+    if(!diagnosis)throw new Error("CODEGEN_BENCHMARK_DIAGNOSIS_REQUIRED");
+    return{repo,level,caseId,selectedPaths,task,diagnosis};
+  }
+  function codegenBenchmarkStatus(runId){
+    if(!runtimeEvidence||typeof runtimeEvidence.list!=="function")throw new Error("RUNTIME_EVIDENCE_REQUIRED");
+    const id=String(runId||"");
+    if(!id)throw new Error("RUN_ID_REQUIRED");
+    const record=runtimeEvidence.list(id,{types:["codegen_benchmark"],limit:1})?.[0]||null;
+    if(!record)return{schema:"debugai.codegen-benchmark-status/v1",run_id:id,state:activeCodegenBenchmarks.has(id)?"RUNNING":"UNKNOWN"};
+    return{schema:"debugai.codegen-benchmark-status/v1",run_id:id,...record.payload};
+  }
+  async function startCodegenBenchmark(input={}){
+    const cfg=normalizeCodegenBenchmarkInput(input),startedAt=Date.now();
+    const run=authority.start({rawRequest:cfg.task,repo:cfg.repo,projectId:"debug-ai-codegen-benchmark"});
+    for(const state of ["PARSED","CONTEXT_READY","VERIFYING","FAILED","RESOLVING"])authority.transition(run,state);
+    const runId=run.run_id;
+    runtimeEvidence.write(runId,"codegen_benchmark",{state:"RUNNING",level:cfg.level,case_id:cfg.caseId,started_at:startedAt,finished_at:null,duration_ms:null,error:null,candidate:null});
+    const analysis={deterministic_verification:{status:"FINAL_VALID",checks:[]},evidence_gap:false,evidence_status:"FINAL_VALID",evidence_registry:{evidence_ids:[],tool_evidence_ids:[]},diagnosis:cfg.diagnosis,external_hypothesis_review:{json:{verdict:"PASS"}}};
+    const promise=(async()=>{
+      try{
+        const out=await patchCandidate({runId,analysis,repo:cfg.repo,selectedPaths:cfg.selectedPaths,context:cfg.task,task:cfg.task});
+        const finishedAt=Date.now(),payload={state:"DONE",level:cfg.level,case_id:cfg.caseId,started_at:startedAt,finished_at:finishedAt,duration_ms:finishedAt-startedAt,error:null,candidate:out.candidate};
+        runtimeEvidence.write(runId,"codegen_benchmark",payload);backgroundErrors.delete(runId);return payload;
+      }catch(error){
+        const finishedAt=Date.now(),code=String(error?.code||error?.message||error).slice(0,240),payload={state:"FAILED",level:cfg.level,case_id:cfg.caseId,started_at:startedAt,finished_at:finishedAt,duration_ms:finishedAt-startedAt,error:code,candidate:null};
+        runtimeEvidence.write(runId,"codegen_benchmark",payload);backgroundErrors.set(runId,code);throw error;
+      }finally{activeCodegenBenchmarks.delete(runId);}
+    })();
+    activeCodegenBenchmarks.set(runId,{promise,started_at:startedAt,level:cfg.level,case_id:cfg.caseId});
+    void promise.catch(()=>{});
+    return{schema:"debugai.codegen-benchmark-accepted/v1",run_id:runId,state:"RUNNING",level:cfg.level,case_id:cfg.caseId};
+  }
   async function promote(asset){assertPromotable(asset);if(!tgserver)throw new Error("TGSERVER_ADAPTER_REQUIRED");return tgserver.promote(asset);}
   async function searchKnowledge(query,opts={}){if(!tgserver)throw new Error("TGSERVER_ADAPTER_REQUIRED");return tgserver.search(query,opts);}
-  return{runAnalysis,startAnalysis,resumeAnalysis,recoverStartup,patchCandidate,approveAndVerify,verifyReadOnly,status,inspect,promote,searchKnowledge};
+  return{runAnalysis,startAnalysis,resumeAnalysis,recoverStartup,patchCandidate,startCodegenBenchmark,codegenBenchmarkStatus,approveAndVerify,verifyReadOnly,status,inspect,promote,searchKnowledge};
 }
 module.exports={createWorkflow,parseJson,roleOutput,toolEvidenceRecords,toolAudit,pickDiagnosisStatement,publicLocalEvidence,dapFailureChecks,activeDapHint,dapHintProtocol,reviewStreamEvidence,reviewableVerificationCheck,evidencePromptView,repositorySnapshotId};
