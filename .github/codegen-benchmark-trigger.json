@@ -10,5 +10,7 @@
   ],
   "apply": false,
   "deploy": false,
-  "generated_at": "2026-10-06T14:06:00Z"
+  "rerun_reason": "live be28 snapshot fix reflected; rerun semantic codegen benchmark",
+  "live_source": "be28b807e099563b262d9fa3cf4bc86110e21b8c",
+  "nonce": "rerun-20261006-1454"
 }
