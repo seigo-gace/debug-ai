@@ -368,6 +368,27 @@ AND no blocking evidence gap
 AND final run contract valid
 ```
 
+## GitHub Project control relay
+
+DebugAI now reuses the Guarded GitOps path for GitHub Project #1 control-plane updates instead of copying Project logic into every repository.
+
+The fixed flow is:
+
+```text
+CHAT
+-> owner-authored [GACE-PROJECT] Issue in seigo-gace/debug-ai
+-> short-lived Project control poller
+-> bounded project_update request
+-> host GitOps runner
+-> gh project item-add / item-edit
+-> Project #1 readback
+-> PASS/FAIL comment on the control Issue
+```
+
+`project_update` cannot execute arbitrary shell. It is fixed to Project owner `seigo-gace`, Project number `1`, Issue/PR URLs owned by `seigo-gace` or `G-ACE-inc`, and the fields `Status`, `Gate`, `Change Unit`, and `Mutation Owner`.
+
+The poller runs as a Bash oneshot from a user-systemd timer. It does not require Host Node/Python and does not mount the Docker socket into DebugAI. Runtime deploy/recreate remains a separate approval boundary.
+
 ## HTTP API
 
 The service binds to loopback by default at `127.0.0.1:8787`.
