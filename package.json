@@ -8,7 +8,7 @@
   "devDependencies":{"@modelcontextprotocol/client":"2.2.0"},
   "scripts":{
     "build:durable-native":"node scripts/build-durable-native.cjs",
-    "check":"find server orchestrator tests mcp bin scripts -type f \\( -name '*.js' -o -name '*.mjs' -o -name '*.cjs' \\) -print0 | xargs -0 -n1 node --check && bash -n scripts/host-gitops-runner.sh",
+    "check":"find server orchestrator tests mcp bin scripts -type f \\( -name '*.js' -o -name '*.mjs' -o -name '*.cjs' \\) -print0 | xargs -0 -n1 node --check && bash -n scripts/host-gitops-runner.sh scripts/github-project-control-poller.sh",
     "test":"node --test tests/*.test.cjs server/tests/*.test.cjs mcp/tests/*.test.mjs",
     "verify":"npm run build:durable-native && npm run check && npm test && npm run audit:pre-server-qualification",
     "verify:core":"npm run build:durable-native && npm run check && npm test && npm run audit:pre-server-qualification",
