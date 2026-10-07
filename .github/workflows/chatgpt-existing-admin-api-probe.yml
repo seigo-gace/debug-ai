@@ -1,0 +1,30 @@
+name: ChatGPT Existing Admin API Probe
+
+on:
+  push:
+    branches:
+      - automation/chatgpt-verify
+    paths:
+      - .github/workflows/chatgpt-existing-admin-api-probe.yml
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    env:
+      CF_ACCESS_CLIENT_ID: ${{ secrets.DEBUGAI_CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.DEBUGAI_CF_ACCESS_CLIENT_SECRET }}
+    steps:
+      - name: Read-only existing admin endpoints
+        shell: bash
+        run: |
+          set -euo pipefail
+          for url in             https://docker.asterav8.jp/api/status             https://compose.asterav8.jp             https://compose.asterav8.jp/api/status
+          do
+            code="$(curl -sS -L --max-time 20 -o /tmp/body -w '%{http_code}'               -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID"               -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET"               "$url" || true)"
+            ct="$(grep -i '^content-type:' /tmp/headers 2>/dev/null || true)"
+            printf 'URL=%s HTTP=%s BODY_PREFIX=%s\n' "$url" "$code" "$(head -c 120 /tmp/body | tr '\n' ' ' | sed -E 's/[[:cntrl:]]/ /g')"
+          done
