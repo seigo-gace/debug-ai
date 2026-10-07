@@ -38,7 +38,7 @@ jobs:
       max-parallel: 3
       matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 60
     env:
       BASE_URL: https://debugai.asterav8.jp
       CF_ACCESS_CLIENT_ID: ${{ secrets.DEBUGAI_CF_ACCESS_CLIENT_ID }}
@@ -76,7 +76,7 @@ jobs:
         run: |
           set -euo pipefail
           id="${{ steps.run.outputs.benchmark_id }}"
-          deadline=$((SECONDS+600))
+          deadline=$((SECONDS+3300))
           while true; do
             code="$(curl -sS --max-time 30 -o /tmp/result.json -w '%{http_code}' -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" "${BASE_URL}/v1/investigation-benchmark/status/$id")"
             test "$code" = "200"
