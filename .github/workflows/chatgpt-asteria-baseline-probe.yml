@@ -1,0 +1,115 @@
+name: ChatGPT Asteria Baseline Probe
+
+on:
+  push:
+    branches:
+      - feat/tgserver-async-log-sink-20261003
+    paths:
+      - .github/asteria-baseline-probe-target.json
+      - .github/workflows/chatgpt-asteria-baseline-probe.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chatgpt-asteria-baseline-probe
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      BASE_URL: https://debugai.asterav8.jp
+      CF_ACCESS_CLIENT_ID: ${{ secrets.DEBUGAI_CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.DEBUGAI_CF_ACCESS_CLIENT_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          enabled="$(jq -r '.enabled' .github/asteria-baseline-probe-target.json)"
+          [[ "$enabled" == "true" || "$enabled" == "false" ]]
+          echo "enabled=$enabled" >>"$GITHUB_OUTPUT"
+          echo "PROBE_ENABLED=$enabled"
+      - if: ${{ steps.target.outputs.enabled == 'true' }}
+        name: Require bounded live access
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${CF_ACCESS_CLIENT_ID:-}"
+          test -n "${CF_ACCESS_CLIENT_SECRET:-}"
+          code="$(curl -sS -L --max-time 30 -o /tmp/health.json -w '%{http_code}' -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" "${BASE_URL}/health")"
+          test "$code" = "200"
+          echo "LIVE_HEALTH=PASS"
+      - if: ${{ steps.target.outputs.enabled == 'true' }}
+        name: Start Asteria baseline probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          run_cmd(){
+            local command_id="$1" req id code state
+            req="$(jq -nc --arg command_id "$command_id" '{repo:"/workspace/debug-ai",command_id:$command_id,arguments:[]}')"
+            code="$(curl -sS --max-time 30 -o /tmp/request.json -w '%{http_code}' -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" -H 'content-type: application/json' --data-binary "$req" "${BASE_URL}/v1/server-command/request")"
+            test "$code" = "202"
+            id="$(jq -r '.id // empty' /tmp/request.json)"
+            [[ "$id" =~ ^cmd_[0-9a-f]{24}$ ]]
+            for _ in $(seq 1 30); do
+              code="$(curl -sS --max-time 30 -o /tmp/status.json -w '%{http_code}' -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" -H 'content-type: application/json' --data-binary "$(jq -nc --arg id "$id" '{id:$id}')" "${BASE_URL}/v1/server-command/status")"
+              [ "$code" = "200" ] || { sleep 2; continue; }
+              state="$(jq -r '.state // "UNKNOWN"' /tmp/status.json)"
+              [ "$state" = "PASS" ] && { jq -r '.result.stdout' /tmp/status.json; return 0; }
+              [ "$state" = "FAIL" ] && { cat /tmp/status.json; return 12; }
+              sleep 2
+            done
+            return 13
+          }
+          run_cmd asteria.baseline_probe_start
+      - if: ${{ steps.target.outputs.enabled == 'true' }}
+        name: Poll Asteria baseline result
+        shell: bash
+        run: |
+          set -euo pipefail
+          run_cmd(){
+            local command_id="$1" req id code state
+            req="$(jq -nc --arg command_id "$command_id" '{repo:"/workspace/debug-ai",command_id:$command_id,arguments:[]}')"
+            code="$(curl -sS --max-time 30 -o /tmp/request.json -w '%{http_code}' -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" -H 'content-type: application/json' --data-binary "$req" "${BASE_URL}/v1/server-command/request")"
+            test "$code" = "202"
+            id="$(jq -r '.id // empty' /tmp/request.json)"
+            for _ in $(seq 1 30); do
+              code="$(curl -sS --max-time 30 -o /tmp/status.json -w '%{http_code}' -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" -H 'content-type: application/json' --data-binary "$(jq -nc --arg id "$id" '{id:$id}')" "${BASE_URL}/v1/server-command/status")"
+              [ "$code" = "200" ] || { sleep 2; continue; }
+              state="$(jq -r '.state // "UNKNOWN"' /tmp/status.json)"
+              [ "$state" = "PASS" ] && { jq -r '.result.stdout' /tmp/status.json; return 0; }
+              [ "$state" = "FAIL" ] && return 12
+              sleep 2
+            done
+            return 13
+          }
+          deadline=$((SECONDS+600))
+          while (( SECONDS < deadline )); do
+            out="$(run_cmd asteria.baseline_probe_status)"
+            state="$(jq -r '.state // "UNKNOWN"' <<<"$out")"
+            echo "ASTERIA_PROBE_STATE=$state"
+            if [ "$state" = "PASS" ]; then
+              echo "$out" | jq -c .
+              echo "ASTERIA_BASELINE_PROBE=PASS"
+              exit 0
+            fi
+            if [ "$state" = "FAIL" ]; then
+              echo "$out" | jq -c .
+              exit 12
+            fi
+            sleep 10
+          done
+          echo "ASTERIA_BASELINE_PROBE=TIMEOUT"
+          exit 13
+      - if: always()
+        name: Safety assertion
+        shell: bash
+        run: |
+          echo "ASTERIA_PERSISTENT_18110_TOUCHED=NO"
+          echo "AI_CORE_RESOURCE_MUTATION=NO"
+          echo "ASTERIA_SOURCE_MUTATION=NO"
+          echo "DEBUGAI_ARBITRARY_SHELL=NO"
