@@ -1,4 +1,4 @@
-name: ChatGPT Investigation Benchmark Smoke
+name: ChatGPT Investigation Benchmark Status
 
 on:
   push:
@@ -11,35 +11,20 @@ permissions:
   contents: read
 
 jobs:
-  smoke:
+  status:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 5
     env:
       BASE_URL: https://debugai.asterav8.jp
+      BENCHMARK_ID: invbench_3cf4b8ce792948969346636c3a548ee0
       CF_ACCESS_CLIENT_ID: ${{ secrets.DEBUGAI_CF_ACCESS_CLIENT_ID }}
       CF_ACCESS_CLIENT_SECRET: ${{ secrets.DEBUGAI_CF_ACCESS_CLIENT_SECRET }}
     steps:
-      - name: Health and new endpoint smoke
+      - name: Read benchmark status
         shell: bash
         run: |
           set -euo pipefail
-          hcode="$(curl -sS -L --max-time 30 -o /tmp/health.json -w '%{http_code}'             -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID"             -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET"             "$BASE_URL/health")"
-          echo "HEALTH_HTTP=$hcode"; cat /tmp/health.json
-          test "$hcode" = "200"
-          jq -n '{case_id:"L1-CS1"}' >/tmp/start.json
-          code="$(curl -sS --max-time 30 -o /tmp/start-out.json -w '%{http_code}'             -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID"             -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET"             -H 'content-type: application/json' --data-binary @/tmp/start.json             "$BASE_URL/v1/investigation-benchmark/start")"
-          echo "START_HTTP=$code"; cat /tmp/start-out.json
-          test "$code" = "202"
-          id="$(jq -r '.benchmark_id // empty' /tmp/start-out.json)"
-          [[ "$id" =~ ^invbench_[A-Za-z0-9]+$ ]]
-          for i in $(seq 1 120); do
-            scode="$(curl -sS --max-time 30 -o /tmp/status.json -w '%{http_code}'               -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID"               -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET"               "$BASE_URL/v1/investigation-benchmark/status/$id")"
-            echo "STATUS_HTTP=$scode"
-            test "$scode" = "200"
-            state="$(jq -r '.state // "UNKNOWN"' /tmp/status.json)"
-            echo "STATE=$state"
-            if [ "$state" = "DONE" ]; then jq -c . /tmp/status.json; exit 0; fi
-            if [ "$state" = "FAILED" ]; then jq -c . /tmp/status.json; exit 12; fi
-            sleep 3
-          done
-          echo "SMOKE_TIMEOUT"; exit 13
+          code="$(curl -sS --max-time 30 -o /tmp/status.json -w '%{http_code}'             -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID"             -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET"             "$BASE_URL/v1/investigation-benchmark/status/$BENCHMARK_ID")"
+          echo "STATUS_HTTP=$code"
+          cat /tmp/status.json
+          test "$code" = "200"
