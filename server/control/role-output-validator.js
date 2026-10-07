@@ -3,10 +3,10 @@ const {validateReasoningArtifact,DECISIONS}=require("./claim-evidence.js");
 const {currentRoleSemanticMode}=require("./role-semantic-mode.js");
 
 const ROLE_SEMANTIC_RULES=Object.freeze({
-  code_scout:Object.freeze({expected_any:Object.freeze(["facts","claims","locations","source_facts"]),forbidden_mutation:true,forbid_confirmed_root:true}),
+  code_scout:Object.freeze({expected_any:Object.freeze(["facts","claims","locations","source_facts","relevant_files","call_path","contract_mismatch"]),forbidden_mutation:true,forbid_confirmed_root:true}),
   causal_scout:Object.freeze({expected_any:Object.freeze(["candidates","hypotheses","causal_chain","claims"]),forbidden_mutation:true,forbid_confirmed_root:true}),
   researcher:Object.freeze({expected_any:Object.freeze(["research_status","selected_evidence","evidence_refs","answer","claims"]),forbidden_mutation:true,forbid_confirmed_root:true}),
-  diagnoser:Object.freeze({expected_any:Object.freeze(["hypothesis","diagnoses","confirmed_root_cause","unsupported_claims","claims"]),forbidden_mutation:true,forbid_confirmed_root:false}),
+  diagnoser:Object.freeze({expected_any:Object.freeze(["hypothesis","hypotheses","diagnoses","diagnosis_status","confirmed_root_cause","unsupported_claims","claims"]),forbidden_mutation:true,forbid_confirmed_root:false}),
   patch_engineer:Object.freeze({expected_any:Object.freeze(["operations","candidate_changes","patch_status","claims"]),forbidden_mutation:false,forbid_confirmed_root:false}),
   local_reviewer:Object.freeze({expected_any:Object.freeze(["verdict","decision","claims"]),forbidden_mutation:true,forbid_confirmed_root:false}),
 });
