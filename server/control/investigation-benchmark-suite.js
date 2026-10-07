@@ -11,7 +11,9 @@ const SCHEMA="debugai.investigation-benchmark/v1";
 const LEVELS=Object.freeze(["L1","L2","L3","L4","L5"]);
 const ROLES=Object.freeze(["code_scout","causal_scout","researcher","diagnoser","local_reviewer"]);
 const REVIEW_POLICY="Return JSON only with exactly these top-level keys: verdict, decision, claims. verdict must be PASS, FAIL, UNKNOWN, INSUFFICIENT_EVIDENCE, BLOCKED, APPROVED, REJECTED, or ACCEPTED. decision must be CONTINUE, HANDOFF, INSUFFICIENT_EVIDENCE, BLOCKED, or DONE. claims must be an array. Do not invent evidence and do not claim mutation or patch application.";
-const POLICIES=Object.freeze({code_scout:CODE_SCOUT_POLICY,causal_scout:CAUSAL_POLICY,researcher:RESEARCH_POLICY,diagnoser:DIAGNOSER_POLICY,local_reviewer:REVIEW_POLICY});
+const CODE_SCOUT_COMPAT_POLICY="Return JSON only with exactly these top-level keys: source_facts, relevant_files, call_path, contract_mismatch, excluded_files, unknowns. source_facts must be an array containing the supplied source fact objects needed for downstream evidence compatibility. relevant_files/excluded_files/call_path/unknowns must be arrays of strings. contract_mismatch must be null or an object with file, expected, observed. Do not diagnose root cause and do not invent files or behavior not supplied in the case.";
+const POLICIES=Object.freeze({code_scout:CODE_SCOUT_COMPAT_POLICY,causal_scout:CAUSAL_POLICY,researcher:RESEARCH_POLICY,diagnoser:DIAGNOSER_POLICY,local_reviewer:REVIEW_POLICY});
+const BENCHMARK_MAX_TOKENS=Object.freeze({code_scout:2048,causal_scout:1024,researcher:1024,diagnoser:2048,local_reviewer:1024});
 const C=(id,level,role,input,expected)=>Object.freeze({id,level,role,input:Object.freeze(input),expected:Object.freeze(expected)});
 
 const CASES=Object.freeze([
@@ -85,9 +87,9 @@ function score(testCase,value){
 function systemFor(testCase){return compileInvocation(testCase.role,{task:"bounded investigation and verification benchmark",extraSystem:POLICIES[testCase.role]}).system;}
 async function runInvestigationBenchmarkCase({aiCore,caseId,clock=performance}={}){
   const testCase=CASES.find(x=>x.id===caseId);if(!testCase)throw new Error("INVESTIGATION_BENCHMARK_CASE_NOT_FOUND:"+caseId);
-  const started=clock.now(),out=await runRoleWithReadOnlyTools({aiCore,role:testCase.role,system:systemFor(testCase),user:JSON.stringify({benchmark_case:testCase.id,...testCase.input}),toolRuntime:null,baseEvidenceIds:[],strictEvidenceRefs:false});
+  const cappedAiCore={call:(role,options={})=>aiCore.call(role,{...options,maxTokens:Math.min(Number(options.maxTokens||BENCHMARK_MAX_TOKENS[role]),BENCHMARK_MAX_TOKENS[role])})};const started=clock.now(),out=await runRoleWithReadOnlyTools({aiCore:cappedAiCore,role:testCase.role,system:systemFor(testCase),user:JSON.stringify({benchmark_case:testCase.id,...testCase.input}),toolRuntime:null,baseEvidenceIds:[],strictEvidenceRefs:false});
   const elapsed_ms=Math.max(0,Math.round(clock.now()-started)),value=out.validated_output,scored=score(testCase,value);
   return{schema:SCHEMA,case_id:testCase.id,level:testCase.level,role:testCase.role,...scored,elapsed_ms,output:value,selected_skill_ids:[...(out?.control_plane?.selected_skill_ids||out?.tool_loop?.selected_skill_ids||[])],attempts:Number(out?.attempts||1),tool_calls:Number(out?.tool_loop?.total_calls||0),telemetry:out?.tool_loop?.telemetry||null};
 }
 function listCases(){return CASES.map(x=>({id:x.id,level:x.level,role:x.role}));}
-module.exports={SCHEMA,LEVELS,ROLES,CASES,POLICIES,score,runInvestigationBenchmarkCase,listCases};
+module.exports={SCHEMA,LEVELS,ROLES,CASES,POLICIES,BENCHMARK_MAX_TOKENS,score,runInvestigationBenchmarkCase,listCases};
