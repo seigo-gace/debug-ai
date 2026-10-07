@@ -17,6 +17,7 @@ const {makeDurableWorkflowStage,loadDurableWorkflowStage}=require("./control/dur
 const {buildCompletionGateInput,evaluateCompletionGate}=require("./control/completion-gate.js");
 const {makePatchPacket,makeReviewPacket,publicReviewPacketSummary}=require("./control/runtime-packets.js");
 const {repositorySnapshotId}=require("./control/repository-snapshot.js");
+const {runInvestigationBenchmarkCase,listCases:listInvestigationBenchmarkCases}=require("./control/investigation-benchmark-suite.js");
 const CAUSAL_SCOUT_OUTPUT_POLICY="Causal Scout. Return JSON only. Final output requires a top-level claims array. Every claims[] item requires type and statement. Causal candidates must use type HYPOTHESIS and a concrete falsification_condition; cite only registered evidence_refs when available. A falsification condition must name an observation that contradicts the hypothesis, rather than one that supports it. Keep proposed observations within existing read-only tools and security restrictions; never propose relaxing seccomp or other safety controls. Use type UNKNOWN for unresolved evidence gaps instead of inventing a cause, and retain rejected hypotheses with their counter_evidence_refs. An empty claims array is valid when no supported candidate or material unknown remains. Never emit confirmed_root_cause or patch/apply/deploy operations. Tool-request rounds use the existing tool_requests protocol; the claims requirement applies to final output.";
 
 const MAX_AUTOMATIC_REFIX_ATTEMPTS=2;
@@ -73,7 +74,7 @@ function reviewPacketInvariants(result){
 }
 function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeEvidence=null,tgserver=null,patchService=null,authority=null,repoPolicy=null,sandboxVerification=null,dapEvidence=null,serverCommand=null,recoveryHooks=null,repositorySnapshot=repositorySnapshotId}={}){
   if(!aiCore)throw new Error("AI_CORE_ADAPTER_REQUIRED");
-  const activeRuns=new Map(),backgroundErrors=new Map(),activeCodegenBenchmarks=new Map();
+  const activeRuns=new Map(),backgroundErrors=new Map(),activeCodegenBenchmarks=new Map(),activeInvestigationBenchmarks=new Map();
   async function logRuntime(event){if(tgserver)await tgserver.log(event);}
   function snapshotRepo(repoPath){const approved=repoPolicy?repoPolicy.assertRepo(repoPath):repoPath;return repositorySnapshot(approved,{allowMissingGitMarker:Boolean(repoPolicy)});}
   async function logProgress(runId,step,phase){
@@ -355,8 +356,31 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
     void promise.catch(()=>{});
     return{schema:"debugai.codegen-benchmark-accepted/v1",run_id:runId,state:"RUNNING",level:cfg.level,case_id:cfg.caseId};
   }
+  function investigationBenchmarkStatus(benchmarkId){
+    if(!runtimeEvidence||typeof runtimeEvidence.list!=="function")throw new Error("RUNTIME_EVIDENCE_REQUIRED");
+    const id=String(benchmarkId||"");if(!id)throw new Error("INVESTIGATION_BENCHMARK_ID_REQUIRED");
+    const record=runtimeEvidence.list(id,{types:["investigation_benchmark"],limit:1})?.[0]||null;
+    if(!record)return{schema:"debugai.investigation-benchmark-status/v1",benchmark_id:id,state:activeInvestigationBenchmarks.has(id)?"RUNNING":"UNKNOWN"};
+    return{schema:"debugai.investigation-benchmark-status/v1",benchmark_id:id,...record.payload};
+  }
+  async function startInvestigationBenchmark({case_id:caseId}={}){
+    if(!runtimeEvidence||typeof runtimeEvidence.write!=="function"||typeof runtimeEvidence.list!=="function")throw new Error("RUNTIME_EVIDENCE_REQUIRED");
+    const known=new Set(listInvestigationBenchmarkCases().map(x=>x.id)),id=String(caseId||"");
+    if(!known.has(id))throw new Error("INVESTIGATION_BENCHMARK_CASE_INVALID:"+id);
+    const benchmarkId="invbench_"+crypto.randomUUID().replaceAll("-",""),startedAt=Date.now();
+    runtimeEvidence.write(benchmarkId,"investigation_benchmark",{state:"RUNNING",case_id:id,started_at:startedAt,finished_at:null,duration_ms:null,error:null,result:null});
+    const promise=(async()=>{try{
+      const result=await runInvestigationBenchmarkCase({aiCore,caseId:id}),finishedAt=Date.now(),payload={state:"DONE",case_id:id,started_at:startedAt,finished_at:finishedAt,duration_ms:finishedAt-startedAt,error:null,result};
+      runtimeEvidence.write(benchmarkId,"investigation_benchmark",payload);return payload;
+    }catch(error){
+      const finishedAt=Date.now(),code=String(error?.code||error?.message||error).slice(0,240),payload={state:"FAILED",case_id:id,started_at:startedAt,finished_at:finishedAt,duration_ms:finishedAt-startedAt,error:code,result:null};
+      runtimeEvidence.write(benchmarkId,"investigation_benchmark",payload);throw error;
+    }finally{activeInvestigationBenchmarks.delete(benchmarkId);}})();
+    activeInvestigationBenchmarks.set(benchmarkId,{promise,started_at:startedAt,case_id:id});void promise.catch(()=>{});
+    return{schema:"debugai.investigation-benchmark-accepted/v1",benchmark_id:benchmarkId,state:"RUNNING",case_id:id};
+  }
   async function promote(asset){assertPromotable(asset);if(!tgserver)throw new Error("TGSERVER_ADAPTER_REQUIRED");return tgserver.promote(asset);}
   async function searchKnowledge(query,opts={}){if(!tgserver)throw new Error("TGSERVER_ADAPTER_REQUIRED");return tgserver.search(query,opts);}
-  return{runAnalysis,startAnalysis,resumeAnalysis,recoverStartup,patchCandidate,startCodegenBenchmark,codegenBenchmarkStatus,approveAndVerify,verifyReadOnly,status,inspect,promote,searchKnowledge};
+  return{runAnalysis,startAnalysis,resumeAnalysis,recoverStartup,patchCandidate,startCodegenBenchmark,codegenBenchmarkStatus,startInvestigationBenchmark,investigationBenchmarkStatus,approveAndVerify,verifyReadOnly,status,inspect,promote,searchKnowledge};
 }
 module.exports={createWorkflow,parseJson,roleOutput,toolEvidenceRecords,toolAudit,pickDiagnosisStatement,publicLocalEvidence,dapFailureChecks,activeDapHint,dapHintProtocol,reviewStreamEvidence,reviewableVerificationCheck,evidencePromptView,repositorySnapshotId};
