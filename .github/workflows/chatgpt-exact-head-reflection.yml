@@ -31,7 +31,9 @@ jobs:
           for i in $(seq 1 20); do
             jq -n --arg id "$id" '{id:$id}' >/tmp/status-in.json
             code="$(curl -sS --max-time 30 -o /tmp/status.json -w '%{http_code}'               -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID"               -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET"               -H 'content-type: application/json' --data-binary @/tmp/status-in.json               "$BASE_URL/v1/server-command/status")"
-            test "$code" = "200"
+            echo "STATUS_HTTP=$code"
+            cat /tmp/status.json || true
+            if [ "$code" != "200" ]; then sleep 2; continue; fi
             state="$(jq -r '.state // "UNKNOWN"' /tmp/status.json)"
             echo "STATE=$state"
             if [ "$state" = "PASS" ]; then jq -r '.result.stdout' /tmp/status.json; exit 0; fi
