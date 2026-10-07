@@ -74,9 +74,10 @@ test("existing watcher dispatches both bounded runners without adding another se
   assert.match(watcher, /PathExistsGlob=.*server-command\/requests\/cmd_\*\.json/);
   assert.match(watcher, /PathExistsGlob=.*gitops\/requests\/gitops_\*\.json/);
   assert.match(service, /Type=oneshot/);
+  assert.match(service, /TimeoutStartSec=40min/);
   assert.deepEqual(service.split("\n").filter(line => line.startsWith("ExecStart=")), [
-    "ExecStart=/usr/bin/env bash /home/admin1/projects/debug-ai/scripts/host-server-command-runner.sh",
-    "ExecStart=/usr/bin/env bash /home/admin1/projects/debug-ai/scripts/host-gitops-runner.sh",
+    'ExecStart=/usr/bin/sg docker -c "/usr/bin/env bash /home/admin1/projects/debug-ai/scripts/host-server-command-runner.sh"',
+    'ExecStart=/usr/bin/sg docker -c "/usr/bin/env bash /home/admin1/projects/debug-ai/scripts/host-gitops-runner.sh"',
   ]);
 });
 
