@@ -373,7 +373,7 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
       const result=await runInvestigationBenchmarkCase({aiCore,caseId:id}),finishedAt=Date.now(),payload={state:"DONE",case_id:id,started_at:startedAt,finished_at:finishedAt,duration_ms:finishedAt-startedAt,error:null,result};
       runtimeEvidence.write(benchmarkId,"investigation_benchmark",payload);return payload;
     }catch(error){
-      const finishedAt=Date.now(),code=String(error?.code||error?.message||error).slice(0,240),payload={state:"FAILED",case_id:id,started_at:startedAt,finished_at:finishedAt,duration_ms:finishedAt-startedAt,error:code,result:null};
+      const finishedAt=Date.now(),code=String(error?.code||error?.message||error).slice(0,240),payload={state:"FAILED",case_id:id,started_at:startedAt,finished_at:finishedAt,duration_ms:finishedAt-startedAt,error:code,error_telemetry:error?.meta?.telemetry||null,error_meta:error?.meta?{timeout_ms:error.meta.timeout_ms??null,attempts:error.meta.attempts??null,timeout_class:error.meta.timeout_class??null,status:error.meta.status??null}:null,result:null};
       runtimeEvidence.write(benchmarkId,"investigation_benchmark",payload);throw error;
     }finally{activeInvestigationBenchmarks.delete(benchmarkId);}})();
     activeInvestigationBenchmarks.set(benchmarkId,{promise,started_at:startedAt,case_id:id});void promise.catch(()=>{});
