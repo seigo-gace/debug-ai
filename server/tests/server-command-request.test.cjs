@@ -44,3 +44,34 @@ test("github write gateway separates routine and master-gated gh operations",()=
     assert.equal(normalizeGitHubWriteArguments(["project","item-edit","--id","PVTI_x","--field-id","PVTF_x","--text","Gate"],{}).approval,"ROUTINE");
   }finally{f.cleanup();}
 });
+
+test("HTTP and CLI reuse Server Command service request/status and GitOps contracts",async t=>{
+  const {createServer}=require("../http.js"),{execute}=require("../../bin/debugai.js");
+  const f=fixture();t.after(f.cleanup);
+  const calls=[],request=f.service.request.bind(f.service),status=f.service.status.bind(f.service);
+  f.service.request=body=>{calls.push(["request",body]);return request(body);};
+  f.service.status=id=>{calls.push(["status",id]);return status(id);};
+  const gitOps={request(body){calls.push(["gitops-request",body]);return{state:"QUEUED"};},status(body){calls.push(["gitops-status",body]);return{state:"QUEUED"};}};
+  const server=createServer({workflow:{},serverCommand:f.service,gitOps});
+  await new Promise(resolve=>server.listen(0,"127.0.0.1",resolve));
+  t.after(()=>new Promise(resolve=>server.close(resolve)));
+  const base=`http://127.0.0.1:${server.address().port}`,env={DEBUGAI_URL:base,DEBUGAI_STATE_FILE:path.join(f.workspace,"session.json")};
+  const input={command_id:"project.pwd",repo:f.repo,arguments:[]};
+  const q=await execute(["server-command","request","--input-json",JSON.stringify(input)],{env});
+  assert.equal(q.result.state,"QUEUED");assert.deepEqual(calls[0],["request",input]);
+  const s=await execute(["server-command","status","--input-json",JSON.stringify({id:q.result.id})],{env});
+  assert.equal(s.result.state,"QUEUED");assert.deepEqual(calls[1],["status",q.result.id]);
+  for(const bad of [{command_id:"bash",repo:f.repo},{command_id:"project.pwd",repo:"/forbidden"}]){
+    await assert.rejects(execute(["server-command","request","--input-json",JSON.stringify(bad)],{env}),/SERVER_COMMAND_NOT_ALLOWED|REPO_NOT_ALLOWLISTED/);
+  }
+  for(const operation of ["request","status"]){
+    const body={repo:f.repo,id:"gitops_x",action:"publish",human_approved:false,expected_head:"a".repeat(40),files:["a.js"],candidate_id:"patch_x",candidate_hash:"b".repeat(64)};
+    await execute(["gitops",operation,"--input-json",JSON.stringify(body)],{env});
+    assert.deepEqual(calls.at(-1),[`gitops-${operation}`,body]);
+  }
+  assert.equal(fs.existsSync(env.DEBUGAI_STATE_FILE),false);
+  const response=await fetch(`${base}/v1/server-command/request`,{method:"POST",body:JSON.stringify(input)});
+  assert.equal(response.status,202);
+  const unavailable=createServer({workflow:{}});await new Promise(resolve=>unavailable.listen(0,"127.0.0.1",resolve));
+  try{for(const route of ["request","status"]){const r=await fetch(`http://127.0.0.1:${unavailable.address().port}/v1/server-command/${route}`,{method:"POST",body:"{}"});assert.equal(r.status,400);assert.equal((await r.json()).error,"SERVER_COMMAND_UNAVAILABLE");}}finally{await new Promise(resolve=>unavailable.close(resolve));}
+});

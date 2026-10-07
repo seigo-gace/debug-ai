@@ -12,7 +12,7 @@ const SCHEMA="debugai.pre-server-qualification-audit/v1";
 const EXPECTED_ROLES=Object.freeze(["code_scout","causal_scout","researcher","diagnoser","patch_engineer","local_reviewer"]);
 const EXPECTED_AXES=Object.freeze(["thinking","temperature","top_p","top_k","max_tokens"]);
 const EXPECTED_SAMPLING_SCOPE=Object.freeze({authority:"DEBUGAI_BENCHMARK_AI_CORE_REQUEST_CONTRACT",temperature:"SUPPORTED_EXPLICIT_A_B_ONLY",top_p:"SUPPORTED_EXPLICIT_A_B_ONLY",top_k:"SUPPORTED_EXPLICIT_A_B_ONLY",production_defaults_changed:false,complete_sampling_sweep:false});
-const EXPECTED_MCP_TOOLS=Object.freeze(["debugai_health","debugai_analyze","debugai_start","debugai_resume","debugai_wait","debugai_patch_candidate","debugai_verify","debugai_status","debugai_inspect"]);
+const EXPECTED_MCP_TOOLS=Object.freeze(["debugai_health","debugai_analyze","debugai_start","debugai_resume","debugai_wait","debugai_patch_candidate","debugai_verify","debugai_status","debugai_inspect","debugai_server_read","debugai_server_status","debugai_gitops_request","debugai_gitops_status"]);
 const REQUIRED_SCRIPTS=Object.freeze(["benchmark:local-reviewer","benchmark:skill-effect-all","benchmark:model-ab","audit:pre-server-qualification","audit:live-runtime","debugai:mcp"]);
 const REQUIRED_DOCS=Object.freeze(["docs/PRE_SERVER_QUALIFICATION.md","docs/CODEX_MCP_LIVE_HANDOFF.md","docs/MCP_ADAPTER.md","docs/DURABLE-CONTINUATION-DESIGN.md"]);
 
@@ -31,7 +31,7 @@ function auditPreServerQualification({root=path.resolve(__dirname,".."),packageJ
     model_ab_runner:typeof runModelAbBenchmark==="function"&&sameArray(MODEL_ROLES,EXPECTED_ROLES)&&sameArray(AXES,EXPECTED_AXES),
     model_ab_sampling_scope:sameJson(SAMPLING_SCOPE,EXPECTED_SAMPLING_SCOPE),
     model_ab_official_candidates:officialCandidatesCovered(),
-    mcp_exact_nine_tools:sameArray(exposedTools,EXPECTED_MCP_TOOLS),
+    mcp_exact_tools:sameArray(exposedTools,EXPECTED_MCP_TOOLS),
     required_scripts:Object.values(scripts).every(Boolean),
     required_docs:Object.values(docs).every(Boolean),
   });

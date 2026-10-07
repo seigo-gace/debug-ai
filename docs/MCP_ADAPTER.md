@@ -32,7 +32,7 @@ The MCP entry is ESM because the MCP SDK is ESM; the existing runtime/CLI remain
 
 ## Exact tool surface
 
-Exactly nine tools:
+Thirteen tools; the original nine remain available:
 
 ```text
 debugai_health
@@ -44,6 +44,10 @@ debugai_patch_candidate
 debugai_verify
 debugai_status
 debugai_inspect
+debugai_server_read
+debugai_server_status
+debugai_gitops_request
+debugai_gitops_status
 ```
 
 No approve/apply shortcut is allowed.
@@ -129,7 +133,7 @@ A healthy older image does not prove the current source MCP contract is live. Cu
 MCP_SOURCE=PASS
 MCP_UNIT_CONTRACT=PASS
 MCP_STDIO_PROTOCOL=PASS
-MCP_TOOLS_9_OF_9=PASS
+MCP_ORIGINAL_TOOLS_9_OF_9=PASS
 MCP_DURABLE_CONTINUATION_SOURCE_CHAIN=PASS
 MCP_RUNTIME_IMAGE_ASSETS=PASS
 MCP_LIVE_DEBUGAI_RUNTIME=NOT_VERIFIED
@@ -172,7 +176,7 @@ Do not invent an SSH alias, Windows wrapper, or Codex config. Read the actual ex
 After Current source/runtime parity is proven:
 
 ```text
-1. discover exactly nine tools
+1. discover all thirteen tools
 2. debugai_health
 3. debugai_start on an explicitly allowed repository
 4. capture exact run_id
@@ -193,3 +197,20 @@ Do not mark Workspace MCP `AVAILABLE_VERIFIED` before representative real-runtim
 - `PRE_SERVER_QUALIFICATION.md`
 - `CODEX_MCP_LIVE_HANDOFF.md`
 - `../DEBUGAI.md`
+
+## Control surface extension — 2026-10-07
+
+The original ordered nine-tool surface is preserved and four tools are appended:
+
+| MCP tool | CLI command | HTTP POST route |
+| --- | --- | --- |
+| `debugai_server_read` | `server-command request --input-json <json>` | `/v1/server-command/request` |
+| `debugai_server_status` | `server-command status --input-json <json>` | `/v1/server-command/status` |
+| `debugai_gitops_request` | `gitops request --input-json <json>` | `/v1/gitops/request` |
+| `debugai_gitops_status` | `gitops status --input-json <json>` | `/v1/gitops/status` |
+
+`debugai_server_read` takes `command_id`, optional `repo`, and optional string-array `arguments`; it accepts no shell field. `debugai_server_status` takes `id`. GitOps request forwards the existing service object unchanged, including approval, expected SHA and action-specific candidate/files or deploy SHA fields. GitOps status takes `repo` and `id`. These control tools use server-visible paths exactly as supplied, without CLI path remapping or run/session identity inference.
+
+Server Command request/status delegate to the same `ServerCommandRequestService` instance already passed to workflow and GitHub gateway by `server/main.js`; request returns HTTP 202 and status returns HTTP 200. GitOps reuses its existing routes and `GitOpsRequestService`. The request result means queued, not executed or verified; follow the returned id with status. No executor, queue, workflow, MCP server, allowlist or approval engine is added. No registration, Production reflection or live qualification was performed for this extension.
+
+Allowlist/argument/RepoPolicy decisions remain service-owned. GitOps approval, exact SHA, candidate identity, file scope and remote readback remain service/Host-runner-owned. No approve/apply MCP shortcut exists. Thrown CLI/HTTP errors and nonzero delegated control-command exits return MCP `isError=true` while retaining structured result evidence.

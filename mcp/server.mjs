@@ -16,6 +16,14 @@ function listToFlag(values) {
 
 export function buildCliArgs(toolName, input = {}) {
   switch (toolName) {
+    case 'debugai_server_read':
+      return ['server-command', 'request', '--input-json', JSON.stringify(input)];
+    case 'debugai_server_status':
+      return ['server-command', 'status', '--input-json', JSON.stringify(input)];
+    case 'debugai_gitops_request':
+      return ['gitops', 'request', '--input-json', JSON.stringify(input)];
+    case 'debugai_gitops_status':
+      return ['gitops', 'status', '--input-json', JSON.stringify(input)];
     case 'debugai_health':
       return ['health'];
     case 'debugai_analyze': {
@@ -67,12 +75,14 @@ export async function invokeDebugAITool(toolName, input, { execute = defaultExec
   try {
     const cliArgs = buildCliArgs(toolName, input);
     const output = await execute(cliArgs, { env, cwd });
-    return toToolResult({
+    const result = toToolResult({
       schema: 'debugai.mcp-result/v1',
       tool: toolName,
       exit_code: output.exitCode,
       result: output.result,
     });
+    if (['server-command', 'gitops'].includes(cliArgs[0]) && output.exitCode !== 0) result.isError = true;
+    return result;
   } catch (error) {
     return {
       isError: true,
@@ -162,6 +172,30 @@ export function createDebugAIMcpServer({ execute = defaultExecute, env = process
     inputSchema: z.object({ run_id: runIdSchema }),
   }, invoke('debugai_inspect'));
 
+  server.registerTool('debugai_server_read', {
+    description: 'Queue a bounded Server Command read using the existing service contract. command_id is service-validated; no shell string is accepted.',
+    inputSchema: z.strictObject({
+      command_id: z.string().min(1),
+      repo: z.string().min(1).optional(),
+      arguments: z.array(z.string()).optional(),
+    }),
+  }, invoke('debugai_server_read'));
+
+  server.registerTool('debugai_server_status', {
+    description: 'Read existing Server Command queue status by exact request id.',
+    inputSchema: z.strictObject({ id: z.string().min(1) }),
+  }, invoke('debugai_server_status'));
+
+  server.registerTool('debugai_gitops_request', {
+    description: 'Delegate the existing GitOps request object unchanged. Existing service and host approval, exact SHA, candidate, scope and remote readback gates remain authoritative.',
+    inputSchema: z.record(z.string(), z.unknown()),
+  }, invoke('debugai_gitops_request'));
+
+  server.registerTool('debugai_gitops_status', {
+    description: 'Read existing GitOps request status using its repo/id contract.',
+    inputSchema: z.strictObject({ repo: z.string().min(1), id: z.string().min(1) }),
+  }, invoke('debugai_gitops_status'));
+
   return server;
 }
 
@@ -175,4 +209,8 @@ export const EXPOSED_TOOLS = Object.freeze([
   'debugai_verify',
   'debugai_status',
   'debugai_inspect',
+  'debugai_server_read',
+  'debugai_server_status',
+  'debugai_gitops_request',
+  'debugai_gitops_status',
 ]);

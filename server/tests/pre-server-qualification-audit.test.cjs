@@ -20,8 +20,8 @@ test("pre-server audit fails source readiness when a required command or documen
   assert.equal(result.source_ready,false);assert.equal(result.checks.required_scripts,false);assert.equal(result.checks.required_docs,false);
 });
 
-test("MCP source extraction requires exact ordered nine-tool authority",()=>{
+test("MCP source extraction requires exact ordered tool authority",()=>{
   assert.deepEqual(extractMcpTools(MCP_SOURCE),EXPECTED_MCP_TOOLS);assert.deepEqual(extractMcpTools("export const EXPOSED_TOOLS=[];"),[]);
   const wrong=MCP_SOURCE.replace("debugai_inspect","debugai_apply"),result=auditPreServerQualification({root:"/repo",packageJson:PACKAGE,fileExists:()=>true,readFile:file=>String(file).endsWith(path.join("mcp","server.mjs"))?wrong:""});
-  assert.equal(result.checks.mcp_exact_nine_tools,false);assert.equal(result.source_ready,false);
+  assert.equal(result.checks.mcp_exact_tools,false);assert.equal(result.source_ready,false);
 });

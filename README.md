@@ -27,7 +27,7 @@ Use the documents by responsibility, not as interchangeable status notes:
 3. [`docs/PROJECT_TREE.md`](docs/PROJECT_TREE.md) — responsibility/location map for repository work.
 4. [`docs/DURABLE-CONTINUATION-DESIGN.md`](docs/DURABLE-CONTINUATION-DESIGN.md) — architecture/design authority and durable-continuation contract.
 5. [`docs/PRE_SERVER_QUALIFICATION.md`](docs/PRE_SERVER_QUALIFICATION.md) — benchmark/source/live qualification order and pass/fail states.
-6. [`docs/MCP_ADAPTER.md`](docs/MCP_ADAPTER.md) — MCP transport contract and nine-tool boundary.
+6. [`docs/MCP_ADAPTER.md`](docs/MCP_ADAPTER.md) — MCP transport contract and tool boundary.
 7. [`docs/CODEX_MCP_LIVE_HANDOFF.md`](docs/CODEX_MCP_LIVE_HANDOFF.md) — live parent-agent/MCP verification handoff.
 8. [`DEBUGAI.md`](DEBUGAI.md) — CLI/MCP usage surface.
 9. [`AGENTS.md`](AGENTS.md) — repository operating constraints for coding agents.
@@ -397,6 +397,10 @@ The service binds to loopback by default at `127.0.0.1:8787`.
 | POST | `/v1/patch-candidate` | create candidate only |
 | POST | `/v1/verify` | read-only verification |
 | POST | `/v1/approve-apply-verify` | explicit approved mutation path |
+| POST | `/v1/server-command/request` | queue an existing bounded Server Command read |
+| POST | `/v1/server-command/status` | existing Server Command status by id |
+| POST | `/v1/gitops/request` | existing guarded GitOps request |
+| POST | `/v1/gitops/status` | existing guarded GitOps status |
 | POST | `/v1/assets/promote` | promote validated reusable knowledge |
 
 ## CLI and MCP
@@ -413,9 +417,11 @@ patch
 verify
 status
 inspect
+server-command <request|status> --input-json <service-contract-json>
+gitops <request|status> --input-json <service-contract-json>
 ```
 
-MCP exposes exactly nine guarded tools:
+MCP exposes thirteen guarded tools (the original nine plus four control tools):
 
 ```text
 debugai_health
@@ -427,6 +433,10 @@ debugai_patch_candidate
 debugai_verify
 debugai_status
 debugai_inspect
+debugai_server_read
+debugai_server_status
+debugai_gitops_request
+debugai_gitops_status
 ```
 
 Continuation is explicit:
@@ -435,7 +445,7 @@ Continuation is explicit:
 debugai_start -> exact run_id -> debugai_status -> debugai_resume when applicable -> debugai_wait -> debugai_inspect
 ```
 
-See [`DEBUGAI.md`](DEBUGAI.md) and [`docs/MCP_ADAPTER.md`](docs/MCP_ADAPTER.md).
+The four control tools reuse the existing Server Command and GitOps services through CLI/HTTP. Their transport extension is source-only; runtime reflection is NOT_RUN. See [`DEBUGAI.md`](DEBUGAI.md) and [`docs/MCP_ADAPTER.md`](docs/MCP_ADAPTER.md).
 
 ## Pre-server and real-model qualification
 

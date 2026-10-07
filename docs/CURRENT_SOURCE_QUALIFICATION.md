@@ -116,3 +116,7 @@ Before any real automatic re-fix dogfood on Production:
 6. A real failed-retest flow must prove that automatic work stops at a new candidate and waits for explicit controlling-orchestrator approval before mutation; Master is involved only when the subsequent operation is separately Master-gated.
 
 No main merge, Production deploy/recreate, Secret/provider/model/profile mutation, Search Gate activation, or destructive state change is authorized by this record.
+
+## Control transport source qualification — 2026-10-07
+
+The control extension preserves the original nine MCP tools and adds four, with two Server Command HTTP routes and thin CLI delegation to existing Server Command/GitOps services. Mapping/ownership/rollback boundaries are documented in `MCP_ADAPTER.md` and the appended design history. Related fixture tests passed 28/28; canonical verification in an isolated Node 24.20.0 toolchain passed 480/480 tests with zero failures/skips and source audit `source_ready=true`. Final exact-head CI evidence belongs to PR #40 / Issue #41 and must be read back for the implementing SHA. The initial Host verify attempt stopped because no C compiler was installed; the isolated verification used the real source-bound native build without weakening its provenance checks. This extension has no live-runtime qualification: reflection, merge, deploy and Secret/Provider/Model mutation are NOT_RUN.

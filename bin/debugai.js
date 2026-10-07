@@ -18,6 +18,8 @@ function usage(){return [
   "debugai verify [--repo <server-visible-path>] [--paths <a,b>]",
   "debugai status <run-id>",
   "debugai inspect <run-id>",
+  'debugai server-command <request|status> --input-json <service-contract-json>',
+  'debugai gitops <request|status> --input-json <service-contract-json>',
 ].join("\n");}
 
 function parseArgs(argv){
@@ -89,12 +91,19 @@ function summary(command,result){
   if(command==="verify")return `DebugAI verify: ${result.verdict||"UNKNOWN"}`;
   if(command==="status"||command==="wait")return `DebugAI ${command}: ${result.durable?.job_status||result.state||"UNKNOWN"} run=${result.run_id||"UNKNOWN"}`;
   if(command==="inspect")return `DebugAI inspect: run=${result.run?.run_id||"UNKNOWN"}`;
+  if(command==="server-command"||command==="gitops")return `DebugAI ${command}: ${result.state||"UNKNOWN"} id=${result.id||"UNKNOWN"}`;
   return "DebugAI command complete";
 }
 
 async function execute(argv,{env=process.env,cwd=process.cwd()}={}){
-  const parsed=parseArgs(argv),command=parsed.positional.shift();if(!command||command==="help"||parsed.flags.help)return{help:usage(),exitCode:command?0:2};const base=serverUrl(parsed.flags,env),sessionFile=stateFile(env),session=loadState(sessionFile);let result;
-  if(command==="health")result=await requestJson(base,"/health");
+  const parsed=parseArgs(argv),command=parsed.positional.shift();if(!command||command==="help"||parsed.flags.help)return{help:usage(),exitCode:command?0:2};const base=serverUrl(parsed.flags,env),sessionFile=stateFile(env),session=["server-command","gitops"].includes(command)?null:loadState(sessionFile);let result;
+  if(command==="server-command"||command==="gitops"){
+    const operation=parsed.positional[0];
+    if(!["request","status"].includes(operation))throw new Error("CONTROL_OPERATION_INVALID");
+    if(typeof parsed.flags["input-json"]!=="string")throw new Error("CONTROL_INPUT_JSON_REQUIRED");
+    const body=JSON.parse(parsed.flags["input-json"]);
+    result=await requestJson(base,`/v1/${command}/${operation}`,{method:"POST",body});
+  }else if(command==="health")result=await requestJson(base,"/health");
   else if(command==="analyze"||command==="start"){
     const request=parsed.positional.join(" ").trim();if(!request)throw new Error("ANALYZE_REQUEST_REQUIRED");
     const requestedRunId=String(parsed.flags["run-id"]||"");

@@ -39,7 +39,7 @@ tests/
   repository-level contracts and integration tests
 
 mcp/
-  guarded nine-tool MCP transport and tests
+  guarded MCP transport and tests
 
 bin/
   CLI and stdio entry points
@@ -99,3 +99,7 @@ Automatic re-fix is candidate-generation only. It does not own approval, apply, 
 - Never create a second orchestrator, Sandbox service or runtime merely to make verification pass.
 - Do not install Host Node/Python or a DebugAI-specific resident host service merely to execute Guarded GitOps.
 - Test deletion, skip relaxation, fake PASS and security-policy relaxation are prohibited fixes.
+
+## Bounded control surface extension — 2026-10-07
+
+`server/http.js` exposes Server Command request/status through the existing `server/control/server-command-request.js` service. `server/main.js` passes its existing instance; no second service is constructed. `bin/debugai.js` forwards structured control JSON to HTTP, and `mcp/server.mjs` delegates the four appended control tools to that CLI. Existing GitOps routes, service, Host runners, systemd units and queues are reused unchanged. Regression coverage remains in the existing MCP, Server Command and GitOps test files; the pre-server audit requires the exact thirteen-tool surface and forbids approve/apply tools.

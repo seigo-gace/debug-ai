@@ -18,6 +18,10 @@ test('MCP surface exposes guarded tools but no approve/apply shortcut', () => {
     'debugai_verify',
     'debugai_status',
     'debugai_inspect',
+    'debugai_server_read',
+    'debugai_server_status',
+    'debugai_gitops_request',
+    'debugai_gitops_status',
   ]);
   assert.equal(EXPOSED_TOOLS.some((name) => /approve|apply/i.test(name)), false);
 });
@@ -68,4 +72,33 @@ test('MCP server factory constructs with the registered tool surface', () => {
   });
   assert.ok(server);
   assert.equal(typeof server.registerTool, 'function');
+});
+
+test('control tools delegate exact structured contracts and fail closed', async () => {
+  const cases = [
+    ['debugai_server_read', 'server-command', 'request', { command_id: 'github.gh_read', repo: '/workspace/debug-ai', arguments: ['pr', 'view', '40'] }],
+    ['debugai_server_status', 'server-command', 'status', { id: 'cmd_abc' }],
+    ['debugai_gitops_request', 'gitops', 'request', { action: 'publish', human_approved: false, repo: '/workspace/debug-ai', expected_head: 'a'.repeat(40), files: ['a.js'], candidate_id: 'patch_x', candidate_hash: 'b'.repeat(64) }],
+    ['debugai_gitops_status', 'gitops', 'status', { repo: '/workspace/debug-ai', id: 'gitops_abc' }],
+  ];
+  for (const [name, command, operation, input] of cases) {
+    const expected = [command, operation, '--input-json', JSON.stringify(input)];
+    assert.deepEqual(buildCliArgs(name, input), expected);
+    const result = await invokeDebugAITool(name, input, { execute: async args => {
+      assert.deepEqual(args, expected);
+      throw new Error('SERVICE_REJECTED');
+    } });
+    assert.equal(result.isError, true);
+    assert.equal(JSON.parse(result.content[0].text).error, 'SERVICE_REJECTED');
+  }
+  const result = await invokeDebugAITool('debugai_server_read', { command_id: 'project.pwd' }, {
+    execute: async () => ({ exitCode: 1, result: { error: 'FAIL' } }),
+  });
+  assert.equal(result.isError, true);
+  assert.equal(JSON.parse(result.content[0].text).exit_code, 1);
+  const originalVerify = await invokeDebugAITool('debugai_verify', { repo: '/workspace/debug-ai' }, {
+    execute: async () => ({ exitCode: 2, result: { verdict: 'UNKNOWN' } }),
+  });
+  assert.equal(originalVerify.isError, undefined);
+  assert.equal(JSON.parse(originalVerify.content[0].text).exit_code, 2);
 });

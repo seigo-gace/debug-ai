@@ -388,3 +388,7 @@ Automatic re-fix does not relax the mutation boundary: it may automatically crea
 ```
 
 Unexecuted, failed, incomplete, source/runtime-unmatched, and approval-blocked items retain their actual state.
+
+## Bounded control transport extension — 2026-10-07
+
+The source extends the original nine MCP tools with four direct control tools; exact mapping and contracts are in [`MCP_ADAPTER.md`](MCP_ADAPTER.md). Two Server Command HTTP routes delegate to the existing service instance. CLI forwards service-contract JSON for Server Command and the existing GitOps request/status routes. No Host runner, queue, Service policy or runtime path is replaced. Source/fixture verification and final exact-HEAD CI are recorded in the implementing commit and PR #40 / Issue #41. Runtime reflection, merge, deploy and Secret/Provider/Model mutation are NOT_RUN for this change unit. Historical live/source records above remain bound to their recorded revisions.

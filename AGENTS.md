@@ -100,7 +100,7 @@ Mutation-capable effects are never replayed automatically after restart.
 - responsibility tree: `docs/PROJECT_TREE.md`
 - live MCP handoff: `docs/CODEX_MCP_LIVE_HANDOFF.md`
 
-MCP exposes exactly nine guarded tools and intentionally no approve/apply shortcut.
+MCP exposes thirteen guarded tools (the original nine plus four control tools) and intentionally no approve/apply shortcut.
 
 Durable continuation uses explicit `run_id`; do not replace a multi-call continuation path with fabricated one-shot completion.
 
