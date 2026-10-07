@@ -477,6 +477,16 @@ Production defaults are not modified by benchmark source. Skill OFF wins and tie
 
 ## Runtime image contract
 
+The bounded Host Server Command runner validates requests with real Bash/jq.
+Its lifecycle regression is `node --test ops/tests/server-command-host-execution.test.cjs`
+on a test toolchain with jq; it executes the runner against temporary queues and
+checks successful exact readback and fail-closed rejection by the original request ID.
+Production reflection remains separately approved and verified.
+The existing user path/oneshot unit dispatches Server Command and guarded GitOps
+queues to their existing Bash runners. Updating active units requires the same
+separate runtime approval as reflection; GitOps deploy still requires its
+single-use exact-SHA Host approval receipt.
+
 The current source explicitly packages the runtime assets required for live qualification:
 
 ```text

@@ -1,5 +1,13 @@
 # DebugAI Project Tree
 
+`ops/tests/server-command-host-execution.test.cjs` executes the existing bounded
+Host runner with real Bash/jq against temporary queues, checking terminal ID
+correlation, mirror fallback and approval rejection. Verify CI owns this Host
+toolchain gate; the production container does not acquire Host executor dependencies.
+The existing `ops/systemd-user/debugai-server-command.path` watches Server Command
+and GitOps request queues; its existing oneshot service runs their respective
+bounded Bash runners. GitOps retains its exact-SHA Host approval contract.
+
 This file is a responsibility map for development work. It is not an exhaustive generated file listing and does not replace architecture or current-state authority.
 
 ## Authority order
