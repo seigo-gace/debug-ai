@@ -1,5 +1,18 @@
 # DebugAI Current Source Qualification
 
+## Host Server Command validation correction
+
+Fresh live reproduction found an extra closing parenthesis in the Host runner's
+jq request predicate. The watcher delivered the request, but validation failed
+before reading its ID, leaving terminal failure under an `invalid_*` filename.
+The correction removes that parenthesis and retains the validated filename ID
+before schema validation. Existing queue, readback mirrors, allowlists and approval
+checks remain in place. Real Bash/jq lifecycle regression covers valid git-head
+readback, unsupported command, wrong repository, expiry, unapproved write and
+protected write without Master approval. Local verification is isolated in a
+Node 24.20.0/jq container; CI runs the same regression on its Host test toolchain.
+Live reflection of this correction is NOT_EXECUTED until exact-SHA approval.
+
 This record is the source/CI qualification checkpoint for the current feature branch. It does not replace live Server readback and does not authorize deployment.
 
 ## Current source

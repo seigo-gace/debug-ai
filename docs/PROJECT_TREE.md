@@ -1,5 +1,10 @@
 # DebugAI Project Tree
 
+`ops/tests/server-command-host-execution.test.cjs` executes the existing bounded
+Host runner with real Bash/jq against temporary queues, checking terminal ID
+correlation, mirror fallback and approval rejection. Verify CI owns this Host
+toolchain gate; the production container does not acquire Host executor dependencies.
+
 This file is a responsibility map for development work. It is not an exhaustive generated file listing and does not replace architecture or current-state authority.
 
 ## Authority order
