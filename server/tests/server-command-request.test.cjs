@@ -14,6 +14,15 @@ test("server command execute returns request identity and preserves it on failur
   }finally{f.cleanup();}
 });
 
+test("server command status falls back to queue-root readback mirror",()=>{
+  const f=fixture();try{
+    const q=f.service.request({command_id:"project.pwd"}),root=path.join(f.repo,".debugai-input","server-command");
+    fs.unlinkSync(path.join(root,"requests",q.id+".json"));
+    fs.writeFileSync(path.join(root,`readback_${q.id}.json`),JSON.stringify({schema:"debugai.server-command-status/v1",id:q.id,state:"PASS",result:{command_id:"project.pwd",stdout:"/home/admin1/projects/debug-ai",exit_code:0,read_only:true}}));
+    const out=f.service.status(q.id);assert.equal(out.state,"PASS");assert.equal(out.result.stdout,"/home/admin1/projects/debug-ai");
+  }finally{f.cleanup();}
+});
+
 test("server command status treats processing file as RUNNING instead of NOT_FOUND",()=>{
   const f=fixture();try{
     const q=f.service.request({command_id:"project.pwd"}),root=path.join(f.repo,".debugai-input","server-command");
