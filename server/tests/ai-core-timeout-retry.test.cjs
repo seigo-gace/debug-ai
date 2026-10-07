@@ -116,6 +116,28 @@ test("AI Core returns measured telemetry and does not invent unavailable provide
   assert.equal(out.telemetry.prompt_tokens,12);assert.equal(out.telemetry.completion_tokens,4);assert.equal(out.telemetry.total_tokens,16);assert.equal(out.telemetry.finish_reason,"stop");assert.equal(out.telemetry.attempts,1);assert.equal(out.telemetry.request_bytes,Buffer.byteLength(sentBody,"utf8"));assert.equal(out.telemetry.response_bytes,Buffer.byteLength(payload,"utf8"));for(const field of ["queue_wait_ms","prepare_ms","upstream_request_wall_ms","parse_validate_ms","role_wall_ms"])assert.ok(Number.isInteger(out.telemetry[field])&&out.telemetry[field]>=0,field);
 });
 
+
+test("prepared measurement call sends exact compiled system and bounded optional sampling axes",async()=>{
+  let sent=null;
+  const fetchImpl=async(_url,opts)=>{sent=JSON.parse(opts.body);return{ok:true,status:200,text:async()=>JSON.stringify({choices:[{message:{content:"{\"ok\":true}"},finish_reason:"stop"}],usage:{prompt_tokens:9,completion_tokens:2,total_tokens:11}})};};
+  const ai=createAiCoreAdapter({baseUrl:"http://127.0.0.1:18080",apiKey:"test",fetchImpl,timeoutMs:600000,maxTransportTimeoutAttempts:1});
+  const out=await ai.callPrepared("diagnoser",{system:"EXACT_PRECOMPILED_SYSTEM",user:"case",maxTokens:2048,temperature:0.6,topP:0.95,topK:20});
+  assert.equal(sent.messages[0].content,"EXACT_PRECOMPILED_SYSTEM");
+  assert.equal(sent.temperature,0.6);assert.equal(sent.top_p,0.95);assert.equal(sent.top_k,20);
+  assert.equal(sent.chat_template_kwargs.enable_thinking,true);
+  assert.equal(out.control_plane.skill_selection_mode,"PRECOMPILED_MEASUREMENT");
+});
+
+test("normal production call omits optional sampling axes unless explicitly supplied",async()=>{
+  let sent=null;
+  const fetchImpl=async(_url,opts)=>{sent=JSON.parse(opts.body);return{ok:true,status:200,text:async()=>JSON.stringify({choices:[{message:{content:"{\"facts\":[]}"},finish_reason:"stop"}]})};};
+  const ai=createAiCoreAdapter({baseUrl:"http://127.0.0.1:18080",apiKey:"test",fetchImpl,timeoutMs:600000,maxTransportTimeoutAttempts:1});
+  await ai.call("code_scout",{user:"x"});
+  assert.equal(Object.prototype.hasOwnProperty.call(sent,"top_p"),false);
+  assert.equal(Object.prototype.hasOwnProperty.call(sent,"top_k"),false);
+  assert.notEqual(sent.messages[0].content,"EXACT_PRECOMPILED_SYSTEM");
+});
+
 test("AI Core keeps unavailable provider usage as null",async()=>{
   const fetchImpl=async()=>({ok:true,status:200,text:async()=>JSON.stringify({choices:[{message:{content:"{\"ok\":true}"}}]})});
   const ai=createAiCoreAdapter({baseUrl:"http://127.0.0.1:18080",apiKey:"test",fetchImpl,timeoutMs:600000,maxTransportTimeoutAttempts:2});
