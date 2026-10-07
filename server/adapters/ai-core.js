@@ -5,7 +5,7 @@ const {ROLES}=require("../roles.js");
 const {compileInvocation}=require("../control/invocation-compiler.js");
 const {OUTPUT_HEADROOM_TOKENS,getModelOutputHardCeilingForRole}=require("../control/model-profiles.js");
 const ROLE_ALIASES=Object.freeze(Object.fromEntries(Object.entries(ROLES).map(([k,v])=>[k,v.alias])));
-const TIMEOUT_CLASS=Object.freeze({DEADLINE_ABORT:"DEADLINE_ABORT",TRANSPORT_TIMEOUT:"TRANSPORT_TIMEOUT",EXTERNAL_ABORT:"EXTERNAL_ABORT"});
+const TIMEOUT_CLASS=Object.freeze({QUEUE_TIMEOUT:"QUEUE_TIMEOUT",DEADLINE_ABORT:"DEADLINE_ABORT",TRANSPORT_TIMEOUT:"TRANSPORT_TIMEOUT",EXTERNAL_ABORT:"EXTERNAL_ABORT"});
 class AiCoreError extends Error{constructor(code,msg,meta={}){super(msg);this.name="AiCoreError";this.code=code;this.meta=meta;}}
 function resolveRoleTimeoutMs(role,defaultTimeoutMs){const cfg=ROLES[role];if(!cfg)throw new AiCoreError("ROLE_INVALID",`Unknown DebugAI role: ${role}`);return Number.isFinite(cfg.timeout_ms)&&cfg.timeout_ms>0?cfg.timeout_ms:defaultTimeoutMs;}
 function resolveEffectiveTimeoutMs(role,defaultTimeoutMs,{timeoutMsOverride=null,deadlineAt=null,now=Date.now()}={}){
@@ -126,7 +126,24 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
     }
     throw new AiCoreError("AI_CORE_TIMEOUT","AI Core transport timeout retry loop exhausted",{role,model:cfg.backend_model,timeout_ms:effectiveTimeoutMs,attempts:maxTransportTimeoutAttempts,timeout_class:TIMEOUT_CLASS.TRANSPORT_TIMEOUT,retryable:false});
   }
-  async function call(role,options={}){let release;const queuedAt=Date.now(),turn=new Promise(resolve=>{release=resolve;}),previous=queueTail;queueTail=turn;await previous;const queueWaitMs=Date.now()-queuedAt;try{return await execute(role,options,{queueWaitMs});}finally{release();}}
+  async function call(role,options={}){
+    let release;const queuedAt=Date.now(),turn=new Promise(resolve=>{release=resolve;}),previous=queueTail;queueTail=turn;
+    const queueTimeoutMs=options.queueTimeoutMs===null||options.queueTimeoutMs===undefined?null:Number(options.queueTimeoutMs);
+    if(queueTimeoutMs!==null&&(!Number.isFinite(queueTimeoutMs)||queueTimeoutMs<=0)){previous.finally(release);throw new AiCoreError("AI_CORE_QUEUE_TIMEOUT_INVALID","queueTimeoutMs must be a positive finite number",{role,queue_timeout_ms:options.queueTimeoutMs});}
+    let queueTimer=null;
+    try{
+      if(queueTimeoutMs===null)await previous;
+      else await Promise.race([previous,new Promise((_,reject)=>{queueTimer=setTimeout(()=>reject(new AiCoreError("AI_CORE_QUEUE_TIMEOUT",`AI Core queue wait exceeded ${Math.floor(queueTimeoutMs)}ms for ${role}`,{role,timeout_ms:Math.floor(queueTimeoutMs),timeout_class:TIMEOUT_CLASS.QUEUE_TIMEOUT,retryable:false,telemetry:makeTelemetry({queueWaitMs:Date.now()-queuedAt})})),Math.floor(queueTimeoutMs));})]);
+    }catch(error){
+      if(queueTimer)clearTimeout(queueTimer);
+      previous.finally(release);
+      throw error;
+    }
+    if(queueTimer)clearTimeout(queueTimer);
+    const queueWaitMs=Date.now()-queuedAt;
+    const executeOptions=options.excludeQueueFromDeadline===true&&Number.isFinite(options.deadlineAt)?{...options,deadlineAt:Number(options.deadlineAt)+queueWaitMs}:options;
+    try{return await execute(role,executeOptions,{queueWaitMs});}finally{release();}
+  }
   return{endpoint,runtime_context_tokens:qualifiedRuntimeContext,runtime_context_qualified:qualifiedRuntimeContext!==null,prompt_cache_requested:promptCache,call};
 }
 module.exports={ROLE_ALIASES,TIMEOUT_CLASS,AiCoreError,classifyTimeoutError,isTimeoutError,resolveRoleTimeoutMs,resolveEffectiveTimeoutMs,normalizeRuntimeContextTokens,resolveEffectiveMaxTokens,finiteUsage,usageTelemetry,providerTimingTelemetry,prefixHash,truncationError,runtimeControlWireUser,createAiCoreAdapter};
