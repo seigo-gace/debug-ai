@@ -1,0 +1,35 @@
+name: ChatGPT Server Command Status Diagnose
+
+on:
+  push:
+    branches:
+      - automation/chatgpt-verify
+    paths:
+      - .github/workflows/chatgpt-server-command-status-diagnose.yml
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    env:
+      BASE_URL: https://debugai.asterav8.jp
+      CF_ACCESS_CLIENT_ID: ${{ secrets.DEBUGAI_CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.DEBUGAI_CF_ACCESS_CLIENT_SECRET }}
+    steps:
+      - name: Request and read one status response
+        shell: bash
+        run: |
+          set -euo pipefail
+          req='{"repo":"/workspace/debug-ai","command_id":"project.git_head","arguments":[]}'
+          code="$(curl -sS --max-time 30 -o /tmp/request.json -w '%{http_code}'             -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID"             -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET"             -H 'content-type: application/json'             --data-binary "$req" "$BASE_URL/v1/server-command/request")"
+          echo "REQUEST_HTTP=$code"
+          jq -c '{schema,id,state,command_id,repo}' /tmp/request.json
+          test "$code" = "202"
+          id="$(jq -r '.id // empty' /tmp/request.json)"
+          sleep 1
+          code="$(curl -sS --max-time 30 -o /tmp/status.json -w '%{http_code}'             -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID"             -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET"             -H 'content-type: application/json'             --data-binary "$(jq -nc --arg id "$id" '{id:$id}')"             "$BASE_URL/v1/server-command/status")"
+          echo "STATUS_HTTP=$code"
+          jq -c . /tmp/status.json
