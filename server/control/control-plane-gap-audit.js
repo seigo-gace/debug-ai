@@ -4,6 +4,8 @@ const {SKILLS}=require("./skill-registry.js");
 const {PROCEDURES}=require("./skill-procedures.js");
 const {ROLE_CONTRACTS}=require("./role-contracts.js");
 const {AVAILABLE_TOOLS}=require("./read-only-tool-runtime.js");
+const {makeReviewPacket}=require("./runtime-packets.js");
+const {preparePatchCandidate}=require("../../orchestrator/patch-core.js");
 
 const SCHEMA="debugai.control-plane-gap-audit/v2";
 const CAPABILITY_TYPE=Object.freeze({MODEL_TOOL:"MODEL_TOOL",RUNTIME_PACKET:"RUNTIME_PACKET",DETERMINISTIC_CORE:"DETERMINISTIC_CORE"});
@@ -22,7 +24,39 @@ const NON_RUNTIME_CAPABILITY_PLAN=Object.freeze({
 });
 
 function uniqueSorted(values){return [...new Set(values)].sort();}
-function capabilityFor(tool,runtimeTools){if(runtimeTools.has(tool))return{requirement:tool,type:CAPABILITY_TYPE.MODEL_TOOL,provider:`runtime-tool:${tool}`,status:"IMPLEMENTED"};const planned=NON_RUNTIME_CAPABILITY_PLAN[tool];return planned?{requirement:tool,...planned}:{requirement:tool,type:CAPABILITY_TYPE.MODEL_TOOL,provider:null,status:"UNCLASSIFIED"};}
+function reviewPacketProbe(){
+  try{
+    return makeReviewPacket({
+      candidateRef:"audit_candidate",
+      applyReceiptRef:"audit_apply",
+      repositoryRevision:"audit_revision",
+      changedPaths:["audit.js"],
+      diff:"--- a/audit.js\n+++ b/audit.js",
+      executedTests:[{name:"audit",status:"PASS",executed:true}],
+      testResults:[{name:"audit",status:"PASS",executed:true}],
+      invariants:[{name:"audit",status:"PASS"}],
+      evidenceRefs:["EVI_AUDIT"]
+    });
+  }catch{return null;}
+}
+function nonRuntimeCapabilityImplemented(requirement){
+  if(requirement==="diff.plan")return typeof preparePatchCandidate==="function";
+  if(requirement==="diff.read"){
+    const packet=reviewPacketProbe();
+    return packet?.schema==="debugai.review-packet/v1"&&typeof packet.payload?.diff==="string"&&packet.payload.diff.length>0;
+  }
+  if(requirement==="test.result.read"){
+    const packet=reviewPacketProbe();
+    return packet?.schema==="debugai.review-packet/v1"&&Array.isArray(packet.payload?.test_results)&&packet.payload.test_results.length>0;
+  }
+  return false;
+}
+function capabilityFor(tool,runtimeTools){
+  if(runtimeTools.has(tool))return{requirement:tool,type:CAPABILITY_TYPE.MODEL_TOOL,provider:`runtime-tool:${tool}`,status:"IMPLEMENTED"};
+  const planned=NON_RUNTIME_CAPABILITY_PLAN[tool];
+  if(!planned)return{requirement:tool,type:CAPABILITY_TYPE.MODEL_TOOL,provider:null,status:"UNCLASSIFIED"};
+  return{requirement:tool,...planned,status:nonRuntimeCapabilityImplemented(tool)?"IMPLEMENTED":planned.status};
+}
 
 function auditControlPlaneGaps(){
   const skillIds=Object.keys(SKILLS).sort();
@@ -81,4 +115,4 @@ function cli(){
 
 if(require.main===module)cli();
 
-module.exports={SCHEMA,CAPABILITY_TYPE,NON_RUNTIME_CAPABILITY_PLAN,capabilityFor,auditControlPlaneGaps,isGapFree};
+module.exports={SCHEMA,CAPABILITY_TYPE,NON_RUNTIME_CAPABILITY_PLAN,nonRuntimeCapabilityImplemented,capabilityFor,auditControlPlaneGaps,isGapFree};
