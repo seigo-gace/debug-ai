@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -u
+set -o pipefail
+REPO="${DEBUG_AI_HOST_REPO:-/home/admin1/projects/debug-ai}"
+RESULT="$REPO/.debugai-input/asteria-baseline-probe/result.json"
+DOCKER_BIN="${DEBUG_AI_SERVER_COMMAND_DOCKER_BIN:-docker}"
+CURL_BIN="${DEBUG_AI_SERVER_COMMAND_CURL_BIN:-curl}"
+JQ_BIN="${DEBUG_AI_SERVER_COMMAND_JQ_BIN:-jq}"
+started="$(date +%s%3N)"
+finish(){ local state="$1" error="${2:-}" c1="${3:-}" c6="${4:-}" gb="${5:-}" ga="${6:-}" qb="${7:-}" qa="${8:-}" tmp="${RESULT}.tmp-$$"; "$JQ_BIN" -n --arg state "$state" --arg error "$error" --arg c1 "$c1" --arg c6 "$c6" --arg gb "$gb" --arg ga "$ga" --arg qb "$qb" --arg qa "$qa" --argjson started "$started" --argjson finished "$(date +%s%3N)" '{schema:"debugai.asteria-baseline-probe/v1",state:$state,error:$error,started_at:$started,finished_at:$finished,case1:$c1,case6:$c6,granite_before:$gb,granite_after:$ga,qwen_before:$qb,qwen_after:$qa}' >"$tmp" && mv -f -- "$tmp" "$RESULT"; }
+read_evt(){ "$DOCKER_BIN" exec "$1" sh -lc 'awk "$1==\"high\"||$1==\"max\"||$1==\"oom\"||$1==\"oom_kill\"{printf \"%s=%s|\",$1,$2}" /sys/fs/cgroup/memory.events' 2>/dev/null; }
+CID="$("$DOCKER_BIN" ps -q -f name=^/asteria-ab-baseline-forensic$ 2>/dev/null | head -n1)"
+[ -n "$CID" ] || { finish FAIL ASTERIA_FORENSIC_CONTAINER_NOT_RUNNING; exit 2; }
+TOKEN="$("$DOCKER_BIN" inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$CID" 2>/dev/null | sed -n 's/^ASTERIA_INTERNAL_TOKEN=//p' | head -n1)"
+[ -n "$TOKEN" ] || { finish FAIL ASTERIA_TOKEN_NOT_FOUND; exit 3; }
+health="$("$CURL_BIN" -sS -o /dev/null -w '%{http_code}' --connect-timeout 2 --max-time 5 http://127.0.0.1:18111/health 2>/dev/null || true)"
+[ "$health" = "200" ] || { finish FAIL "ASTERIA_FORENSIC_HEALTH_$health"; exit 4; }
+GB="$(read_evt ai-granite)"; QB="$(read_evt ai-qwen3)"
+run_case(){ local id="$1" src="$2" body tmp code time_s err out; tmp="$(mktemp)"; body="$("$JQ_BIN" -nc --arg id "$id" --arg src "$src" '{request_id:$id,profile_version:"asteria-translation-v1",target_language:"en",source_language:"ja",segments:[{id:"body",text:$src}]}')"; read -r code time_s < <("$CURL_BIN" -sS --max-time 180 -o "$tmp" -w '%{http_code} %{time_total}' -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data-binary "$body" http://127.0.0.1:18111/internal/v1/translate 2>/dev/null || printf '000 180'); err="$("$JQ_BIN" -r 'if .error then ((.error.code//"UNKNOWN")|tostring)+":"+((.error.message//"")|tostring) else "" end' "$tmp" 2>/dev/null | head -c 300)"; out="$("$JQ_BIN" -r 'if (.segments|type)=="array" then (.segments[0].text//"") else "" end' "$tmp" 2>/dev/null | tr '\n' ' ' | head -c 500)"; rm -f -- "$tmp"; printf '%s|http=%s|seconds=%s|error=%s|output=%s' "$id" "$code" "$time_s" "$err" "$out"; }
+C1="$(run_case ja-ab-negation-deadline '2026-10-31まではバックアップを削除してはならない。期限後も、監査が完了するまでは削除しないこと。')"
+C6="$(run_case ja-ab-quantity-deadline-bounds '常に最低3台を維持し、5台を超えてはならない。2026-11-15の17:00までに移行を完了すること。')"
+GA="$(read_evt ai-granite)"; QA="$(read_evt ai-qwen3)"
+finish PASS "" "$C1" "$C6" "$GB" "$GA" "$QB" "$QA"
