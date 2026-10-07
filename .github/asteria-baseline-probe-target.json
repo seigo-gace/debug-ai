@@ -1,6 +1,6 @@
 {
   "enabled": true,
   "purpose": "Asteria baseline Case 1/6 verification through existing DebugAI bounded Server Command lane",
-  "request_id": "asteria-baseline-readback-20261008-rule-reanchor",
-  "readback_only": true
+  "request_id": "asteria-baseline-run-20261008-after-workflow-fix",
+  "readback_only": false
 }
