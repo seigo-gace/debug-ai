@@ -106,3 +106,34 @@ test("real GitOps Host runner rejects missing approval before checkout or Docker
   assert.equal(status.error, "DEPLOY_HOST_APPROVAL_REQUIRED");
   assert.ok(fs.existsSync(path.join(queue, "failed", `${id}.json`)));
 });
+
+test("GitOps waits for Docker healthy when HTTP becomes ready during starting", t => {
+  const f = fixture(t), bin = path.join(f.repo, "test-bin");
+  const sha = "d".repeat(40), id = "gitops_" + "e".repeat(24);
+  const git = path.join(bin, "deploy-git"), docker = path.join(bin, "deploy-docker");
+  const curl = path.join(bin, "health-curl"), inspections = path.join(f.repo, "inspections");
+  fs.writeFileSync(git, `#!/bin/sh\ncase "$1" in\nremote) printf '%s\\n' 'https://github.com/seigo-gace/debug-ai.git';;\nls-remote) printf '%s\\trefs/heads/feat/tgserver-async-log-sink-20261003\\n' '${sha}';;\nrev-parse) printf '%s\\n' '${sha}';;\ndiff|ls-files|fetch|merge-base|checkout) exit 0;;\n*) exit 99;;\nesac\n`, { mode: 0o700 });
+  fs.writeFileSync(docker, `#!/bin/sh\nif [ "$1" = inspect ]; then\n n=0; [ ! -f '${inspections}' ] || n=$(cat '${inspections}'); n=$((n+1)); echo "$n" > '${inspections}'\n if [ "$n" = 1 ]; then echo 'running|starting'; else echo 'running|healthy'; fi\nelse\n case "$2" in ps) echo fixture-container;; build|up) exit 0;; *) exit 99;; esac\nfi\n`, { mode: 0o700 });
+  fs.writeFileSync(curl, "#!/bin/sh\nprintf 200\n", { mode: 0o700 });
+  const queue = path.join(f.repo, ".debugai-input", "gitops"), approvals = path.join(f.repo, "approvals");
+  fs.mkdirSync(path.join(queue, "requests"), { recursive: true });
+  fs.mkdirSync(approvals);
+  fs.writeFileSync(path.join(approvals, `${id}.approve`), sha + "\n");
+  fs.writeFileSync(path.join(queue, "requests", `${id}.json`), JSON.stringify({
+    schema: "debugai.gitops-request/v1", id, action: "deploy", repo: "/workspace/debug-ai",
+    branch: "feat/tgserver-async-log-sink-20261003", expected_head: sha, sha,
+    human_approved: true, expires_at: Date.now() + 60000,
+  }));
+  const result = spawnSync("bash", [gitopsRunner], { encoding: "utf8", env: {
+    ...process.env, DEBUG_AI_HOST_REPO: f.repo, DEBUG_AI_GITOPS_GIT_BIN: git,
+    DEBUG_AI_GITOPS_DOCKER_BIN: docker, DEBUG_AI_GITOPS_CURL_BIN: curl,
+    DEBUG_AI_GITOPS_APPROVAL_ROOT: approvals,
+  } });
+  assert.equal(result.status, 0, result.stderr);
+  const status = JSON.parse(fs.readFileSync(path.join(queue, "status", `${id}.json`)));
+  assert.equal(status.state, "PASS", status.error);
+  assert.equal(status.result.container_state, "running|healthy");
+  assert.ok(Number(fs.readFileSync(inspections, "utf8")) >= 3);
+  assert.equal(fs.existsSync(path.join(approvals, `${id}.approve`)), false);
+  assert.equal(fs.readdirSync(approvals).filter(v => v.endsWith(".used")).length, 1);
+});

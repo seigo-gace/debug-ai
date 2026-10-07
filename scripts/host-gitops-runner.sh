@@ -160,10 +160,20 @@ consume_approval() {
 }
 
 wait_health() {
-  local deadline=$((SECONDS + 120)) code
+  local deadline=$((SECONDS + 120)) code container_id state
   while [ "$SECONDS" -lt "$deadline" ]; do
     code="$("$CURL_BIN" -sS -o /dev/null -w '%{http_code}' --max-time 3 http://127.0.0.1:8787/health 2>/dev/null || true)"
-    [[ "$code" =~ ^2[0-9][0-9]$ ]] && { printf 'HTTP_%s\n' "$code"; return 0; }
+    if [[ "$code" =~ ^2[0-9][0-9]$ ]]; then
+      container_id="$(docker_cmd compose ps -q debug-ai 2>/dev/null | head -n1)"
+      state=""
+      if [ -n "$container_id" ]; then
+        state="$(docker_cmd inspect -f '{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}NONE{{end}}' "$container_id" 2>/dev/null || true)"
+      fi
+      if [ "$state" = "running|healthy" ]; then
+        printf 'HTTP_%s\n' "$code"
+        return 0
+      fi
+    fi
     sleep 2
   done
   fail DEPLOY_HEALTH_TIMEOUT
