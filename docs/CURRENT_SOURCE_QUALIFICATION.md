@@ -21,6 +21,22 @@ queue or executor is introduced. Real GitOps regression proves missing exact-SHA
 Host approval is rejected before checkout or Docker mutation. Activating updated
 units and rebuilding/recreating Production remain separately approval-gated.
 
+Approved reflection to `1c6da080d340ab6a47d447c78a21c8738f2e748a` exposed a
+separate readiness race: HTTP health passed while Docker health was `starting`,
+so GitOps recorded FAIL although the recreated container later became healthy.
+That failed receipt is preserved. The correction waits inside the existing
+120-second budget for both HTTP success and `running|healthy`, retaining final
+state validation and the existing exact-SHA approval gate. A real Bash/jq Host
+regression reproduces HTTP-ready/starting -> healthy and consumes the single-use
+approval receipt. This additional source correction is not deployed implicitly.
+
+Live automatic GitOps approval-rejection request `gitops_3e6784dc54cb8e127ee17f09`
+also exposed a status polling gap: moving requests to `processing/` temporarily
+returned GITOPS_REQUEST_NOT_FOUND. The same status service now reports RUNNING
+from that existing lifecycle directory, with terminal status taking precedence.
+The Host ultimately rejected the missing receipt with DEPLOY_HOST_APPROVAL_REQUIRED;
+no deploy occurred. The regression preserves that boundary and request identity.
+
 This record is the source/CI qualification checkpoint for the current feature branch. It does not replace live Server readback and does not authorize deployment.
 
 ## Current source

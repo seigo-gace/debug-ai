@@ -51,3 +51,17 @@ test("deploy requires exact approved target sha", () => {
   assert.equal(queued.action, "deploy");
   assert.equal(queued.expected_head, input.expected_head);
 });
+
+test("GitOps status remains readable while Host runner owns the processing request", t => {
+  const { repo, service } = fixture();
+  t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
+  const input = { ...base(repo), action: "deploy", sha: base(repo).expected_head };
+  const queued = service.request(input), root = service.queueRoot(repo);
+  fs.mkdirSync(path.join(root, "processing"));
+  fs.renameSync(path.join(root, "requests", `${queued.id}.json`), path.join(root, "processing", `${queued.id}.json`));
+  assert.deepEqual(service.status({ repo, id: queued.id }), { schema: "debugai.gitops-status/v1", id: queued.id, state: "RUNNING" });
+  fs.mkdirSync(path.join(root, "status"));
+  const terminal = { schema: "debugai.gitops-status/v1", id: queued.id, state: "FAIL", error: "DEPLOY_HOST_APPROVAL_REQUIRED" };
+  fs.writeFileSync(path.join(root, "status", `${queued.id}.json`), JSON.stringify(terminal));
+  assert.deepEqual(service.status({ repo, id: queued.id }), terminal);
+});
