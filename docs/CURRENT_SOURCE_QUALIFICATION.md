@@ -13,6 +13,14 @@ protected write without Master approval. Local verification is isolated in a
 Node 24.20.0/jq container; CI runs the same regression on its Host test toolchain.
 Live reflection of this correction is NOT_EXECUTED until exact-SHA approval.
 
+Fresh user-unit readback also found that the existing path unit watches only
+Server Commands, while GitOps requests remain queued without any automatic Host
+dispatch. The same existing path/service is adapted to watch both queues and run
+both existing bounded Bash runners sequentially. No new service, timer, poller,
+queue or executor is introduced. Real GitOps regression proves missing exact-SHA
+Host approval is rejected before checkout or Docker mutation. Activating updated
+units and rebuilding/recreating Production remain separately approval-gated.
+
 This record is the source/CI qualification checkpoint for the current feature branch. It does not replace live Server readback and does not authorize deployment.
 
 ## Current source

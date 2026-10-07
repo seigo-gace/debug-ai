@@ -1,5 +1,6 @@
 [Unit]
-Description=DebugAI bounded read-only server command executor
+Description=DebugAI bounded Server Command and guarded GitOps executors
 [Service]
 Type=oneshot
 ExecStart=/usr/bin/env bash /home/admin1/projects/debug-ai/scripts/host-server-command-runner.sh
+ExecStart=/usr/bin/env bash /home/admin1/projects/debug-ai/scripts/host-gitops-runner.sh

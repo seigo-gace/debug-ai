@@ -7,6 +7,7 @@ const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 const { ServerCommandRequestService } = require("../../server/control/server-command-request.js");
 const runner = path.resolve(__dirname, "../../scripts/host-server-command-runner.sh");
+const gitopsRunner = path.resolve(__dirname, "../../scripts/host-gitops-runner.sh");
 
 function fixture(t) {
   const repo = fs.mkdtempSync(path.join(os.tmpdir(), "debugai-host-command-"));
@@ -64,4 +65,44 @@ for (const [label, overrides, error] of [
   assert.ok(fs.existsSync(path.join(f.service.queueRoot(), "failed", `${id}.json`)));
   fs.unlinkSync(path.join(f.service.queueRoot(), "status", `${id}.json`));
   assert.deepEqual(f.service.status(id), status);
+});
+
+test("existing watcher dispatches both bounded runners without adding another service", () => {
+  const units = path.resolve(__dirname, "../systemd-user");
+  const watcher = fs.readFileSync(path.join(units, "debugai-server-command.path"), "utf8");
+  const service = fs.readFileSync(path.join(units, "debugai-server-command.service"), "utf8");
+  assert.match(watcher, /PathExistsGlob=.*server-command\/requests\/cmd_\*\.json/);
+  assert.match(watcher, /PathExistsGlob=.*gitops\/requests\/gitops_\*\.json/);
+  assert.match(service, /Type=oneshot/);
+  assert.deepEqual(service.split("\n").filter(line => line.startsWith("ExecStart=")), [
+    "ExecStart=/usr/bin/env bash /home/admin1/projects/debug-ai/scripts/host-server-command-runner.sh",
+    "ExecStart=/usr/bin/env bash /home/admin1/projects/debug-ai/scripts/host-gitops-runner.sh",
+  ]);
+});
+
+test("real GitOps Host runner rejects missing approval before checkout or Docker mutation", t => {
+  const f = fixture(t), bin = path.join(f.repo, "test-bin");
+  const sha = "b".repeat(40), id = "gitops_" + "c".repeat(24);
+  const git = path.join(bin, "gitops-git"), docker = path.join(bin, "forbidden-docker");
+  fs.writeFileSync(git, `#!/bin/sh\ncase "$1" in\nremote) printf '%s\\n' 'https://github.com/seigo-gace/debug-ai.git';;\nls-remote) printf '%s\\trefs/heads/feat/tgserver-async-log-sink-20261003\\n' '${sha}';;\nrev-parse) printf '%s\\n' '${sha}';;\ndiff|ls-files) exit 0;;\n*) echo GIT_MUTATION_FORBIDDEN >&2; exit 99;;\nesac\n`, { mode: 0o700 });
+  fs.writeFileSync(docker, "#!/bin/sh\necho DOCKER_MUTATION_FORBIDDEN >&2\nexit 99\n", { mode: 0o700 });
+  const queue = path.join(f.repo, ".debugai-input", "gitops");
+  fs.mkdirSync(path.join(queue, "requests"), { recursive: true });
+  fs.writeFileSync(path.join(queue, "requests", `${id}.json`), JSON.stringify({
+    schema: "debugai.gitops-request/v1", id, action: "deploy", repo: "/workspace/debug-ai",
+    branch: "feat/tgserver-async-log-sink-20261003", expected_head: sha, sha,
+    human_approved: true, expires_at: Date.now() + 60000,
+  }));
+  const result = spawnSync("bash", [gitopsRunner], { encoding: "utf8", env: {
+    ...process.env, DEBUG_AI_HOST_REPO: f.repo, DEBUG_AI_GITOPS_GIT_BIN: git,
+    DEBUG_AI_GITOPS_DOCKER_BIN: docker, DEBUG_AI_GITOPS_CURL_BIN: "true",
+    DEBUG_AI_GITOPS_APPROVAL_ROOT: path.join(f.repo, "approvals"),
+  } });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stderr, "");
+  const status = JSON.parse(fs.readFileSync(path.join(queue, "status", `${id}.json`)));
+  assert.equal(status.id, id);
+  assert.equal(status.state, "FAIL");
+  assert.equal(status.error, "DEPLOY_HOST_APPROVAL_REQUIRED");
+  assert.ok(fs.existsSync(path.join(queue, "failed", `${id}.json`)));
 });
