@@ -1,0 +1,55 @@
+name: ChatGPT Exact Head Reflection
+
+on:
+  push:
+    branches:
+      - automation/chatgpt-verify
+    paths:
+      - .github/workflows/chatgpt-exact-head-reflection.yml
+
+permissions:
+  contents: read
+
+jobs:
+  reflect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      BASE_URL: https://debugai.asterav8.jp
+      TARGET_HEAD: 15b39b66b01e2bc687ada72d6f9a2cd5a8fba9a6
+      TARGET_BRANCH: feat/tgserver-async-log-sink-20261003
+      CF_ACCESS_CLIENT_ID: ${{ secrets.DEBUGAI_CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.DEBUGAI_CF_ACCESS_CLIENT_SECRET }}
+    steps:
+      - name: Request exact-head deploy
+        id: deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -n --arg repo "/workspace/debug-ai" --arg branch "$TARGET_BRANCH" --arg sha "$TARGET_HEAD"             '{action:"deploy",repo:$repo,branch:$branch,expected_head:$sha,sha:$sha,human_approved:true}' >/tmp/request.json
+          code="$(curl -sS --max-time 30 -o /tmp/request-out.json -w '%{http_code}'             -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID"             -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET"             -H 'content-type: application/json' --data-binary @/tmp/request.json             "$BASE_URL/v1/gitops/request")"
+          echo "REQUEST_HTTP=$code"
+          cat /tmp/request-out.json
+          test "$code" = "202" -o "$code" = "200"
+          id="$(jq -r '.id // empty' /tmp/request-out.json)"
+          [[ "$id" =~ ^gitops_[0-9a-f]{24}$ ]]
+          echo "id=$id" >>"$GITHUB_OUTPUT"
+
+      - name: Poll exact-head deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          id="${{ steps.deploy.outputs.id }}"
+          deadline=$((SECONDS+240))
+          while true; do
+            jq -n --arg repo "/workspace/debug-ai" --arg id "$id" '{repo:$repo,id:$id}' >/tmp/status-in.json
+            code="$(curl -sS --max-time 30 -o /tmp/status.json -w '%{http_code}'               -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID"               -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET"               -H 'content-type: application/json' --data-binary @/tmp/status-in.json               "$BASE_URL/v1/gitops/status")"
+            echo "STATUS_HTTP=$code"
+            test "$code" = "200"
+            state="$(jq -r '.state // "UNKNOWN"' /tmp/status.json)"
+            echo "GITOPS_STATE=$state"
+            if [ "$state" = "PASS" ]; then jq -c . /tmp/status.json; exit 0; fi
+            if [ "$state" = "FAIL" ]; then jq -c . /tmp/status.json; exit 12; fi
+            (( SECONDS < deadline )) || { echo "GITOPS_AUTOPROCESS_TIMEOUT"; jq -c . /tmp/status.json; exit 13; }
+            sleep 5
+          done
