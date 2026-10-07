@@ -1,0 +1,51 @@
+name: ChatGPT Live Host Head Read
+
+on:
+  push:
+    branches:
+      - automation/chatgpt-verify
+    paths:
+      - .github/workflows/chatgpt-live-host-head-read.yml
+
+permissions:
+  contents: read
+
+jobs:
+  read:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    env:
+      BASE_URL: https://debugai.asterav8.jp
+      CF_ACCESS_CLIENT_ID: ${{ secrets.DEBUGAI_CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.DEBUGAI_CF_ACCESS_CLIENT_SECRET }}
+    steps:
+      - name: Read live host head through existing Server Command
+        shell: bash
+        run: |
+          set -euo pipefail
+          req='{"repo":"/workspace/debug-ai","command_id":"project.git_head","arguments":[]}'
+          code="$(curl -sS --max-time 30 -o /tmp/request.json -w '%{http_code}' -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" -H 'content-type: application/json' --data-binary "$req" "$BASE_URL/v1/server-command/request")"
+          echo "REQUEST_HTTP=$code"
+          test "$code" = "202"
+          id="$(jq -r '.id // empty' /tmp/request.json)"
+          [[ "$id" =~ ^cmd_[0-9a-f]{24}$ ]]
+          echo "REQUEST_ID=$id"
+          for _ in $(seq 1 60); do
+            code="$(curl -sS --max-time 30 -o /tmp/status.json -w '%{http_code}' -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" -H 'content-type: application/json' --data-binary "$(jq -nc --arg id "$id" '{id:$id}')" "$BASE_URL/v1/server-command/status")"
+            if [ "$code" = "200" ]; then
+              state="$(jq -r '.state // "UNKNOWN"' /tmp/status.json)"
+              echo "STATE=$state"
+              if [ "$state" = "PASS" ]; then
+                head="$(jq -r '.result.stdout // empty' /tmp/status.json)"
+                [[ "$head" =~ ^[0-9a-f]{40}$ ]]
+                echo "LIVE_HOST_HEAD=$head"
+                exit 0
+              fi
+              if [ "$state" = "FAIL" ]; then jq -c . /tmp/status.json; exit 12; fi
+            else
+              echo "STATUS_HTTP=$code"
+            fi
+            sleep 2
+          done
+          echo "LIVE_HOST_HEAD=NOT_VERIFIED"
+          exit 13
