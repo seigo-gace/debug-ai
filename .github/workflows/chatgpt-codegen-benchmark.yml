@@ -23,16 +23,16 @@ jobs:
       max-parallel: 3
       matrix:
         include:
-          - {level: small, id: s01}
-          - {level: small, id: s02}
-          - {level: small, id: s03}
-          - {level: small, id: s04}
-          - {level: small, id: s05}
-          - {level: small, id: s06}
-          - {level: small, id: s07}
-          - {level: small, id: s08}
-          - {level: small, id: s09}
-          - {level: small, id: s10}
+          - {level: small, id: s03, repeat: r1}
+          - {level: small, id: s03, repeat: r2}
+          - {level: small, id: s03, repeat: r3}
+          - {level: small, id: s03, repeat: r4}
+          - {level: small, id: s03, repeat: r5}
+          - {level: small, id: s07, repeat: r1}
+          - {level: small, id: s07, repeat: r2}
+          - {level: small, id: s07, repeat: r3}
+          - {level: small, id: s07, repeat: r4}
+          - {level: small, id: s07, repeat: r5}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -117,7 +117,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: codegen-${{ matrix.level }}-${{ matrix.id }}-${{ github.run_id }}
+          name: codegen-${{ matrix.level }}-${{ matrix.id }}-${{ matrix.repeat }}-${{ github.run_id }}
           path: |
             /tmp/patch-response.json
             /tmp/material.json
