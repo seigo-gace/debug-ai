@@ -1,4 +1,5 @@
 {
   "enabled": true,
-  "purpose": "Asteria baseline Case 1/6 verification through existing DebugAI bounded Server Command lane"
+  "purpose": "Asteria baseline Case 1/6 verification through existing DebugAI bounded Server Command lane",
+  "request_id": "asteria-baseline-recheck-20261008-rule-reanchor"
 }
