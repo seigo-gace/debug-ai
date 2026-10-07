@@ -1,7 +1,7 @@
 {
   "base_url": "https://debugai.asterav8.jp",
   "mode": "readonly",
-  "run_id": "run_muwu09gi_f8ea770973",
+  "run_id": "run_muxmlc1r_9c36ba9d6e",
   "repo": "/workspace/debug-ai",
-  "request": "Read-only benchmark run inspection only. No mutation."
+  "request": "Read-only forensic inspection of failed small benchmark s07. No mutation."
 }
