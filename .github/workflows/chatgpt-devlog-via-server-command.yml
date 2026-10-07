@@ -1,0 +1,67 @@
+name: ChatGPT DevLog Activate via Existing Server Command
+
+on:
+  push:
+    branches:
+      - automation/chatgpt-verify
+    paths:
+      - .github/workflows/chatgpt-devlog-via-server-command.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chatgpt-devlog-existing-server-command
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      BASE_URL: https://debugai.asterav8.jp
+      CF_ACCESS_CLIENT_ID: ${{ secrets.DEBUGAI_CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.DEBUGAI_CF_ACCESS_CLIENT_SECRET }}
+      TARGET_REPO: /workspace/debug-ai/.debugai-input/test-repos/DevLog-Activator-20261008A
+    steps:
+      - name: Queue bounded repo clone through existing Server Command
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -n '{
+            repo:"/workspace/debug-ai",
+            command_id:"github.gh_read",
+            arguments:["repo","clone","seigo-gace/debug-ai",".debugai-input/test-repos/DevLog-Activator-20261008A","--","-b","automation/chatgpt-verify"]
+          }' >/tmp/clone.json
+          code="$(curl -sS --max-time 30 -o /tmp/clone-out.json -w '%{http_code}'             -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID"             -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET"             -H 'content-type: application/json'             --data-binary @/tmp/clone.json             "$BASE_URL/v1/server-command/request")"
+          echo "CLONE_REQUEST_HTTP=$code"
+          cat /tmp/clone-out.json
+          test "$code" = "202"
+
+      - name: Wait for cloned repo then dispatch fixed activation proxy
+        shell: bash
+        run: |
+          set -euo pipefail
+          deadline=$((SECONDS+240))
+          while true; do
+            jq -n --arg repo "$TARGET_REPO" '{
+              repo:$repo,
+              command_id:"project.python_unittest",
+              arguments:["tools/devlog_activation_proxy.py"]
+            }' >/tmp/activate.json
+            code="$(curl -sS --max-time 30 -o /tmp/activate-out.json -w '%{http_code}'               -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID"               -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET"               -H 'content-type: application/json'               --data-binary @/tmp/activate.json               "$BASE_URL/v1/server-command/request" || true)"
+            echo "ACTIVATION_REQUEST_HTTP=$code"
+            if [ "$code" = "202" ]; then
+              id="$(jq -r '.id // empty' /tmp/activate-out.json)"
+              [[ "$id" =~ ^cmd_[0-9a-f]{24}$ ]]
+              echo "ACTIVATION_REQUEST_ID=$id"
+              echo "EXISTING_SERVER_COMMAND_DISPATCH=PASS"
+              exit 0
+            fi
+            (( SECONDS < deadline )) || {
+              echo "EXISTING_SERVER_COMMAND_DISPATCH=TIMEOUT"
+              cat /tmp/activate-out.json
+              exit 13
+            }
+            sleep 3
+          done
