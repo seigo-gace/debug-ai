@@ -34,7 +34,7 @@ jobs:
           enabled="$(jq -r '.enabled' .github/canonical-devlog-activate-target.json)"
           helper="$(jq -r '.helper_head' .github/canonical-devlog-activate-target.json)"
           [[ "$enabled" == "true" || "$enabled" == "false" ]]
-          [[ "$helper" == "337fd3b12e253300fb25ef3147af3b1b913066f7" ]]
+          [[ "$helper" == "2008cc936da224becc080e20c57dfa7b96f364a8" ]]
           echo "enabled=$enabled" >>"$GITHUB_OUTPUT"
           echo "ACTIVATION_ENABLED=$enabled"
 
