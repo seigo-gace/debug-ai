@@ -14,7 +14,7 @@ permissions:
 
 concurrency:
   group: chatgpt-codegen-benchmark
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   codegen:
@@ -33,26 +33,6 @@ jobs:
           - {level: small, id: s08}
           - {level: small, id: s09}
           - {level: small, id: s10}
-          - {level: medium, id: m01}
-          - {level: medium, id: m02}
-          - {level: medium, id: m03}
-          - {level: medium, id: m04}
-          - {level: medium, id: m05}
-          - {level: medium, id: m06}
-          - {level: medium, id: m07}
-          - {level: medium, id: m08}
-          - {level: medium, id: m09}
-          - {level: medium, id: m10}
-          - {level: hard, id: h01}
-          - {level: hard, id: h02}
-          - {level: hard, id: h03}
-          - {level: hard, id: h04}
-          - {level: hard, id: h05}
-          - {level: hard, id: h06}
-          - {level: hard, id: h07}
-          - {level: hard, id: h08}
-          - {level: hard, id: h09}
-          - {level: hard, id: h10}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
