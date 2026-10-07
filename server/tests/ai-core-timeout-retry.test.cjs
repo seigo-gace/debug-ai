@@ -123,6 +123,46 @@ test("AI Core keeps unavailable provider usage as null",async()=>{
   assert.equal(out.telemetry.prompt_tokens,null);assert.equal(out.telemetry.completion_tokens,null);assert.equal(out.telemetry.total_tokens,null);assert.equal(out.telemetry.finish_reason,null);
 });
 
+
+test("queue timeout fails closed without breaking single-flight ordering",async()=>{
+  let releaseFirst,active=0,maxActive=0;
+  const fetchImpl=async(_url,opts)=>{
+    active++;maxActive=Math.max(maxActive,active);
+    const body=JSON.parse(opts.body);
+    if(body.messages[1].content==="first")await new Promise(resolve=>{releaseFirst=resolve;});
+    active--;
+    return {ok:true,status:200,text:async()=>JSON.stringify({choices:[{message:{content:"{\"ok\":true}"},finish_reason:"stop"}]})};
+  };
+  const ai=createAiCoreAdapter({baseUrl:"http://127.0.0.1:18080",apiKey:"test",fetchImpl,timeoutMs:1000,maxTransportTimeoutAttempts:1});
+  const first=ai.call("code_scout",{user:"first"});
+  await new Promise(resolve=>setTimeout(resolve,5));
+  await assert.rejects(()=>ai.call("causal_scout",{user:"second",queueTimeoutMs:10}),e=>e?.code==="AI_CORE_QUEUE_TIMEOUT"&&e?.meta?.timeout_class===TIMEOUT_CLASS.QUEUE_TIMEOUT);
+  releaseFirst();
+  await first;
+  const third=await ai.call("researcher",{user:"third",queueTimeoutMs:100});
+  assert.equal(third.content,'{"ok":true}');
+  assert.equal(maxActive,1);
+});
+
+test("excluding queue wait from deadline preserves full execution allowance after dequeue",async()=>{
+  let releaseFirst,secondTimeout=null;
+  const fetchImpl=async(_url,opts)=>{
+    const body=JSON.parse(opts.body);
+    if(body.messages[1].content==="first")await new Promise(resolve=>{releaseFirst=resolve;});
+    return {ok:true,status:200,text:async()=>JSON.stringify({choices:[{message:{content:"{\"ok\":true}"},finish_reason:"stop"}]})};
+  };
+  const ai=createAiCoreAdapter({baseUrl:"http://127.0.0.1:18080",apiKey:"test",fetchImpl,timeoutMs:1000,maxTransportTimeoutAttempts:1});
+  const first=ai.call("code_scout",{user:"first"});
+  await new Promise(resolve=>setTimeout(resolve,5));
+  const started=Date.now();
+  const secondPromise=ai.call("causal_scout",{user:"second",timeoutMsOverride:80,deadlineAt:started+80,queueTimeoutMs:100,excludeQueueFromDeadline:true}).then(out=>{secondTimeout=out.control_plane.effective_timeout_ms;return out;});
+  await new Promise(resolve=>setTimeout(resolve,25));
+  releaseFirst();
+  await first;
+  await secondPromise;
+  assert.ok(secondTimeout>=70,secondTimeout);
+});
+
 test("AI Core transport remains single-flight because current runtime has one effective slot",async()=>{
   let active=0,maxActive=0;const order=[];
   const fetchImpl=async(_url,opts)=>{const body=JSON.parse(opts.body);const role=body.model;active++;maxActive=Math.max(maxActive,active);order.push(`start:${role}`);await new Promise(resolve=>setTimeout(resolve,20));order.push(`end:${role}`);active--;return {ok:true,text:async()=>JSON.stringify({choices:[{message:{content:"{\"ok\":true}"}}]})};};
