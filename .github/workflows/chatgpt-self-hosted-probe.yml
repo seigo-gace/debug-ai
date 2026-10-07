@@ -1,0 +1,26 @@
+name: ChatGPT Existing Self-Hosted Probe
+
+on:
+  push:
+    branches:
+      - automation/chatgpt-verify
+    paths:
+      - .github/workflows/chatgpt-self-hosted-probe.yml
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: self-hosted
+    timeout-minutes: 2
+    steps:
+      - name: Read-only host identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "SELF_HOSTED_RUNNER=YES"
+          hostname
+          pwd
+          test -d /home/admin1/projects/debug-ai/.git
+          git -C /home/admin1/projects/debug-ai rev-parse HEAD
