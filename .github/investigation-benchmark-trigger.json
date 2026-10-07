@@ -1,0 +1,14 @@
+{
+  "suite": "investigation-verification-5-levels",
+  "levels": [
+    "L1",
+    "L2",
+    "L3",
+    "L4",
+    "L5"
+  ],
+  "cases": 50,
+  "max_parallel": 3,
+  "mode": "read-only",
+  "nonce": "bootstrap-20261007"
+}
