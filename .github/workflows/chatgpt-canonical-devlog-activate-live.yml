@@ -93,20 +93,25 @@ jobs:
           }
           deadline=$((SECONDS+1800))
           while (( SECONDS < deadline )); do
-            out="$(run_status)"
-            state="$(jq -r '.state // "UNKNOWN"' <<<"$out")"
-            echo "CANONICAL_DEVLOG_STATE=$state"
-            if [ "$state" = "PASS" ]; then
-              echo "$out" | jq -c .
-              event_id="$(jq -r '.event_id // empty' <<<"$out")"
-              [[ "$event_id" =~ ^[0-9a-f]{64}$ ]]
-              echo "CANONICAL_EVENT_ID=$event_id"
-              echo "CANONICAL_DEVLOG_ACTIVATION=PASS"
-              exit 0
-            fi
-            if [ "$state" = "FAIL" ]; then
-              echo "$out" | jq -c .
-              exit 12
+            if out="$(run_status)"; then
+              state="$(jq -r '.state // "UNKNOWN"' <<<"$out")"
+              echo "CANONICAL_DEVLOG_STATE=$state"
+              if [ "$state" = "PASS" ]; then
+                echo "$out" | jq -c .
+                event_id="$(jq -r '.event_id // empty' <<<"$out")"
+                [[ "$event_id" =~ ^[0-9a-f]{64}$ ]]
+                echo "CANONICAL_EVENT_ID=$event_id"
+                echo "CANONICAL_DEVLOG_ACTIVATION=PASS"
+                exit 0
+              fi
+              if [ "$state" = "FAIL" ]; then
+                echo "$out" | jq -c .
+                exit 12
+              fi
+            else
+              rc=$?
+              echo "CANONICAL_DEVLOG_STATUS_READ_RETRY=$rc"
+              [ "$rc" = "11" ] || [ "$rc" = "13" ] || exit "$rc"
             fi
             sleep 10
           done
