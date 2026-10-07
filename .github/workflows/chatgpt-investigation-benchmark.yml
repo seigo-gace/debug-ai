@@ -27,7 +27,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          matrix="$(node -e 'const s=require("./server/control/investigation-benchmark-suite.js");process.stdout.write(JSON.stringify({include:s.listCases().map(x=>({id:x.id,level:x.level,role:x.role}))}))')"
+          matrix="$(node - <<'NODE'
+const roles=[["CS1","code_scout"],["CS2","code_scout"],["CA1","causal_scout"],["CA2","causal_scout"],["RS1","researcher"],["RS2","researcher"],["DG1","diagnoser"],["DG2","diagnoser"],["VR1","local_reviewer"],["VR2","local_reviewer"]];
+const include=[];
+for(let l=1;l<=5;l++)for(const [suffix,role] of roles)include.push({id:`L${l}-${suffix}`,level:`L${l}`,role});
+process.stdout.write(JSON.stringify({include}));
+NODE
+)"
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
           echo "$matrix" | jq -e '.include|length==50' >/dev/null
 
