@@ -37,6 +37,18 @@ from that existing lifecycle directory, with terminal status taking precedence.
 The Host ultimately rejected the missing receipt with DEPLOY_HOST_APPROVAL_REQUIRED;
 no deploy occurred. The regression preserves that boundary and request identity.
 
+Production watcher-driven deploy attempts `gitops_540d3d3f8c4e20002a3418d5` and
+`gitops_e98b71157ad85156684a2a57` failed at build. The same Docker builds passed
+in the login shell. An existing-unit diagnostic confirmed Docker socket permission
+denied: the long-running user manager lacked the docker supplementary group,
+although admin1 is already a member. The existing service now uses `sg docker`
+for both existing bounded runners to refresh that authorized group at execution.
+No socket permissions, group membership, queue, executor or service are added.
+The service timeout is 40 minutes to cover the runner's bounded 30-minute build,
+fetch, recreate and health budgets; the previous default 90 seconds was insufficient.
+The original failed receipts remain unchanged. Source/unit regression is separate
+from the required successful production deploy receipt.
+
 This record is the source/CI qualification checkpoint for the current feature branch. It does not replace live Server readback and does not authorize deployment.
 
 ## Current source

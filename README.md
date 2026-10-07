@@ -485,7 +485,10 @@ Production reflection remains separately approved and verified.
 The existing user path/oneshot unit dispatches Server Command and guarded GitOps
 queues to their existing Bash runners. Updating active units requires the same
 separate runtime approval as reflection; GitOps deploy still requires its
-single-use exact-SHA Host approval receipt.
+single-use exact-SHA Host approval receipt. The unit refreshes the already-authorized
+docker group with `sg docker` for both runners, so a stale user-manager group list
+does not deny Docker socket access. Its 40-minute timeout covers one bounded deploy
+build/recreate/health cycle without restarting unrelated user services.
 
 The current source explicitly packages the runtime assets required for live qualification:
 

@@ -2,5 +2,6 @@
 Description=DebugAI bounded Server Command and guarded GitOps executors
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/env bash /home/admin1/projects/debug-ai/scripts/host-server-command-runner.sh
-ExecStart=/usr/bin/env bash /home/admin1/projects/debug-ai/scripts/host-gitops-runner.sh
+TimeoutStartSec=40min
+ExecStart=/usr/bin/sg docker -c "/usr/bin/env bash /home/admin1/projects/debug-ai/scripts/host-server-command-runner.sh"
+ExecStart=/usr/bin/sg docker -c "/usr/bin/env bash /home/admin1/projects/debug-ai/scripts/host-gitops-runner.sh"

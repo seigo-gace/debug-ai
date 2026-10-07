@@ -4,6 +4,10 @@
 Host runner with real Bash/jq against temporary queues, checking terminal ID
 correlation, mirror fallback and approval rejection. Verify CI owns this Host
 toolchain gate; the production container does not acquire Host executor dependencies.
+The existing oneshot refreshes authorized Docker group access with `sg docker`
+and allows 40 minutes for the bounded deploy cycle. No socket permission change or
+new service is introduced.
+
 The existing `ops/systemd-user/debugai-server-command.path` watches Server Command
 and GitOps request queues; its existing oneshot service runs their respective
 bounded Bash runners. GitOps retains its exact-SHA Host approval contract.
