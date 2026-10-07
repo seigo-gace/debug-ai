@@ -1,0 +1,35 @@
+name: ChatGPT Existing Host Mutation Probe
+
+on:
+  push:
+    branches:
+      - automation/chatgpt-verify
+    paths:
+      - .github/workflows/chatgpt-existing-host-mutation-probe.yml
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    env:
+      BASE_URL: https://debugai.asterav8.jp
+      CF_ACCESS_CLIENT_ID: ${{ secrets.DEBUGAI_CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.DEBUGAI_CF_ACCESS_CLIENT_SECRET }}
+    steps:
+      - name: Queue fixed Issue comment through existing Host runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -n '{
+            repo:"/workspace/debug-ai",
+            arguments:["issue","comment","41","--repo","seigo-gace/debug-ai","--body","HOST_MUTATION_PROBE=2026-10-08-A"],
+            human_approved:true,
+            master_approved:true
+          }' >/tmp/request.json
+          code="$(curl -sS --max-time 30 -o /tmp/out.json -w '%{http_code}'             -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID"             -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET"             -H 'content-type: application/json'             --data-binary @/tmp/request.json             "$BASE_URL/v1/github/request")"
+          echo "REQUEST_HTTP=$code"
+          cat /tmp/out.json
+          test "$code" = "202"
