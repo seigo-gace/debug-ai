@@ -23,16 +23,16 @@ jobs:
       max-parallel: 3
       matrix:
         include:
-          - {level: small, id: s31, round: r3}
-          - {level: small, id: s32, round: r3}
-          - {level: small, id: s33, round: r3}
-          - {level: small, id: s34, round: r3}
-          - {level: small, id: s35, round: r3}
-          - {level: small, id: s36, round: r3}
-          - {level: small, id: s37, round: r3}
-          - {level: small, id: s38, round: r3}
-          - {level: small, id: s39, round: r3}
-          - {level: small, id: s40, round: r3}
+          - {level: small, id: s41, round: r4}
+          - {level: small, id: s42, round: r4}
+          - {level: small, id: s43, round: r4}
+          - {level: small, id: s44, round: r4}
+          - {level: small, id: s45, round: r4}
+          - {level: small, id: s46, round: r4}
+          - {level: small, id: s47, round: r4}
+          - {level: small, id: s48, round: r4}
+          - {level: small, id: s49, round: r4}
+          - {level: small, id: s50, round: r4}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
