@@ -80,7 +80,7 @@ async function runRoleWithReadOnlyTools({aiCore,role,system="",user="",toolRunti
   if(!toolRuntime){
     if(continuationState!==null)throw new Error("ROLE_TOOL_CONTINUATION_REQUIRES_TOOL_RUNTIME");
     const deadlineAt=Date.now()+budget.turn_timeout_ms;
-    const out=await aiCore.call(role,{system:[system,evidencePolicy].filter(Boolean).join("\n"),user,maxTokens:budget.max_tokens,timeoutMsOverride:budget.turn_timeout_ms,deadlineAt});
+    const out=await aiCore.call(role,{system:[system,evidencePolicy].filter(Boolean).join("\n"),user,maxTokens:budget.max_tokens,timeoutMsOverride:budget.turn_timeout_ms,deadlineAt,queueTimeoutMs:budget.turn_timeout_ms,excludeQueueFromDeadline:true});
     const available=mergeEvidenceIds(baseEvidenceIds),telemetry=summarizeAiTelemetry([out.telemetry]);
     return {...out,validated_output:parseAndValidateRoleOutput(role,out.content,{availableEvidenceIds:available,strictEvidenceRefs}),tool_loop:{rounds:0,total_calls:0,observations:[],evidence_ids:available,progress:{max_no_progress_rounds:2,no_progress_rounds:0,total_evidence_ids:available.length,total_work_ids:0,total_effect_ids:0,seen_evidence_ids:[...available],completed_work_ids:[],completed_effect_ids:[],history:[],runtime_telemetry:telemetry},parse_status:"FINAL",selected_skill_ids:[...(out.control_plane?.selected_skill_ids||[])],continuation_state:null,telemetry}};
   }
