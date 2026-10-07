@@ -18,6 +18,7 @@ const {buildCompletionGateInput,evaluateCompletionGate}=require("./control/compl
 const {makePatchPacket,makeReviewPacket,publicReviewPacketSummary}=require("./control/runtime-packets.js");
 const {repositorySnapshotId}=require("./control/repository-snapshot.js");
 const {runInvestigationBenchmarkCase,listCases:listInvestigationBenchmarkCases}=require("./control/investigation-benchmark-suite.js");
+const {runModelAbBenchmark,qualifyVariantForRuntime}=require("./control/model-ab-benchmark.js");
 const CAUSAL_SCOUT_OUTPUT_POLICY="Causal Scout. Return JSON only. Final output requires a top-level claims array. Every claims[] item requires type and statement. Causal candidates must use type HYPOTHESIS and a concrete falsification_condition; cite only registered evidence_refs when available. A falsification condition must name an observation that contradicts the hypothesis, rather than one that supports it. Keep proposed observations within existing read-only tools and security restrictions; never propose relaxing seccomp or other safety controls. Use type UNKNOWN for unresolved evidence gaps instead of inventing a cause, and retain rejected hypotheses with their counter_evidence_refs. An empty claims array is valid when no supported candidate or material unknown remains. Never emit confirmed_root_cause or patch/apply/deploy operations. Tool-request rounds use the existing tool_requests protocol; the claims requirement applies to final output.";
 
 const MAX_AUTOMATIC_REFIX_ATTEMPTS=2;
@@ -74,7 +75,7 @@ function reviewPacketInvariants(result){
 }
 function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeEvidence=null,tgserver=null,patchService=null,authority=null,repoPolicy=null,sandboxVerification=null,dapEvidence=null,serverCommand=null,recoveryHooks=null,repositorySnapshot=repositorySnapshotId}={}){
   if(!aiCore)throw new Error("AI_CORE_ADAPTER_REQUIRED");
-  const activeRuns=new Map(),backgroundErrors=new Map(),activeCodegenBenchmarks=new Map(),activeInvestigationBenchmarks=new Map();
+  const activeRuns=new Map(),backgroundErrors=new Map(),activeCodegenBenchmarks=new Map(),activeInvestigationBenchmarks=new Map(),activeModelAbBenchmarks=new Map();
   async function logRuntime(event){if(tgserver)await tgserver.log(event);}
   function snapshotRepo(repoPath){const approved=repoPolicy?repoPolicy.assertRepo(repoPath):repoPath;return repositorySnapshot(approved,{allowMissingGitMarker:Boolean(repoPolicy)});}
   async function logProgress(runId,step,phase){
@@ -379,8 +380,49 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
     activeInvestigationBenchmarks.set(benchmarkId,{promise,started_at:startedAt,case_id:id});void promise.catch(()=>{});
     return{schema:"debugai.investigation-benchmark-accepted/v1",benchmark_id:benchmarkId,state:"RUNNING",case_id:id};
   }
+  const MODEL_AB_ROLES=new Set(["code_scout","causal_scout","researcher","diagnoser","local_reviewer"]);
+  const MODEL_AB_AXES=new Set(["temperature","top_p","top_k","max_tokens"]);
+  function modelAbBenchmarkStatus(benchmarkId){
+    if(!runtimeEvidence||typeof runtimeEvidence.list!=="function")throw new Error("RUNTIME_EVIDENCE_REQUIRED");
+    const id=String(benchmarkId||"");if(!id)throw new Error("MODEL_AB_BENCHMARK_ID_REQUIRED");
+    const record=runtimeEvidence.list(id,{types:["model_ab_benchmark"],limit:1})?.[0]||null;
+    if(!record)return{schema:"debugai.model-ab-benchmark-status/v1",benchmark_id:id,state:activeModelAbBenchmarks.has(id)?"RUNNING":"UNKNOWN"};
+    return{schema:"debugai.model-ab-benchmark-status/v1",benchmark_id:id,...record.payload};
+  }
+  function modelAbQueuedCaller(){
+    if(typeof aiCore.callPrepared!=="function")throw new Error("AI_CORE_PREPARED_MEASUREMENT_REQUIRED");
+    const caller=async({role,config,system,user})=>{
+      const budget=getRoleRuntimeBudget(role);
+      const out=await aiCore.callPrepared(role,{system,user,maxTokens:config.max_tokens,temperature:config.temperature,topP:Number.isFinite(config.top_p)?config.top_p:null,topK:Number.isInteger(config.top_k)?config.top_k:null,timeoutMsOverride:budget.turn_timeout_ms,queueTimeoutMs:budget.turn_timeout_ms});
+      const usage=out?.raw?.usage||{};
+      return{content:out.content,finish_reason:out?.raw?.choices?.[0]?.finish_reason??out?.telemetry?.finish_reason??null,usage:{prompt_tokens:Number.isFinite(usage.prompt_tokens)?usage.prompt_tokens:null,completion_tokens:Number.isFinite(usage.completion_tokens)?usage.completion_tokens:null,total_tokens:Number.isFinite(usage.total_tokens)?usage.total_tokens:null},runtime_telemetry:out.telemetry||null};
+    };
+    caller.runtime_context_tokens=aiCore.runtime_context_tokens??null;
+    if(Number.isSafeInteger(caller.runtime_context_tokens)&&caller.runtime_context_tokens>0)caller.qualify_variant=(role,axis,variant)=>qualifyVariantForRuntime(role,axis,variant,caller.runtime_context_tokens);
+    return caller;
+  }
+  async function startModelAbBenchmark({role,axis,candidate="official",repeats=1}={}){
+    if(!runtimeEvidence||typeof runtimeEvidence.write!=="function"||typeof runtimeEvidence.list!=="function")throw new Error("RUNTIME_EVIDENCE_REQUIRED");
+    const r=String(role||""),a=String(axis||"");if(!MODEL_AB_ROLES.has(r))throw new Error("MODEL_AB_ROLE_INVALID:"+r);if(!MODEL_AB_AXES.has(a))throw new Error("MODEL_AB_AXIS_INVALID:"+a);
+    if(r==="patch_engineer")throw new Error("MODEL_AB_PATCH_ENGINEER_DEFERRED");
+    if(a!=="max_tokens"&&candidate!=="official")throw new Error("MODEL_AB_OFFICIAL_CANDIDATE_REQUIRED");
+    if(a==="max_tokens"&&(!Number.isInteger(Number(candidate))||Number(candidate)<64))throw new Error("MODEL_AB_MAX_TOKENS_CANDIDATE_INVALID");
+    const n=Number(repeats);if(!Number.isInteger(n)||n<1||n>3)throw new Error("MODEL_AB_REPEATS_INVALID");
+    if(activeModelAbBenchmarks.size>0)throw new Error("MODEL_AB_BENCHMARK_ALREADY_RUNNING");
+    const benchmarkId="modelab_"+crypto.randomUUID().replaceAll("-",""),startedAt=Date.now();
+    runtimeEvidence.write(benchmarkId,"model_ab_benchmark",{state:"RUNNING",role:r,axis:a,candidate,started_at:startedAt,finished_at:null,duration_ms:null,error:null,result:null});
+    const promise=(async()=>{try{
+      const result=await runModelAbBenchmark({role:r,axis:a,candidate,repeats:n,callModel:modelAbQueuedCaller()}),finishedAt=Date.now(),payload={state:"DONE",role:r,axis:a,candidate,started_at:startedAt,finished_at:finishedAt,duration_ms:finishedAt-startedAt,error:null,result};
+      runtimeEvidence.write(benchmarkId,"model_ab_benchmark",payload);return payload;
+    }catch(error){
+      const finishedAt=Date.now(),code=String(error?.code||error?.message||error).slice(0,240),payload={state:"FAILED",role:r,axis:a,candidate,started_at:startedAt,finished_at:finishedAt,duration_ms:finishedAt-startedAt,error:code,result:null};
+      runtimeEvidence.write(benchmarkId,"model_ab_benchmark",payload);throw error;
+    }finally{activeModelAbBenchmarks.delete(benchmarkId);}})();
+    activeModelAbBenchmarks.set(benchmarkId,{promise,started_at:startedAt,role:r,axis:a});void promise.catch(()=>{});
+    return{schema:"debugai.model-ab-benchmark-accepted/v1",benchmark_id:benchmarkId,state:"RUNNING",role:r,axis:a,candidate};
+  }
   async function promote(asset){assertPromotable(asset);if(!tgserver)throw new Error("TGSERVER_ADAPTER_REQUIRED");return tgserver.promote(asset);}
   async function searchKnowledge(query,opts={}){if(!tgserver)throw new Error("TGSERVER_ADAPTER_REQUIRED");return tgserver.search(query,opts);}
-  return{runAnalysis,startAnalysis,resumeAnalysis,recoverStartup,patchCandidate,startCodegenBenchmark,codegenBenchmarkStatus,startInvestigationBenchmark,investigationBenchmarkStatus,approveAndVerify,verifyReadOnly,status,inspect,promote,searchKnowledge};
+  return{runAnalysis,startAnalysis,resumeAnalysis,recoverStartup,patchCandidate,startCodegenBenchmark,codegenBenchmarkStatus,startInvestigationBenchmark,investigationBenchmarkStatus,startModelAbBenchmark,modelAbBenchmarkStatus,approveAndVerify,verifyReadOnly,status,inspect,promote,searchKnowledge};
 }
 module.exports={createWorkflow,parseJson,roleOutput,toolEvidenceRecords,toolAudit,pickDiagnosisStatement,publicLocalEvidence,dapFailureChecks,activeDapHint,dapHintProtocol,reviewStreamEvidence,reviewableVerificationCheck,evidencePromptView,repositorySnapshotId};
