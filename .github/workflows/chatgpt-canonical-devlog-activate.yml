@@ -1,0 +1,36 @@
+name: ChatGPT Canonical DevLog Runtime Activate
+
+on:
+  push:
+    branches:
+      - automation/chatgpt-verify
+    paths:
+      - .github/workflows/chatgpt-canonical-devlog-activate.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chatgpt-canonical-devlog-runtime-activate
+  cancel-in-progress: false
+
+jobs:
+  activate:
+    runs-on: self-hosted
+    timeout-minutes: 25
+    steps:
+      - name: Activate exact Canonical DevLog runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          TGS=/home/admin1/projects/TGserver
+          EXPECTED=0bbd3b2a6fa90f7f9ceca92945f28f482524b809
+          BRANCH=ops/canonical-devlog-runtime-readback-20261007
+          test -d "$TGS/.git"
+          cd "$TGS"
+          git fetch --quiet origin "$BRANCH"
+          ACTUAL="$(git rev-parse FETCH_HEAD)"
+          echo "ACTIVATION_HELPER_EXPECTED=$EXPECTED"
+          echo "ACTIVATION_HELPER_ACTUAL=$ACTUAL"
+          test "$ACTUAL" = "$EXPECTED"
+          git show "$EXPECTED:scripts/canonical-devlog-runtime-activate.sh" | bash
