@@ -44,6 +44,25 @@ jobs:
           test "$code" = "200"
           echo "LIVE_HEALTH=PASS"
       - if: ${{ steps.target.outputs.enabled == 'true' }}
+        name: Read live Host checkout HEAD
+        shell: bash
+        run: |
+          set -euo pipefail
+          req='{"repo":"/workspace/debug-ai","command_id":"project.git_head","arguments":[]}'
+          code="$(curl -sS --max-time 30 -o /tmp/head-request.json -w '%{http_code}' -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" -H 'content-type: application/json' --data-binary "$req" "${BASE_URL}/v1/server-command/request")"
+          test "$code" = "202"
+          id="$(jq -r '.id // empty' /tmp/head-request.json)"
+          [[ "$id" =~ ^cmd_[0-9a-f]{24}$ ]]
+          for _ in $(seq 1 30); do
+            code="$(curl -sS --max-time 30 -o /tmp/head-status.json -w '%{http_code}' -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" -H 'content-type: application/json' --data-binary "$(jq -nc --arg id "$id" '{id:$id}')" "${BASE_URL}/v1/server-command/status")"
+            [ "$code" = "200" || { sleep 2; continue; }
+            state="$(jq -r '.state // "UNKNOWN"' /tmp/head-status.json)"
+            if [ "$state" = "PASS" ]; then echo "LIVE_HOST_HEAD=$(jq -r '.result.stdout' /tmp/head-status.json)"; exit 0; fi
+            [ "$state" = "FAIL" ] && { jq -c . /tmp/head-status.json; exit 12; }
+            sleep 2
+          done
+          exit 13
+      - if: ${{ steps.target.outputs.enabled == 'true' }}
         name: Start Asteria baseline probe
         shell: bash
         run: |
