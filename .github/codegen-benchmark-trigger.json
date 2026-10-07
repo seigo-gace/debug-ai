@@ -1,6 +1,6 @@
 {
   "schema": "debugai.codegen-benchmark-trigger/v1",
-  "suite": "30-individual-cases",
+  "suite": "30-individual-cases-async",
   "cases_per_level": 10,
   "total_cases": 30,
   "max_parallel": 3,
@@ -11,6 +11,7 @@
   ],
   "apply": false,
   "deploy": false,
-  "live_source": "77954ffdb6591c3e3c57840e55da7dd40058ae88",
-  "nonce": "individual-20261006-1524"
+  "live_source": "b8d5323062271a786a3abd0c4154dd751acb52cf",
+  "transport": "async-start-poll",
+  "nonce": "async-rerun-20261007-1311"
 }
