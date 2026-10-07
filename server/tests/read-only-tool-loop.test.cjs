@@ -93,11 +93,15 @@ test("tool loop rejects non-JSON role output instead of treating it as final",as
   }finally{f.cleanup();}
 });
 
-test("tool loop stops repeated same tool and arguments as no-progress",async()=>{
+test("tool loop reuses repeated successful read-only tool result in the same invocation",async()=>{
   const f=fixture();try{
-    const runtime=createReadOnlyToolRuntime({repo:f.repo,repoPolicy:new RepoPolicy({workspaceRoot:f.workspace})});let n=0;
-    const aiCore={call:async()=>{n++;return{content:JSON.stringify({tool_requests:[{tool:"source.read",arguments:{path:"a.js"},reason:`round ${n}`}]})};}};
-    await assert.rejects(()=>runRoleWithReadOnlyTools({aiCore,role:"code_scout",user:"x",toolRuntime:runtime,maxToolRounds:2,maxToolCalls:4}),/ROLE_TOOL_REPEAT_NO_PROGRESS:code_scout:source\.read/);
+    const base=createReadOnlyToolRuntime({repo:f.repo,repoPolicy:new RepoPolicy({workspaceRoot:f.workspace})});let n=0,executeCount=0;
+    const runtime={...base,execute:async input=>{executeCount++;return await base.execute(input);}};
+    const aiCore={call:async()=>{n++;if(n<=2)return{content:JSON.stringify({tool_requests:[{tool:"source.read",arguments:{path:"a.js"},reason:`round ${n}`}]})};return{content:JSON.stringify({claims:[],decision:"HANDOFF"})};}};
+    const out=await runRoleWithReadOnlyTools({aiCore,role:"code_scout",user:"x",toolRuntime:runtime,maxToolRounds:2,maxToolCalls:4});
+    assert.equal(executeCount,1);assert.equal(out.tool_loop.total_calls,1);assert.equal(out.tool_loop.observations.length,2);
+    assert.equal(out.tool_loop.observations[0].results[0].reused,false);assert.equal(out.tool_loop.observations[1].results[0].reused,true);
+    assert.equal(out.tool_loop.telemetry.tool_calls_reused_current,1);assert.equal(out.tool_loop.parse_status,"FINAL");
   }finally{f.cleanup();}
 });
 
