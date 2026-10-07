@@ -1,7 +1,7 @@
 {
   "base_url": "https://debugai.asterav8.jp",
-  "mode": "readonly",
-  "run_id": "run_muxmlc1r_9c36ba9d6e",
-  "repo": "/workspace/debug-ai",
-  "request": "Read-only forensic inspection of failed small benchmark s07. No mutation."
+  "mode": "dogfood",
+  "run_id": "",
+  "repo": "/workspace/debug-ai/.debugai-input/test-repos/AI-Numbers",
+  "request": "Stage 1 read-only investigation only. In the AI-Numbers dogfood repository, determine why the latest-version behavior is wrong for an input containing v2 and v10. Inspect the relevant source and available tests/evidence, identify the smallest supported root-cause candidate with uncertainty if evidence is insufficient, and report evidence-bound findings. Do not modify files, do not create a patch candidate, do not apply, publish, deploy, or change repository state."
 }
