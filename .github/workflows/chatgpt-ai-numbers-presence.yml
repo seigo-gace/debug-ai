@@ -1,0 +1,30 @@
+name: ChatGPT Existing AI-Numbers Repo Presence
+
+on:
+  push:
+    branches:
+      - automation/chatgpt-verify
+    paths:
+      - .github/workflows/chatgpt-ai-numbers-presence.yml
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    env:
+      BASE_URL: https://debugai.asterav8.jp
+      CF_ACCESS_CLIENT_ID: ${{ secrets.DEBUGAI_CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.DEBUGAI_CF_ACCESS_CLIENT_SECRET }}
+    steps:
+      - name: Check existing isolated repo through request validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          body='{"repo":"/workspace/debug-ai/.debugai-input/test-repos/AI-Numbers","command_id":"project.git_head","arguments":[]}'
+          code="$(curl -sS --max-time 30 -o /tmp/out.json -w '%{http_code}'             -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID"             -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET"             -H 'content-type: application/json'             --data-binary "$body"             "$BASE_URL/v1/server-command/request")"
+          echo "AI_NUMBERS_REQUEST_HTTP=$code"
+          cat /tmp/out.json
+          test "$code" = "202"
