@@ -1,5 +1,5 @@
 {
-  "enabled": true,
-  "helper_head": "337fd3b12e253300fb25ef3147af3b1b913066f7",
+  "enabled": false,
+  "helper_head": "2008cc936da224becc080e20c57dfa7b96f364a8",
   "purpose": "Canonical Development Log activation through existing DebugAI bounded Server Command lane"
 }
