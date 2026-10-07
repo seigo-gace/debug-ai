@@ -16,7 +16,7 @@ jobs:
     timeout-minutes: 12
     env:
       BASE_URL: https://debugai.asterav8.jp
-      TARGET_HEAD: 28f78773a8e074faefbfbdb2dfed8f970d4d1fed
+      TARGET_HEAD: fc25bee665d4d846e1252891070be847b2d61cdf
       TARGET_BRANCH: feat/tgserver-async-log-sink-20261003
       CF_ACCESS_CLIENT_ID: ${{ secrets.DEBUGAI_CF_ACCESS_CLIENT_ID }}
       CF_ACCESS_CLIENT_SECRET: ${{ secrets.DEBUGAI_CF_ACCESS_CLIENT_SECRET }}
