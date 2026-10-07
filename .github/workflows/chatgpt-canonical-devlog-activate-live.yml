@@ -79,7 +79,7 @@ jobs:
             local req code id state
             req='{"repo":"/workspace/debug-ai","command_id":"canonical.devlog_activate_status","arguments":[]}'
             code="$(curl -sS --max-time 30 -o /tmp/request.json -w '%{http_code}' -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" -H 'content-type: application/json' --data-binary "$req" "$BASE_URL/v1/server-command/request")"
-            [ "$code" = "202" || return 11
+            [ "$code" = "202" ] || return 11
             id="$(jq -r '.id // empty' /tmp/request.json)"
             for _ in $(seq 1 30); do
               code="$(curl -sS --max-time 30 -o /tmp/status.json -w '%{http_code}' -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" -H 'content-type: application/json' --data-binary "$(jq -nc --arg id "$id" '{id:$id}')" "$BASE_URL/v1/server-command/status")"
