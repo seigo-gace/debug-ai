@@ -1,8 +1,8 @@
 {
   "schema": "debugai.codegen-benchmark-trigger/v1",
-  "suite": "50-small-distinct-round2",
+  "suite": "small-round-5-s51-s60",
   "cases_per_level": 10,
-  "total_cases": 30,
+  "total_cases": 10,
   "max_parallel": 3,
   "measure": [
     "semantic_accuracy",
@@ -13,8 +13,8 @@
   "deploy": false,
   "live_source": "b8d5323062271a786a3abd0c4154dd751acb52cf",
   "transport": "async-start-poll",
-  "nonce": "round2-20261007-",
-  "round": 2,
+  "nonce": "round5-20261007-1640",
+  "round": "r5",
   "cases": [
     "s21",
     "s22",
