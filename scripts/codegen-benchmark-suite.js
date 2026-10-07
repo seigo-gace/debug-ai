@@ -46,7 +46,7 @@ function getCase(level,id){
 }
 function buildCase(level,id,out){
  const item=getCase(level,id);
- const task=`Code generation benchmark case=${id} level=${level}. Produce exactly one patch candidate that creates only FILE ${item.file}. Implement exactly this specification: ${item.spec} Do not create tests, docs, helpers outside this file, or modify any existing file. Candidate only; never apply/publish/deploy.`;
+ const task=`Code generation benchmark case=${id} level=${level}. Produce exactly one patch candidate that creates only FILE ${item.file}. Implement exactly this specification: ${item.spec} Return JSON with a required non-empty operations array. For this benchmark use exactly one operation: {"type":"create","path":"${item.file}","content":"<complete Python source>"}. Optional summary is allowed. Do not return prose instead of operations. Do not create tests, docs, helpers outside this file, or modify any existing file. Candidate only; never apply/publish/deploy.`;
  const diagnosis={cause_kind:'SYNTHETIC_CODEGEN_BENCHMARK',public_statement:`Implement case ${id} exactly as written.`,case:{id:item.id,file:item.file,spec:item.spec}};
  fs.writeFileSync(out,JSON.stringify({level,id,task,diagnosis,selected_paths:[item.file],case:item},null,2));
 }
