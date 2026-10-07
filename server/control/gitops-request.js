@@ -118,6 +118,8 @@ class GitOpsRequestService {
     const root = this.queueRoot(repo);
     const statusFile = path.join(root, "status", `${id}.json`);
     if (fs.existsSync(statusFile)) return JSON.parse(fs.readFileSync(statusFile, "utf8"));
+    const processingFile = path.join(root, "processing", `${id}.json`);
+    if (fs.existsSync(processingFile)) return { schema: "debugai.gitops-status/v1", id, state: "RUNNING" };
     const requestFile = path.join(root, "requests", `${id}.json`);
     if (fs.existsSync(requestFile)) return { schema: SCHEMA, id, state: "QUEUED" };
     fail("GITOPS_REQUEST_NOT_FOUND");
