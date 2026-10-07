@@ -10,7 +10,12 @@ started="$(date +%s%3N)"
 finish(){ local state="$1" error="${2:-}" c1="${3:-}" c6="${4:-}" gb="${5:-}" ga="${6:-}" qb="${7:-}" qa="${8:-}" tmp="${RESULT}.tmp-$$"; "$JQ_BIN" -n --arg state "$state" --arg error "$error" --arg c1 "$c1" --arg c6 "$c6" --arg gb "$gb" --arg ga "$ga" --arg qb "$qb" --arg qa "$qa" --argjson started "$started" --argjson finished "$(date +%s%3N)" '{schema:"debugai.asteria-baseline-probe/v1",state:$state,error:$error,started_at:$started,finished_at:$finished,case1:$c1,case6:$c6,granite_before:$gb,granite_after:$ga,qwen_before:$qb,qwen_after:$qa}' >"$tmp" && mv -f -- "$tmp" "$RESULT"; }
 read_evt(){ "$DOCKER_BIN" exec "$1" sh -lc 'awk "$1==\"high\"||$1==\"max\"||$1==\"oom\"||$1==\"oom_kill\"{printf \"%s=%s|\",$1,$2}" /sys/fs/cgroup/memory.events' 2>/dev/null; }
 CID="$("$DOCKER_BIN" ps -q -f name=^/asteria-ab-baseline-forensic$ 2>/dev/null | head -n1)"
-[ -n "$CID" ] || { finish FAIL ASTERIA_FORENSIC_CONTAINER_NOT_RUNNING; exit 2; }
+if [ -z "$CID" ]; then
+  SAVED_CID="$("$DOCKER_BIN" ps -aq -f name=^/asteria-ab-baseline-forensic$ 2>/dev/null | head -n1)"
+  [ -n "$SAVED_CID" ] || { finish FAIL ASTERIA_FORENSIC_CONTAINER_NOT_FOUND; exit 2; }
+  "$DOCKER_BIN" start "$SAVED_CID" >/dev/null 2>&1 || { finish FAIL ASTERIA_FORENSIC_CONTAINER_RESTART_FAILED; exit 2; }
+  CID="$SAVED_CID"
+fi
 TOKEN="$("$DOCKER_BIN" inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$CID" 2>/dev/null | sed -n 's/^ASTERIA_INTERNAL_TOKEN=//p' | head -n1)"
 [ -n "$TOKEN" ] || { finish FAIL ASTERIA_TOKEN_NOT_FOUND; exit 3; }
 health="$("$CURL_BIN" -sS -o /dev/null -w '%{http_code}' --connect-timeout 2 --max-time 5 http://127.0.0.1:18111/health 2>/dev/null || true)"
