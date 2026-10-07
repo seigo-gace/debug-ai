@@ -86,7 +86,7 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
   const endpoint=new URL("/v1/chat/completions",baseUrl).toString();
   const transport=dispatcher||new Agent({headersTimeout:timeoutMs+5000,bodyTimeout:timeoutMs+5000});
   let queueTail=Promise.resolve();
-  async function execute(role,{system="",user="",maxTokens=1024,responseFormat="json_object",temperature=0,selectedSkillIds=null,timeoutMsOverride=null,deadlineAt=null,toolBudgetFinalRound=null}={},runtimeMeta={}){
+  async function execute(role,{system="",user="",maxTokens=1024,responseFormat="json_object",temperature=0,topP=null,topK=null,selectedSkillIds=null,timeoutMsOverride=null,deadlineAt=null,toolBudgetFinalRound=null}={},runtimeMeta={}){
     const roleStartedAt=Date.now(),prepareStartedAt=Date.now();
     const cfg=ROLES[role];if(!cfg)throw new AiCoreError("ROLE_INVALID",`Unknown DebugAI role: ${role}`);
     const tokenBudget=resolveEffectiveMaxTokens(role,maxTokens,{runtimeContextTokens:qualifiedRuntimeContext,requireRuntimeContextQualification});
@@ -95,7 +95,7 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
     const invocation=compileInvocation(role,{task:user,extraSystem:system,selectedSkillIds});
     const compiledPrefixHash=prefixHash(invocation.system);
     const wireUser=runtimeControlWireUser(user,toolBudgetFinalRound);
-    const body={model:cfg.backend_model,messages:[{role:"system",content:invocation.system},{role:"user",content:wireUser}],max_tokens:effectiveMaxTokens,temperature,stream:false,cache_prompt:promptCache,response_format:responseFormat?{type:responseFormat}:undefined};
+    const body={model:cfg.backend_model,messages:[{role:"system",content:invocation.system},{role:"user",content:wireUser}],max_tokens:effectiveMaxTokens,temperature,stream:false,cache_prompt:promptCache,response_format:responseFormat?{type:responseFormat}:undefined};if(topP!==null&&topP!==undefined){if(!Number.isFinite(topP)||topP<0||topP>1)throw new AiCoreError("AI_CORE_TOP_P_INVALID","topP must be between 0 and 1",{role,top_p:topP});body.top_p=topP;}if(topK!==null&&topK!==undefined){if(!Number.isInteger(topK)||topK<0)throw new AiCoreError("AI_CORE_TOP_K_INVALID","topK must be a nonnegative integer",{role,top_k:topK});body.top_k=topK;}
     if(typeof cfg.thinking==="boolean")body.chat_template_kwargs={enable_thinking:cfg.thinking};
     const requestBody=JSON.stringify(body),requestBytesPerAttempt=Buffer.byteLength(requestBody,"utf8"),prepareMs=Date.now()-prepareStartedAt;
     let upstreamMs=0,responseBytes=0,parseValidateMs=0;
