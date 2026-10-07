@@ -13,23 +13,49 @@ permissions:
 jobs:
   diagnose:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 4
     env:
       BASE_URL: https://debugai.asterav8.jp
       CF_ACCESS_CLIENT_ID: ${{ secrets.DEBUGAI_CF_ACCESS_CLIENT_ID }}
       CF_ACCESS_CLIENT_SECRET: ${{ secrets.DEBUGAI_CF_ACCESS_CLIENT_SECRET }}
     steps:
-      - name: Request and read one status response
+      - name: Read Canonical DevLog activation status
         shell: bash
         run: |
           set -euo pipefail
-          req='{"repo":"/workspace/debug-ai","command_id":"project.git_head","arguments":[]}'
-          code="$(curl -sS --max-time 30 -o /tmp/request.json -w '%{http_code}'             -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID"             -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET"             -H 'content-type: application/json'             --data-binary "$req" "$BASE_URL/v1/server-command/request")"
+          req='{"repo":"/workspace/debug-ai","command_id":"canonical.devlog_activate_status","arguments":[]}'
+          code="$(curl -sS --max-time 30 -o /tmp/request.json -w '%{http_code}' \
+            -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
+            -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
+            -H 'content-type: application/json' \
+            --data-binary "$req" "$BASE_URL/v1/server-command/request")"
           echo "REQUEST_HTTP=$code"
-          jq -c '{schema,id,state,command_id,repo}' /tmp/request.json
+          jq -c '{schema,id,state,command_id,repo,error,code}' /tmp/request.json
           test "$code" = "202"
           id="$(jq -r '.id // empty' /tmp/request.json)"
-          sleep 1
-          code="$(curl -sS --max-time 30 -o /tmp/status.json -w '%{http_code}'             -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID"             -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET"             -H 'content-type: application/json'             --data-binary "$(jq -nc --arg id "$id" '{id:$id}')"             "$BASE_URL/v1/server-command/status")"
-          echo "STATUS_HTTP=$code"
-          jq -c . /tmp/status.json
+          [[ "$id" =~ ^cmd_[0-9a-f]{24}$ ]]
+          for _ in $(seq 1 30); do
+            code="$(curl -sS --max-time 30 -o /tmp/status.json -w '%{http_code}' \
+              -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
+              -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
+              -H 'content-type: application/json' \
+              --data-binary "$(jq -nc --arg id "$id" '{id:$id}')" \
+              "$BASE_URL/v1/server-command/status")"
+            echo "STATUS_HTTP=$code"
+            if [ "$code" = "200" ]; then
+              state="$(jq -r '.state // "UNKNOWN"' /tmp/status.json)"
+              echo "STATUS_STATE=$state"
+              if [ "$state" = "PASS" ]; then
+                jq -r '.result.stdout // "{}"' /tmp/status.json > /tmp/activation.json
+                jq -c '{state,error,verify,event_id,helper_expected,helper_actual,exit_code,log_path,started_at,finished_at}' /tmp/activation.json
+                exit 0
+              fi
+              if [ "$state" = "FAIL" ]; then
+                jq -c '{schema,id,state,error,command_id}' /tmp/status.json
+                exit 12
+              fi
+            fi
+            sleep 2
+          done
+          echo "STATUS_READ=TIMEOUT"
+          exit 13
