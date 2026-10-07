@@ -6,7 +6,7 @@ REPO="${DEBUG_AI_HOST_REPO:-/home/admin1/projects/debug-ai}"
 TGS="/home/admin1/projects/TGserver"
 RESULT="$REPO/.debugai-input/canonical-devlog-activation/result.json"
 LOG="$REPO/.debugai-input/canonical-devlog-activation/run.log"
-EXPECTED="0bbd3b2a6fa90f7f9ceca92945f28f482524b809"
+EXPECTED="337fd3b12e253300fb25ef3147af3b1b913066f7"
 BRANCH="ops/canonical-devlog-runtime-readback-20261007"
 started="$(date +%s%3N)"
 
