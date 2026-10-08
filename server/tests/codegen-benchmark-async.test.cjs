@@ -42,7 +42,7 @@ test("async codegen benchmark invokes patch engineer only and returns candidate 
     assert.equal(status.patch_engineer_runtime.telemetry.prompt_eval_ms_known_sum,5);
     assert.equal(status.patch_engineer_runtime.telemetry.decode_ms_known_sum,6);
     assert.equal(status.patch_engineer_runtime.telemetry.prompt_tokens_known_sum,10);
-    assert.deepEqual(status.patch_engineer_runtime.selected_skill_ids,["reproduce-before-fix","minimal-diff-planner"]);
+    assert.deepEqual(status.patch_engineer_runtime.selected_skill_ids,["reproduce-before-fix","minimal-diff-planner","regression-risk-map"]);
     const patchRecord=f.runtimeEvidence.list(accepted.run_id,{types:["patch_candidate"],limit:1})[0];
     assert.equal(patchRecord.payload.patch_engineer_runtime.telemetry.queue_wait_ms_known_sum,7);
     assert.deepEqual(roles,["patch_engineer"]);
