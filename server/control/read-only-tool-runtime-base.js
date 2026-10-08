@@ -40,6 +40,8 @@ function resolveSafeFile(repo,rel){
   if(full!==root&&!full.startsWith(prefix))throw new Error(`READ_PATH_ESCAPE:${safe}`);
   if(!fs.existsSync(full))throw new Error(`READ_FILE_NOT_FOUND:${safe}`);
   const real=fs.realpathSync(full);if(real!==root&&!real.startsWith(prefix))throw new Error(`READ_SYMLINK_ESCAPE:${safe}`);
+  const realRel=path.relative(root,real).replace(/\\/g,"/");
+  if(blockedReadPath(realRel))throw new Error(`READ_PROTECTED_PATH:${safe}`);
   const st=fs.statSync(real);if(!st.isFile())throw new Error(`READ_NOT_FILE:${safe}`);
   return {safe,full:real,st};
 }
@@ -90,6 +92,17 @@ function dependencyCandidatePaths(sourcePath,specifier){
   const options=hasExt?[rel]:[rel,...LOCAL_DEPENDENCY_EXT.map(ext=>rel+ext),...LOCAL_DEPENDENCY_EXT.map(ext=>rel+"/index"+ext)];
   return [...new Set(options)];
 }
+// Candidate evidence is not an import proof: reject symlinks in every ancestor,
+// including aliases into otherwise protected areas of the same repository.
+function dependencyPathHasSymlink(repo,rel){
+  let current=fs.realpathSync(repo);
+  for(const segment of rel.split("/")){
+    current=path.join(current,segment);
+    try{if(fs.lstatSync(current).isSymbolicLink())return true;}
+    catch(error){if(error?.code==="ENOENT")return false;return true;}
+  }
+  return false;
+}
 function localDependencyMap(repo,sourcePath){
   const source=readText(repo,sourcePath,{maxChars:100000});
   const specifiers=extractSpecifiers(source.content).slice(0,128);
@@ -100,6 +113,7 @@ function localDependencyMap(repo,sourcePath){
     const matches=[];let unverified=false;
     for(const rel of options){
       if(rel.split("/").some(segment=>SKIP_DIRS.has(segment))||blockedReadPath(rel)){unverified=true;continue;}
+      if(dependencyPathHasSymlink(repo,rel)){unverified=true;continue;}
       const candidate=path.join(repo,...rel.split("/"));
       let st;
       try{st=fs.lstatSync(candidate);}catch(error){if(error?.code!=="ENOENT")unverified=true;continue;}
