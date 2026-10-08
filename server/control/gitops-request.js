@@ -108,9 +108,12 @@ class GitOpsRequestService {
     }
     if (input.delegation !== undefined) {
       const d = input.delegation;
+      const persistent = d?.mode === "MASTER_INTERNAL_PERSISTENT";
       if (action !== "deploy" || !d || typeof d !== "object" || Array.isArray(d) ||
-          Object.keys(d).some(key => !["id", "scope"].includes(key)) ||
-          !/^dlg_[a-z0-9_-]{1,64}$/.test(d.id || "") || d.scope !== "debugai.compose.reflect") {
+          Object.keys(d).some(key => !(persistent ? ["id", "scope", "mode", "repository", "runtime_target"] : ["id", "scope"]).includes(key)) ||
+          !/^dlg_[a-z0-9_-]{1,64}$/.test(d.id || "") || (persistent ? !/^[a-z][a-z0-9_.-]{1,80}$/.test(d.scope || "") ||
+            !/^[A-Za-z0-9_-]+\/[A-Za-z0-9_.-]+$/.test(d.repository || "") ||
+            !/^[a-z][a-z0-9_.-]{1,80}$/.test(d.runtime_target || "") : d.scope !== "debugai.compose.reflect")) {
         fail("GITOPS_DELEGATION_INPUT_INVALID");
       }
       // Identity is supplied by the existing authenticated control service,
@@ -119,6 +122,7 @@ class GitOpsRequestService {
         request_identity: "debugai.authenticated-control", production: true,
         effects: { destructive: false, persistent_data: false, secrets: false,
           provider_model: false, public_exposure: false } };
+      if (persistent) Object.assign(request.delegation, {mode: d.mode, repository: d.repository, runtime_target: d.runtime_target});
     }
     const root = this.queueRoot(repo);
     atomicJsonWrite(path.join(root, "requests", `${request.id}.json`), request);

@@ -79,3 +79,12 @@ test("delegation input preserves human gate and binds identity to generated oper
   assert.equal(r.delegation.operation_id, q.id);
   assert.equal(r.delegation.request_identity, "debugai.authenticated-control");
 });
+
+test('Master Internal normalization routes through the same queue and refuses caller credentials', t => {
+  const {repo,service}=fixture();t.after(()=>fs.rmSync(repo,{recursive:true,force:true}));
+  const delegation={id:'dlg_master_debugai_v1',scope:'debugai.compose.reflect',mode:'MASTER_INTERNAL_PERSISTENT',repository:'seigo-gace/debug-ai',runtime_target:'debugai.compose'};
+  const input={...base(repo),action:'deploy',sha:base(repo).expected_head,delegation};
+  for(const extra of [{request_identity:'caller'},{operation_id:'caller'},{server_project_path:'/tmp/other'},{effects:{secrets:true}}]) assert.throws(()=>service.request({...input,delegation:{...delegation,...extra}}),/GITOPS_DELEGATION_INPUT_INVALID/);
+  const q=service.request(input),r=JSON.parse(fs.readFileSync(path.join(service.queueRoot(repo),'requests',q.id+'.json')));
+  assert.equal(r.delegation.operation_id,q.id);assert.equal(r.delegation.mode,delegation.mode);assert.equal(r.delegation.repository,delegation.repository);
+});

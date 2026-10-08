@@ -1,5 +1,20 @@
 # DebugAI Current Source Qualification
 
+## Master Internal Persistent Delegation — source implementation
+
+Master-only persistent delegation reuses the existing Workspace registry, MCP and
+Host receipt path. Registered Project membership alone never authorizes execution:
+owner/admin identity, exact server/runtime mapping, enabled/unrevoked registry and
+per-operation Repo/branch/SHA/scope/effects are freshly verified. Legacy manual and
+Commercial/customer paths are unchanged. Repository delegation has no expiry;
+execution receipts remain <=5 minutes and single-use.
+Contract/design delta: [Master Internal Persistent Delegation](MASTER_INTERNAL_PERSISTENT_DELEGATION.md).
+Initial mapped entry: `seigo-gace/debug-ai`, `dlg_master_debugai_v1`.
+Source/test qualification and live Runtime completion remain separate. At this
+source checkpoint live remains `cc3462ddb07fb1379d61dc7c2321a776794800c1`; the new
+persistent mode has not yet been reflected or live-qualified.
+
+
 ## Standing Delegation source boundary
 
 The existing guarded GitOps lane now supports Host-only standing delegation for

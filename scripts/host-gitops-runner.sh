@@ -14,6 +14,13 @@ JQ_BIN="${DEBUG_AI_GITOPS_JQ_BIN:-jq}"
 CURL_BIN="${DEBUG_AI_GITOPS_CURL_BIN:-curl}"
 TIMEOUT_BIN="${DEBUG_AI_GITOPS_TIMEOUT_BIN:-timeout}"
 
+CONTROL_REPO="$REPO"
+LEGACY_REMOTE="$REMOTE"
+LEGACY_BRANCH="$BRANCH"
+master_services=(debug-ai sandbox-runner)
+master_health_service=debug-ai
+master_health_url=http://127.0.0.1:8787/health
+
 err_code=""
 request_id=""
 request_action=""
@@ -21,6 +28,7 @@ expected_head=""
 request_sha=""
 result_json="{}"
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/host-gitops-delegation.sh" || exit 1
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/host-gitops-master-internal.sh" || exit 1
 
 fail() {
   err_code="${1:-ERROR}"
@@ -70,13 +78,17 @@ subset_of_file() {
 
 common_validate() {
   local file="$1" now_ms remote_url remote_head expires
+  if is_master_internal "$file"; then
+    validate_master_internal "$file" || return 1
+    master_resolve_target "$file" || return 1
+  fi
   "$JQ_BIN" -e '
     .schema=="debugai.gitops-request/v1" and
     (.id|type=="string" and test("^gitops_[0-9a-f]{24}$")) and
     (.action=="publish" or .action=="deploy") and
     (.expected_head|type=="string" and test("^[0-9a-f]{40}$")) and
     .repo=="/workspace/debug-ai" and
-    .branch=="feat/tgserver-async-log-sink-20261003" and
+    (.branch=="feat/tgserver-async-log-sink-20261003" or .delegation.mode=="MASTER_INTERNAL_PERSISTENT") and
     .human_approved==true and
     (.expires_at|type=="number")
   ' "$file" >/dev/null || fail REQUEST_SCHEMA_OR_BOUNDARY_INVALID || return 1
@@ -163,9 +175,9 @@ consume_approval() {
 wait_health() {
   local deadline=$((SECONDS + 120)) code container_id state
   while [ "$SECONDS" -lt "$deadline" ]; do
-    code="$("$CURL_BIN" -sS -o /dev/null -w '%{http_code}' --max-time 3 http://127.0.0.1:8787/health 2>/dev/null || true)"
+    code="$("$CURL_BIN" -sS -o /dev/null -w '%{http_code}' --max-time 3 "$master_health_url" 2>/dev/null || true)"
     if [[ "$code" =~ ^2[0-9][0-9]$ ]]; then
-      container_id="$(docker_cmd compose ps -q debug-ai 2>/dev/null | head -n1)"
+      container_id="$(docker_cmd compose ps -q "$master_health_service" 2>/dev/null | head -n1)"
       state=""
       if [ -n "$container_id" ]; then
         state="$(docker_cmd inspect -f '{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}NONE{{end}}' "$container_id" 2>/dev/null || true)"
@@ -211,11 +223,11 @@ deploy_request() {
   git_cmd checkout --detach "$request_sha" >/dev/null 2>&1 || fail DEPLOY_CHECKOUT_FAILED || return 1
 
   delegated_execution_gate "$file" || return 1
-  (cd "$REPO" && run_timed 1800s "$DOCKER_BIN" compose build debug-ai sandbox-runner) >/dev/null 2>&1 || fail DEPLOY_BUILD_FAILED || return 1
+  (cd "$REPO" && run_timed 1800s "$DOCKER_BIN" compose build "${master_services[@]}") >/dev/null 2>&1 || fail DEPLOY_BUILD_FAILED || return 1
   delegated_execution_gate "$file" || return 1
-  (cd "$REPO" && run_timed 180s "$DOCKER_BIN" compose up -d --no-deps --force-recreate debug-ai sandbox-runner) >/dev/null 2>&1 || fail DEPLOY_RECREATE_FAILED || return 1
+  (cd "$REPO" && run_timed 180s "$DOCKER_BIN" compose up -d --no-deps --force-recreate "${master_services[@]}") >/dev/null 2>&1 || fail DEPLOY_RECREATE_FAILED || return 1
   health_http="$(wait_health)" || return 1
-  container_id="$(docker_cmd compose ps -q debug-ai 2>/dev/null | head -n1)" || fail DEPLOY_CONTAINER_ID_READ_FAILED || return 1
+  container_id="$(docker_cmd compose ps -q "$master_health_service" 2>/dev/null | head -n1)" || fail DEPLOY_CONTAINER_ID_READ_FAILED || return 1
   [ -n "$container_id" ] || fail DEPLOY_CONTAINER_ID_MISSING || return 1
   state="$(docker_cmd inspect -f '{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}NONE{{end}}' "$container_id" 2>/dev/null)" || fail DEPLOY_CONTAINER_STATE_READ_FAILED || return 1
   [ "$state" = "running|healthy" ] || fail "DEPLOY_CONTAINER_NOT_HEALTHY:$state" || return 1
@@ -242,6 +254,12 @@ process_file() {
     return
   fi
 
+  REPO="$CONTROL_REPO"
+  REMOTE="$LEGACY_REMOTE"
+  BRANCH="$LEGACY_BRANCH"
+  master_services=(debug-ai sandbox-runner)
+  master_health_service=debug-ai
+  master_health_url=http://127.0.0.1:8787/health
   request_id=""
   request_action=""
   err_code=""

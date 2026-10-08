@@ -97,3 +97,11 @@ Regression: `node --test ops/tests/gitops-standing-delegation.test.cjs
 ops/tests/server-command-host-execution.test.cjs` uses real Bash/jq; Verify CI owns
 that Host-toolchain gate. Container source tests own normalization and the existing
 13-tool/Server Command regressions. Host Node/Python installation is unnecessary.
+
+## Additive Master Internal mode
+
+Master's own development may use the separate `MASTER_INTERNAL_PERSISTENT` registry
+mode described in [the internal contract](MASTER_INTERNAL_PERSISTENT_DELEGATION.md).
+It has no repository-delegation expiry and uses the same short single-use receipt
+mechanism. This does not delete/change the finite Standing policy or the legacy
+manual/Commercial approval paths described above.
