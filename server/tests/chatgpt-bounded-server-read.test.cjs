@@ -38,3 +38,21 @@ test("Real request awaits terminal status, exact ID, command and no write",async
   assert.ok(logs.includes("SERVER_GIT_HEAD="+"d".repeat(40)));
   assert.ok(!logs.join("|").includes("secret"));
 });
+
+
+test("GitOps status is read-only, exact ID and safe terminal fields only",async()=>{
+  const id="gitops_"+"a".repeat(24),events=[],calls=[];
+  assert.equal(m.normalizeGitopsStatusId(""),null);
+  assert.throws(()=>m.normalizeGitopsStatusId("gitops_invalid"),/GITOPS_STATUS_ID_INVALID/);
+  const requester=async(url,args)=>{
+    calls.push({url,body:JSON.parse(args.body)});
+    return {status:200,json:async()=>({id,state:"PASS",result:{deployed_sha:"e".repeat(40),opaque_secret:"must-not-print"}})};
+  };
+  await m.runGitopsStatus({request:requester,log:x=>events.push(x),env:{CF_ACCESS_CLIENT_ID:"id",CF_ACCESS_CLIENT_SECRET:"s"}});
+  assert.equal(calls.length,1);
+  assert.equal(calls[0].url,"https://debugai.asterav8.jp/v1/gitops/status");
+  assert.deepEqual(calls[0].body,{repo:"/workspace/debug-ai",id});
+  assert.ok(events.includes("GITOPS_HOST_STATE=PASS"));
+  assert.ok(events.includes("GITOPS_DEPLOYED_SHA="+"e".repeat(40)));
+  assert.ok(!events.join(" ").includes("must-not-print"));
+});

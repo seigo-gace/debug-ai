@@ -69,5 +69,30 @@ async function run({request=fetch,sleep=delay,log=console.log,env=process.env,ta
   }
   throw Error("SERVER_COMMAND_POLL_TIMEOUT");
 }
-if(require.main===module)run().catch(e=>{console.error("BOUNDED_SERVER_COMMAND_ERROR="+String(e.code||e.message||"UNKNOWN").replace(/[^A-Z0-9_]/g,"").slice(0,80));process.exitCode=1;});
-module.exports={ALLOWED,validateTarget,safeResult,run};
+function normalizeGitopsStatusId(value){
+  if(value===undefined||value===null||value==="")return null;
+  if(typeof value!=="string"||!/^gitops_[0-9a-f]{24}$/.test(value))throw Error("GITOPS_STATUS_ID_INVALID");
+  return value;
+}
+async function runGitopsStatus({request=fetch,log=console.log,env=process.env,targetFile=".github/chatgpt-live-api-target.json"}={}){
+  const target=JSON.parse(fs.readFileSync(targetFile,"utf8"));
+  const id=normalizeGitopsStatusId(target.gitops_status_id);
+  if(!id){log("GITOPS_STATUS_READ=SKIPPED");return;}
+  if(target.mode!=="readonly"||target.base_url!==API)throw Error("GITOPS_STATUS_SCOPE_DENIED");
+  if(!env.CF_ACCESS_CLIENT_ID||!env.CF_ACCESS_CLIENT_SECRET)throw Error("CF_ACCESS_NOT_CONFIGURED");
+  const headers={"CF-Access-Client-Id":env.CF_ACCESS_CLIENT_ID,"CF-Access-Client-Secret":env.CF_ACCESS_CLIENT_SECRET};
+  const x=await post("/v1/gitops/status",{repo:DEFAULT_REPO,id},headers,request);
+  if(x.id!==id)throw Error("GITOPS_STATUS_ID_MISMATCH");
+  if(!["PASS","FAIL","QUEUED","RUNNING"].includes(x.state))throw Error("GITOPS_STATUS_UNEXPECTED_STATE");
+  log("GITOPS_STATUS_REQUEST_ID="+id);
+  log("GITOPS_HOST_STATE="+x.state);
+  log("GITOPS_TERMINAL="+(x.state==="PASS"||x.state==="FAIL"));
+  const sha=x.result?.deployed_sha;
+  if(typeof sha==="string"&&/^[a-f0-9]{40}$/.test(sha))log("GITOPS_DEPLOYED_SHA="+sha);
+  if(x.state==="FAIL"){
+    const cause=typeof x.error==="string"&&/^[A-Z][A-Z0-9_]{0,79}$/.test(x.error)?x.error:"REDACTED_OR_UNKNOWN";
+    log("GITOPS_FAILURE_CLASS="+cause);
+  }
+}
+if(require.main===module)(async()=>{await run();await runGitopsStatus();})().catch(e=>{console.error("BOUNDED_CHAT_READ_ERROR="+String(e.code||e.message||"UNKNOWN").replace(/[^A-Z0-9_]/g,"").slice(0,80));process.exitCode=1;});
+module.exports={ALLOWED,validateTarget,safeResult,run,normalizeGitopsStatusId,runGitopsStatus};
