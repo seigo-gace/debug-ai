@@ -1,5 +1,15 @@
 # DebugAI
 
+## Standing Delegation for bounded reflection
+
+The existing guarded GitOps lane now supports Host-only standing delegation for
+`deploy` / `debugai.compose.reflect`. Issuer, validity/revocation, exact target,
+changed-path scope and request identity are checked before a bound single-use
+receipt is issued and consumed. Manual receipt compatibility is retained.
+Source/CI qualification and live delegated E2E remain separate gates. The last
+fresh live readback before this Change Unit was `4190f870...`; broader PR #40
+qualification is unchanged. Contract/design delta: [Standing Delegation](docs/GITOPS_STANDING_DELEGATION.md).
+
 DebugAI is a code-first, evidence-driven debugging runtime that operates as a specialized debugging sub-agent under a primary AI. It investigates failures, binds claims to evidence, creates patch candidates, preserves explicit human approval before mutation, verifies applied changes, survives interruption/restart, and refuses to call a run complete when required evidence is missing.
 
 This repository is the canonical source authority. GitHub source/CI, shared AI Core state, live Contabo checkout/container state, and production state are separate facts and must be read back independently before any live claim.

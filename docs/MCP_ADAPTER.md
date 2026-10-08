@@ -214,3 +214,7 @@ The original ordered nine-tool surface is preserved and four tools are appended:
 Server Command request/status delegate to the same `ServerCommandRequestService` instance already passed to workflow and GitHub gateway by `server/main.js`; request returns HTTP 202 and status returns HTTP 200. GitOps reuses its existing routes and `GitOpsRequestService`. The request result means queued, not executed or verified; follow the returned id with status. No executor, queue, workflow, MCP server, allowlist or approval engine is added. No registration, Production reflection or live qualification was performed for this extension.
 
 Allowlist/argument/RepoPolicy decisions remain service-owned. GitOps approval, exact SHA, candidate identity, file scope and remote readback remain service/Host-runner-owned. No approve/apply MCP shortcut exists. Thrown CLI/HTTP errors and nonzero delegated control-command exits return MCP `isError=true` while retaining structured result evidence.
+
+GitOps deploy optionally accepts `delegation:{id,scope}` under the existing tool.
+It references a Host-only policy; caller text and `human_approved` are not delegation
+proof. No approve/apply tool is added. See [Standing Delegation](GITOPS_STANDING_DELEGATION.md).

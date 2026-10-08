@@ -1,5 +1,11 @@
 # DebugAI Project Tree
 
+`scripts/host-gitops-delegation.sh` is a sourced policy/receipt helper of the existing
+Host GitOps runner, not an executor. `ops/tests/gitops-standing-delegation.test.cjs`
+owns real Bash/jq authorization/receipt/replay regression.
+`docs/GITOPS_STANDING_DELEGATION.md` records the explicit design delta, Host-only
+trust contract, compatibility, revocation and live qualification gates.
+
 `ops/tests/server-command-host-execution.test.cjs` executes the existing bounded
 Host runner with real Bash/jq against temporary queues, checking terminal ID
 correlation, mirror fallback and approval rejection. Verify CI owns this Host

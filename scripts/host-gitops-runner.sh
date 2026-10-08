@@ -20,6 +20,7 @@ request_action=""
 expected_head=""
 request_sha=""
 result_json="{}"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/host-gitops-delegation.sh" || exit 1
 
 fail() {
   err_code="${1:-ERROR}"
@@ -190,7 +191,18 @@ deploy_request() {
   changed="$(changed_paths)" || fail DEPLOY_CHANGED_PATHS_READ_FAILED || return 1
   [ -z "$changed" ] || fail DEPLOY_WORKTREE_NOT_CLEAN || return 1
   approval_file="$APPROVAL_ROOT/${request_id}.approve"
-  consume_approval "$approval_file" || return 1
+  if "$JQ_BIN" -e 'has("delegation")' "$file" >/dev/null; then
+    # Read-only fetch admits the exact source for scope inspection. Existing
+    # fetch/SHA/ancestry gates are repeated after receipt consumption.
+    validate_standing_delegation "$file" || return 1
+    (cd "$REPO" && run_timed 120s "$GIT_BIN" fetch --no-tags origin "refs/heads/$BRANCH") >/dev/null 2>&1 || fail DEPLOY_FETCH_FAILED || return 1
+    [ "$(git_cmd rev-parse FETCH_HEAD)" = "$request_sha" ] || fail DEPLOY_FETCH_HEAD_MISMATCH || return 1
+    git_cmd merge-base --is-ancestor "$before_head" "$request_sha" >/dev/null 2>&1 || fail DEPLOY_NON_FAST_FORWARD_TARGET || return 1
+    issue_delegated_receipt "$file" "$before_head" "$approval_file" || return 1
+    consume_delegated_receipt "$file" "$approval_file" || return 1
+  else
+    consume_approval "$approval_file" || return 1
+  fi
 
   (cd "$REPO" && run_timed 120s "$GIT_BIN" fetch --no-tags origin "refs/heads/$BRANCH") >/dev/null 2>&1 || fail DEPLOY_FETCH_FAILED || return 1
   fetched="$(git_cmd rev-parse FETCH_HEAD 2>/dev/null)" || fail DEPLOY_FETCH_HEAD_READ_FAILED || return 1
@@ -219,10 +231,20 @@ process_file() {
   ensure_dir "$failed_dir" || return 1
   mv -- "$source" "$processing" || return 1
 
+  # Replay never overwrites the original terminal result or reissues approval.
+  local replay_id
+  replay_id="$("$JQ_BIN" -r '.id // ""' "$processing" 2>/dev/null || true)"
+  if [[ "$replay_id" =~ ^gitops_[0-9a-f]{24}$ ]] && [ -f "$QUEUE/status/$replay_id.json" ]; then
+    "$JQ_BIN" -nc --arg id "$replay_id" --argjson at "$started" '{operation_id:$id,at:$at,state:"REJECTED",error:"GITOPS_OPERATION_REPLAY_REJECTED"}' >> "$QUEUE/status/$replay_id.rejections.jsonl" || return 1
+    mv -- "$processing" "$failed_dir/$replay_id.duplicate.$started.json"
+    return
+  fi
+
   request_id=""
   request_action=""
   err_code=""
   result_json="{}"
+  authorization_json='null'
   if "$JQ_BIN" -e . "$processing" >/dev/null 2>&1; then
     request_id="$("$JQ_BIN" -r '.id // ""' "$processing")"
     request_action="$("$JQ_BIN" -r '.action // ""' "$processing")"
@@ -245,11 +267,11 @@ process_file() {
   [[ "$id_for_status" =~ ^gitops_[0-9a-f]{24}$ ]] || id_for_status="invalid_${finished}"
 
   if [ -z "$err_code" ]; then
-    status="$("$JQ_BIN" -n --arg id "$request_id" --arg action "$request_action" --argjson started "$started" --argjson finished "$finished" --argjson result "$result_json" '{schema:"debugai.gitops-status/v1",id:$id,action:$action,started_at:$started,state:"PASS",finished_at:$finished,result:$result}')"
+    status="$("$JQ_BIN" -n --arg id "$request_id" --arg action "$request_action" --argjson started "$started" --argjson finished "$finished" --argjson result "$result_json" --argjson authorization "$authorization_json" '{schema:"debugai.gitops-status/v1",id:$id,action:$action,started_at:$started,state:"PASS",finished_at:$finished,result:$result,authorization:$authorization}')"
     atomic_json "$QUEUE/status/${id_for_status}.json" "$status" || return 1
     mv -- "$processing" "$done_dir/$(basename -- "$processing")"
   else
-    status="$("$JQ_BIN" -n --arg id "$id_for_status" --arg action "$request_action" --argjson started "$started" --argjson finished "$finished" --arg error "${err_code:0:240}" '{schema:"debugai.gitops-status/v1",id:$id,action:$action,started_at:$started,state:"FAIL",finished_at:$finished,error:$error}')"
+    status="$("$JQ_BIN" -n --arg id "$id_for_status" --arg action "$request_action" --argjson started "$started" --argjson finished "$finished" --arg error "${err_code:0:240}" --argjson authorization "$authorization_json" '{schema:"debugai.gitops-status/v1",id:$id,action:$action,started_at:$started,state:"FAIL",finished_at:$finished,error:$error,authorization:$authorization}')"
     atomic_json "$QUEUE/status/${id_for_status}.json" "$status" || return 1
     mv -- "$processing" "$failed_dir/$(basename -- "$processing")"
   fi
