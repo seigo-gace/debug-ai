@@ -21,8 +21,9 @@ master_verify_mapping() {
       ($e.repository|type)!="string" or ($e.repository|test("^[A-Za-z0-9_-]+/[A-Za-z0-9_.-]+$")|not) or
       ($e.repository_id|type)!="number" or ($e.repository_node_id|type)!="string" or
       $e.remote!=("https://github.com/"+$e.repository+".git") or
-      ($e.server_project_id|type)!="string" or ($e.server_project_id|test("^[a-z][a-z0-9_-]{1,80}$")|not) or
-      $e.server_project_path!=($root+"/"+$e.server_project_id) or
+      ($e.server_project_id|type)!="string" or ($e.server_project_id|test("^[A-Za-z][A-Za-z0-9_-]{1,80}$")|not) or
+      ($e.server_project_path|type)!="string" or ($e.server_project_path|startswith($root+"/")|not) or
+      ($e.server_project_path|ltrimstr($root+"/")|test("^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$")|not) or
       $e.repo!="/workspace/debug-ai" then "MASTER_MAPPING_INVALID"
     elif ($e.allowed_branches|type)!="array" or ($e.allowed_branches|length)<1 or any($e.allowed_branches[]; type!="string" or (test("^[A-Za-z0-9._/-]{1,160}$")|not) or startswith("-") or contains("..") or contains("@{")) then "MASTER_BRANCH_POLICY_INVALID"
     elif $e.allowed_operations!=["deploy"] or ($e.allowed_scopes|type)!="array" or ($e.allowed_scopes|length)<1 or any($e.allowed_scopes[]; type!="string" or (test("^[a-z][a-z0-9_.-]{1,80}$")|not)) then "MASTER_OPERATION_POLICY_INVALID"
