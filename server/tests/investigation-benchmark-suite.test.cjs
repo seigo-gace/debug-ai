@@ -17,14 +17,15 @@ test("investigation benchmark defines 50 unique cases balanced by level and role
 });
 
 
-test("investigation benchmark keeps Code Scout output compatible with current semantic validator",()=>{
-  assert.match(POLICIES.code_scout,/source_facts/);
+test("investigation benchmark mirrors the production Code Scout output contract",()=>{
+  assert.match(POLICIES.code_scout,/relevant_files/);
+  assert.doesNotMatch(POLICIES.code_scout,/source_facts/);
   assert.deepEqual(BENCHMARK_MAX_TOKENS,{code_scout:2048,causal_scout:1024,researcher:1024,diagnoser:2048,local_reviewer:1024});
 });
 
 test("investigation benchmark caps role output tokens without changing production budget",async()=>{
   let seen=null;
-  const aiCore={call:async(role,options)=>{seen={role,maxTokens:options.maxTokens};return{content:JSON.stringify({source_facts:[{file:"src/api.js",fact:"handle() calls profile.load(id)"},{file:"src/profile.js",fact:"load() returns repository value"},{file:"src/theme.js",fact:"contains CSS tokens only"}],relevant_files:["src/api.js","src/profile.js"],excluded_files:["src/theme.js"],call_path:["src/api.js:handle","src/profile.js:load"],contract_mismatch:null,unknowns:[]})};}};
+  const aiCore={call:async(role,options)=>{seen={role,maxTokens:options.maxTokens};return{content:JSON.stringify({relevant_files:["src/api.js","src/profile.js"],excluded_files:["src/theme.js"],call_path:["src/api.js:handle","src/profile.js:load"],contract_mismatch:null,unknowns:[]})};}};
   const out=await runInvestigationBenchmarkCase({aiCore,caseId:"L1-CS1"});
   assert.equal(seen.role,"code_scout");
   assert.equal(seen.maxTokens,2048);
