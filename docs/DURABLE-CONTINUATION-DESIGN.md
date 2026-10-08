@@ -332,6 +332,25 @@ model assignments and historical 60-case codegen results remain unchanged.
 No Python execution, live model rerun, candidate application or semantic repair
 success is inferred. Negative and independent malformed-member cases run offline.
 
+### 6.8 Runtime Packet immutable handoff — Step 12 source delta, 2026-10-08
+
+Patch/Review Packet creation previously froze only outer containers and retained
+references to nested checks, requirements carried in invariants, and hash maps.
+Changing a caller's failed-check status or nested acceptance condition altered
+the packet while retaining its original digest. The existing packet provider now
+copies and recursively freezes JSON-shaped payloads before computing the digest.
+Caller inputs remain writable; issued packets reject nested mutation. Existing
+schemas, payload fields and digests for unchanged plain data remain compatible.
+Both packet types reuse this one provider; consumers and approval paths are unchanged.
+
+This closes the reproduced immutable-handoff defect only. Independently required
+structured requested/preserved/forbidden behavior, acceptance, UNKNOWN and test
+contracts are still missing from the current workflow caller. No such fields
+are invented from task text. Their integration requires isolated caller ownership.
+Baseline/candidate materialization identity and language oracle qualification are
+separate prerequisites. This change does not qualify Python execution, a live
+workflow, model semantic accuracy or Strict Completion.
+
 ## 7. Evidence model
 
 Evidence is an explicit runtime object, not free-form model confidence.

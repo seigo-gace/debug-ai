@@ -81,6 +81,12 @@ Historical live/source records below remain evidence for their recorded revision
 
 ## What DebugAI does
 
+Patch and Review Packet payloads are detached from their input objects and
+recursively frozen before hashing. Nested requirements, failed-check evidence
+and source preconditions cannot change under an already issued packet digest.
+This preserves handed-off constraints; it does not establish a complete
+structured Requirement/Evidence contract or candidate semantic correctness.
+
 ```text
 Failure / request / local evidence
         |

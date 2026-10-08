@@ -5,7 +5,14 @@ const REVIEW_EXCLUDED_FIELDS=Object.freeze(["patch_engineer_raw_reasoning","hidd
 function nonEmpty(value,name){const text=String(value||"").trim();if(!text)throw new Error(`${name}_REQUIRED`);return text;}
 function uniqueStrings(values){return [...new Set((Array.isArray(values)?values:[]).map(String).map(x=>x.trim()).filter(Boolean))];}
 function object(value){return value&&typeof value==="object"&&!Array.isArray(value)?value:{};}
-function freezePacket(schema,payload){const digest=contentHash({schema,payload});return Object.freeze({schema,payload:Object.freeze(payload),packet_digest:digest});}
+function immutablePayload(value,seen=new WeakMap()){
+  if(value===null||typeof value!=="object")return value;
+  if(seen.has(value))return seen.get(value);
+  const copy=Array.isArray(value)?new Array(value.length):{};seen.set(value,copy);
+  for(const key of Object.keys(value))Object.defineProperty(copy,key,{value:immutablePayload(value[key],seen),enumerable:true});
+  return Object.freeze(copy);
+}
+function freezePacket(schema,payload){const boundPayload=immutablePayload(payload),digest=contentHash({schema,payload:boundPayload});return Object.freeze({schema,payload:boundPayload,packet_digest:digest});}
 
 function makePatchPacket({runId,diagnosisRef,repositoryRevision,paths=[],sourceExcerpts=[],preconditionHashes={},reproductionSummary={},testInventory=[],invariants=[],prohibitedPaths=[],evidenceRefs=[]}={}){
   const payload={
