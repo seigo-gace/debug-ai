@@ -373,6 +373,11 @@ Read-only evidence/control-plane capabilities include `evidence.read`, `runtime.
 
 `RunAuthority` is the single authoritative execution/state owner. Durable state preserves run/role identity, attempts, generation, execution epoch, workflow cursor, checkpoint/result/effect references, retry/timeout/cancellation/no-progress state, and integrity bindings.
 
+Git RepositorySnapshot identity binds tracked dirty source bytes and mode changes,
+not only HEAD/status. Clean Git identities remain compatible; untracked-only
+changes remain outside this established Git scope. Snapshot identity still does
+not prove candidate materialization or executed verification.
+
 Replay-safe continuation reuses compatible committed read-only/deterministic effects while refusing to replay mutation-capable effects automatically. Researcher uses durable A/B/C/D/E work units. Real SIGKILL recovery is covered by regression tests.
 
 Raw hidden chain-of-thought is never persisted.

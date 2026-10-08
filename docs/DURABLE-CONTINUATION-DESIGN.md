@@ -264,6 +264,26 @@ restores the previous checks without persistent-state migration. No Runtime
 reflection is implied. Regression authority:
 `server/tests/role-contract-correctness.test.cjs` and existing semantic/tool tests.
 
+### 6.5 Dirty Git snapshot identity — additive source delta, 2026-10-08
+
+The existing Git RepositorySnapshot hashed HEAD and porcelain status only. Two
+different versions of an already-modified tracked file produced identical IDs.
+Bind a bounded binary tracked diff against HEAD, including staged/net worktree
+changes and file modes, into the existing Git snapshot hash when status is dirty.
+Disable external diff and textconv so repository configuration cannot substitute
+another program/output for the source comparison. Preserve existing file/byte
+limits and fail-closed content-tree fallback when Git is unavailable or fails.
+
+Clean Git IDs remain byte-compatible with the previous HEAD/status contract.
+Dirty IDs change intentionally; historical dirty checkpoints must fail closed
+rather than be silently rebound. Untracked files remain excluded from this Git
+scope. This is a point-in-time source binding, not a claim of atomic filesystem
+capture or complete candidate construction. Existing BASELINE/isolated CANDIDATE,
+approval and Strict Completion gates remain necessary. Rollback restores the old
+Source implementation without persistent-state migration; it must never rewrite
+saved checkpoint identities. Real Git regression authority:
+`server/tests/repository-snapshot-auto-bind.test.cjs`.
+
 ---
 
 ## 7. Evidence model
