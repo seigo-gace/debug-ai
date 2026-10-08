@@ -101,6 +101,13 @@ before persistence. Durable input and re-fix retain the original obligations;
 re-fix gets fresh current source/retest bindings without relabeling original
 Evidence as current. Stored v1 packets/candidates retain their historical digests.
 
+Sandbox copies now retain a deterministic manifest of bytes, executable bits and
+explicit exclusions, reject missing declared required files, and re-read staging
+before execution. This qualifies copied entries only: whole-tree completeness
+remains NOT_VERIFIED and isolated candidate construction is NOT_CONFIGURED under
+the existing action allowlist. See the Step 14 slice in
+`docs/DURABLE-CONTINUATION-DESIGN.md` §6.10; command PASS does not close those gaps.
+
 ```text
 Failure / request / local evidence
         |

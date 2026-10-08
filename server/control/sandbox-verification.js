@@ -25,7 +25,7 @@ function toEvidence(result,check){
     kind:"deterministic_sandbox_check",
     name:`sandbox:${check.script}`,
     check_type:check.check_type,
-    status:result.pass?"PASS":"FAIL",
+    status:result.pass===true&&result.code===0&&!result.timed_out?"PASS":"FAIL",
     configured:true,
     executed:true,
     code:result.code,
@@ -35,6 +35,11 @@ function toEvidence(result,check){
     command:String(result.command||""),
     stdout:String(result.stdout||""),
     stderr:String(result.stderr||""),
+    // PASS above is the command outcome, never full-tree/candidate qualification.
+    snapshot_qualification:result.snapshot_qualification||"NOT_VERIFIED",
+    snapshot_manifest_digest:result.snapshot?.manifest?.digest||null,
+    snapshot_completeness:"NOT_VERIFIED",
+    candidate_construction:"NOT_CONFIGURED",
     sandbox:{backend:result?.isolation?.backend||null,job_id:result.job_id,network:result?.isolation?.network||null,workspace_mount:result?.isolation?.workspace_mount||null,secret_mounts:result?.isolation?.secret_mounts||null,docker_socket:result?.isolation?.docker_socket||null},
   };
 }

@@ -390,6 +390,54 @@ Requirement fulfillment still needs identity-bound actual tests/semantic review.
 Isolated materialized candidate, candidate snapshot/preflight/oracle and live
 Strict Completion are later gates, not implied by this handoff qualification.
 
+### 6.10 Sandbox snapshot integrity slice — Step 14 source delta, 2026-10-08
+
+Gate 1 retains PatchService create/load, preparePatchCandidate, requirement-bound
+candidate identity, explicit approval and transactional apply. The existing
+Sandbox still permits only node.check and package lint/typecheck/test/build.
+No permitted candidate-construction operation currently connects PatchService
+to an isolated writable candidate workspace. This CU therefore implements the
+independent manifest/completeness slice authorized by Step 14, not Phase 3 completion.
+
+The existing copySnapshot provider now inventories the allowed tree deterministically:
+normalized path, regular-file/directory type, exact byte hash/length, executable
+bits, empty directories, file/entry/byte totals, limits and explicit exclusions.
+Protected contents are not read; unsupported symlinks are recorded by target hash
+without dereferencing. The manifest and nested arrays are immutable in memory and
+have an integrity digest. This digest identifies allowed snapshot material, not
+a replacement RepositorySnapshot authority or an authenticated signature.
+
+Copies go to new destinations outside the source. Source is re-inventoried after
+copying; destination entries are independently re-read and compared, including
+extra files, omissions, changed bytes and executable bits. Existing destinations,
+overlaps, path aliases/traversal and symlinked parents fail closed. Required paths
+must be present regular files; omitted/excluded/dependency/native/symlink-backed
+requirements throw SANDBOX_SNAPSHOT_INCOMPLETE before publication. Node check
+requires its target; package actions require package.json. Additional requiredPaths
+must be explicitly supplied; no dependency graph or required asset is inferred.
+
+New existing-schema jobs retain this manifest in source_snapshot. The sidecar
+rechecks it before existing artifact provisioning; execution rechecks again before
+the helper probe/command. Only existing exact-source package-test provisioning
+admits top-level build/node_modules artifacts after its unchanged provenance checks.
+Landlock/seccomp, action/network/socket/environment restrictions are unchanged.
+Legacy v1 requests without manifests remain executable but snapshot qualification
+stays NOT_VERIFIED. No old candidate/approval hash is reinterpreted.
+
+MATERIALIZED_ENTRIES_MATCH proves only copied entries, not whole-repository
+completeness. Completeness remains NOT_VERIFIED, exclusions retain their reasons,
+and candidate construction remains NOT_CONFIGURED. Command PASS requires a real
+zero exit without timeout and is carried separately from these qualifications;
+an injected pass flag with a failed exit cannot manufacture PASS. A candidate
+argument to prepareSandboxJob is rejected as construction NOT_CONFIGURED.
+
+New tests are LOCAL_FIXTURE_ONLY. Source/CI does not prove immutable physical
+BASELINE storage, isolated multi-file candidate construction, candidate diff/re-read
+bound to original requirements/revision, a generated-language oracle, live Runtime,
+semantic correctness or Strict Completion. Those are the next exact construction
+gate under the existing security/action authority; no Host execution, Python
+substitute, new Sandbox/tool/executor, deployment or production apply is authorized.
+
 ## 7. Evidence model
 
 Evidence is an explicit runtime object, not free-form model confidence.

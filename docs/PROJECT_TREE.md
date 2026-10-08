@@ -65,6 +65,8 @@ server/tests/
   runtime-packets.test.cjs covers nested constraint/evidence immutability and input-alias isolation
   requirement-handoff.test.cjs covers actual workflow/candidate requirement binding, forbidden paths,
   stale references, insufficient input and re-fix retention; startup recovery also covers durable origin
+  sandbox-snapshot-integrity.test.cjs covers LOCAL_FIXTURE_ONLY manifest/copy integrity,
+  required omissions, unsupported links, changed bytes/modes and unconfigured construction
 
 ops/tests/repository-snapshot-real-git.test.cjs
   explicit offline real-Git snapshot regression; separate from Git-command unit fixtures in the canonical Sandbox suite
