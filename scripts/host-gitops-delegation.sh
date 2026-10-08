@@ -92,3 +92,18 @@ consume_delegated_receipt() {
   mv -- "$receipt" "$receipt.used" || fail DELEGATION_RECEIPT_CONSUME_FAILED || return 1
   authorization_json="$("$JQ_BIN" --argjson consumed "$now" '. + {receipt_consumed_at:$consumed}' "$receipt.used")" || fail DELEGATION_RECEIPT_INVALID || return 1
 }
+
+# A long image build must not outlive revocation or target admission before
+# the next production effect. A consumed receipt is evidence, never reused.
+delegated_execution_gate() {
+  local request="$1" changed remote
+  [ "$authorization_json" != null ] || return 0
+  validate_standing_delegation "$request" || return 1
+  [ "$(delegation_digest "$request")" = "$("$JQ_BIN" -r '.request_digest' <<<"$authorization_json")" ] &&
+    [ "$(delegation_digest "$delegation_policy")" = "$("$JQ_BIN" -r '.policy_digest' <<<"$authorization_json")" ] &&
+    [ "$(delegation_digest "$DELEGATION_ROOT/issuers.json")" = "$("$JQ_BIN" -r '.issuer_digest' <<<"$authorization_json")" ] || fail DELEGATION_TARGET_STATE_CHANGED || return 1
+  [ "$(git_cmd rev-parse HEAD)" = "$request_sha" ] || fail DELEGATION_TARGET_STATE_CHANGED || return 1
+  changed="$(changed_paths)" || fail DELEGATION_TARGET_STATE_READ_FAILED || return 1
+  remote="$(git_cmd ls-remote origin "refs/heads/$BRANCH" | awk 'NR==1{print $1}')" || fail DELEGATION_REMOTE_READ_FAILED || return 1
+  [ -z "$changed" ] && [ "$remote" = "$request_sha" ] || fail DELEGATION_TARGET_STATE_CHANGED || return 1
+}

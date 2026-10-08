@@ -210,7 +210,9 @@ deploy_request() {
   git_cmd merge-base --is-ancestor "$before_head" "$request_sha" >/dev/null 2>&1 || fail DEPLOY_NON_FAST_FORWARD_TARGET || return 1
   git_cmd checkout --detach "$request_sha" >/dev/null 2>&1 || fail DEPLOY_CHECKOUT_FAILED || return 1
 
+  delegated_execution_gate "$file" || return 1
   (cd "$REPO" && run_timed 1800s "$DOCKER_BIN" compose build debug-ai sandbox-runner) >/dev/null 2>&1 || fail DEPLOY_BUILD_FAILED || return 1
+  delegated_execution_gate "$file" || return 1
   (cd "$REPO" && run_timed 180s "$DOCKER_BIN" compose up -d --no-deps --force-recreate debug-ai sandbox-runner) >/dev/null 2>&1 || fail DEPLOY_RECREATE_FAILED || return 1
   health_http="$(wait_health)" || return 1
   container_id="$(docker_cmd compose ps -q debug-ai 2>/dev/null | head -n1)" || fail DEPLOY_CONTAINER_ID_READ_FAILED || return 1

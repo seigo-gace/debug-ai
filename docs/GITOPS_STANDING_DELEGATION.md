@@ -66,7 +66,9 @@ Immediately before consumption, the Host revalidates current policy, issuer,
 revocation, expiry, request identity/hash, remote target and local checkout state.
 The existing global runner lock serializes issue/consume. Consumption atomically
 moves the file to `<operation_id>.approve.used`; that marker prevents reissuance.
-Fetch/SHA/ancestry are checked again before checkout/build/recreate.
+Fetch/SHA/ancestry are checked again before checkout/build/recreate. Policy, issuer,
+request digests, revocation/expiry, remote SHA and checkout state are checked again
+before build and before recreate, so a long build cannot cross a revoked grant.
 
 A failed operation after consumption needs a new request ID and fresh receipt;
 mutation is never replayed automatically. A duplicate operation is rejected into
