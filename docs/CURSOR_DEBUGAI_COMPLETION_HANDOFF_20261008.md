@@ -1,7 +1,7 @@
 # Cursor → DebugAI Real-World Completion Handoff — 2026-10-08
 
 Status: **MASTER-DIRECTED EXECUTION ORDER / COST-CONSTRAINED**  
-Owner of product/technical orchestration in CHAT: ChatGPT GPT-6; local task orchestrator: existing Cursor parent agent.  
+Owner of product/technical orchestration: ChatGPT GPT-6; Cursor execution: Composer only by default; Master relays bounded instructions/results.  
 Repository: `seigo-gace/debug-ai` — source branch `feat/tgserver-async-log-sink-20261003`; integration PR `#40` **DRAFT / UNMERGED** at preparation. **Never trust a recorded HEAD as fresh.**
 
 ## 0. Entry, source-of-truth and authority
@@ -20,29 +20,26 @@ Use current sources over historical Notion/head records. [Notion adopted design-
 
 **Master's intent:** practical completion ASAP, minimal external AI cost, no feature reduction, no unrelated implementations, no second orchestrator or redoing completed work. Protected actions must still obey existing exact-SHA/scope/approval/Host gates. Do not prompt Master for routine technical choices.
 
-## 1. Reuse existing Cursor multi-agent setup (do not reconfigure)
+## 1. Composer-only by default — Master-approved operating mode (2026-10-08)
 
-Keep user's already configured role selection. Verify the actual available model IDs in Cursor; **do not assume 'GPT-mini4' is a real model identifier**.
+**GPT-6 CHAT is the sole development coordinator; Cursor Composer is the only routinely invoked paid editor/implementer.** Master copies the bounded instruction from CHAT into Composer, and returns the Composer implementation report to CHAT. GPT-6 independently checks GitHub repository Current, code, diff, CI, issue/PR, and available existing GitHub-triggered real-server evidence; it directly performs safe connected-source edits when possible. Composer is used only for actual workspace, MCP, server-read, Test or implementation steps CHAT cannot complete directly.
 
-| Existing function | Desired assignment | Mutation permission |
+The existing Cursor model/subagent configuration stays intact and **idle**. Do not automatically call Cursor parent Sonnet/Cursor AI, Gemini Flash, lightweight GPT, extra Composer agents, or Cloud Agents. Any additional agent is an **explicit exceptional delegation** from CHAT when narrow evidence proves that Composer + existing deterministic/DebugAI tools cannot close a specific blocker; no automatic multi-agent fan-out or paid provider/model change.
+
+| Executor | Routine duty | Boundary |
 |---|---|---|
-| Parent coordinator (Sonnet or Cursor AI, whichever is currently configured) | Choose next gate, deduplicate and adjudicate evidence, own final integration/CI decisions | Only as already authorized in Cursor |
-| Gemini Flash reader | Bounded, read-only source search, gap/impact mapping, test location, evidence IDs | NONE |
-| Existing lightweight GPT design helper | Narrow contract/schema/dependency review on *unresolved* points, not a new architecture proposal | NONE |
-| Composer implementer | Implement one approved-by-Current bounded Change Unit and matching tests in its isolated workspace | Its **owned paths only** |
-| DebugAI itself | Real read-only investigation → diagnosis → candidate-only debugging dogfood via proven MCP/CLI; guarded follow-on only after admissible authority | Existing bounded scope only |
-| Deterministic scripts, focused tests, GitHub CI | First-class evidence and acceptance, preferred before paid reasoning | Only explicit script/test surface |
+| GPT-6 CHAT | Fresh Current, source analysis, design/CI checks, action plan, direct GitHub operations and analysis of Composer results | GitHub connector and existing verified GitHub-triggered routes only; not a fictitious directly mounted DebugAI MCP |
+| Master | Copy CHAT instruction to Composer; return Composer report to CHAT | No routine VPS commands, troubleshooting or technical decisions |
+| Cursor Composer | Execute *only the latest assigned Change Unit*, run focused/canonical tests and real DebugAI MCP/CLI operations where available | Existing SERVER_AI minimal rule-plane, repository paths, model/account budget, Master protected gates |
+| DebugAI | Existing real read-only investigation, evidence-bound diagnosis, candidate generation, verification and bounded refix | Current authorization and verified server/runtime identity; no automatic apply/merge/deploy |
+| Sonnet / Cursor AI / Gemini Flash / GPT design helper | **Not routinely used**; retained as optional configured tools | Only if GPT-6 requests a specific needed operation, with bounded spend |
 
-**Cost governor:**
-- The parent first uses direct repository search, available CI logs, fast deterministic tools and already collected evidence.
-- Launch **at most two independent subagents initially**; do not invoke every configured model on every task. Run an extra reviewer only for a nontrivial ambiguity or safety-sensitive diff.
-- Keep source search and file-reading in cheaper, read-only role; return only file:line, exact SHA, failure, missing check, suggested owner (no huge copied logs).
-- Composer implements, runs targeted checks, and escalates blockers with real logs. Expensive parent reasoning only adjudicates unresolved failures.
-- Parallel *read-only* investigation is fine. Parallel *writes* must use isolated worktrees/branches with disjoint files. One owner per path. Do not merge unrelated agent output, do not create overlapping patches in `server/workflow.js`.
-- Do not change provider/model/plan, turn on billed Cloud Agents, create subscriptions, use external paid calls, or trigger large AI benchmark runs without the existing policy/authority and clear bounded benefit.
-- Keep parallelism low for model/CPU/queue measurements; simultaneous workloads invalidate historical baseline comparisons.
-
-Cursor's native subagents have independent billed context. Do not create redundant `.cursor/agents/` files or overwrite user-global agent configuration.
+**Cost protocol**
+- First use existing source/logs, static read-only checks, GitHub CI and already verified DebugAI infrastructure. Avoid expensive 50/60 model benchmark reruns until a targeted need and run budget are established.
+- GPT-6 performs all GitHub/Current/CI/design work possible without Composer; Composer receives one small concrete instruction at a time, not entire research handoffs.
+- A Composer result must report exact source HEAD, test/run IDs, source-vs-live SHA, evidence, blockers and next gate. Return the report to CHAT; GPT-6 decides the next Change Unit.
+- Read-only tasks can run next to one Composer write only when safely independent. Never introduce overlapping writers or change the user's Cursor settings.
+- Existing master-only persistent delegation and 13-tool DebugAI MCP are **verified as server-side capabilities**. This ChatGPT session's direct DebugAI MCP mount is **not verified**; prefer existing GitHub→authorized server read-only workflows for CHAT-visible evidence and Composer/MCP only for the unexposed live operations. Do not build a new execution transport.
 
 ## 2. Exact next steps — optimize for actual working DebugAI
 
@@ -96,11 +93,11 @@ Cursor's native subagents have independent billed context. Do not create redunda
 ## 3. Work order and merge discipline
 
 1. First complete G0 and pick the one shortest real G1/G2 blocker. No speculative backlog expansion.
-2. At most two workstreams in flight: one bounded source mutation + one independent read-only/test audit. Use isolated worktrees if both mutate distinct files; otherwise serialize.
+2. A single Composer mutation Change Unit at a time. GPT-6 may independently perform non-overlapping GitHub read-only evidence audits. If GPT-6 directly writes source, serialize or require explicitly disjoint paths plus fresh HEAD lease to avoid collision.
 3. After each Change Unit: focused tests -> canonical `npm run verify` (including toolchain prerequisites) -> exact-head CI -> project/Issue Current checkpoint -> next smallest missing Gate. Never suppress failing checks or change tests merely to make them green; investigate fixture-vs-production differences from direct logs.
 4. If current branch moved, fetch and reconcile before Push/PR update. Never force-push, broad pull, merge to main, or overwrite unrelated concurrent Cursor/Codex/GPT commits.
 5. Failed Runtime evidence is not overwritten by source CI. Record exact Server HEAD, model runtime availability, private health and actual commands/results.
-6. Do not create a second Cursor coordinator or override the existing model configuration. If a configured subagent is unavailable, parent continues with deterministic tools and available roles; no automatic paid substitute.
+6. Do not create or launch a second Cursor coordinator or any routine subagent. Composer continues with deterministic tools and DebugAI when available; GPT-6 adjudicates blockers after reading Composer's report. No automatic paid substitute.
 
 ## 4. Reporting — canonical Issue, concise and verifiable
 
