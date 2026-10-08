@@ -24,6 +24,9 @@ test("real Code Scout tools bind source candidates into Diagnoser evidence.read 
  assert.equal(searchResults.length,1); // File search matches content, not filename-only hits.
  const fromRuntime=await runtime.execute({role:"code_scout",selectedSkillIds:["failure-scope-reduction"],tool:"source.search",arguments:{query:"helper"}});
  assert.equal(assertToolResultIntegrity(fromRuntime),true);
+ const checkedContext=runtime.createEvidenceContext({user:"source search admitted evidence smoke",baseEvidenceIds:[],observations:[]});
+ const fromWithContext=await runtime.execute({role:"code_scout",selectedSkillIds:["failure-scope-reduction"],tool:"source.search",arguments:{query:"helper"},evidenceContext:checkedContext});
+ assert.equal(assertToolResultIntegrity(fromWithContext),true);
  const scoutAi={call:async (role,input)=>{
    assert.equal(role,"code_scout");seen.scout.push(input);
    return {content:JSON.stringify(scoutTurn++===0?{tool_requests:[
