@@ -49,6 +49,22 @@ test("real bash/jq host runner completes a valid command with exact correlated r
   assert.deepEqual(f.service.status(id), status);
 });
 
+test("real existing Bash/jq Host runner returns the new inventory page with exact command ID", t => {
+  const f=fixture(t),dir=path.join(f.repo,"scripts");fs.mkdirSync(dir);
+  fs.copyFileSync(path.resolve(__dirname,"../../scripts/host-workspace-inventory.py"),path.join(dir,"host-workspace-inventory.py"));
+  const id=f.enqueue({command_id:"system.projects_inventory",arguments:["0"]});
+  const p=f.execute();
+  assert.equal(p.status,0,p.stderr);
+  const result=f.service.status(id);
+  assert.equal(result.state,"PASS",result.error);
+  assert.equal(result.result.command_id,"system.projects_inventory");
+  assert.equal(result.result.read_only,true);
+  const payload=JSON.parse(result.result.stdout);
+  assert.equal(payload.schema,"debugai.host-workspace-inventory/v1");
+  assert.equal(payload.page,0);
+  assert.ok(Array.isArray(payload.entries));
+});
+
 for (const [label, overrides, error] of [
   ["unsupported command", { command_id: "arbitrary.shell" }, "REQUEST_SCHEMA_OR_BOUNDARY_INVALID"],
   ["wrong repository", { repo: "/workspace/other" }, "REQUEST_SCHEMA_OR_BOUNDARY_INVALID"],
