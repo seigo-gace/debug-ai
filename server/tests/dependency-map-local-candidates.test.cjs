@@ -63,4 +63,6 @@ test("symlinked ancestor never aliases a protected in-repository secret into dep
  assert.equal(mapped.status,"BLOCKED_OR_UNVERIFIED");
  assert.equal(mapped.sha256,undefined);
  assert.ok(!JSON.stringify(result.data).includes("PRIVATE_TEST_ONLY_CANARY"));
+ const tool=createReadOnlyToolRuntime({repo:f.repo,repoPolicy:{assertRepo:x=>x}});
+ await assert.rejects(()=>tool.execute({role:"code_scout",selectedSkillIds:["failure-scope-reduction"],tool:"source.read",arguments:{path:"src/alias/private.js"}}),/READ_PROTECTED_PATH/);
 });
