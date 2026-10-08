@@ -504,6 +504,10 @@ npm run benchmark:model-ab -- --role <role> --axis <thinking|temperature|top_p|t
 ```
 
 A source audit never converts an unexecuted, aborted, incomplete, or failed real benchmark into PASS.
+The Patch Engineer role-only scorer validates required string arrays and exact
+typed reproduction/rollback fields before awarding their points; malformed
+empty fields cannot receive full credit. Its fixture score does not measure
+actual candidate execution or semantic repair success.
 
 Current Model A/B axes are:
 

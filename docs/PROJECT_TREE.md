@@ -61,6 +61,7 @@ server/tests/
   role-contract-correctness.test.cjs covers malformed role fields, diagnosis Evidence binding,
   unsupported confirmation, UNKNOWN, shadow compatibility and held-out false-pass cases
   source-search-coverage.test.cjs covers bounded search negatives, receipt integrity and evidence rehydration
+  patch-engineer-skill-effect-benchmark.test.cjs includes deterministic oracle false-pass and typed-field holdouts
 
 ops/tests/repository-snapshot-real-git.test.cjs
   explicit offline real-Git snapshot regression; separate from Git-command unit fixtures in the canonical Sandbox suite

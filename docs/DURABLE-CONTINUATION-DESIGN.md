@@ -317,6 +317,21 @@ behavior; historical Evidence IDs are never rewritten. Regression authority:
 
 ---
 
+### 6.7 Patch Engineer evaluation oracle — additive source delta, 2026-10-08
+
+The existing role-only Patch Engineer skill-effect scorer awarded full credit to
+the BLOCKED case with required arrays set to null, because missing or malformed
+arrays became empty arrays. Array members were also string-coerced. The scorer
+now checks actual string arrays, exact reproduction keys and typed explicit
+limitation/rollback fields before awarding the associated points. Valid fixed
+outputs retain 5/5; partial scores retain their individual check meanings.
+
+This is deterministic evaluation correctness, not a production contract change
+or a model-quality result. Existing benchmark cases, paired inputs, prompts,
+model assignments and historical 60-case codegen results remain unchanged.
+No Python execution, live model rerun, candidate application or semantic repair
+success is inferred. Negative and independent malformed-member cases run offline.
+
 ## 7. Evidence model
 
 Evidence is an explicit runtime object, not free-form model confidence.
