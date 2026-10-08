@@ -11,6 +11,7 @@ function validateTarget(t){
   if(!ALLOWED.has(command))throw Error("SERVER_COMMAND_DENIED");
   if(t.mode!=="readonly"||t.base_url!==API)throw Error("SERVER_COMMAND_SCOPE_DENIED");
   if(command==="system.projects_inventory" && !/^(?:0|[1-9][0-9]{0,3})$/.test(String(t.inventory_page??0)))throw Error("PROJECT_INVENTORY_PAGE_INVALID");
+  if(command==="system.projects_inventory" && t.inventory_all!==undefined && typeof t.inventory_all!=="boolean")throw Error("PROJECT_INVENTORY_MODE_INVALID");
   return command;
 }
 function safeResult(command,raw){
@@ -54,27 +55,46 @@ async function run({request=fetch,sleep=delay,log=console.log,env=process.env,ta
   const id=env.CF_ACCESS_CLIENT_ID,secret=env.CF_ACCESS_CLIENT_SECRET;
   if(!id||!secret)throw Error("CF_ACCESS_NOT_CONFIGURED");
   const headers={"CF-Access-Client-Id":id,"CF-Access-Client-Secret":secret};
-  const q=await post("/v1/server-command/request",{repo:DEFAULT_REPO,command_id:command,arguments:command==="system.projects_inventory"?[String(target.inventory_page??0)]:[]},headers,request);
-  if(!/^cmd_[0-9a-f]{24}$/.test(q.id||""))throw Error("SERVER_COMMAND_ID_INVALID");
-  log("SERVER_COMMAND_REQUEST_ID="+q.id);
-  for(let i=0;i<60;i++){
-    let state;
-    try{state=await post("/v1/server-command/status",{repo:DEFAULT_REPO,id:q.id},headers,request);}
-    catch(err){if(i===59)throw err;await sleep(2000);continue;}
-    if(state.id!==q.id)throw Error("SERVER_COMMAND_ID_MISMATCH");
-    if(state.state==="PASS"){
-      if(state.result?.read_only!==true||state.result?.command_id!==command||state.result?.exit_code!==0)throw Error("SERVER_COMMAND_RESULT_CONTRACT");
-      for(const line of safeResult(command,state.result.stdout))log(line);
-      log("SERVER_COMMAND_STATE=PASS");
-      log("SERVER_COMMAND_READ_ONLY=TRUE");
-      return;
+  const allPages=command==="system.projects_inventory"&&target.inventory_all===true;
+  let page=Number(target.inventory_page??0);
+  const seenPages=new Set();
+  for(;;){
+    if(seenPages.has(page)||seenPages.size>=200)throw Error("PROJECT_INVENTORY_PAGINATION_INVALID");
+    seenPages.add(page);
+    const args=command==="system.projects_inventory"?[String(page)]:[];
+    const q=await post("/v1/server-command/request",{repo:DEFAULT_REPO,command_id:command,arguments:args},headers,request);
+    if(!/^cmd_[0-9a-f]{24}$/.test(q.id||""))throw Error("SERVER_COMMAND_ID_INVALID");
+    log("SERVER_COMMAND_REQUEST_ID="+q.id);
+    let finished=false,nextPage=null;
+    for(let i=0;i<60;i++){
+      let state;
+      try{state=await post("/v1/server-command/status",{repo:DEFAULT_REPO,id:q.id},headers,request);}
+      catch(err){if(i===59)throw err;await sleep(2000);continue;}
+      if(state.id!==q.id)throw Error("SERVER_COMMAND_ID_MISMATCH");
+      if(state.state==="PASS"){
+        if(state.result?.read_only!==true||state.result?.command_id!==command||state.result?.exit_code!==0)throw Error("SERVER_COMMAND_RESULT_CONTRACT");
+        for(const line of safeResult(command,state.result.stdout))log(line);
+        if(command==="system.projects_inventory"){
+          const data=JSON.parse(state.result.stdout);
+          nextPage=data.next_page;
+          if(nextPage!==null&&(!Number.isInteger(nextPage)||nextPage!==page+1))throw Error("PROJECT_INVENTORY_NEXT_PAGE_INVALID");
+        }
+        log("SERVER_COMMAND_STATE=PASS");
+        log("SERVER_COMMAND_READ_ONLY=TRUE");
+        finished=true;
+        break;
+      }
+      if(state.state==="FAIL")throw Error("SERVER_COMMAND_STATE_FAIL");
+      if(state.state!=="QUEUED"&&state.state!=="RUNNING")throw Error("SERVER_COMMAND_UNEXPECTED_STATE");
+      await sleep(2000);
     }
-    if(state.state==="FAIL")throw Error("SERVER_COMMAND_STATE_FAIL");
-    if(state.state!=="QUEUED"&&state.state!=="RUNNING")throw Error("SERVER_COMMAND_UNEXPECTED_STATE");
-    await sleep(2000);
+    if(!finished)throw Error("SERVER_COMMAND_POLL_TIMEOUT");
+    if(!allPages)break;
+    if(nextPage===null){log("SERVER_PROJECTS_SCAN_COMPLETE=TRUE");break;}
+    page=nextPage;
   }
-  throw Error("SERVER_COMMAND_POLL_TIMEOUT");
 }
+
 function normalizeGitopsStatusId(value){
   if(value===undefined||value===null||value==="")return null;
   if(typeof value!=="string"||!/^gitops_[0-9a-f]{24}$/.test(value))throw Error("GITOPS_STATUS_ID_INVALID");
