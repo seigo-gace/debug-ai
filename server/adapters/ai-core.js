@@ -104,13 +104,14 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
     for(let attempt=1;attempt<=maxTransportTimeoutAttempts;attempt++){
       const ctl=new AbortController();let deadlineTriggered=false;
       let timer=null;
-      let envelope=null,finishReason=null;
+      let envelope=null,finishReason=null,requestDispatched=false;
       try{
         // A transport retry must not restart the absolute role deadline.
         // Recompute the remaining time after the previous attempt and fail
         // before making another request if the shared budget is exhausted.
         effectiveTimeoutMs=resolveEffectiveTimeoutMs(role,timeoutMs,{timeoutMsOverride,deadlineAt,now:Date.now()});
         timer=setTimeout(()=>{deadlineTriggered=true;ctl.abort();},effectiveTimeoutMs);
+        requestDispatched=true;
         const upstreamStartedAt=Date.now();let r,text;
         try{r=await fetchImpl(endpoint,{method:"POST",headers:{authorization:`Bearer ${apiKey}`,"content-type":"application/json"},body:requestBody,signal:ctl.signal,dispatcher:transport});text=await r.text();}finally{upstreamMs+=Date.now()-upstreamStartedAt;}
         if(typeof text==="string")responseBytes+=Buffer.byteLength(text,"utf8");
@@ -124,7 +125,12 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
         return {provider:"llama-swap",role,alias:cfg.alias,model:cfg.backend_model,thinking:cfg.thinking,content,raw:envelope,attempts:attempt,telemetry,control_plane:{selected_skill_ids:invocation?[...invocation.selected_skill_ids]:[...(selectedSkillIds||[])],skill_selection_mode:invocation?invocation.skill_selection_mode:"PRECOMPILED_MEASUREMENT",role_contract_version:invocation?invocation.role_contract_version:null,output_schema:invocation?invocation.output_schema:null,guardrail_profile:invocation?invocation.guardrail_profile:null,effective_timeout_ms:effectiveTimeoutMs,max_tokens:effectiveMaxTokens,requested_max_tokens:tokenBudget.requested_max_tokens,model_output_hard_ceiling_tokens:tokenBudget.model_output_hard_ceiling_tokens,runtime_context_tokens:tokenBudget.runtime_context_tokens,runtime_output_ceiling_tokens:tokenBudget.runtime_output_ceiling_tokens,runtime_context_qualified:tokenBudget.runtime_context_qualified,context_limited:tokenBudget.context_limited,prompt_cache_requested:promptCache,tool_budget_final_round:toolBudgetFinalRound===true,prefix_hash:compiledPrefixHash}};
       }catch(e){
         const timeoutClass=classifyTimeoutError(e,{deadlineTriggered});
-        const telemetry=e?.meta?.telemetry||makeTelemetry({queueWaitMs:runtimeMeta.queueWaitMs,prepareMs,upstreamMs,parseValidateMs,roleStartedAt,requestBytes:requestBytesPerAttempt*attempt,responseBytes,attempts:attempt,envelope,finishReason,prefix:compiledPrefixHash});
+        const attemptsStarted=requestDispatched?attempt:attempt-1;
+        const telemetry=e?.meta?.telemetry||makeTelemetry({queueWaitMs:runtimeMeta.queueWaitMs,prepareMs,upstreamMs,parseValidateMs,roleStartedAt,requestBytes:requestBytesPerAttempt*attemptsStarted,responseBytes,attempts:attemptsStarted,envelope,finishReason,prefix:compiledPrefixHash});
+        if(!requestDispatched&&e instanceof AiCoreError&&e.code==="AI_CORE_BUDGET_EXHAUSTED"){
+          e.meta={...e.meta,attempts:attemptsStarted,telemetry};
+          throw e;
+        }
         if(timeoutClass===TIMEOUT_CLASS.DEADLINE_ABORT)throw new AiCoreError("AI_CORE_TIMEOUT",`AI Core role deadline reached after ${effectiveTimeoutMs}ms`,{role,model:cfg.backend_model,timeout_ms:effectiveTimeoutMs,attempts:attempt,timeout_class:timeoutClass,retryable:false,telemetry});
         if(timeoutClass===TIMEOUT_CLASS.TRANSPORT_TIMEOUT){if(attempt===maxTransportTimeoutAttempts)throw new AiCoreError("AI_CORE_TIMEOUT",`AI Core transport timeout after ${attempt} attempt(s)`,{role,model:cfg.backend_model,timeout_ms:effectiveTimeoutMs,attempts:attempt,timeout_class:timeoutClass,retryable:false,telemetry});continue;}
         if(timeoutClass===TIMEOUT_CLASS.EXTERNAL_ABORT)throw new AiCoreError("AI_CORE_ABORTED","AI Core request aborted outside the role deadline",{role,model:cfg.backend_model,attempts:attempt,timeout_class:timeoutClass,retryable:false,telemetry});
