@@ -5,5 +5,5 @@
   "delegation_id": "dlg_master_debugai_v1",
   "scope": "debugai.compose.reflect",
   "runtime_target": "debugai.compose",
-  "purpose": "Reflect qualified Asteria forensic baseline recreation support only"
+  "purpose": "Reflect qualified Asteria forensic baseline recreation support after verified Host registry re-admit"
 }
