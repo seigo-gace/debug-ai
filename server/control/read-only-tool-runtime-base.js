@@ -103,7 +103,7 @@ function localDependencyMap(repo,sourcePath){
       const candidate=path.join(repo,...rel.split("/"));
       let st;
       try{st=fs.lstatSync(candidate);}catch(error){if(error?.code!=="ENOENT")unverified=true;continue;}
-      if(st.isSymbolicLink()||!st.isFile()){unverified=true;continue;}
+      if(st.isDirectory())continue; // Bare directory may have a supported index module.\n      if(st.isSymbolicLink()||!st.isFile()){unverified=true;continue;}
       try{
         const item=readText(repo,rel,{maxChars:100000});
         matches.push({path:item.path,sha256:item.sha256});
