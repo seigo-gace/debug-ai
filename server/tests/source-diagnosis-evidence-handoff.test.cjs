@@ -1,7 +1,7 @@
 "use strict";
 // Deterministic Tool Loop integration over real repo files, not a paid/model benchmark or actual causal E2E.
 const test=require("node:test"),assert=require("node:assert/strict"),fs=require("node:fs"),os=require("node:os"),path=require("node:path");
-const {createReadOnlyToolRuntime,assertToolResultIntegrity}=require("../control/read-only-tool-runtime-base.js");
+const {createReadOnlyToolRuntime,assertToolResultIntegrity,makeToolResult,searchSource}=require("../control/read-only-tool-runtime-base.js");
 const {runRoleWithReadOnlyTools}=require("../control/tool-loop.js");
 const {getSemanticShadow}=require("../control/role-output-validator.js");
 
@@ -17,7 +17,13 @@ const scoutOutput=()=>({relevant_files:["src/entry.js","src/helper.js"],call_pat
 const hypothesis=(refs,other=[])=>({diagnosis_status:"HYPOTHESES_RETAINED",hypotheses:[{id:"H_SOURCE_PATH",status:"HYPOTHESIS",evidence_refs:refs,counter_evidence_refs:other,falsification_condition:"Reproduce the input failure in an isolated runtime test"}],confirmed_root_cause:null,unsupported_claims:["The observed code path alone does not establish a root cause"]});
 
 test("real Code Scout tools bind source candidates into Diagnoser evidence.read with stable admitted IDs",async t=>{
- const {runtime}=fixture(t),seen={scout:[],diagnoser:[]};let scoutTurn=0;
+ const {runtime,repo}=fixture(t),seen={scout:[],diagnoser:[]};let scoutTurn=0;
+ const coverage={};const searchResults=searchSource(repo,"helper",{coverage});
+ const directResult=makeToolResult("source.search",searchResults,{searchCoverage:coverage});
+ assert.equal(assertToolResultIntegrity(directResult),true);
+ assert.equal(searchResults.length,2);
+ const fromRuntime=await runtime.execute({role:"code_scout",selectedSkillIds:["failure-scope-reduction"],tool:"source.search",arguments:{query:"helper"}});
+ assert.equal(assertToolResultIntegrity(fromRuntime),true);
  const scoutAi={call:async (role,input)=>{
    assert.equal(role,"code_scout");seen.scout.push(input);
    return {content:JSON.stringify(scoutTurn++===0?{tool_requests:[
