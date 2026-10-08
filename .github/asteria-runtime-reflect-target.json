@@ -1,9 +1,9 @@
 {
   "enabled": true,
   "target_branch": "master-internal-runtime-20261008",
-  "target_head": "bfcdbfa82810612cee41e043ea3ffc259cb69eb8",
+  "target_head": "48ea21bce87641178ad0dcd12ad7aefae547b793",
   "delegation_id": "dlg_master_debugai_v1",
   "scope": "debugai.compose.reflect",
   "runtime_target": "debugai.compose",
-  "purpose": "Reflect exact-image rebuild support for Asteria forensic baseline"
+  "purpose": "Reflect bounded Asteria image-build evidence capture"
 }
