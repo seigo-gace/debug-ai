@@ -43,3 +43,13 @@ test("truncated source remains INCOMPLETE, never an absent-dependency assertion"
  assert.equal(result.data.coverage.state,"INCOMPLETE");
  assert.equal(assertToolResultIntegrity(result),true);
 });
+
+test("directory-index imports resolve as candidates but protected imports never expose data",async t=>{
+ const f=fixture(t);f.write("src/entry.ts",'import "./package";\nimport "../secrets/password";\n');
+ f.write("src/package/index.ts","export const nested=true;\n");f.write("secrets/password.ts","private-fixture-value");
+ const result=await f.run("src/entry.ts");
+ assert.equal(result.data.local_candidates.find(x=>x.specifier==="./package").status,"SINGLE_LOCAL_CANDIDATE");
+ assert.equal(result.data.local_candidates.find(x=>x.specifier==="./package").path,"src/package/index.ts");
+ assert.equal(result.data.local_candidates.find(x=>x.specifier==="../secrets/password").status,"BLOCKED_OR_UNVERIFIED");
+ assert.equal(JSON.stringify(result).includes("private-fixture-value"),false);
+});
