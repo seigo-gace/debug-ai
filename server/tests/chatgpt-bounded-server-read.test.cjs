@@ -90,3 +90,21 @@ test("GitOps status is read-only, exact ID and safe terminal fields only",async 
   assert.ok(events.includes("GITOPS_DEPLOYED_SHA="+"e".repeat(40)));
   assert.ok(!events.join(" ").includes("must-not-print"));
 });
+
+test("existing CHAT workflow can retrieve a concrete server workspace inventory page",async t=>{
+  const targetFile=targetFixture(t,{server_command_id:"system.projects_inventory",inventory_page:2});
+  const payload={schema:"debugai.host-workspace-inventory/v1",page:2,page_size:6,total:14,next_page:null,missing_roots:[],entries:[{root:"/home/admin1/projects",name:"repo",path:"/home/admin1/projects/repo",kind:"git_repository",head:"a".repeat(12),branch:"main"}]};
+  const events=[],calls=[],id="cmd_"+"e".repeat(24);
+  const request=async(url,args)=>{
+    calls.push(JSON.parse(args.body));
+    return {status:url.endsWith("/request")?202:200,json:async()=>url.endsWith("/request")?{id}:{id,state:"PASS",result:{read_only:true,command_id:"system.projects_inventory",exit_code:0,stdout:JSON.stringify(payload)}}};
+  };
+  await m.run({request,sleep:async()=>{},log:s=>events.push(s),env:{CF_ACCESS_CLIENT_ID:"id",CF_ACCESS_CLIENT_SECRET:"test-secret"},targetFile});
+  assert.deepEqual(calls[0],{repo:"/workspace/debug-ai",command_id:"system.projects_inventory",arguments:["2"]});
+  assert.equal(calls[1].id,id);
+  assert.ok(events.includes("SERVER_PROJECTS_TOTAL=14"));
+  assert.ok(events.includes("SERVER_PROJECTS_NEXT=NONE"));
+  assert.ok(events.find(x=>x.startsWith("SERVER_PROJECTS_DATA=")).includes("/home/admin1/projects/repo"));
+  assert.ok(!events.join("|").includes("test-secret"));
+  assert.throws(()=>m.validateTarget({...target,server_command_id:"system.projects_inventory",inventory_page:"../"}),/PROJECT_INVENTORY_PAGE_INVALID/);
+});
