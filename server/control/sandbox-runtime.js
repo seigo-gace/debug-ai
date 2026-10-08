@@ -77,14 +77,13 @@ function copySnapshot(source,destination,options={}){
   try{
     for(const entry of manifest.entries){
       const from=path.join(root,entry.path),to=path.join(dst,entry.path);
-      if(entry.type==="directory"){fs.mkdirSync(to,{recursive:true});continue;}
+      if(entry.type==="directory"){fs.mkdirSync(to,{recursive:true,mode:0o600|entry.executable_mode});continue;}
       if(fs.realpathSync(path.dirname(from))!==path.dirname(from))throw new Error("SANDBOX_SNAPSHOT_DIRECTORY_CHANGED");
       const fd=fs.openSync(from,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW);let data;
       try{if(!fs.fstatSync(fd).isFile())throw new Error("SANDBOX_SNAPSHOT_FILE_CHANGED");data=fs.readFileSync(fd);}finally{fs.closeSync(fd);}
       if(data.length!==entry.bytes||snapshotHash(data)!==entry.sha256||(fs.lstatSync(from).mode&0o111)!==entry.executable_mode)throw new Error("SANDBOX_SNAPSHOT_SOURCE_CHANGED");
-      fs.writeFileSync(to,data,{flag:"wx",mode:0o600|entry.executable_mode});fs.chmodSync(to,0o600|entry.executable_mode);
+      fs.writeFileSync(to,data,{flag:"wx",mode:0o600|entry.executable_mode});
     }
-    for(const entry of manifest.entries.filter(e=>e.type==="directory").reverse())fs.chmodSync(path.join(dst,entry.path),0o600|entry.executable_mode);
     if(snapshotInventory(root,options).digest!==manifest.digest)throw new Error("SANDBOX_SNAPSHOT_SOURCE_CHANGED");
     verifySnapshotCopy(dst,manifest);
     return {files:manifest.files,bytes:manifest.bytes,skipped_symlinks:manifest.exclusions.filter(e=>e.type==="symlink").length,manifest};
