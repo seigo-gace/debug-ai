@@ -2,6 +2,15 @@
 set -u
 set -o pipefail
 
+# The outer bounded Server Command runs under the docker group, but
+# systemd-run --user starts this separate unit with the base user groups.
+# Follow the existing Asteria Host wrapper's docker-group entry pattern.
+# Never grant new group membership or access to arbitrary commands.
+if [ "${1:-}" != "--docker-group" ]; then
+  exec /usr/bin/sg docker -c '/usr/bin/env bash /home/admin1/projects/debug-ai/scripts/host-canonical-devlog-activate.sh --docker-group'
+fi
+[ "$(id -gn)" = "docker" ] || { printf '%s\n' 'CANONICAL_DEVLOG_DOCKER_GROUP_NOT_ACTIVE' >&2; exit 1; }
+
 REPO="${DEBUG_AI_HOST_REPO:-/home/admin1/projects/debug-ai}"
 TGS="/home/admin1/projects/TGserver"
 RESULT="$REPO/.debugai-input/canonical-devlog-activation/result.json"
