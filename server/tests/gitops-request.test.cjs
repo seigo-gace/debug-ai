@@ -65,3 +65,17 @@ test("GitOps status remains readable while Host runner owns the processing reque
   fs.writeFileSync(path.join(root, "status", `${queued.id}.json`), JSON.stringify(terminal));
   assert.deepEqual(service.status({ repo, id: queued.id }), terminal);
 });
+
+
+test("delegation input preserves human gate and binds identity to generated operation", t => {
+  const { repo, service } = fixture();
+  t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
+  const input = { ...base(repo), action: "deploy", sha: base(repo).expected_head, delegation: { id: "dlg_test", scope: "debugai.compose.reflect" } };
+  assert.throws(() => service.request({ ...input, human_approved: false }), /GITOPS_HUMAN_APPROVAL_REQUIRED/);
+  assert.throws(() => service.request({ ...input, delegation: { ...input.delegation, request_identity: "caller" } }), /GITOPS_DELEGATION_INPUT_INVALID/);
+  assert.throws(() => service.request({ ...input, delegation: { ...input.delegation, scope: "shell" } }), /GITOPS_DELEGATION_INPUT_INVALID/);
+  const q = service.request(input);
+  const r = JSON.parse(fs.readFileSync(path.join(service.queueRoot(repo), "requests", q.id + ".json")));
+  assert.equal(r.delegation.operation_id, q.id);
+  assert.equal(r.delegation.request_identity, "debugai.authenticated-control");
+});

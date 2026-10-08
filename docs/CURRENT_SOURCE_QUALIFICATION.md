@@ -1,5 +1,15 @@
 # DebugAI Current Source Qualification
 
+## Standing Delegation source boundary
+
+The existing guarded GitOps lane now supports Host-only standing delegation for
+`deploy` / `debugai.compose.reflect`. Issuer, validity/revocation, exact target,
+changed-path scope and request identity are checked before a bound single-use
+receipt is issued and consumed. Manual receipt compatibility is retained.
+Source/CI qualification and live delegated E2E remain separate gates. The last
+fresh live readback before this Change Unit was `4190f870...`; broader PR #40
+qualification is unchanged. Contract/design delta: [Standing Delegation](GITOPS_STANDING_DELEGATION.md).
+
 ## Host Server Command validation correction
 
 Fresh live reproduction found an extra closing parenthesis in the Host runner's

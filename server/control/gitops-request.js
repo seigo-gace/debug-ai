@@ -106,6 +106,20 @@ class GitOpsRequestService {
       request.sha = normalizeSha(input.sha, "GITOPS_DEPLOY_SHA_INVALID");
       if (request.sha !== expectedHead) fail("GITOPS_DEPLOY_SHA_HEAD_MISMATCH");
     }
+    if (input.delegation !== undefined) {
+      const d = input.delegation;
+      if (action !== "deploy" || !d || typeof d !== "object" || Array.isArray(d) ||
+          Object.keys(d).some(key => !["id", "scope"].includes(key)) ||
+          !/^dlg_[a-z0-9_-]{1,64}$/.test(d.id || "") || d.scope !== "debugai.compose.reflect") {
+        fail("GITOPS_DELEGATION_INPUT_INVALID");
+      }
+      // Identity is supplied by the existing authenticated control service,
+      // never by caller text. Host-only policy remains the authorization proof.
+      request.delegation = { id: d.id, scope: d.scope, operation_id: request.id,
+        request_identity: "debugai.authenticated-control", production: true,
+        effects: { destructive: false, persistent_data: false, secrets: false,
+          provider_model: false, public_exposure: false } };
+    }
     const root = this.queueRoot(repo);
     atomicJsonWrite(path.join(root, "requests", `${request.id}.json`), request);
     return { schema: SCHEMA, id: request.id, action, state: "QUEUED", repo, branch, expected_head: expectedHead };
