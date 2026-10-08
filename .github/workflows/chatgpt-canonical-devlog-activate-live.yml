@@ -110,7 +110,7 @@ jobs:
             id="$(jq -r '.id // empty' /tmp/request.json)"
             for _ in $(seq 1 30); do
               code="$(curl -sS --max-time 30 -o /tmp/status.json -w '%{http_code}' -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" -H 'content-type: application/json' --data-binary "$(jq -nc --arg id "$id" '{id:$id}')" "$BASE_URL/v1/server-command/status")"
-              [ "$code" = "200" || { sleep 2; continue; }
+              [ "$code" = "200" ] || { sleep 2; continue; }
               state="$(jq -r '.state // "UNKNOWN"' /tmp/status.json)"
               [ "$state" = "PASS" ] && { jq -r '.result.stdout' /tmp/status.json; return 0; }
               [ "$state" = "FAIL" ] && return 12

@@ -9,6 +9,8 @@ test("canonical DevLog activation poll keeps valid HTTP guard syntax",()=>{
   assert.doesNotMatch(workflow,/\[ "\$code" = "202" \|\| return 11/);
   assert.match(workflow,/\[ "\$code" = "202" \] \|\| return 11/);
   assert.match(workflow,/canonical\.devlog_activate_status/);
+  assert.doesNotMatch(workflow,/\[ "\$code" = "200" \|\| \{ sleep 2; continue; \}/);
+  assert.match(workflow,/\[ "\$code" = "200" \] \|\| \{ sleep 2; continue; \}/);
 });
 
 test("canonical activation cannot use approval booleans without exact owner Github receipt",()=>{
