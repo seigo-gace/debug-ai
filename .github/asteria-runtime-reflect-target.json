@@ -1,9 +1,9 @@
 {
   "enabled": true,
   "target_branch": "master-internal-runtime-20261008",
-  "target_head": "48ea21bce87641178ad0dcd12ad7aefae547b793",
+  "target_head": "952f0b287ad242355538890d5abb6b1faba342fa",
   "delegation_id": "dlg_master_debugai_v1",
   "scope": "debugai.compose.reflect",
   "runtime_target": "debugai.compose",
-  "purpose": "Reflect bounded Asteria image-build evidence capture"
+  "purpose": "Reflect Docker-group-preserving Asteria forensic probe"
 }
