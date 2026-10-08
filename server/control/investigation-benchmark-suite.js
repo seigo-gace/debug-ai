@@ -11,7 +11,7 @@ const SCHEMA="debugai.investigation-benchmark/v1";
 const LEVELS=Object.freeze(["L1","L2","L3","L4","L5"]);
 const ROLES=Object.freeze(["code_scout","causal_scout","researcher","diagnoser","local_reviewer"]);
 const REVIEW_POLICY="Return JSON only with exactly these top-level keys: verdict, decision, claims. verdict must be PASS, FAIL, UNKNOWN, INSUFFICIENT_EVIDENCE, BLOCKED, APPROVED, REJECTED, or ACCEPTED. decision must be CONTINUE, HANDOFF, INSUFFICIENT_EVIDENCE, BLOCKED, or DONE. claims must be an array. Do not invent evidence and do not claim mutation or patch application.";
-const CODE_SCOUT_COMPAT_POLICY="Return JSON only with exactly these top-level keys: source_facts, relevant_files, call_path, contract_mismatch, excluded_files, unknowns. source_facts must be an array containing the supplied source fact objects needed for downstream evidence compatibility. relevant_files/excluded_files/call_path/unknowns must be arrays of strings. contract_mismatch must be null or an object with file, expected, observed. Do not diagnose root cause and do not invent files or behavior not supplied in the case.";
+const CODE_SCOUT_COMPAT_POLICY=CODE_SCOUT_POLICY;
 const POLICIES=Object.freeze({code_scout:CODE_SCOUT_COMPAT_POLICY,causal_scout:CAUSAL_POLICY,researcher:RESEARCH_POLICY,diagnoser:DIAGNOSER_POLICY,local_reviewer:REVIEW_POLICY});
 const BENCHMARK_MAX_TOKENS=Object.freeze({code_scout:2048,causal_scout:1024,researcher:1024,diagnoser:2048,local_reviewer:1024});
 const C=(id,level,role,input,expected)=>Object.freeze({id,level,role,input:Object.freeze(input),expected:Object.freeze(expected)});
