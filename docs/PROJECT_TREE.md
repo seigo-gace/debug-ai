@@ -1,5 +1,14 @@
 # DebugAI Project Tree
 
+`scripts/host-gitops-master-internal.sh` validates the canonical server-core Master
+registry inside the existing runner; it is not an executor. The trusted Host
+`scripts/host-gitops-register-master.sh` admits/disables/revokes private registry
+entries with readback/audit and never deploys. `ops/tests/gitops-master-internal.test.cjs`
+covers actual Bash/jq registry/receipt/lifecycle regression; shared real Host fixture
+lives in `ops/tests/fixtures/gitops-delegation-fixture.cjs`.
+`docs/MASTER_INTERNAL_PERSISTENT_DELEGATION.md` owns this additive design delta,
+registration/mapping/lifecycle/compatibility and Runtime qualification contract.
+
 `scripts/host-gitops-delegation.sh` is a sourced policy/receipt helper of the existing
 Host GitOps runner, not an executor. `ops/tests/gitops-standing-delegation.test.cjs`
 owns real Bash/jq authorization/receipt/replay regression.

@@ -2,25 +2,7 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path');
 const {spawnSync}=require('node:child_process');
 const runner=path.resolve(__dirname,'../../scripts/host-gitops-runner.sh'),helper=path.resolve(__dirname,'../../scripts/host-gitops-delegation.sh');
-function fixture(t){
- const root=fs.mkdtempSync(path.join(os.tmpdir(),'delegated-gitops-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
- const repo=path.join(root,'repo'),trust=path.join(root,'trust'),approvals=path.join(root,'approvals'),queue=path.join(repo,'.debugai-input/gitops');
- for(const d of [repo,path.join(repo,'.git'),trust,path.join(trust,'policies'),approvals,path.join(queue,'requests')])fs.mkdirSync(d,{recursive:true,mode:0o700});
- const sha='a'.repeat(40),id='gitops_'+'b'.repeat(24),now=Date.now();
- const effects={destructive:false,persistent_data:false,secrets:false,provider_model:false,public_exposure:false};
- const policy={schema:'debugai.standing-delegation/v1',id:'dlg_test',issuer:'master:seigo-gace',authority:'gace-master',audit_identity:'master:seigo-gace/delegated:server-ai',repo:'/workspace/debug-ai',remote:'https://github.com/seigo-gace/debug-ai.git',branch:'feat/tgserver-async-log-sink-20261003',allowed_operations:['deploy'],allowed_scopes:['debugai.compose.reflect'],allow_production:true,effects,valid_from:now-10000,expires_at:now+600000,revoked:false,request_identity:'debugai.authenticated-control',allowed_paths:['scripts/','docs/']};
- const request={schema:'debugai.gitops-request/v1',id,action:'deploy',repo:policy.repo,branch:policy.branch,expected_head:sha,sha,human_approved:true,expires_at:now+60000,delegation:{id:policy.id,scope:policy.allowed_scopes[0],operation_id:id,request_identity:policy.request_identity,production:true,effects}};
- const policyFile=path.join(trust,'policies/dlg_test.json'),issuerFile=path.join(trust,'issuers.json'),requestFile=path.join(queue,`requests/${id}.json`),receipt=path.join(approvals,`${id}.approve`),calls=path.join(root,'calls');
- const write=(file,v)=>fs.writeFileSync(file,JSON.stringify(v),{mode:0o600});write(policyFile,policy);write(issuerFile,{schema:'debugai.delegation-issuers/v1',issuers:[{issuer:policy.issuer,authority:policy.authority,enabled:true}]});
- const git=path.join(root,'git'),docker=path.join(root,'docker'),curl=path.join(root,'curl');
- fs.writeFileSync(git,`#!/bin/sh\ncase "$1" in\nremote) echo '${policy.remote}';;\nls-remote) echo '${sha} refs/heads/${policy.branch}';;\nrev-parse) if [ -f '${root}/changed-head' ]; then cat '${root}/changed-head'; else echo '${sha}'; fi;;\ndiff) if [ "$#" -eq 4 ]; then if [ -f '${root}/forbidden-path' ]; then echo compose.yaml; else echo scripts/host-gitops-runner.sh; fi; fi;;\nls-files|fetch|merge-base) exit 0;;\ncheckout) echo checkout >> '${calls}';;\n*) exit 99;;\nesac\n`,{mode:0o700});
- fs.writeFileSync(docker,`#!/bin/sh\necho docker >> '${calls}'\nif [ "$1" = inspect ]; then echo 'running|healthy'; elif [ "$2" = ps ]; then echo test-container; fi\n`,{mode:0o700});fs.writeFileSync(curl,'#!/bin/sh\nprintf 200\n',{mode:0o700});
- const env={...process.env,DEBUG_AI_HOST_REPO:repo,DEBUG_AI_GITOPS_GIT_BIN:git,DEBUG_AI_GITOPS_DOCKER_BIN:docker,DEBUG_AI_GITOPS_CURL_BIN:curl,DEBUG_AI_GITOPS_APPROVAL_ROOT:approvals,DEBUG_AI_GITOPS_DELEGATION_ROOT:trust};
- const run=()=>{write(requestFile,request);const r=spawnSync('bash',[runner],{env,encoding:'utf8'});assert.equal(r.status,0,r.stderr);return JSON.parse(fs.readFileSync(path.join(queue,`status/${id}.json`)));};
- const prepare=()=>{write(requestFile,request);const r=spawnSync('bash',['-c',`source '${runner.replaceAll("'","'\\''")}'`,],{env,encoding:'utf8'});return r;};
- const receiptCheck=(mutation='')=>{write(requestFile,request);const body=fs.readFileSync(runner,'utf8').replace(/main "\$@"\s*$/,'');const bootstrap=path.join(root,'runner-library.sh');fs.writeFileSync(bootstrap,body.replace('source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/host-gitops-delegation.sh"',`source '${helper}'`));return spawnSync('bash',['-c',`source '${bootstrap}'; request_id='${id}'; request_sha='${sha}'; issue_delegated_receipt '${requestFile}' '${sha}' '${receipt}' || { echo "$err_code"; exit 1; }; ${mutation}; consume_delegated_receipt '${requestFile}' '${receipt}' || { echo "$err_code"; exit 1; }; consume_delegated_receipt '${requestFile}' '${receipt}' || { echo "$err_code"; exit 1; }`],{env,encoding:'utf8'});};
- return {root,repo,trust,approvals,queue,sha,id,policy,request,policyFile,issuerFile,requestFile,receipt,calls,write,run,receiptCheck};
-}
+const {fixture}=require('./fixtures/gitops-delegation-fixture.cjs');
 for(const [label,change,error] of [
  ['missing delegation',f=>delete f.request.delegation,'DEPLOY_HOST_APPROVAL_REQUIRED'],
  ['invalid issuer',f=>f.policy.issuer='untrusted','DELEGATION_ISSUER_INVALID'],

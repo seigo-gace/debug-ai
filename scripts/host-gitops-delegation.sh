@@ -13,6 +13,7 @@ delegation_digest() { sha256sum -- "$1" | cut -d' ' -f1; }
 
 validate_standing_delegation() {
   local request="$1" id now error
+  if is_master_internal "$request"; then validate_master_internal "$request"; return $?; fi
   id="$("$JQ_BIN" -r '.delegation.id // ""' "$request")"
   [[ "$id" =~ ^dlg_[a-z0-9_-]{1,64}$ ]] || fail DELEGATION_REQUIRED || return 1
   trusted_delegation_dir "$DELEGATION_ROOT" && trusted_delegation_dir "$DELEGATION_ROOT/policies" || fail DELEGATION_TRUST_ROOT_INVALID || return 1
@@ -48,6 +49,10 @@ validate_delegation_paths() {
   local paths="$1" value
   while IFS= read -r value; do
     [ -z "$value" ] && continue
+    if "$JQ_BIN" -e '.delegation_mode=="MASTER_INTERNAL_PERSISTENT"' "$delegation_policy" >/dev/null; then
+      [[ "$value" != *$'\n'* ]] || fail MASTER_CHANGED_PATH_INVALID || return 1
+      "$JQ_BIN" -en --arg path "$value" '$path|test("(^|/)(\\.git|\\.env[^/]*|compose[^/]*|Dockerfile[^/]*|[^/]*[Ss]ecret[^/]*|[^/]*\\.key)(/|$)")|not' >/dev/null || fail MASTER_PROTECTED_PATH_FORBIDDEN || return 1
+    fi
     "$JQ_BIN" -e --arg path "$value" 'any(.allowed_paths[]; . as $allowed | if endswith("/") then $path|startswith($allowed) else $path==$allowed end)' "$delegation_policy" >/dev/null || fail DELEGATION_CHANGED_PATH_FORBIDDEN || return 1
   done <<<"$paths"
 }
@@ -59,9 +64,9 @@ issue_delegated_receipt() {
   validate_delegation_paths "$paths" || return 1
   [ ! -e "$receipt.used" ] && [ ! -L "$receipt.used" ] && [ ! -e "$receipt" ] && [ ! -L "$receipt" ] || fail DELEGATION_RECEIPT_ALREADY_EXISTS_OR_USED || return 1
   now="$(date +%s%3N)"
-  expires="$("$JQ_BIN" -nr --argjson now "$now" --slurpfile r "$request" --slurpfile p "$delegation_policy" '[$r[0].expires_at,$p[0].expires_at,($now+300000)]|min')" || fail DELEGATION_RECEIPT_INVALID || return 1
+  expires="$("$JQ_BIN" -nr --argjson now "$now" --slurpfile r "$request" --slurpfile p "$delegation_policy" '[$r[0].expires_at,$p[0].expires_at // $r[0].expires_at,($now+300000)]|min')" || fail DELEGATION_RECEIPT_INVALID || return 1
   json="$("$JQ_BIN" -n --slurpfile r "$request" --slurpfile p "$delegation_policy" --arg digest "$(delegation_digest "$request")" --arg policy_digest "$(delegation_digest "$delegation_policy")" --arg issuer_digest "$(delegation_digest "$DELEGATION_ROOT/issuers.json")" --arg before "$before" --argjson now "$now" --argjson expires "$expires" '
-    $r[0] as $r | $p[0] as $p | {schema:"debugai.host-approval/v2",delegation_id:$p.id,issuer:$p.issuer,authority:$p.authority,audit_identity:$p.audit_identity,request_identity:$r.delegation.request_identity,operation_id:$r.id,operation:$r.action,repo:$r.repo,branch:$r.branch,sha:$r.sha,scope:$r.delegation.scope,production:$r.delegation.production,effects:$r.delegation.effects,issued_at:$now,expires_at:$expires,request_digest:$digest,policy_digest:$policy_digest,issuer_digest:$issuer_digest,target_before_head:$before}')" || fail DELEGATION_RECEIPT_INVALID || return 1
+    $r[0] as $r | $p[0] as $p | {schema:"debugai.host-approval/v2",delegation_id:$p.id,issuer:$p.issuer,authority:$p.authority,audit_identity:$p.audit_identity,request_identity:$r.delegation.request_identity,operation_id:$r.id,operation:$r.action,repo:$r.repo,branch:$r.branch,sha:$r.sha,scope:$r.delegation.scope,production:$r.delegation.production,effects:$r.delegation.effects,issued_at:$now,expires_at:$expires,request_digest:$digest,policy_digest:$policy_digest,issuer_digest:$issuer_digest,target_before_head:$before} + (if $p.delegation_mode=="MASTER_INTERNAL_PERSISTENT" then {delegation_mode:$p.delegation_mode,repository:$p.repository,repository_id:$p.repository_id,project:$p.project,server_project_id:$p.server_project_id,server_project_path:$p.server_project_path,runtime_target:$p.runtime_target.id} else {} end)')" || fail DELEGATION_RECEIPT_INVALID || return 1
   ensure_dir "$APPROVAL_ROOT" || return 1
   (umask 077; set -C; printf '%s\n' "$json" > "$receipt") || fail DELEGATION_RECEIPT_CREATE_FAILED || return 1
 }
@@ -79,7 +84,8 @@ consume_delegated_receipt() {
   error="$("$JQ_BIN" -r --slurpfile r "$request" --slurpfile p "$delegation_policy" --arg digest "$(delegation_digest "$request")" --arg policy_digest "$(delegation_digest "$delegation_policy")" --arg issuer_digest "$(delegation_digest "$DELEGATION_ROOT/issuers.json")" --arg before "$before" --argjson now "$now" '
     $r[0] as $r | $p[0] as $p |
     if .schema!="debugai.host-approval/v2" then "DELEGATION_RECEIPT_INVALID"
-    elif (.issued_at|type)!="number" or (.expires_at|type)!="number" or .issued_at>$now or .expires_at<=$now or .expires_at>$p.expires_at or .expires_at>$r.expires_at or .expires_at>(.issued_at+300000) then "DELEGATION_RECEIPT_EXPIRED"
+    elif (.issued_at|type)!="number" or (.expires_at|type)!="number" or .issued_at>$now or .expires_at<=$now or .expires_at>($p.expires_at // $r.expires_at) or .expires_at>$r.expires_at or .expires_at>(.issued_at+300000) then "DELEGATION_RECEIPT_EXPIRED"
+    elif $p.delegation_mode=="MASTER_INTERNAL_PERSISTENT" and (.delegation_mode!=$p.delegation_mode or .repository!=$p.repository or .repository_id!=$p.repository_id or .project!=$p.project or .server_project_id!=$p.server_project_id or .server_project_path!=$p.server_project_path or .runtime_target!=$p.runtime_target.id) then "DELEGATION_RECEIPT_BINDING_MISMATCH"
     elif .operation_id!=$r.id then "DELEGATION_RECEIPT_OPERATION_ID_MISMATCH"
     elif .request_identity!=$r.delegation.request_identity then "DELEGATION_RECEIPT_REQUEST_IDENTITY_MISMATCH"
     elif .sha!=$r.sha then "DELEGATION_RECEIPT_SHA_MISMATCH"
