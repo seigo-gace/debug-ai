@@ -1,11 +1,18 @@
 "use strict";
 const crypto=require("node:crypto"),fs=require("node:fs"),path=require("node:path");
-const SCHEMA="debugai.server-command-request/v1",STATUS_SCHEMA="debugai.server-command-status/v1",COMMANDS=new Set(["project.pwd","project.git_head","project.git_status","project.git_changed_paths","project.git_recent_commits","project.python_unittest","service.debug_ai_state","service.sandbox_state","service.debug_ai_health","system.disk_usage","asteria.baseline_probe_start","asteria.baseline_probe_status","canonical.devlog_activate_start","canonical.devlog_activate_status","github.auth_status","github.repo_view","github.pr_current","github.actions_recent","github.control_current"]),REQUEST_ID_RE=/^cmd_[0-9a-f]{24}$/;
+const SCHEMA="debugai.server-command-request/v1",STATUS_SCHEMA="debugai.server-command-status/v1",COMMANDS=new Set(["project.pwd","project.git_head","project.git_status","project.git_changed_paths","project.git_recent_commits","project.python_unittest","service.debug_ai_state","service.sandbox_state","service.debug_ai_health","system.disk_usage","system.projects_inventory","asteria.baseline_probe_start","asteria.baseline_probe_status","canonical.devlog_activate_start","canonical.devlog_activate_status","github.auth_status","github.repo_view","github.pr_current","github.actions_recent","github.control_current"]),REQUEST_ID_RE=/^cmd_[0-9a-f]{24}$/;
 function fail(code){const e=new Error(code);e.code=String(code).split(":")[0];throw e;}
 function ensureDir(d){fs.mkdirSync(d,{recursive:true,mode:0o700});}
 function atomicJsonWrite(file,value){const d=path.dirname(file);ensureDir(d);const tmp=`${file}.tmp-${process.pid}-${Date.now()}`;fs.writeFileSync(tmp,JSON.stringify(value,null,2),{encoding:"utf8",mode:0o600,flag:"wx"});fs.renameSync(tmp,file);}
 function normalizeCommandId(value){const id=String(value||"").trim();if(!COMMANDS.has(id)&&id!=="github.gh_read")fail("SERVER_COMMAND_NOT_ALLOWED");return id;}
 function normalizeArguments(commandId,value){
+  if(commandId==="system.projects_inventory"){
+    const args=value===undefined||value===null?[]:value;
+    if(!Array.isArray(args)||args.length>1)fail("SERVER_COMMAND_ARGUMENTS_INVALID");
+    const page=args.length?String(args[0]):"0";
+    if(!/^(?:0|[1-9][0-9]{0,3})$/.test(page))fail("PROJECT_INVENTORY_PAGE_INVALID");
+    return[page];
+  }
   if(commandId==="project.python_unittest"){
     const args=Array.isArray(value)?value.map(v=>String(v)):fail("SERVER_COMMAND_ARGUMENTS_INVALID");
     if(args.length!==1)fail("SERVER_COMMAND_ARGUMENTS_INVALID");
