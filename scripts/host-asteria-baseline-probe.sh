@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -u
 set -o pipefail
+if [ "${1:-}" != "--docker-group" ]; then
+  exec /usr/bin/sg docker -c '/usr/bin/env bash /home/admin1/projects/debug-ai/scripts/host-asteria-baseline-probe.sh --docker-group'
+fi
 REPO="${DEBUG_AI_HOST_REPO:-/home/admin1/projects/debug-ai}"
 RESULT="$REPO/.debugai-input/asteria-baseline-probe/result.json"
 DOCKER_BIN="${DEBUG_AI_SERVER_COMMAND_DOCKER_BIN:-docker}"
