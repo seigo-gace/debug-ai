@@ -379,6 +379,17 @@ inspected paths, limits, truncation and read failures. Zero hits never prove
 repository-wide absence; complete coverage applies only to the declared search
 scope. Bounded evidence projections retain a coverage summary.
 
+Code Scout's existing `dependency.map` preserves its lexical import specifiers
+and now returns bounded local JS/TS module-file **candidates** with source and
+candidate hashes. Missing, ambiguous, escaped, protected, symlink-backed and
+third-party specifiers remain explicit unresolved/unverified statuses. The
+coverage receipt declares a 100,000-character source prefix, 128-specifier cap,
+regex (not AST) extraction and `repository_absence_proven=false`; a candidate
+is never proof of a real import, transitive dependency or call graph. The
+existing role/tool allowlist and integrity-bound Evidence handling are reused.
+This is source/tool-integration qualification only, not real model diagnosis,
+Python semantic analysis, generated-code correctness or Runtime completion.
+
 The central role-output validator checks Code Scout's localization fields,
 Diagnoser's typed hypothesis/status contract, and non-empty Patch Engineer
 operations. The default semantic mode remains `shadow`: contract violations are
