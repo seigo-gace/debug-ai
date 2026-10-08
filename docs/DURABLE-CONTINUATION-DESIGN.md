@@ -281,8 +281,39 @@ scope. This is a point-in-time source binding, not a claim of atomic filesystem
 capture or complete candidate construction. Existing BASELINE/isolated CANDIDATE,
 approval and Strict Completion gates remain necessary. Rollback restores the old
 Source implementation without persistent-state migration; it must never rewrite
-saved checkpoint identities. Real Git regression authority:
-`server/tests/repository-snapshot-auto-bind.test.cjs`.
+saved checkpoint identities. Git binding unit regression authority:
+`server/tests/repository-snapshot-auto-bind.test.cjs`. These tests inject command
+evidence so the existing Sandbox needs no Git executable or permission changes.
+Actual Git execution regressions are separately run through
+`ops/tests/repository-snapshot-real-git.test.cjs`; unit/Sandbox PASS does not imply
+that executable is configured inside a sandbox job.
+
+### 6.6 Source search coverage — additive source delta, 2026-10-08
+
+The existing bounded source search returned an empty match array when a query
+appeared beyond the 128000-character read prefix, without exposing incomplete
+coverage. Reuse the existing walk/read/search and Tool Result/Evidence contracts.
+Keep the result `data` match array and tool arguments unchanged. Add optional
+`integrity.search_coverage` with query, inspected paths/counts, limits, file/match
+cap flags, directory/read errors and truncated-file count. Bind the receipt into
+the existing result digest/Evidence ID and reject tampering. Legacy Tool Results
+without a receipt retain their old digest and integrity validation; their search
+coverage remains UNKNOWN, not implicitly complete.
+
+COMPLETE_WITHIN_SEARCH_SCOPE means the selected regular searchable files were
+fully read within the existing exclusions, not exhaustive repository absence.
+Any cap, read failure or truncation marks INCOMPLETE. File-cap detection is
+conservative at the limit. `repository_absence_proven` stays false even for a
+complete scoped query. Preserve source/permission/Secret filtering; no new search
+engine, tool, traversal expansion or MCP interface is introduced.
+
+Existing evidence projections prepend a small coverage summary before bounded
+matches, retaining the full receipt in durable results for admitted evidence.read.
+Source identity/admitted-window checks remain the owning workflow's responsibility.
+The invocation compiler explains scope and zero-hit limits without supplying any
+benchmark answers. Rollback removes optional receipts and restores old Source
+behavior; historical Evidence IDs are never rewritten. Regression authority:
+`server/tests/source-search-coverage.test.cjs` and existing tool-loop tests.
 
 ---
 

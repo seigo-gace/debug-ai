@@ -347,6 +347,11 @@ Live MCP stdio on approved b30649a passed initialize, the exact ordered nine-too
 
 Model confidence is not evidence.
 
+Source search preserves its match array and adds integrity-bound search coverage:
+inspected paths, limits, truncation and read failures. Zero hits never prove
+repository-wide absence; complete coverage applies only to the declared search
+scope. Bounded evidence projections retain a coverage summary.
+
 The central role-output validator checks Code Scout's localization fields,
 Diagnoser's typed hypothesis/status contract, and non-empty Patch Engineer
 operations. The default semantic mode remains `shadow`: contract violations are
