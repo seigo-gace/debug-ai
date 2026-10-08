@@ -41,7 +41,7 @@ test("Real request awaits terminal status, exact ID, command and no write",async
 
 
 test("GitOps status is read-only, exact ID and safe terminal fields only",async()=>{
-  const id="gitops_"+"a".repeat(24),events=[],calls=[];
+  const id=target.gitops_status_id,events=[],calls=[];
   assert.equal(m.normalizeGitopsStatusId(""),null);
   assert.throws(()=>m.normalizeGitopsStatusId("gitops_invalid"),/GITOPS_STATUS_ID_INVALID/);
   const requester=async(url,args)=>{
