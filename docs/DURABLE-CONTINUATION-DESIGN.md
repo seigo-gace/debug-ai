@@ -351,6 +351,45 @@ Baseline/candidate materialization identity and language oracle qualification ar
 separate prerequisites. This change does not qualify Python execution, a live
 workflow, model semantic accuracy or Strict Completion.
 
+### 6.9 Structured Requirement/Evidence handoff — Step 13 source delta, 2026-10-08
+
+The old workflow supplied task/context beside a v1 Patch Packet, and neither the
+packet nor candidate hash bound explicit preservation/exclusion/test obligations.
+The existing provider now emits v2 only when a requirement input or prior v2
+packet is supplied. Constructor-only legacy v1 calls and old stored digests remain
+unchanged. v2 includes the typed `debugai.requirement-evidence/v1` contract:
+explicit requested/preserved/forbidden behavior, forbidden paths, acceptance,
+boundary/negative cases, UNKNOWNs and required tests. Each is a string array or
+null when unavailable; no language-wide rule or intended behavior is inferred.
+Original request, task and context are retained after existing Secret redaction.
+v2 source/check excerpts are also redacted before hashing and binding persistence;
+the observed source hashes still bind the original bytes.
+Coverage means field presence, never semantic success; semantic_verification is UNKNOWN.
+
+Origin is caller `context.requirements` or original analysis `failure.requirements`.
+The existing durable input already persists failure/raw request; the workflow
+reads that integrity-bound manifest on candidate generation after resume rather
+than trusting a caller's replacement analysis. Conflicting explicit replacements
+fail. Optional origin source/hash/Evidence assertions must match the current
+packet's observed revision, selected-source hashes and admitted Evidence IDs.
+Exact-string requested/forbidden contradictions fail; broader semantic conflicts
+remain unproven and cannot receive PASS.
+
+The existing workflow checks packet digest, current snapshot/source/Evidence and
+forbidden operation paths after model handoff. PatchService checks again before
+persisting, and the existing candidate hash includes optional requirement_binding.
+Changed/dropped binding therefore changes the approval identity; stored candidate
+load checks its integrity. Legacy candidates without a binding remain compatible.
+No candidate is applied by this new path.
+
+Existing bounded re-fix carries the original immutable contract through diagnosis,
+Patch Engineer and replacement candidate. Its original revision/Evidence provenance
+stays original; the outer new packet supplies fresh current source/retest bindings.
+Legacy re-fix without structured input stays v1 and does not invent obligations.
+Requirement fulfillment still needs identity-bound actual tests/semantic review.
+Isolated materialized candidate, candidate snapshot/preflight/oracle and live
+Strict Completion are later gates, not implied by this handoff qualification.
+
 ## 7. Evidence model
 
 Evidence is an explicit runtime object, not free-form model confidence.

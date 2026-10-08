@@ -63,6 +63,8 @@ server/tests/
   source-search-coverage.test.cjs covers bounded search negatives, receipt integrity and evidence rehydration
   patch-engineer-skill-effect-benchmark.test.cjs includes deterministic oracle false-pass and typed-field holdouts
   runtime-packets.test.cjs covers nested constraint/evidence immutability and input-alias isolation
+  requirement-handoff.test.cjs covers actual workflow/candidate requirement binding, forbidden paths,
+  stale references, insufficient input and re-fix retention; startup recovery also covers durable origin
 
 ops/tests/repository-snapshot-real-git.test.cjs
   explicit offline real-Git snapshot regression; separate from Git-command unit fixtures in the canonical Sandbox suite

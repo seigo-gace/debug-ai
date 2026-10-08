@@ -1,5 +1,7 @@
 "use strict";
 const {contentHash}=require("../../orchestrator/durable-contracts.js");
+const {scrub}=require("../runtime-evidence.js");
+const path=require("node:path");
 
 const REVIEW_EXCLUDED_FIELDS=Object.freeze(["patch_engineer_raw_reasoning","hidden_chain_of_thought","raw_chain_of_thought","secrets","credentials"]);
 function nonEmpty(value,name){const text=String(value||"").trim();if(!text)throw new Error(`${name}_REQUIRED`);return text;}
@@ -14,7 +16,49 @@ function immutablePayload(value,seen=new WeakMap()){
 }
 function freezePacket(schema,payload){const boundPayload=immutablePayload(payload),digest=contentHash({schema,payload:boundPayload});return Object.freeze({schema,payload:boundPayload,packet_digest:digest});}
 
-function makePatchPacket({runId,diagnosisRef,repositoryRevision,paths=[],sourceExcerpts=[],preconditionHashes={},reproductionSummary={},testInventory=[],invariants=[],prohibitedPaths=[],evidenceRefs=[]}={}){
+const REQUIREMENT_FIELDS=Object.freeze(["requested_behavior","preserved_behavior","forbidden_changes","forbidden_paths","acceptance_conditions","boundary_cases","negative_cases","unknowns","required_tests"]);
+function requirementStrings(value,field){if(!Array.isArray(value)||value.some(x=>typeof x!=="string"||!x.trim()))throw new Error(`REQUIREMENT_FIELD_INVALID:${field}`);return [...value];}
+function requirementPath(value){if(typeof value!=="string"||!value||value.startsWith("/")||value.includes("\\")||value.includes(":")||value.split("/").some(x=>!x||x==="."||x===".."))throw new Error("REQUIREMENT_PATH_INVALID");return value;}
+function makeRequirementContract(input,payload){
+  if(!input||typeof input!=="object"||Array.isArray(input)||typeof input.verbatim_request!=="string")throw new Error("REQUIREMENT_INPUT_INVALID");
+  const safe=scrub(input),spec=safe.specification??null,fields={};
+  if(spec!==null&&(typeof spec!=="object"||Array.isArray(spec)))throw new Error("REQUIREMENT_INPUT_INVALID");
+  if(spec){
+    const allowed=new Set([...REQUIREMENT_FIELDS,"repository_revision","source_hashes","evidence_refs"]);
+    if(Object.keys(spec).some(k=>!allowed.has(k)))throw new Error("REQUIREMENT_FIELD_UNSUPPORTED");
+    if(spec.repository_revision!==undefined&&spec.repository_revision!==payload.repository_revision)throw new Error("REQUIREMENT_SOURCE_MISMATCH");
+    if(spec.source_hashes!==undefined){
+      if(!spec.source_hashes||typeof spec.source_hashes!=="object"||Array.isArray(spec.source_hashes))throw new Error("REQUIREMENT_SOURCE_INVALID");
+      for(const [rel,hash] of Object.entries(spec.source_hashes))if(requirementPath(rel)&&(!/^[a-f0-9]{64}$/.test(String(hash))||payload.precondition_hashes[rel]!==hash))throw new Error("REQUIREMENT_SOURCE_MISMATCH");
+    }
+    if(spec.evidence_refs!==undefined)for(const ref of requirementStrings(spec.evidence_refs,"evidence_refs"))if(!payload.evidence_refs.includes(ref))throw new Error(`REQUIREMENT_EVIDENCE_NOT_ADMITTED:${ref}`);
+  }
+  for(const key of REQUIREMENT_FIELDS)fields[key]=spec?.[key]===undefined||spec?.[key]===null?null:requirementStrings(spec[key],key);
+  for(const rel of fields.forbidden_paths||[])requirementPath(rel);
+  if((fields.requested_behavior||[]).some(x=>(fields.forbidden_changes||[]).includes(x)))throw new Error("REQUIREMENT_CONTRADICTION");
+  return {schema:"debugai.requirement-evidence/v1",origin:"CALLER_INPUT",input:safe,fields,repository_revision:payload.repository_revision,source_hashes:payload.precondition_hashes,evidence_refs:payload.evidence_refs,coverage_status:REQUIREMENT_FIELDS.every(k=>fields[k]!==null)?"EXPLICIT_FIELDS":"INSUFFICIENT_EVIDENCE",semantic_verification:"UNKNOWN"};
+}
+function assertPatchPacket(packet){
+  if(!packet||!["debugai.patch-packet/v1","debugai.patch-packet/v2"].includes(packet.schema)||!packet.payload)throw new Error("PATCH_PACKET_SCHEMA_INVALID");
+  if(contentHash({schema:packet.schema,payload:packet.payload})!==packet.packet_digest)throw new Error("PATCH_PACKET_DIGEST_MISMATCH");
+  const contract=packet.payload.requirement_contract;
+  if(packet.schema==="debugai.patch-packet/v1"){if(contract!==undefined)throw new Error("PATCH_PACKET_VERSION_MISMATCH");return true;}
+  if(!contract)throw new Error("REQUIREMENT_CONTRACT_REQUIRED");
+  const expected=makeRequirementContract(contract.input,{repository_revision:contract.repository_revision,precondition_hashes:contract.source_hashes,evidence_refs:contract.evidence_refs});
+  if(contentHash(expected)!==contentHash(contract))throw new Error("REQUIREMENT_CONTRACT_INVALID");
+  return true;
+}
+function assertPatchRequirements(packet,{operations=[],repositoryRevision=null,sourceHashes=null,availableEvidenceIds=null}={}){
+  assertPatchPacket(packet);
+  if(repositoryRevision!==null&&packet.payload.repository_revision!==repositoryRevision)throw new Error("REQUIREMENT_SOURCE_MISMATCH");
+  if(sourceHashes!==null&&contentHash(sourceHashes)!==contentHash(packet.payload.precondition_hashes))throw new Error("REQUIREMENT_SOURCE_MISMATCH");
+  if(availableEvidenceIds!==null)for(const ref of packet.payload.evidence_refs)if(!availableEvidenceIds.includes(ref))throw new Error("REQUIREMENT_EVIDENCE_NOT_ADMITTED:"+ref);
+  const forbidden=packet.payload.requirement_contract?.fields?.forbidden_paths||[];
+  if(forbidden.length)for(const op of operations){const rel=path.posix.normalize(String(op?.path||"").replace(/\\/g,"/"));if(forbidden.some(p=>rel===p||rel.startsWith(p+"/")))throw new Error("REQUIREMENT_FORBIDDEN_PATH:"+rel);}
+  return true;
+}
+
+function makePatchPacket({runId,diagnosisRef,repositoryRevision,paths=[],sourceExcerpts=[],preconditionHashes={},reproductionSummary={},testInventory=[],invariants=[],prohibitedPaths=[],evidenceRefs=[],requirementInput=undefined,previousPatchPacket=null}={}){
   const payload={
     run_id:nonEmpty(runId,"PATCH_PACKET_RUN_ID"),
     diagnosis_ref:nonEmpty(diagnosisRef,"PATCH_PACKET_DIAGNOSIS_REF"),
@@ -30,7 +74,18 @@ function makePatchPacket({runId,diagnosisRef,repositoryRevision,paths=[],sourceE
   };
   if(payload.paths.length===0)throw new Error("PATCH_PACKET_PATHS_REQUIRED");
   for(const path of payload.paths)if(payload.prohibited_paths.includes(path))throw new Error(`PATCH_PACKET_PROHIBITED_PATH:${path}`);
-  return freezePacket("debugai.patch-packet/v1",payload);
+  if(previousPatchPacket){
+    assertPatchPacket(previousPatchPacket);
+    if(previousPatchPacket.payload.run_id!==payload.run_id)throw new Error("REQUIREMENT_RUN_MISMATCH");
+    if(previousPatchPacket.schema==="debugai.patch-packet/v2")payload.requirement_contract=previousPatchPacket.payload.requirement_contract;
+  }else if(requirementInput!==undefined)payload.requirement_contract=makeRequirementContract(requirementInput,payload);
+  if(payload.requirement_contract){
+    payload.source_excerpts=scrub(payload.source_excerpts);
+    payload.reproduction_summary=scrub(payload.reproduction_summary);
+    payload.test_inventory=scrub(payload.test_inventory);
+    payload.invariants=scrub(payload.invariants);
+  }
+  return freezePacket(payload.requirement_contract?"debugai.patch-packet/v2":"debugai.patch-packet/v1",payload);
 }
 
 function makeReviewPacket({candidateRef,applyReceiptRef,repositoryRevision,changedPaths=[],diff="",prePostHashes={},executedTests=[],testResults=[],invariants=[],evidenceRefs=[]}={}){
@@ -67,4 +122,4 @@ function publicReviewPacketSummary(packet,{localVerdict="UNKNOWN"}={}){
   });
 }
 
-module.exports={REVIEW_EXCLUDED_FIELDS,makePatchPacket,makeReviewPacket,publicReviewPacketSummary};
+module.exports={REVIEW_EXCLUDED_FIELDS,makePatchPacket,makeReviewPacket,publicReviewPacketSummary,assertPatchPacket,assertPatchRequirements};

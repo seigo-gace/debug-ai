@@ -104,10 +104,11 @@ function candidateMaterial(candidate) {
     preconditions: candidate.preconditions,
     files: candidate.files,
     diff_hash: candidate.diff_hash,
+    ...(candidate.requirement_binding===undefined?{}:{requirement_binding:candidate.requirement_binding}),
   };
 }
 
-function preparePatchCandidate({ repo, selectedPaths, task, requestHash, stage, result }) {
+function preparePatchCandidate({ repo, selectedPaths, task, requestHash, stage, result, requirementBinding=undefined }) {
   if (!result || !Array.isArray(result.operations) || result.operations.length === 0) {
     throw new Error("PATCH_OPERATIONS_REQUIRED");
   }
@@ -199,6 +200,7 @@ function preparePatchCandidate({ repo, selectedPaths, task, requestHash, stage, 
     preconditions,
     files,
     diff_hash,
+    ...(requirementBinding===undefined?{}:{requirement_binding:requirementBinding}),
   };
   const candidate_hash = sha256(Buffer.from(JSON.stringify(base), "utf8"));
 

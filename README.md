@@ -84,8 +84,22 @@ Historical live/source records below remain evidence for their recorded revision
 Patch and Review Packet payloads are detached from their input objects and
 recursively frozen before hashing. Nested requirements, failed-check evidence
 and source preconditions cannot change under an already issued packet digest.
-This preserves handed-off constraints; it does not establish a complete
-structured Requirement/Evidence contract or candidate semantic correctness.
+This preserves handed-off constraints; immutability alone does not establish
+candidate semantic correctness.
+
+New workflow candidates use `debugai.patch-packet/v2` with an immutable
+Requirement/Evidence contract. Explicit arrays may be supplied in existing
+`context.requirements` or analysis `failure.requirements`: requested_behavior,
+preserved_behavior, forbidden_changes, forbidden_paths, acceptance_conditions,
+boundary_cases, negative_cases, unknowns and required_tests. Optional
+repository_revision/source_hashes/evidence_refs must match admitted current
+bindings. Omitted fields remain null/INSUFFICIENT_EVIDENCE; semantic verification
+is always UNKNOWN at generation. Original request/context are retained with
+Secret redaction, without extracting a specification from prose. Candidate
+identity covers the whole packet; forbidden paths and stale bindings are checked
+before persistence. Durable input and re-fix retain the original obligations;
+re-fix gets fresh current source/retest bindings without relabeling original
+Evidence as current. Stored v1 packets/candidates retain their historical digests.
 
 ```text
 Failure / request / local evidence
