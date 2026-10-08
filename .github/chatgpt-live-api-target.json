@@ -3,5 +3,5 @@
   "mode": "readonly",
   "run_id": "run_muxvvfwo_ddc6f17461",
   "repo": "/workspace/debug-ai/.debugai-input/test-repos/AI-Numbers",
-  "request": "Read-only status and inspect of the failed Stage 1 AI-Numbers investigation run. No mutation."
+  "request": "2026-10-08 GPT CHAT direct GitHub-triggered READ-ONLY verification of existing AI-Numbers Stage 1 run; health, status, inspect only. No new run, apply, deployment or provider/model change."
 }
