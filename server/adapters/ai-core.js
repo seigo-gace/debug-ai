@@ -91,7 +91,7 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
     const cfg=ROLES[role];if(!cfg)throw new AiCoreError("ROLE_INVALID",`Unknown DebugAI role: ${role}`);
     const tokenBudget=resolveEffectiveMaxTokens(role,maxTokens,{runtimeContextTokens:qualifiedRuntimeContext,requireRuntimeContextQualification});
     const effectiveMaxTokens=tokenBudget.effective_max_tokens;
-    const effectiveTimeoutMs=resolveEffectiveTimeoutMs(role,timeoutMs,{timeoutMsOverride,deadlineAt,now:Date.now()});
+    let effectiveTimeoutMs=resolveEffectiveTimeoutMs(role,timeoutMs,{timeoutMsOverride,deadlineAt,now:Date.now()});
     const preparedSystem=typeof runtimeMeta.preparedSystem==="string"&&runtimeMeta.preparedSystem?runtimeMeta.preparedSystem:null;
     const invocation=preparedSystem?null:compileInvocation(role,{task:user,extraSystem:system,selectedSkillIds});
     const effectiveSystem=preparedSystem||invocation.system;
@@ -103,9 +103,14 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
     let upstreamMs=0,responseBytes=0,parseValidateMs=0;
     for(let attempt=1;attempt<=maxTransportTimeoutAttempts;attempt++){
       const ctl=new AbortController();let deadlineTriggered=false;
-      const timer=setTimeout(()=>{deadlineTriggered=true;ctl.abort();},effectiveTimeoutMs);
+      let timer=null;
       let envelope=null,finishReason=null;
       try{
+        // A transport retry must not restart the absolute role deadline.
+        // Recompute the remaining time after the previous attempt and fail
+        // before making another request if the shared budget is exhausted.
+        effectiveTimeoutMs=resolveEffectiveTimeoutMs(role,timeoutMs,{timeoutMsOverride,deadlineAt,now:Date.now()});
+        timer=setTimeout(()=>{deadlineTriggered=true;ctl.abort();},effectiveTimeoutMs);
         const upstreamStartedAt=Date.now();let r,text;
         try{r=await fetchImpl(endpoint,{method:"POST",headers:{authorization:`Bearer ${apiKey}`,"content-type":"application/json"},body:requestBody,signal:ctl.signal,dispatcher:transport});text=await r.text();}finally{upstreamMs+=Date.now()-upstreamStartedAt;}
         if(typeof text==="string")responseBytes+=Buffer.byteLength(text,"utf8");
