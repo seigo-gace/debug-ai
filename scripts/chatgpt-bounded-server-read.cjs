@@ -3,17 +3,23 @@ const fs=require("node:fs");
 const {setTimeout:delay}=require("node:timers/promises");
 const API="https://debugai.asterav8.jp";
 const DEFAULT_REPO="/workspace/debug-ai";
-const ALLOWED=new Set(["project.git_head","service.debug_ai_state","service.sandbox_state","service.debug_ai_health","canonical.devlog_activate_status"]);
+const ALLOWED=new Set(["project.git_head","service.debug_ai_state","service.sandbox_state","service.debug_ai_health","canonical.devlog_activate_status","system.projects_inventory"]);
 function validateTarget(t){
   if(!t||typeof t!=="object")throw Error("INVALID_TARGET");
   const command=String(t.server_command_id||"");
   if(!command)return null;
   if(!ALLOWED.has(command))throw Error("SERVER_COMMAND_DENIED");
   if(t.mode!=="readonly"||t.base_url!==API)throw Error("SERVER_COMMAND_SCOPE_DENIED");
+  if(command==="system.projects_inventory" && !/^(?:0|[1-9][0-9]{0,3})$/.test(String(t.inventory_page??0)))throw Error("PROJECT_INVENTORY_PAGE_INVALID");
   return command;
 }
 function safeResult(command,raw){
   const stdout=String(raw||"").trim();
+  if(command==="system.projects_inventory"){
+    let d;try{d=JSON.parse(stdout);}catch{throw Error("PROJECT_INVENTORY_RESULT_INVALID");}
+    if(d?.schema!=="debugai.host-workspace-inventory/v1"||!Number.isInteger(d.page)||!Number.isInteger(d.total)||!Array.isArray(d.entries)||!Array.isArray(d.missing_roots)||stdout.length>4096)throw Error("PROJECT_INVENTORY_RESULT_INVALID");
+    return["SERVER_PROJECTS_PAGE="+d.page,"SERVER_PROJECTS_TOTAL="+d.total,"SERVER_PROJECTS_NEXT="+(d.next_page??"NONE"),"SERVER_PROJECTS_DATA="+JSON.stringify(d)];
+  }
   if(command==="project.git_head"){
     if(!/^[a-f0-9]{40}$/.test(stdout))throw Error("SERVER_HEAD_INVALID");
     return ["SERVER_GIT_HEAD="+stdout];
@@ -48,7 +54,7 @@ async function run({request=fetch,sleep=delay,log=console.log,env=process.env,ta
   const id=env.CF_ACCESS_CLIENT_ID,secret=env.CF_ACCESS_CLIENT_SECRET;
   if(!id||!secret)throw Error("CF_ACCESS_NOT_CONFIGURED");
   const headers={"CF-Access-Client-Id":id,"CF-Access-Client-Secret":secret};
-  const q=await post("/v1/server-command/request",{repo:DEFAULT_REPO,command_id:command,arguments:[]},headers,request);
+  const q=await post("/v1/server-command/request",{repo:DEFAULT_REPO,command_id:command,arguments:command==="system.projects_inventory"?[String(target.inventory_page??0)]:[]},headers,request);
   if(!/^cmd_[0-9a-f]{24}$/.test(q.id||""))throw Error("SERVER_COMMAND_ID_INVALID");
   log("SERVER_COMMAND_REQUEST_ID="+q.id);
   for(let i=0;i<60;i++){
