@@ -88,6 +88,10 @@ jobs:
           test "$code" = "200"
           jq -r '"ANALYSIS_PRESENT="+((.artifacts.analysis!=null)|tostring), "PATCH_CANDIDATE_PRESENT="+((.artifacts.patch_candidate!=null)|tostring), "DIAGNOSIS_PRESENT="+((.artifacts.analysis.payload.diagnosis!=null)|tostring)' /tmp/inspect.json
 
+      - name: Bounded existing Server Command readback
+        shell: bash
+        run: node scripts/chatgpt-bounded-server-read.cjs
+
       - name: Start bounded dogfood
         id: dogfood
         if: ${{ steps.target.outputs.mode == 'dogfood' }}
