@@ -34,7 +34,14 @@ if [ -z "$CID" ]; then
       [ "$WT_HEAD" = "$ASTERIA_SHA" ] || { finish FAIL ASTERIA_WORKTREE_HEAD_MISMATCH; exit 2; }
       [ -z "$("$GIT_BIN" -C "$ASTERIA_WORKTREE" status --porcelain 2>/dev/null)" ] || { finish FAIL ASTERIA_WORKTREE_DIRTY; exit 2; }
       [ -f "$ASTERIA_WORKTREE/Dockerfile" ] || { finish FAIL ASTERIA_DOCKERFILE_NOT_FOUND; exit 2; }
-      "$DOCKER_BIN" build --pull=false --label "gace.asteria.exact_sha=$ASTERIA_SHA" -t "$ASTERIA_IMAGE" "$ASTERIA_WORKTREE" >/dev/null 2>&1 || { finish FAIL ASTERIA_FORENSIC_IMAGE_BUILD_FAILED; exit 2; }
+      BUILD_LOG="$(mktemp)"
+      if ! "$DOCKER_BIN" build --pull=false --label "gace.asteria.exact_sha=$ASTERIA_SHA" -t "$ASTERIA_IMAGE" "$ASTERIA_WORKTREE" >"$BUILD_LOG" 2>&1; then
+        BUILD_DETAIL="$(tail -n 12 "$BUILD_LOG" | tr '\n' ';' | head -c 1200)"
+        rm -f -- "$BUILD_LOG"
+        finish FAIL "ASTERIA_FORENSIC_IMAGE_BUILD_FAILED:$BUILD_DETAIL"
+        exit 2
+      fi
+      rm -f -- "$BUILD_LOG"
       IMG_SHA="$("$DOCKER_BIN" image inspect -f '{{index .Config.Labels "gace.asteria.exact_sha"}}' "$ASTERIA_IMAGE" 2>/dev/null)"
       [ "$IMG_SHA" = "$ASTERIA_SHA" ] || { finish FAIL ASTERIA_FORENSIC_IMAGE_PROVENANCE_MISMATCH; exit 2; }
     fi
