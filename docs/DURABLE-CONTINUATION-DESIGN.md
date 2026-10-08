@@ -910,6 +910,28 @@ Never run an implicit server pull/reset/sync merely because GitHub source advanc
 
 ---
 
+### Step14 Gate3 resumption — upstream test contract correction (2026-10-09 JST)
+
+The actual upstream feature branch now includes the reviewed and verified
+health-only CHAT read fixture correction from PR #57 (squash merge
+`b3dcffc55e9a2b7844474ff08ae43a5344659bea`). Previously, the PR #56
+integration run failed Verify/Core because upstream selected
+`service.debug_ai_health` without a GitOps status ID but three existing
+test expectations still assumed `project.git_head` and an active GitOps ID.
+The isolated PR #57 checks passed; independent draft PR #58 combined the
+unchanged Step14 source with the current upstream target and corrected test,
+qualifying six Actions and a real isolated full-suite 549/549 with no skips.
+
+This is an additive **source/CI evidence checkpoint**, not a design rewrite,
+live reflection or assertion that a prior PR #56 integration SHA passed.
+The existing snapshot integrity implementation and fail-closed behavior remain
+unchanged. Gate3 on PR #56 requires fresh six-workflow results for its new
+exact HEAD with the corrected upstream integration; any failure remains
+BLOCKED and its original evidence stays visible. Whole-tree completeness,
+isolated candidate construction, generated-candidate semantics, live Runtime
+and Strict Completion remain NOT_VERIFIED or NOT_CONFIGURED as applicable.
+Review/GitHub Project/Host owner and approval boundaries remain unchanged.
+
 ## 23. Stop conditions
 
 Stop and report rather than forcing success when:
