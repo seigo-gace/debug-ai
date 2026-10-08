@@ -3,7 +3,17 @@
 MASTER_REGISTRY="${DEBUG_AI_MASTER_REGISTRY:-/home/admin1/server-core/operations/master-internal-repositories.json}"
 MASTER_PROJECT_ROOT="${DEBUG_AI_MASTER_PROJECT_ROOT:-/home/admin1/projects}"
 GH_BIN="${DEBUG_AI_GITOPS_GH_BIN:-/home/admin1/bin/gh}"
-is_master_internal() { "$JQ_BIN" -e '.delegation.mode=="MASTER_INTERNAL_PERSISTENT"' "$1" >/dev/null 2>&1; }
+is_master_internal() {
+  local id
+  if "$JQ_BIN" -e '.delegation.mode=="MASTER_INTERNAL_PERSISTENT"' "$1" >/dev/null 2>&1; then return 0; fi
+  # Existing MCP simple policy references can bootstrap/migrate Master only.
+  # The installed Host policy selects the mode; an ID is never authority alone.
+  "$JQ_BIN" -e '.delegation.mode==null' "$1" >/dev/null 2>&1 || return 1
+  id="$("$JQ_BIN" -r '.delegation.id // ""' "$1" 2>/dev/null)"
+  [[ "$id" =~ ^dlg_[a-z0-9_-]{1,64}$ ]] || return 1
+  trusted_delegation_file "$DELEGATION_ROOT/policies/$id.json" &&
+    "$JQ_BIN" -e '.delegation_mode=="MASTER_INTERNAL_PERSISTENT"' "$DELEGATION_ROOT/policies/$id.json" >/dev/null 2>&1
+}
 master_gh() { run_timed 30s "$GH_BIN" "$@" 2>/dev/null; }
 
 master_verify_mapping() {
@@ -72,11 +82,12 @@ validate_master_internal() {
     if $a.schema!="debugai.delegation-issuers/v1" or ([ $a.issuers[]|select(.issuer==$p.issuer and .authority==$p.authority and .enabled==true) ]|length)!=1 then "DELEGATION_ISSUER_INVALID"
     elif .schema!="debugai.gitops-request/v1" or (.id|type)!="string" or (.id|test("^gitops_[0-9a-f]{24}$")|not) or .human_approved!=true then "MASTER_REQUEST_INVALID"
     elif .delegation.id!=$p.id then "DELEGATION_ID_MISMATCH"
-    elif .delegation.repository!=$p.repository or .repo!=$p.repo then "MASTER_REQUEST_REPOSITORY_MISMATCH"
+    elif (.delegation.mode!=null and .delegation.mode!="MASTER_INTERNAL_PERSISTENT") then "MASTER_REQUEST_MODE_INVALID"
+    elif (.delegation.mode!=null and .delegation.repository!=$p.repository) or .repo!=$p.repo then "MASTER_REQUEST_REPOSITORY_MISMATCH"
     elif ($p.allowed_branches|index($r.branch))==null then "MASTER_BRANCH_FORBIDDEN"
     elif ($p.allowed_operations|index($r.action))==null then "MASTER_OPERATION_FORBIDDEN"
     elif ($p.allowed_scopes|index($r.delegation.scope))==null then "MASTER_SCOPE_FORBIDDEN"
-    elif .delegation.runtime_target!=$p.runtime_target.id then "MASTER_RUNTIME_TARGET_FORBIDDEN"
+    elif .delegation.mode!=null and .delegation.runtime_target!=$p.runtime_target.id then "MASTER_RUNTIME_TARGET_FORBIDDEN"
     elif .delegation.effects!=$p.effects or .delegation.production!=true then "MASTER_PROTECTED_EFFECT_FORBIDDEN"
     elif .delegation.operation_id!=.id then "DELEGATION_OPERATION_ID_MISMATCH"
     elif .delegation.request_identity!=$p.request_identity then "DELEGATION_REQUEST_IDENTITY_MISMATCH"

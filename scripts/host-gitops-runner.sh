@@ -82,13 +82,13 @@ common_validate() {
     validate_master_internal "$file" || return 1
     master_resolve_target "$file" || return 1
   fi
-  "$JQ_BIN" -e '
+  "$JQ_BIN" -e --argjson internal "$(if is_master_internal "$file"; then echo true; else echo false; fi)" '
     .schema=="debugai.gitops-request/v1" and
     (.id|type=="string" and test("^gitops_[0-9a-f]{24}$")) and
     (.action=="publish" or .action=="deploy") and
     (.expected_head|type=="string" and test("^[0-9a-f]{40}$")) and
     .repo=="/workspace/debug-ai" and
-    (.branch=="feat/tgserver-async-log-sink-20261003" or .delegation.mode=="MASTER_INTERNAL_PERSISTENT") and
+    (.branch=="feat/tgserver-async-log-sink-20261003" or $internal) and
     .human_approved==true and
     (.expires_at|type=="number")
   ' "$file" >/dev/null || fail REQUEST_SCHEMA_OR_BOUNDARY_INVALID || return 1

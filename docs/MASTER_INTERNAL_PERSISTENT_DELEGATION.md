@@ -134,3 +134,21 @@ Source/CI/build are separate from live E2E. Runtime completion requires actual M
 QUEUED -> RUNNING -> PASS, automatic receipt, exact HEAD, health, audit, replay
 rejection and source/image readback. Preserve failed receipts; recover with a new
 request ID after correcting source/registry and qualifying the exact target.
+
+## Compatible Master-only bootstrap and concurrent source isolation
+
+The existing simple MCP `delegation:{id,scope}` reference also works for an
+installed Master persistent entry. The Host reads its mode/repository/runtime from
+the exact private/canonical registry, never from CHAT or ID naming. All fresh
+owner/Project/mapping/branch/SHA/effect/receipt checks still apply. Explicit-mode
+requests require their repository/runtime identifiers to match. Existing finite
+Standing and manual references retain their original semantics.
+
+If the shared feature branch advances with another Change Unit, register a dedicated
+Master runtime branch at the qualified in-scope source. Do not reflect unrelated
+source or rewind the shared branch. For the initial verifier upgrade, trusted AI
+may prepare the live checkout from that exact reviewed/CI-qualified revision after
+checking remote, ancestry, clean state and the actual changed-path policy. The
+existing MCP request and existing watcher/runner then perform the formal automatic
+receipt/build/recreate/health cycle. Record source preparation separately from
+Runtime completion; the later real MCP E2E is mandatory.
