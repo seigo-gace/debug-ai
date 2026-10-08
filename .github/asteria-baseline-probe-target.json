@@ -1,6 +1,6 @@
 {
   "enabled": true,
   "purpose": "Asteria baseline Case 1/6 verification through existing DebugAI bounded Server Command lane",
-  "request_id": "asteria-live-head-readback-after-reflect-20261008",
-  "readback_only": true
+  "request_id": "asteria-case1-case6-after-forensic-recreate-20261008",
+  "readback_only": false
 }
