@@ -26,7 +26,7 @@ function fixture(){
 test("async codegen benchmark invokes patch engineer only and returns candidate by polling",async()=>{
   const f=fixture();try{
     const roles=[];
-    const aiCore={call:async(role)=>{roles.push(role);assert.equal(role,"patch_engineer");return{content:JSON.stringify({summary:"candidate",operations:[{type:"create",path:".debugai_codegen_benchmark/s01.py",content:"def select_latest_version(tags):\n    return None\n"}]})};}};
+    const aiCore={call:async(role)=>{roles.push(role);assert.equal(role,"patch_engineer");return{content:JSON.stringify({summary:"candidate",operations:[{type:"create",path:".debugai_codegen_benchmark/s01.py",content:"def select_latest_version(tags):\n    return None\n"}]}),telemetry:{queue_wait_ms:7,prepare_ms:2,upstream_request_wall_ms:11,parse_validate_ms:1,role_wall_ms:21,request_bytes:100,response_bytes:40,prompt_tokens:10,completion_tokens:4,total_tokens:14,prompt_eval_ms:5,decode_ms:6,cache_hit_tokens:0,cache_miss_tokens:10,prefix_hash:"patch-prefix"},control_plane:{selected_skill_ids:["reproduce-before-fix","minimal-diff-planner"]}};}};
     const patchService={create:({result})=>({id:"patch_"+"a".repeat(24),candidate_hash:"a".repeat(64),diff_hash:"b".repeat(64),summary:result.summary,files:result.operations.map(x=>x.path),operations:result.operations,diff:"candidate"})};
     const workflow=createWorkflow({aiCore,patchService,authority:f.authority,repoPolicy:f.repoPolicy,runtimeEvidence:f.runtimeEvidence});
     const accepted=await workflow.startCodegenBenchmark({repo:f.repo,level:"small",case_id:"s01",selected_paths:[".debugai_codegen_benchmark/s01.py"],task:"Implement s01 exactly.",diagnosis:{cause_kind:"SYNTHETIC_CODEGEN_BENCHMARK",public_statement:"Implement s01."}});
@@ -37,6 +37,14 @@ test("async codegen benchmark invokes patch engineer only and returns candidate 
     assert.equal(status.case_id,"s01");
     assert.equal(status.candidate.files[0],".debugai_codegen_benchmark/s01.py");
     assert.ok(Number.isInteger(status.duration_ms)&&status.duration_ms>=0);
+    assert.equal(status.patch_engineer_runtime.telemetry.queue_wait_ms_known_sum,7);
+    assert.equal(status.patch_engineer_runtime.telemetry.upstream_request_wall_ms_known_sum,11);
+    assert.equal(status.patch_engineer_runtime.telemetry.prompt_eval_ms_known_sum,5);
+    assert.equal(status.patch_engineer_runtime.telemetry.decode_ms_known_sum,6);
+    assert.equal(status.patch_engineer_runtime.telemetry.prompt_tokens_known_sum,10);
+    assert.deepEqual(status.patch_engineer_runtime.selected_skill_ids,["reproduce-before-fix","minimal-diff-planner"]);
+    const patchRecord=f.runtimeEvidence.list(accepted.run_id,{types:["patch_candidate"],limit:1})[0];
+    assert.equal(patchRecord.payload.patch_engineer_runtime.telemetry.queue_wait_ms_known_sum,7);
     assert.deepEqual(roles,["patch_engineer"]);
     assert.equal(f.authority.load(accepted.run_id).state,"WAITING_APPROVAL");
   }finally{f.cleanup();}
