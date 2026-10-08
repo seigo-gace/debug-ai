@@ -192,3 +192,41 @@ test("AI Core transport remains single-flight because current runtime has one ef
   const [first,second]=await Promise.all([ai.call("code_scout",{user:"x"}),ai.call("causal_scout",{user:"y"})]);
   assert.equal(maxActive,1);assert.equal(order.length,4);assert.match(order[0],/^start:/);assert.match(order[1],/^end:/);assert.match(order[2],/^start:/);assert.match(order[3],/^end:/);assert.ok(first.telemetry.queue_wait_ms>=0);assert.ok(second.telemetry.queue_wait_ms>=0);
 });
+
+test("absolute role deadline prevents a second transport request and preserves dispatched attempts",async()=>{
+  const originalNow=Date.now;let now=1000000,calls=0;
+  Date.now=()=>now;
+  try{
+    const fetchImpl=async()=>{
+      calls++;now+=51;
+      const cause=new Error("Headers Timeout Error");cause.code="UND_ERR_HEADERS_TIMEOUT";
+      throw new TypeError("fetch failed",{cause});
+    };
+    const ai=createAiCoreAdapter({baseUrl:"http://127.0.0.1:18080",apiKey:"test",fetchImpl,timeoutMs:600000,maxTransportTimeoutAttempts:2});
+    await assert.rejects(()=>ai.call("code_scout",{user:"deadline",deadlineAt:1000050}),e=>
+      e?.code==="AI_CORE_BUDGET_EXHAUSTED"&&e?.meta?.attempts===1&&
+      e?.meta?.telemetry?.attempts===1&&e?.meta?.telemetry?.request_bytes>0);
+    assert.equal(calls,1,"expired retry must never dispatch a second request");
+  }finally{Date.now=originalNow;}
+});
+
+test("transport retry receives only its remaining absolute role budget",async()=>{
+  const originalNow=Date.now;let now=2000000,calls=0;
+  Date.now=()=>now;
+  try{
+    const fetchImpl=async()=>{
+      calls++;
+      if(calls===1){
+        now+=30;
+        const cause=new Error("Headers Timeout Error");cause.code="UND_ERR_HEADERS_TIMEOUT";
+        throw new TypeError("fetch failed",{cause});
+      }
+      return {ok:true,status:200,text:async()=>JSON.stringify({choices:[{message:{content:"{\\"ok\\":true}"},finish_reason:"stop"}]})};
+    };
+    const ai=createAiCoreAdapter({baseUrl:"http://127.0.0.1:18080",apiKey:"test",fetchImpl,timeoutMs:600000,maxTransportTimeoutAttempts:2});
+    const out=await ai.call("code_scout",{user:"remaining",deadlineAt:2000090});
+    assert.equal(calls,2);
+    assert.equal(out.control_plane.effective_timeout_ms,60);
+    assert.equal(out.telemetry.attempts,2);
+  }finally{Date.now=originalNow;}
+});
