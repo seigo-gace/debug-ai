@@ -1,5 +1,9 @@
 # DebugAI Authority
 
+## Active Cursor practical-completion handoff (2026-10-08)
+When the active task is Master's unified DebugAI investigation/codegen reliability completion, after the **required server-core bootstrap → SERVER_AI Rule Plane → GitHub Project Current** reads, follow `docs/CURSOR_DEBUGAI_COMPLETION_HANDOFF_20261008.md` and the adopted, revised `docs/DEBUGAI_UNIFIED_IMPROVEMENT_PLAN_20261008.md`. The handoff supplements, but never overrides, safety/authorization/current-state rules below. Do not load the GPT CHAT Rule Plane into server-side Cursor agents. Preserve the user's existing Cursor model and subagent setup; do not invent or modify provider/model selection.
+
+
 ## Required reading order
 
 For repository work:
