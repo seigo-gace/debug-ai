@@ -1,0 +1,9 @@
+{
+  "enabled": true,
+  "target_branch": "master-internal-runtime-20261008",
+  "target_head": "366af05ec596416c1a2a2c18151e4c2115747005",
+  "delegation_id": "dlg_master_debugai_v1",
+  "scope": "debugai.compose.reflect",
+  "runtime_target": "debugai.compose",
+  "purpose": "Reflect qualified Asteria forensic baseline recreation support only"
+}

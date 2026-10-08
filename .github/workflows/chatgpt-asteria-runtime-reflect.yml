@@ -1,0 +1,129 @@
+name: ChatGPT Asteria Runtime Reflect
+
+on:
+  push:
+    branches:
+      - ops/asteria-runtime-reflect-20261008
+    paths:
+      - .github/asteria-runtime-reflect-target.json
+      - .github/workflows/chatgpt-asteria-runtime-reflect.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chatgpt-asteria-runtime-reflect
+  cancel-in-progress: false
+
+jobs:
+  reflect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      BASE_URL: https://debugai.asterav8.jp
+      CF_ACCESS_CLIENT_ID: ${{ secrets.DEBUGAI_CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.DEBUGAI_CF_ACCESS_CLIENT_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: target
+        name: Read bounded target
+        shell: bash
+        run: |
+          set -euo pipefail
+          enabled="$(jq -r '.enabled' .github/asteria-runtime-reflect-target.json)"
+          branch="$(jq -r '.target_branch' .github/asteria-runtime-reflect-target.json)"
+          head="$(jq -r '.target_head' .github/asteria-runtime-reflect-target.json)"
+          delegation="$(jq -r '.delegation_id' .github/asteria-runtime-reflect-target.json)"
+          scope="$(jq -r '.scope' .github/asteria-runtime-reflect-target.json)"
+          runtime="$(jq -r '.runtime_target' .github/asteria-runtime-reflect-target.json)"
+          [ "$enabled" = "true" ]
+          [ "$branch" = "master-internal-runtime-20261008" ]
+          [[ "$head" =~ ^[0-9a-f]{40}$ ]]
+          [ "$delegation" = "dlg_master_debugai_v1" ]
+          [ "$scope" = "debugai.compose.reflect" ]
+          [ "$runtime" = "debugai.compose" ]
+          {
+            echo "branch=$branch"
+            echo "head=$head"
+            echo "delegation=$delegation"
+            echo "scope=$scope"
+            echo "runtime=$runtime"
+          } >>"$GITHUB_OUTPUT"
+
+      - name: Require live DebugAI
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${CF_ACCESS_CLIENT_ID:-}"
+          test -n "${CF_ACCESS_CLIENT_SECRET:-}"
+          code="$(curl -sS -L --max-time 30 -o /tmp/health.json -w '%{http_code}' \
+            -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
+            -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
+            "$BASE_URL/health")"
+          test "$code" = "200"
+          jq -e '.ok==true and .service=="debug-ai"' /tmp/health.json >/dev/null
+          echo "LIVE_DEBUGAI=PASS"
+
+      - id: request
+        name: Request delegated exact-head reflection
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -n \
+            --arg branch "${{ steps.target.outputs.branch }}" \
+            --arg sha "${{ steps.target.outputs.head }}" \
+            --arg delegation "${{ steps.target.outputs.delegation }}" \
+            --arg scope "${{ steps.target.outputs.scope }}" \
+            --arg runtime "${{ steps.target.outputs.runtime }}" \
+            '{action:"deploy",repo:"/workspace/debug-ai",branch:$branch,expected_head:$sha,sha:$sha,human_approved:true,delegation:{id:$delegation,mode:"MASTER_INTERNAL_PERSISTENT",repository:"seigo-gace/debug-ai",scope:$scope,runtime_target:$runtime}}' >/tmp/request.json
+          code="$(curl -sS --max-time 30 -o /tmp/request-out.json -w '%{http_code}' \
+            -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
+            -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
+            -H 'content-type: application/json' --data-binary @/tmp/request.json \
+            "$BASE_URL/v1/gitops/request")"
+          echo "REQUEST_HTTP=$code"
+          jq -c '{id,state,branch,expected_head,error}' /tmp/request-out.json
+          test "$code" = "202" -o "$code" = "200"
+          id="$(jq -r '.id // empty' /tmp/request-out.json)"
+          [[ "$id" =~ ^gitops_[0-9a-f]{24}$ ]]
+          echo "id=$id" >>"$GITHUB_OUTPUT"
+
+      - name: Poll delegated reflection
+        shell: bash
+        run: |
+          set -euo pipefail
+          id="${{ steps.request.outputs.id }}"
+          deadline=$((SECONDS+2400))
+          while true; do
+            jq -n --arg repo "/workspace/debug-ai" --arg id "$id" '{repo:$repo,id:$id}' >/tmp/status-in.json
+            code="$(curl -sS --max-time 30 -o /tmp/status.json -w '%{http_code}' \
+              -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
+              -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
+              -H 'content-type: application/json' --data-binary @/tmp/status-in.json \
+              "$BASE_URL/v1/gitops/status")"
+            test "$code" = "200"
+            state="$(jq -r '.state // "UNKNOWN"' /tmp/status.json)"
+            echo "GITOPS_STATE=$state"
+            if [ "$state" = "PASS" ]; then
+              jq -c '{id,state,result,authorization:{delegation_id:.authorization.delegation_id,delegation_mode:.authorization.delegation_mode,issuer:.authorization.issuer,authority:.authorization.authority,audit_identity:.authorization.audit_identity,sha:.authorization.sha,scope:.authorization.scope,receipt_consumed_at:.authorization.receipt_consumed_at}}' /tmp/status.json
+              exit 0
+            fi
+            if [ "$state" = "FAIL" ]; then
+              jq -c '{id,state,error,authorization}' /tmp/status.json
+              exit 12
+            fi
+            (( SECONDS < deadline )) || { echo "GITOPS_REFLECT_TIMEOUT"; jq -c '{id,state,error}' /tmp/status.json; exit 13; }
+            sleep 5
+          done
+
+      - if: always()
+        name: Safety assertion
+        shell: bash
+        run: |
+          echo "NEW_EXECUTOR=NO"
+          echo "NEW_QUEUE=NO"
+          echo "NEW_HOST_SERVICE=NO"
+          echo "ASTERIA_PERSISTENT_18110_TOUCHED=NO"
+          echo "AI_CORE_RESOURCE_MUTATION=NO"
+          echo "PROVIDER_MODEL_SECRET_POLICY_CHANGE=NO"
