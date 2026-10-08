@@ -1,0 +1,24 @@
+name: ChatGPT Self-hosted Presence
+
+on:
+  push:
+    branches:
+      - ops/asteria-runtime-reflect-20261008
+    paths:
+      - .github/workflows/chatgpt-selfhosted-presence.yml
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: self-hosted
+    timeout-minutes: 5
+    steps:
+      - name: Read-only runner presence
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "SELF_HOSTED_RUNNER=ONLINE"
+          printf 'HOST_USER=%s\n' "$(id -un)"
+          printf 'HOST_PWD=%s\n' "$PWD"
