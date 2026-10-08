@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: read
+  issues: read
 
 concurrency:
   group: chatgpt-canonical-devlog-activation
@@ -37,6 +38,32 @@ jobs:
           [[ "$helper" == "2008cc936da224becc080e20c57dfa7b96f364a8" ]]
           echo "enabled=$enabled" >>"$GITHUB_OUTPUT"
           echo "ACTIVATION_ENABLED=$enabled"
+
+      - if: ${{ steps.target.outputs.enabled == 'true' }}
+        name: Require exact owner approval
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          approval="$(jq -r '.approval_comment_id // empty' .github/canonical-devlog-activate-target.json)"
+          [[ "$approval" == "6057495658" ]] || { echo "OWNER_APPROVAL_REFERENCE_INVALID"; exit 31; }
+          code="$(curl -sS -L --max-time 30 -o /tmp/devlog-owner-approval.json -w '%{http_code}' \
+            -H 'Accept: application/vnd.github+json' \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            'https://api.github.com/repos/seigo-gace/TGserver/issues/comments/6057495658')"
+          [ "$code" = "200" ] || { echo "OWNER_APPROVAL_READ_FAILED"; exit 32; }
+          jq -e --arg approval_id 6057495658 \
+            --arg helper "2008cc936da224becc080e20c57dfa7b96f364a8" \
+            '(.id|tostring)==$approval_id and
+             .user.login=="seigo-gace" and
+             .user.type=="User" and
+             .author_association=="OWNER" and
+             .performed_via_github_app.slug=="chatgpt-codex-connector" and
+             (.body|contains("MASTER INTENT / IMPACT APPROVAL") and contains($helper) and contains("No new paid contract"))' \
+            /tmp/devlog-owner-approval.json >/dev/null || { echo "OWNER_APPROVAL_VALIDATION_FAIL"; exit 33; }
+          echo "OWNER_APPROVAL_RECORD_VERIFIED=PASS"
+          echo "OWNER_APPROVAL_IS_NOT_HOST_RECEIPT=TRUE"
 
       - if: ${{ steps.target.outputs.enabled == 'true' }}
         name: Require live DebugAI
