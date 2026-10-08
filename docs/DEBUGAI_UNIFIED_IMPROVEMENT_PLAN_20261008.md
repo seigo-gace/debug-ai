@@ -282,45 +282,43 @@ Track by role and whole workflow:
 - scope failure;
 - apply/deploy incident.
 
-## 9. Rollout order
+## 9. Revised rollout order — adopted 2026-10-08 second audit
 
-### Phase 0 — Fresh implementation audit
-Map this design to Fresh HEAD and classify every item:
-- EXISTS / KEEP
-- EXISTS / IMPROVE
-- NEW INTEGRATION REQUIRED
-- DEFER
-- REJECT
+The prerequisite order matters, but independent **read-only** investigations and tests may run in parallel. Do not impose a fully sequential waterfall when a risk-free isolated Change Unit can complete independently. Every mutation requires a source-bound gate, one owner, and isolated paths.
 
-Do not reimplement EXISTS items.
+### Phase 0 — Authority + benchmark integrity
+- Fresh GitHub Project / canonical Current / branch / PR / exact HEAD / CI / verified Runtime.
+- Classify existing capabilities EXISTS/KEEP, EXISTS/IMPROVE, NEW INTEGRATION, DEFER, REJECT.
+- Preserve the 50-investigation / 60-codegen historical controls and historical NO-RUNTIME / DEFERRED documents as history, not new prohibitions or success claims.
+- Fix the test oracle and input identity before treating new measurements as improvements.
 
-### Phase 1 — Shared control-plane/runtime corrections
-- contract parity;
-- timeout accounting;
-- telemetry persistence/readback;
-- model A/B qualification hooks.
+### Phase 1 — Shared execution/control foundation
+- production prompt / validator / benchmark contract parity, strict shape and evidence binding;
+- queue/role/tool/whole-workflow deadline accounting and failure-side telemetry;
+- measured effective runtime model identity / n_ctx / chat template / sampling / thinking;
+- use existing Model A/B, shadow-to-enforce with verified negative controls.
 
-### Phase 2 — Investigation/verification stabilization
-- re-run corrected 50-case benchmark;
-- repair remaining Code Scout / Diagnoser / Reviewer issues;
-- preserve Causal Scout control;
-- confirm UNKNOWN / INSUFFICIENT_EVIDENCE calibration.
+### Phase 2 — Investigation and diagnosis
+- Role-only regression against fixed 50-case corpus;
+- real read-only tool / source search / evidence reference integration;
+- genuine repository-scoped end-to-end diagnosis, uncertainty and rejected-hypothesis checks;
+- protect Causal Scout's measured baseline and prevent search false negatives from becoming negative facts.
 
-### Phase 3 — Code generation reliability
-- Requirement/Evidence Contract handoff;
-- candidate deterministic preflight;
-- sandbox verification;
-- semantic diff/test-strength gates;
-- bounded evidence-driven repair.
+### Phase 3 — Codegen construction and verification
+- Requirement/Evidence Contract inside existing Patch Packet;
+- exact BASELINE snapshot -> isolated candidate construction -> CANDIDATE snapshot;
+- only THEN deterministic candidate preflight / language-specific syntax/runtime checks;
+- semantic diff, test-strength, false-pass and bounded evidence-driven repair;
+- preserve candidate-only / approval / exact-identity gating.
 
-### Phase 4 — Performance optimization
-- Fast/Deep A/B;
-- normal role output ceilings;
-- model-aware queue concurrency test;
-- prompt/context reduction only where measurements justify it.
+### Phase 4 — Real DebugAI dogfood / Strict Completion
+- Use DebugAI's existing real permitted run surfaces to investigate its own actual faults;
+- prove traceable source -> diagnosis -> candidate -> isolated test -> bounded re-fix -> regression -> fresh review -> Strict Completion;
+- distinguish source/CI/sandbox/server Runtime and record unknown or blocked outcomes honestly.
 
-### Phase 5 — Real dogfood / Strict Completion
-Prove the full real-repository loop without weakening existing approval/security boundaries.
+### Phase 5 — Conditional performance / advanced reuse
+- Evaluate Fast/Deep, normal output ceilings, bounded model-aware concurrency 1 vs 2 and prompt reduction only after the quality gates;
+- integrate Catalog/KB and large archive/ZIP workflows when the exact target need and adapters are verified.
 
 ## 10. Explicitly rejected / deferred approaches
 
@@ -358,3 +356,31 @@ This plan is complete only when Fresh Current evidence proves:
 - source/runtime identity is bound to the evidence;
 - scope and protected-operation incidents remain zero;
 - Strict Completion is supported by evidence rather than model claims.
+
+## 13. Adopted second-audit refinements — 2026-10-08
+
+Source of Master approval: [Notion decision/readback record](https://app.notion.com/p/3f3cdcf128e481159b79f425cce96ba9). That record archives design intent; GitHub Current and live source/CI/runtime remain operational authorities. This section **supersedes rollout ordering** above any historical contrary sequencing in companion documents, but **does not override safety or approval contracts**.
+
+### 13.1 Audit findings and precise gates
+1. **Contract shape is not semantic correctness.** Existing `role-output-validator.js` uses permissive `expected_any` shape checks with shadow semantics by default. Extend the same canonical validator with required per-role keys/types/enums/evidence binding. Test negative cases and advance to enforce only after measured compatibility. Do not invent a second validator or claim that JSON mode is proof of task success.
+2. **Evaluation layers must not be conflated.** Historical 50-case investigation measures mostly single-role execution with `toolRuntime:null`; it cannot certify real source search. Add fixed Role-only, real Tool-integration, and actual Workflow E2E qualification. Historical codegen benchmark with synthetic diagnosis/review passes is likewise not real debugging E2E. New holdout cases must not leak into prompts or reusable skills.
+3. **Evidence handoff must preserve requirements.** Existing `makePatchPacket()` includes source revision, path and evidence fields but lacks an independently required structured contract of requested behavior, preserved behavior, forbidden changes, acceptance conditions, UNKNOWNs, boundary cases and tests. Extend this packet; bind requirement -> candidate edit -> actual test/evidence, reject missing/stale references. Do not add a new orchestration or handoff state owner.
+4. **Snapshot construction precedes preflight.** Existing Sandbox actions center on `node.check`/package lint/typecheck/test/build; `copySnapshot` excludes generated/dependency directories and skips symlinks. Existing sandbox execution is not the same as a complete codegen construction workspace. First qualify exact baseline + candidate materialization, exclusion/metadata manifest and identity; only then execute generated candidate checks in the existing isolated sandbox, without pre-approval repository writes. If language-specific execution is unavailable, mark that check NOT_CONFIGURED/BLOCKED, not PASS. Archive/ZIP support remains a separately tested later transport option.
+5. **Queue budget consistency.** `ai-core.js` supports queueTimeoutMs and excludeQueueFromDeadline for certain call paths; tool-loop and no-tool paths must have consistent, bounded interpretation of queue, model, tool and end-to-end deadlines. Preserve global serialization until measured concurrency 1-vs-2 results justify change.
+6. **Model qualification requires actual identity.** Preserve current role/model assignments. Verify model artifact digest, quantization, runtime version, effective llama.cpp chat template, thinking mode, n_ctx, effective sampling and output ceilings. Official sampling defaults are *experiment candidates*, not blanket production configuration. A single-axis A/B should precede necessary combinations, and a temperature-0 top-p experiment alone may be uninformative. No policy/cost/model change without permitted authority.
+7. **Safe accuracy gates.** False-pass negatives must catch deletion/weakening of tests, overmocking, error swallowing, wrong source snapshot and claims of unexecuted checks. Static AST heuristics alone cannot block valid code. Python bool/int/Unicode/hashability/mutation/boundary coverage is language/task-conditional.
+8. **Measure the full distribution.** Track completion PASS/PARTIAL/FAIL plus timeouts, format failure, errors, retries, token data (null if absent), cold/warm model swaps, queue wait, prompt eval/decode, semantic correctness, holdout results and identity-linked run receipts. Do not compare successful-only averages or differing concurrency as if they were randomized A/B.
+9. **Fastest practical delivery** means first proving a thin *real* debugging vertical slice (one actual in-scope defect closed with existing guarded approval), then stabilizing and extending coverage. Do not postpone functional dogfood for speculative model tuning, more skills, queue redesign or large ZIP features.
+
+### 13.2 Tool and skill decisions
+- KEEP existing 6 roles, RunAuthority, Evidence, Tool Loop, skills, Model A/B, guarded MCP/Server/GitOps, Sandbox, review and Strict Completion.
+- Improve existing source read/search/symbol/dependency capabilities; add Search Coverage Receipt/explicit truncation where search limits can hide files. Do not call 0 hits an exhaustive negative unless coverage proves it.
+- Prefer workflow-owned mandatory candidate verification to a model-optional tool.
+- Add `spec-contract-audit` or `python-edge-semantics` only when minimal prompt/fixture experiments demonstrate a missing capability; enable Python checks only for Python tasks.
+- No duplicate Reviewer/Orchestrator/State Engine, arbitrary Tool permissions, unconstrained agent swarms, unsupported model swaps, or routine paid external review.
+
+### 13.3 Completion and safety acceptance
+- Maintain current protected gates: candidate != apply; source/CI != live Runtime; exact Candidate + source/snapshot identity and permission before any mutation.
+- All meaningful failures must preserve a precise UNKNOWN/BLOCKED state and evidence ID; failures in tool/runtime/CI may not be turned into success summaries.
+- No phase is COMPLETE merely because its documents, tests, CI or benchmark-only run pass; real validated source/runtime closed loop is the product acceptance boundary.
+- A parallel Cursor agent or DebugAI self-dogfood runner is subject to **the same** GitHub Project and Server AI Minimal Kernel, repo scope, approval, secrets and verification conditions. The GPT CHAT Rule Plane stays out of server-side agent context.
