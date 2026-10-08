@@ -53,3 +53,14 @@ test("directory-index imports resolve as candidates but protected imports never 
  assert.equal(result.data.local_candidates.find(x=>x.specifier==="../secrets/password").status,"BLOCKED_OR_UNVERIFIED");
  assert.equal(JSON.stringify(result).includes("private-fixture-value"),false);
 });
+
+test("symlinked ancestor never aliases a protected in-repository secret into dependency evidence",async t=>{
+ const f=fixture(t);f.write("src/entry.js",'import "./alias/private";\n');
+ f.write("secrets/private.js","PRIVATE_TEST_ONLY_CANARY");
+ fs.symlinkSync(path.join(f.repo,"secrets"),path.join(f.repo,"src","alias"),"dir");
+ const result=await f.run("src/entry.js");
+ const mapped=result.data.local_candidates.find(x=>x.specifier==="./alias/private");
+ assert.equal(mapped.status,"BLOCKED_OR_UNVERIFIED");
+ assert.equal(mapped.sha256,undefined);
+ assert.ok(!JSON.stringify(result.data).includes("PRIVATE_TEST_ONLY_CANARY"));
+});
