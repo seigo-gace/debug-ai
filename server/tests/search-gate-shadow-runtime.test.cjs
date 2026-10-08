@@ -84,10 +84,10 @@ test("production workflow executes both searches and stores shadow comparisons w
     const tgserver={log:async()=>({}),search:async()=>{kbCalls++;return[{id:"K1",message:"known"}];}};
     const evidenceSearch={search:async()=>{officialCalls++;return[{source_ref:"O1",title:"Official"}];}};
     const aiCore={call:async role=>{
-      if(role==="code_scout")return{content:JSON.stringify({facts:[],decision:"HANDOFF"})};
+      if(role==="code_scout")return{content:JSON.stringify({relevant_files:[],call_path:[],contract_mismatch:null,excluded_files:[],unknowns:["source unavailable"]})};
       if(role==="causal_scout")return{content:JSON.stringify({candidates:[],decision:"HANDOFF"})};
       if(role==="researcher")return{content:JSON.stringify({research_status:"INSUFFICIENT_EVIDENCE",answer:"UNKNOWN",evidence_refs:[],rejected_source_refs:[],contradictions:[],bound_version:null})};
-      if(role==="diagnoser")return{content:JSON.stringify({hypothesis:"unknown",decision:"HANDOFF"})};
+      if(role==="diagnoser")return{content:JSON.stringify({diagnosis_status:"INSUFFICIENT_EVIDENCE",hypotheses:[],confirmed_root_cause:null,unsupported_claims:[]})};
       throw new Error(`UNEXPECTED_ROLE:${role}`);
     }};
     const workflow=createWorkflow({aiCore,tgserver,evidenceSearch,runtimeEvidence,authority,repoPolicy,repositorySnapshot:()=>"git_fixture"});
@@ -105,10 +105,10 @@ test("production generic task query creates candidates but still executes both s
     const tgserver={log:async()=>({}),search:async()=>{kbCalls++;return[];}};
     const evidenceSearch={search:async()=>{officialCalls++;return[];}};
     const aiCore={call:async role=>{
-      if(role==="code_scout")return{content:JSON.stringify({facts:[],decision:"HANDOFF"})};
+      if(role==="code_scout")return{content:JSON.stringify({relevant_files:[],call_path:[],contract_mismatch:null,excluded_files:[],unknowns:["source unavailable"]})};
       if(role==="causal_scout")return{content:JSON.stringify({candidates:[],decision:"HANDOFF"})};
       if(role==="researcher")return{content:JSON.stringify({research_status:"INSUFFICIENT_EVIDENCE",answer:"UNKNOWN",evidence_refs:[],rejected_source_refs:[],contradictions:[],bound_version:null})};
-      if(role==="diagnoser")return{content:JSON.stringify({hypothesis:"unknown",decision:"HANDOFF"})};
+      if(role==="diagnoser")return{content:JSON.stringify({diagnosis_status:"INSUFFICIENT_EVIDENCE",hypotheses:[],confirmed_root_cause:null,unsupported_claims:[]})};
       throw new Error(`UNEXPECTED_ROLE:${role}`);
     }};
     const workflow=createWorkflow({aiCore,tgserver,evidenceSearch,runtimeEvidence,authority,repoPolicy,repositorySnapshot:()=>"git_fixture"});

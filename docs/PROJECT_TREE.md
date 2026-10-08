@@ -58,6 +58,8 @@ server/adapters/
 
 server/tests/
   server/control/adapter/security/regression tests, including guarded GitOps host-executor policy contract and bounded automatic re-fix regression
+  role-contract-correctness.test.cjs covers malformed role fields, diagnosis Evidence binding,
+  unsupported confirmation, UNKNOWN, shadow compatibility and held-out false-pass cases
 
 orchestrator/
   platform-neutral canonical cores and durable primitives

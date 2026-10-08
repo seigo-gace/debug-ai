@@ -225,6 +225,45 @@ Classification is not implementation. Do not convert all gaps mechanically into 
 
 Role-disposition/search-gate components exist, but broad production skip activation is not complete. Shadow decisions must be compared with real outcomes first, with false-skip risk treated as a blocking safety issue. Search necessity should be gated before invoking TGserver/official search when the evidence need can be decided safely.
 
+### 6.4 Role output correctness — additive source delta, 2026-10-08
+
+The earlier `expected_any` check admitted malformed Code Scout localization,
+invalid diagnosis statuses/fields and empty patch operations even with explicit
+semantic enforcement. Diagnosis hypothesis and root evidence references were also
+outside the central binding traversal unless duplicated in `claims`.
+
+Reuse `role-output-validator.js` with the existing invocation compiler. Code
+Scout requires all five production localization fields with typed string arrays
+and a null or typed contract mismatch. Diagnoser requires its four production
+fields, unique hypothesis IDs, typed references and falsification conditions,
+valid statuses, counter-evidence for REJECTED, and no active HYPOTHESIS under
+NO_ACTIVE_HYPOTHESIS. UNKNOWN and INSUFFICIENT_EVIDENCE remain valid; empty support
+does not become confirmation. A non-null confirmed root is a statement/reference
+object, with non-empty support cited by an active hypothesis and a compatible
+diagnosis status. This makes support inspectable; it cannot prove the causal
+chain by itself. Patch Engineer requires non-empty typed candidate operations;
+repository/path/exact replacement and deletion authorization remain PatchService
+and patch-core responsibilities, not a second patch engine.
+
+Structural role checks remain WARN in default shadow and fail closed only under
+explicit enforce. The existing observed production workflow's enforce context
+is preserved; this delta does not activate a new global mode. Existing hard claim validation and Evidence binding remain
+independent of this mode; the binding traversal also covers diagnosis hypothesis,
+counter and root references. Registered-window membership is checked for all
+references in strict mode, and for runtime TRE_/EVI_ IDs in compatibility mode.
+Malformed individual reference IDs are rejected without string coercion. This
+does not invent freshness metadata: the caller owns the admitted current window
+and Source/Runtime identity. Structural validity, binding validity and actual
+task correctness are separate conclusions.
+
+Compatibility: preserve default mode, Causal Scout/Researcher/Reviewer shapes,
+WeakMap-only shadow storage and existing transport/state/approval contracts.
+Legacy partial Code Scout/Diagnoser/empty operation output can still be parsed
+in shadow, but no longer receives a contract PASS. Reverting this source delta
+restores the previous checks without persistent-state migration. No Runtime
+reflection is implied. Regression authority:
+`server/tests/role-contract-correctness.test.cjs` and existing semantic/tool tests.
+
 ---
 
 ## 7. Evidence model

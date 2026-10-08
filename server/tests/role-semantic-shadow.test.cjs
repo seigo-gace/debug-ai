@@ -5,11 +5,11 @@ const {canonicalJson}=require("../../orchestrator/durable-primitives.js");
 const {evaluateRoleSemantics,getSemanticShadow,parseAndValidateRoleOutput}=require("../control/role-output-validator.js");
 
 test("role semantic shadow accepts ordinary role-shaped outputs without changing runtime enforcement",()=>{
-  assert.equal(evaluateRoleSemantics("code_scout",{facts:[],decision:"HANDOFF"}).status,"PASS");
+  assert.equal(evaluateRoleSemantics("code_scout",{relevant_files:[],call_path:[],contract_mismatch:null,excluded_files:[],unknowns:["source unavailable"]}).status,"PASS");
   assert.equal(evaluateRoleSemantics("causal_scout",{candidates:[],decision:"HANDOFF"}).status,"PASS");
   assert.equal(evaluateRoleSemantics("researcher",{selected_evidence:[],decision:"HANDOFF"}).status,"PASS");
-  assert.equal(evaluateRoleSemantics("diagnoser",{hypothesis:"unknown",decision:"HANDOFF"}).status,"PASS");
-  assert.equal(evaluateRoleSemantics("patch_engineer",{operations:[]}).status,"PASS");
+  assert.equal(evaluateRoleSemantics("diagnoser",{diagnosis_status:"INSUFFICIENT_EVIDENCE",hypotheses:[],confirmed_root_cause:null,unsupported_claims:[]}).status,"PASS");
+  assert.equal(evaluateRoleSemantics("patch_engineer",{operations:[{type:"write",path:"a.js",content:""}]}).status,"PASS");
   assert.equal(evaluateRoleSemantics("local_reviewer",{verdict:"UNKNOWN"}).status,"PASS");
 });
 

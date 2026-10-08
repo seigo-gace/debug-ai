@@ -14,6 +14,8 @@ const ROLE_SEMANTIC_RULES=Object.freeze({
 const RESEARCH_STATUS=new Set(["SUPPORTED","CONTRADICTORY_EVIDENCE","INSUFFICIENT_EVIDENCE"]);
 const REVIEW_VERDICT=new Set(["PASS","FAIL","UNKNOWN","INSUFFICIENT_EVIDENCE","BLOCKED","APPROVED","REJECTED","ACCEPTED"]);
 const SEMANTIC_SHADOWS=new WeakMap();
+const DIAGNOSIS_STATUS=new Set(["HYPOTHESES_RETAINED","NO_ACTIVE_HYPOTHESIS","INSUFFICIENT_EVIDENCE"]);
+const HYPOTHESIS_STATUS=new Set(["HYPOTHESIS","REJECTED","UNKNOWN"]);
 
 function parseJsonContent(content){
   if(typeof content!=="string")return content;
@@ -24,7 +26,8 @@ function array(v){return Array.isArray(v)?v:[];}
 function validateEvidenceBindings(value,{availableEvidenceIds=[],strictEvidenceRefs=false}={}){
   const allowed=new Set(array(availableEvidenceIds).map(String));const errors=[];
   const inspect=(ref,index,kind)=>{
-    const id=String(ref||"");if(!id)return;
+    if(typeof ref!=="string"||!ref.trim()){errors.push(`${kind}_INVALID:${index}`);return;}
+    const id=ref;
     const runtimeId=id.startsWith("TRE_")||id.startsWith("EVI_");
     if((runtimeId||strictEvidenceRefs)&&!allowed.has(id))errors.push(`${kind}_UNKNOWN:${index}:${id}`);
   };
@@ -33,6 +36,11 @@ function validateEvidenceBindings(value,{availableEvidenceIds=[],strictEvidenceR
     for(const ref of array(claim.evidence_refs))inspect(ref,i,"EVIDENCE_REF");
     for(const ref of array(claim.counter_evidence_refs))inspect(ref,i,"COUNTER_EVIDENCE_REF");
   }
+  for(let i=0;i<array(value?.hypotheses).length;i++){
+    for(const ref of array(value.hypotheses[i]?.evidence_refs))inspect(ref,i,"HYPOTHESIS_EVIDENCE_REF");
+    for(const ref of array(value.hypotheses[i]?.counter_evidence_refs))inspect(ref,i,"HYPOTHESIS_COUNTER_EVIDENCE_REF");
+  }
+  for(const ref of array(value?.confirmed_root_cause?.evidence_refs))inspect(ref,0,"ROOT_CAUSE_EVIDENCE_REF");
   return errors;
 }
 function validateRequiredRoleShape(role,value){
@@ -49,6 +57,52 @@ function hasNonEmpty(value,key){
   if(Array.isArray(v))return v.length>0;
   if(v&&typeof v==="object")return Object.keys(v).length>0;
   return v!==null&&v!==undefined&&v!==""&&v!==false;
+}
+function nonBlankString(value){return typeof value==="string"&&value.trim().length>0;}
+function stringArray(value){return Array.isArray(value)&&value.every(nonBlankString);}
+function plainObject(value){return value!==null&&typeof value==="object"&&!Array.isArray(value);}
+function canonicalRoleViolations(role,value){
+  const violations=[];
+  const requireField=(key,valid)=>{if(!Object.prototype.hasOwnProperty.call(value,key))violations.push(`ROLE_FIELD_REQUIRED:${key}`);else if(!valid(value[key]))violations.push(`ROLE_FIELD_INVALID:${key}`);};
+  if(role==="code_scout"){
+    for(const key of ["relevant_files","call_path","excluded_files","unknowns"])requireField(key,stringArray);
+    requireField("contract_mismatch",v=>v===null||(plainObject(v)&&["file","expected","observed"].every(key=>nonBlankString(v[key]))));
+  }
+  if(role==="diagnoser"){
+    requireField("diagnosis_status",v=>DIAGNOSIS_STATUS.has(v));
+    requireField("hypotheses",Array.isArray);
+    requireField("unsupported_claims",stringArray);
+    requireField("confirmed_root_cause",v=>v===null||(plainObject(v)&&nonBlankString(v.statement)&&stringArray(v.evidence_refs)&&v.evidence_refs.length>0));
+    const ids=new Set();
+    for(const [index,h] of array(value.hypotheses).entries()){
+      if(!plainObject(h)){violations.push(`HYPOTHESIS_OBJECT_REQUIRED:${index}`);continue;}
+      if(!nonBlankString(h.id))violations.push(`HYPOTHESIS_ID_REQUIRED:${index}`);
+      else if(ids.has(h.id))violations.push(`HYPOTHESIS_ID_DUPLICATE:${index}`);
+      else ids.add(h.id);
+      if(!HYPOTHESIS_STATUS.has(h.status))violations.push(`HYPOTHESIS_STATUS_INVALID:${index}`);
+      if(!nonBlankString(h.falsification_condition))violations.push(`HYPOTHESIS_FALSIFICATION_REQUIRED:${index}`);
+      for(const field of ["evidence_refs","counter_evidence_refs"])if(!stringArray(h[field]))violations.push(`HYPOTHESIS_REFS_INVALID:${index}:${field}`);
+      if(h.status==="REJECTED"&&array(h.counter_evidence_refs).length===0)violations.push(`HYPOTHESIS_REJECTION_EVIDENCE_REQUIRED:${index}`);
+    }
+    if(value.diagnosis_status==="NO_ACTIVE_HYPOTHESIS"&&array(value.hypotheses).some(h=>h?.status==="HYPOTHESIS"))violations.push("DIAGNOSIS_ACTIVE_HYPOTHESIS_CONFLICT");
+    if(value.confirmed_root_cause!==null&&value.confirmed_root_cause!==undefined){
+      if(value.diagnosis_status!=="HYPOTHESES_RETAINED")violations.push("DIAGNOSIS_CONFIRMATION_STATUS_CONFLICT");
+      const refs=array(value.confirmed_root_cause?.evidence_refs);
+      if(!array(value.hypotheses).some(h=>h?.status==="HYPOTHESIS"&&refs.length>0&&refs.every(ref=>array(h.evidence_refs).includes(ref))))violations.push("ROOT_CAUSE_SUPPORT_REQUIRED");
+    }
+  }
+  if(role==="patch_engineer"){
+    requireField("operations",v=>Array.isArray(v)&&v.length>0);
+    if(value.summary!==undefined&&typeof value.summary!=="string")violations.push("PATCH_SUMMARY_STRING_REQUIRED");
+    for(const [index,operation] of array(value.operations).entries()){
+      if(!plainObject(operation)){violations.push(`PATCH_OPERATION_OBJECT_REQUIRED:${index}`);continue;}
+      if(!["create","write","replace","delete"].includes(operation.type))violations.push(`PATCH_OPERATION_TYPE_INVALID:${index}`);
+      if(!nonBlankString(operation.path))violations.push(`PATCH_OPERATION_PATH_REQUIRED:${index}`);
+      if(["create","write"].includes(operation.type)&&typeof operation.content!=="string")violations.push(`PATCH_OPERATION_CONTENT_STRING_REQUIRED:${index}`);
+      if(operation.type==="replace"&&(!nonBlankString(operation.old)||typeof operation.new!=="string"))violations.push(`PATCH_OPERATION_REPLACEMENT_INVALID:${index}`);
+    }
+  }
+  return violations;
 }
 function evaluateRoleSemantics(role,value){
   const rule=ROLE_SEMANTIC_RULES[role];
@@ -70,6 +124,7 @@ function evaluateRoleSemantics(role,value){
     const verdict=value.verdict;
     if(verdict!==undefined&&!REVIEW_VERDICT.has(String(verdict).toUpperCase()))violations.push(`REVIEW_VERDICT_INVALID:${String(verdict)}`);
   }
+  violations.push(...canonicalRoleViolations(role,value));
   return Object.freeze({schema:"debugai.role-semantic-shadow/v1",role,status:violations.length?"WARN":"PASS",violations:Object.freeze(violations)});
 }
 function attachSemanticShadow(value,semantic){
@@ -87,8 +142,8 @@ function parseAndValidateRoleOutput(role,content,{availableEvidenceIds=[],strict
   if(value.claims!==undefined){
     if(!Array.isArray(value.claims))throw new Error(`ROLE_OUTPUT_CLAIMS_ARRAY_REQUIRED:${role}`);
     const check=validateReasoningArtifact(value);if(!check.valid)throw new Error(`ROLE_CLAIM_EVIDENCE_INVALID:${role}:${check.errors.join("|")}`);
-    const bindingErrors=validateEvidenceBindings(value,{availableEvidenceIds,strictEvidenceRefs});if(bindingErrors.length)throw new Error(`ROLE_CLAIM_BINDING_INVALID:${role}:${bindingErrors.join("|")}`);
   }
+  const bindingErrors=validateEvidenceBindings(value,{availableEvidenceIds,strictEvidenceRefs});if(bindingErrors.length)throw new Error(`ROLE_CLAIM_BINDING_INVALID:${role}:${bindingErrors.join("|")}`);
   if(!["off","shadow","enforce"].includes(roleSemantics))throw new Error(`ROLE_SEMANTICS_MODE_INVALID:${roleSemantics}`);
   if(roleSemantics!=="off"){
     const semantic=evaluateRoleSemantics(role,value);

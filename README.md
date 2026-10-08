@@ -347,6 +347,15 @@ Live MCP stdio on approved b30649a passed initialize, the exact ordered nine-too
 
 Model confidence is not evidence.
 
+The central role-output validator checks Code Scout's localization fields,
+Diagnoser's typed hypothesis/status contract, and non-empty Patch Engineer
+operations. The default semantic mode remains `shadow`: contract violations are
+reported as WARN; explicit `enforce` rejects them. Evidence binding is enforced
+independently, including diagnosis support, counter-evidence and root references
+against the admitted evidence window. A contract PASS establishes neither causal
+correctness nor executed verification. See the role-output contract delta in
+[`docs/DURABLE-CONTINUATION-DESIGN.md`](docs/DURABLE-CONTINUATION-DESIGN.md).
+
 DebugAI separates and validates evidence from:
 
 - local deterministic checks;
