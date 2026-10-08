@@ -29,7 +29,7 @@ test("real Code Scout tools bind source candidates into Diagnoser evidence.read 
  assert.equal(scout.tool_loop.parse_status,"FINAL");
  assert.equal(scout.tool_loop.total_calls,2);
  const toolRecords=scout.tool_loop.observations.flatMap(x=>x.results.map(y=>y.result));
- assert.deepEqual(toolRecords.map(x=>x.tool),["source.search","dependency.map"]);
+ assert.deepEqual(toolRecords.map(x=>({tool:x.tool,status:x.status,error:x.error_code||null})),[{tool:"source.search",status:"OK",error:null},{tool:"dependency.map",status:"OK",error:null}]);
  for(const item of toolRecords)assert.equal(assertToolResultIntegrity(item),true);
  const dep=toolRecords.find(x=>x.tool==="dependency.map"),search=toolRecords.find(x=>x.tool==="source.search");
  assert.equal(dep.data.local_candidates[0].path,"src/helper.js");
