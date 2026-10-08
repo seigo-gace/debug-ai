@@ -108,3 +108,29 @@ test("existing CHAT workflow can retrieve a concrete server workspace inventory 
   assert.ok(!events.join("|").includes("test-secret"));
   assert.throws(()=>m.validateTarget({...target,server_command_id:"system.projects_inventory",inventory_page:"../"}),/PROJECT_INVENTORY_PAGE_INVALID/);
 });
+
+test("one existing GitHub Actions invocation collects all bounded server workspace inventory pages",async t=>{
+  const targetFile=targetFixture(t,{server_command_id:"system.projects_inventory",inventory_page:0,inventory_all:true});
+  const requests=[],log=[],cmdIds=["cmd_"+"e".repeat(24),"cmd_"+"f".repeat(24)];
+  let nextCommand=0;
+  const mock=async(url,args)=>{
+    const body=JSON.parse(args.body);requests.push({url,body});
+    if(url.endsWith("/request")){
+      const id=cmdIds[nextCommand++];
+      assert.ok(id);
+      return {status:202,json:async()=>({id})};
+    }
+    const index=cmdIds.indexOf(body.id);
+    assert.ok(index>=0);
+    const payload={schema:"debugai.host-workspace-inventory/v1",page:index,page_size:6,total:8,next_page:index===0?1:null,missing_roots:[],entries:[{name:index===0?"first":"last",kind:"directory"}]};
+    return {status:200,json:async()=>({id:body.id,state:"PASS",result:{read_only:true,command_id:"system.projects_inventory",exit_code:0,stdout:JSON.stringify(payload)}})};
+  };
+  await m.run({request:mock,sleep:async()=>{},log:s=>log.push(s),env:{CF_ACCESS_CLIENT_ID:"id",CF_ACCESS_CLIENT_SECRET:"secret"},targetFile});
+  assert.equal(nextCommand,2);
+  assert.deepEqual(requests.filter(x=>x.url.endsWith("/request")).map(x=>x.body.arguments),[["0"],["1"]]);
+  assert.equal(log.filter(x=>x==="SERVER_COMMAND_STATE=PASS").length,2);
+  assert.deepEqual(log.filter(x=>x.startsWith("SERVER_PROJECTS_PAGE=")),["SERVER_PROJECTS_PAGE=0","SERVER_PROJECTS_PAGE=1"]);
+  assert.ok(log.includes("SERVER_PROJECTS_SCAN_COMPLETE=TRUE"));
+  assert.deepEqual(log.filter(x=>x.startsWith("SERVER_COMMAND_REQUEST_ID=")).map(x=>x.slice(26)),cmdIds);
+  assert.throws(()=>m.validateTarget({...target,server_command_id:"system.projects_inventory",inventory_all:"yes"}),/PROJECT_INVENTORY_MODE_INVALID/);
+});
