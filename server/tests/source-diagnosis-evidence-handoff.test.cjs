@@ -4,6 +4,7 @@ const test=require("node:test"),assert=require("node:assert/strict"),fs=require(
 const {createReadOnlyToolRuntime,assertToolResultIntegrity,makeToolResult,searchSource}=require("../control/read-only-tool-runtime-base.js");
 const {runRoleWithReadOnlyTools}=require("../control/tool-loop.js");
 const {getSemanticShadow}=require("../control/role-output-validator.js");
+const {assertToolResultIntegrity:assertFullRuntimeToolIntegrity}=require("../control/read-only-tool-runtime.js");
 
 function fixture(t){
  const repo=fs.mkdtempSync(path.join(os.tmpdir(),"debugai-handoff-"));
@@ -27,6 +28,13 @@ test("real Code Scout tools bind source candidates into Diagnoser evidence.read 
  const checkedContext=runtime.createEvidenceContext({user:"source search admitted evidence smoke",baseEvidenceIds:[],observations:[]});
  const fromWithContext=await runtime.execute({role:"code_scout",selectedSkillIds:["failure-scope-reduction"],tool:"source.search",arguments:{query:"helper"},evidenceContext:checkedContext});
  assert.equal(assertToolResultIntegrity(fromWithContext),true);
+ assert.equal(assertFullRuntimeToolIntegrity(fromWithContext),true);
+ const forgedCoverage=structuredClone(fromWithContext);
+ forgedCoverage.integrity.search_coverage.state="FAKE_COMPLETE";
+ assert.throws(()=>assertFullRuntimeToolIntegrity(forgedCoverage),/TOOL_RESULT_HASH_MISMATCH/);
+ const forgedSearch=structuredClone(fromWithContext);
+ forgedSearch.data[0].excerpt="not-the-real-matched-source";
+ assert.throws(()=>assertFullRuntimeToolIntegrity(forgedSearch),/TOOL_RESULT_HASH_MISMATCH/);
  const scoutAi={call:async (role,input)=>{
    assert.equal(role,"code_scout");seen.scout.push(input);
    return {content:JSON.stringify(scoutTurn++===0?{tool_requests:[
