@@ -112,3 +112,25 @@ test("tool loop stops deterministically when model keeps requesting new tools af
     await assert.rejects(()=>runRoleWithReadOnlyTools({aiCore,role:"code_scout",user:"x",toolRuntime:runtime,maxToolRounds:1,maxToolCalls:2}),/ROLE_TOOL_LOOP_LIVELOCK/);
   }finally{f.cleanup();}
 });
+
+test("Tool Loop always bounds serialized model queue wait without extending aggregate wall deadline",async()=>{
+  const f=fixture();try{
+    const runtime=createReadOnlyToolRuntime({repo:f.repo,repoPolicy:new RepoPolicy({workspaceRoot:f.workspace})});
+    const captured=[];
+    const aiCore={call:async(_role,opts)=>{
+      captured.push(opts);
+      return {content:JSON.stringify({claims:[],decision:"HANDOFF"})};
+    }};
+    await runRoleWithReadOnlyTools({aiCore,role:"code_scout",user:"inspect bounded wait",toolRuntime:runtime,maxToolRounds:1});
+    assert.equal(captured.length,1);
+    assert.ok(Number.isInteger(captured[0].queueTimeoutMs));
+    assert.ok(captured[0].queueTimeoutMs>0&&captured[0].queueTimeoutMs<=600000);
+    assert.ok(captured[0].deadlineAt>Date.now());
+    assert.equal(captured[0].excludeQueueFromDeadline,false);
+    captured.length=0;
+    await runRoleWithReadOnlyTools({aiCore,role:"code_scout",user:"role-only",toolRuntime:null});
+    assert.equal(captured.length,1);
+    assert.equal(captured[0].queueTimeoutMs,600000);
+    assert.equal(captured[0].excludeQueueFromDeadline,true);
+  }finally{f.cleanup();}
+});

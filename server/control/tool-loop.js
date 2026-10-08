@@ -100,7 +100,7 @@ async function runRoleWithReadOnlyTools({aiCore,role,system="",user="",toolRunti
     if(Date.now()>=deadlineAt)throw new Error(`ROLE_TOOL_WALL_BUDGET_EXHAUSTED:${role}`);
     const finalRound=round===rounds;
     const roundSystem=[system,evidencePolicy,protocol].filter(Boolean).join("\n");
-    last=await aiCore.call(role,{system:roundSystem,user:currentUser,selectedSkillIds:selected.skillIds,maxTokens:budget.max_tokens,timeoutMsOverride:budget.turn_timeout_ms,deadlineAt,toolBudgetFinalRound:finalRound?true:null});
+    last=await aiCore.call(role,{system:roundSystem,user:currentUser,selectedSkillIds:selected.skillIds,maxTokens:budget.max_tokens,timeoutMsOverride:budget.turn_timeout_ms,deadlineAt,queueTimeoutMs:Math.min(budget.turn_timeout_ms,Math.max(1,deadlineAt-Date.now())),excludeQueueFromDeadline:false,toolBudgetFinalRound:finalRound?true:null});
     llmTelemetry.push(last?.telemetry||null);
     const parsed=parseIntermediate(role,last.content),requests=requestList(parsed);
     if(!requests.length){
