@@ -50,7 +50,7 @@ test("real Code Scout tools bind source candidates into Diagnoser evidence.read 
  const rehydrated=diagnosis.tool_loop.observations[0].results[0].result;
  assert.equal(rehydrated.tool,"evidence.read");
  assert.equal(assertToolResultIntegrity(rehydrated),true);
- assert.match(rehydrated.data.excerpt,/src\\/helper.js|src\/helper.js/);
+ assert.ok(rehydrated.data.excerpt.includes("src/helper.js"));
  assert.ok(diagnosis.tool_loop.evidence_ids.includes(dep.evidence_id));
  assert.equal(diagnosis.validated_output.confirmed_root_cause,null);
  assert.equal(diagnosis.validated_output.hypotheses[0].evidence_refs[0],dep.evidence_id);
