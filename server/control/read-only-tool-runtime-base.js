@@ -40,6 +40,8 @@ function resolveSafeFile(repo,rel){
   if(full!==root&&!full.startsWith(prefix))throw new Error(`READ_PATH_ESCAPE:${safe}`);
   if(!fs.existsSync(full))throw new Error(`READ_FILE_NOT_FOUND:${safe}`);
   const real=fs.realpathSync(full);if(real!==root&&!real.startsWith(prefix))throw new Error(`READ_SYMLINK_ESCAPE:${safe}`);
+  const realRel=path.relative(root,real).replace(/\\/g,"/");
+  if(blockedReadPath(realRel))throw new Error(`READ_PROTECTED_PATH:${safe}`);
   const st=fs.statSync(real);if(!st.isFile())throw new Error(`READ_NOT_FILE:${safe}`);
   return {safe,full:real,st};
 }
@@ -79,6 +81,63 @@ function searchSource(repo,query,{limit=12,maxFiles=500,coverage=null}={}){
   if(!receipt.file_limit_reached&&!receipt.match_limit_reached&&!receipt.directory_errors&&!receipt.read_errors&&!receipt.truncated_files)receipt.state="COMPLETE_WITHIN_SEARCH_SCOPE";
   if(coverage)Object.assign(coverage,receipt);
   return hits;
+}
+// Narrow lexical candidate discovery for source-aware investigation/patch planning.
+// NOT a confirmed language resolver, call graph or repository absence proof.
+const LOCAL_DEPENDENCY_EXT=Object.freeze([".ts",".tsx",".js",".jsx",".mts",".cts",".mjs",".cjs"]);
+function dependencyCandidatePaths(sourcePath,specifier){
+  const rel=path.posix.normalize(path.posix.join(path.posix.dirname(sourcePath),specifier));
+  if(!rel||rel==="."||rel===".."||rel.startsWith("../")||path.posix.isAbsolute(rel))return null;
+  const hasExt=Boolean(path.posix.extname(rel));
+  const options=hasExt?[rel]:[rel,...LOCAL_DEPENDENCY_EXT.map(ext=>rel+ext),...LOCAL_DEPENDENCY_EXT.map(ext=>rel+"/index"+ext)];
+  return [...new Set(options)];
+}
+// Candidate evidence is not an import proof: reject symlinks in every ancestor,
+// including aliases into otherwise protected areas of the same repository.
+function dependencyPathHasSymlink(repo,rel){
+  let current=fs.realpathSync(repo);
+  for(const segment of rel.split("/")){
+    current=path.join(current,segment);
+    try{if(fs.lstatSync(current).isSymbolicLink())return true;}
+    catch(error){if(error?.code==="ENOENT")return false;return true;}
+  }
+  return false;
+}
+function localDependencyMap(repo,sourcePath){
+  const source=readText(repo,sourcePath,{maxChars:100000});
+  const specifiers=extractSpecifiers(source.content).slice(0,128);
+  const local_candidates=specifiers.map(specifier=>{
+    if(!specifier.startsWith("."))return{specifier,status:"NOT_LOCAL"};
+    const options=dependencyCandidatePaths(source.path,specifier);
+    if(!options)return{specifier,status:"BLOCKED_OUTSIDE_REPO"};
+    const matches=[];let unverified=false;
+    for(const rel of options){
+      if(rel.split("/").some(segment=>SKIP_DIRS.has(segment))||blockedReadPath(rel)){unverified=true;continue;}
+      if(dependencyPathHasSymlink(repo,rel)){unverified=true;continue;}
+      const candidate=path.join(repo,...rel.split("/"));
+      let st;
+      try{st=fs.lstatSync(candidate);}catch(error){if(error?.code!=="ENOENT")unverified=true;continue;}
+      if(st.isDirectory())continue; // Bare directory may have a supported index module.\n      if(st.isSymbolicLink()||!st.isFile()){unverified=true;continue;}
+      try{
+        const item=readText(repo,rel,{maxChars:100000});
+        matches.push({path:item.path,sha256:item.sha256});
+      }catch{unverified=true;}
+    }
+    if(unverified)return{specifier,status:"BLOCKED_OR_UNVERIFIED"};
+    if(matches.length>1)return{specifier,status:"AMBIGUOUS_LOCAL_CANDIDATES",candidates:matches};
+    if(matches.length===1)return{specifier,status:"SINGLE_LOCAL_CANDIDATE",...matches[0]};
+    return{specifier,status:"UNRESOLVED_WITHIN_BOUNDED_SCOPE"};
+  });
+  return{
+    path:source.path,sha256:source.sha256,specifiers,local_candidates,
+    coverage:{
+      schema:"debugai.dependency-map-coverage/v1",state:"INCOMPLETE",
+      scope:"LITERAL_RELATIVE_IMPORT_JS_TS_HEURISTIC",source_truncated:source.truncated,
+      max_content_chars:100000,max_specifiers:128,specifier_limit_possible:specifiers.length>=128,
+      repository_absence_proven:false,source_semantics_verified:false,
+      note:"Regex specifiers and bounded extension checks yield file candidates only, not confirmed imports, transitive closure or call paths."
+    }
+  };
 }
 function testInventory(repo){
   const item=readText(repo,"package.json",{maxChars:1024*1024});let pkg;
@@ -218,7 +277,7 @@ function createReadOnlyToolRuntime({repo,repoPolicy=new RepoPolicy(),tgserver=nu
     if(tool==="source.read")data=readText(root,args.path,{maxChars:Math.max(500,Math.min(20000,Number(args.max_chars)||12000))});
     else if(tool==="source.search"){searchCoverage={};data=searchSource(root,args.query,{limit:Math.max(1,Math.min(20,Number(args.limit)||12)),maxFiles:Math.max(50,Math.min(1000,Number(args.max_files)||500)),coverage:searchCoverage});}
     else if(tool==="symbol.lookup")data=await symbolLookup(root,args,{lspFactory:lspFactory||((options)=>new TypeScript7LspClient(options))});
-    else if(tool==="dependency.map"){const item=readText(root,args.path,{maxChars:100000});data={path:item.path,sha256:item.sha256,specifiers:extractSpecifiers(item.content).slice(0,128)};}
+    else if(tool==="dependency.map")data=localDependencyMap(root,args.path);
     else if(tool==="test.inventory")data=testInventory(root);
     else if(tool==="evidence.read"){
       const id=String(args.evidence_id||"").trim();if(!id)throw new Error("EVIDENCE_READ_ID_REQUIRED");
@@ -232,4 +291,4 @@ function createReadOnlyToolRuntime({repo,repoPolicy=new RepoPolicy(),tgserver=nu
   }
   return {repo:root,availableTools:[...AVAILABLE_TOOLS],createEvidenceContext,addEvidenceToContext,execute};
 }
-module.exports={AVAILABLE_TOOLS,stableStringify,normalizeRel,blockedReadPath,resolveSafeFile,readText,walkFiles,searchSource,testInventory,languageIdFor,repoRelativeLocation,sanitizeSymbols,symbolLookup,toolResultHash,makeToolResult,assertToolResultIntegrity,normalizeRegisteredEvidence,evidenceProjection,evidenceViewCandidates,addEvidenceToContext,createEvidenceContext,createReadOnlyToolRuntime};
+module.exports={AVAILABLE_TOOLS,stableStringify,normalizeRel,blockedReadPath,resolveSafeFile,readText,walkFiles,searchSource,localDependencyMap,testInventory,languageIdFor,repoRelativeLocation,sanitizeSymbols,symbolLookup,toolResultHash,makeToolResult,assertToolResultIntegrity,normalizeRegisteredEvidence,evidenceProjection,evidenceViewCandidates,addEvidenceToContext,createEvidenceContext,createReadOnlyToolRuntime};

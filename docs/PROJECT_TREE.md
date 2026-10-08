@@ -61,6 +61,8 @@ server/tests/
   role-contract-correctness.test.cjs covers malformed role fields, diagnosis Evidence binding,
   unsupported confirmation, UNKNOWN, shadow compatibility and held-out false-pass cases
   source-search-coverage.test.cjs covers bounded search negatives, receipt integrity and evidence rehydration
+  dependency-map-local-candidates.test.cjs verifies Code Scout real read-only source candidates,
+  source hashes, ambiguity, protected/symlink/escape bounds, truncation and directory-index holdouts
   patch-engineer-skill-effect-benchmark.test.cjs includes deterministic oracle false-pass and typed-field holdouts
   runtime-packets.test.cjs covers nested constraint/evidence immutability and input-alias isolation
   requirement-handoff.test.cjs covers actual workflow/candidate requirement binding, forbidden paths,
