@@ -6,15 +6,32 @@ RESULT="$REPO/.debugai-input/asteria-baseline-probe/result.json"
 DOCKER_BIN="${DEBUG_AI_SERVER_COMMAND_DOCKER_BIN:-docker}"
 CURL_BIN="${DEBUG_AI_SERVER_COMMAND_CURL_BIN:-curl}"
 JQ_BIN="${DEBUG_AI_SERVER_COMMAND_JQ_BIN:-jq}"
+OPENSSL_BIN="${DEBUG_AI_SERVER_COMMAND_OPENSSL_BIN:-openssl}"
 started="$(date +%s%3N)"
 finish(){ local state="$1" error="${2:-}" c1="${3:-}" c6="${4:-}" gb="${5:-}" ga="${6:-}" qb="${7:-}" qa="${8:-}" tmp="${RESULT}.tmp-$$"; "$JQ_BIN" -n --arg state "$state" --arg error "$error" --arg c1 "$c1" --arg c6 "$c6" --arg gb "$gb" --arg ga "$ga" --arg qb "$qb" --arg qa "$qa" --argjson started "$started" --argjson finished "$(date +%s%3N)" '{schema:"debugai.asteria-baseline-probe/v1",state:$state,error:$error,started_at:$started,finished_at:$finished,case1:$c1,case6:$c6,granite_before:$gb,granite_after:$ga,qwen_before:$qb,qwen_after:$qa}' >"$tmp" && mv -f -- "$tmp" "$RESULT"; }
 read_evt(){ "$DOCKER_BIN" exec "$1" sh -lc 'awk "$1==\"high\"||$1==\"max\"||$1==\"oom\"||$1==\"oom_kill\"{printf \"%s=%s|\",$1,$2}" /sys/fs/cgroup/memory.events' 2>/dev/null; }
 CID="$("$DOCKER_BIN" ps -q -f name=^/asteria-ab-baseline-forensic$ 2>/dev/null | head -n1)"
 if [ -z "$CID" ]; then
   SAVED_CID="$("$DOCKER_BIN" ps -aq -f name=^/asteria-ab-baseline-forensic$ 2>/dev/null | head -n1)"
-  [ -n "$SAVED_CID" ] || { finish FAIL ASTERIA_FORENSIC_CONTAINER_NOT_FOUND; exit 2; }
-  "$DOCKER_BIN" start "$SAVED_CID" >/dev/null 2>&1 || { finish FAIL ASTERIA_FORENSIC_CONTAINER_RESTART_FAILED; exit 2; }
-  CID="$SAVED_CID"
+  if [ -n "$SAVED_CID" ]; then
+    "$DOCKER_BIN" start "$SAVED_CID" >/dev/null 2>&1 || { finish FAIL ASTERIA_FORENSIC_CONTAINER_RESTART_FAILED; exit 2; }
+    CID="$SAVED_CID"
+  else
+    "$DOCKER_BIN" image inspect asteria-ab:67c8f87 >/dev/null 2>&1 || { finish FAIL ASTERIA_FORENSIC_IMAGE_NOT_FOUND; exit 2; }
+    DEBUG_CID="$(cd "$REPO" && "$DOCKER_BIN" compose ps -q debug-ai 2>/dev/null | head -n1)"
+    [ -n "$DEBUG_CID" ] || { finish FAIL DEBUGAI_CONTAINER_NOT_FOUND; exit 2; }
+    AKEY="$("$DOCKER_BIN" exec "$DEBUG_CID" sh -lc 'printf %s "$AI_CORE_API_KEY"' 2>/dev/null)"
+    [ -n "$AKEY" ] || { finish FAIL AI_CORE_KEY_NOT_FOUND; exit 2; }
+    TOK="$("$OPENSSL_BIN" rand -hex 32 2>/dev/null)"
+    [ -n "$TOK" ] || { unset AKEY; finish FAIL ASTERIA_TOKEN_GENERATION_FAILED; exit 2; }
+    export ASTERIA_INTERNAL_TOKEN="$TOK" AI_CORE_API_KEY="$AKEY"
+    "$DOCKER_BIN" run -d --name asteria-ab-baseline-forensic --network host -e HOST=127.0.0.1 -e PORT=18111 -e ASTERIA_INTERNAL_TOKEN -e AI_CORE_BASE_URL=http://127.0.0.1:18080 -e AI_CORE_API_KEY -e ASTERIA_TRANSLATION_TIMEOUT_MS=90000 -e ASTERIA_MEMORY_FILE=/tmp/asteria-ab-baseline-forensic-memory.jsonl asteria-ab:67c8f87 >/dev/null 2>&1
+    CREATE_RC=$?
+    unset ASTERIA_INTERNAL_TOKEN AI_CORE_API_KEY TOK AKEY
+    [ "$CREATE_RC" -eq 0 ] || { finish FAIL ASTERIA_FORENSIC_CONTAINER_CREATE_FAILED; exit 2; }
+    CID="$("$DOCKER_BIN" ps -q -f name=^/asteria-ab-baseline-forensic$ 2>/dev/null | head -n1)"
+    [ -n "$CID" ] || { finish FAIL ASTERIA_FORENSIC_CONTAINER_CREATE_NOT_RUNNING; exit 2; }
+  fi
 fi
 TOKEN="$("$DOCKER_BIN" inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$CID" 2>/dev/null | sed -n 's/^ASTERIA_INTERNAL_TOKEN=//p' | head -n1)"
 [ -n "$TOKEN" ] || { finish FAIL ASTERIA_TOKEN_NOT_FOUND; exit 3; }
