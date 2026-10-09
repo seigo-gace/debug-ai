@@ -110,3 +110,57 @@ test("private review evidence is never sent to either provider",async()=>{
   await assert.rejects(()=>a.hypothesis({privacy:{privacy_class:"PRIVATE",sanitized:false,opaque_evidence:false}}),/EXTERNAL_PRIVACY_METADATA_REQUIRED/);
   assert.equal(calls,0);
 });
+
+test("both configured free reviewers independently examine each of the two existing review stages",async()=>{
+  for(const stage of ["hypothesis","final"]){
+    const calls=[];
+    const a=createExternalReviewAdapter({groqKey:"g",geminiKey:"m",fetchImpl:async(url,opts)=>{
+      calls.push({url,body:JSON.parse(opts.body)});
+      return reply(200,'{"verdict":"PASS","reason":"evidence sufficient"}');
+    }});
+    const result=await a[stage](payload);
+    assert.equal(calls.length,2,stage);
+    assert.match(calls[0].url,/groq/);
+    assert.match(calls[1].url,/generativelanguage/);
+    assert.match(calls[0].body.messages[0].content,new RegExp(stage));
+    assert.match(calls[1].body.messages[0].content,new RegExp(stage));
+    assert.equal(result.provider,"groq+gemini");
+    assert.equal(result.json.verdict,"PASS");
+    assert.equal(result.primary.json.verdict,"PASS");
+    assert.equal(result.second_opinion.json.verdict,"PASS");
+  }
+});
+test("Gemini independently vetoes an unqualified Groq PASS in both existing review stages",async()=>{
+  for(const stage of ["hypothesis","final"]){
+    for(const verdict of ["FAIL","PENDING"]){
+      let requests=0;
+      const a=createExternalReviewAdapter({groqKey:"g",geminiKey:"m",fetchImpl:async()=>{
+        requests++;
+        return reply(200,JSON.stringify({verdict:requests===1?"PASS":verdict,reason:"independent finding"}));
+      }});
+      const result=await a[stage](payload);
+      assert.equal(requests,2);
+      assert.equal(result.json.verdict,verdict,stage+":"+verdict);
+    }
+  }
+});
+test("Groq PENDING cannot become PASS by Gemini disagreement",async()=>{
+  let calls=0;
+  const a=createExternalReviewAdapter({groqKey:"g",geminiKey:"m",fetchImpl:async()=>{
+    calls++;return reply(200,JSON.stringify({verdict:calls===1?"PENDING":"PASS",reason:"needs evidence"}));
+  }});
+  const result=await a.hypothesis(payload);
+  assert.equal(calls,2);
+  assert.equal(result.json.verdict,"PENDING");
+});
+test("failed second reviewer never silently approves first PASS",async()=>{
+  let calls=0;
+  const a=createExternalReviewAdapter({groqKey:"g",geminiKey:"m",fetchImpl:async()=>{
+    calls++;if(calls===2)return reply(503,"");
+    return reply(200,'{"verdict":"PASS","reason":"local evidence"}');
+  }});
+  const result=await a.final(payload);
+  assert.equal(calls,2);
+  assert.equal(result.json.verdict,"PENDING");
+  assert.equal(result.second_opinion_error.code,"GEMINI_HTTP_503");
+});
