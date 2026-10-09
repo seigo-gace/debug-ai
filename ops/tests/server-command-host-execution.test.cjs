@@ -216,3 +216,33 @@ test("GitOps waits for Docker healthy when HTTP becomes ready during starting", 
   assert.equal(fs.existsSync(path.join(approvals, `${id}.approve`)), false);
   assert.equal(fs.readdirSync(approvals).filter(v => v.endsWith(".used")).length, 1);
 });
+
+test("real existing Host runner returns bounded Docker development log and removes sensitive lines",t=>{
+  const f=fixture(t);
+  const docker=path.join(f.repo,"test-bin","docker-logs");
+  const script=[
+    "#!/bin/sh",
+    'if [ "$1" = "compose" ] && [ "$2" = "ps" ] && [ "$3" = "-q" ] && [ "$4" = "debug-ai" ]; then echo fixture-container; exit 0; fi',
+    'if [ "$1" = "logs" ] && [ "$2" = "--tail" ] && [ "$3" = "12" ] && [ "$4" = "--timestamps" ] && [ "$5" = "fixture-container" ]; then',
+    'echo "2026-10-09T11:30:00Z ERROR CODE_CONNECTION_FAILED"',
+    'echo "2026-10-09T11:30:01Z Authorization: Bearer SECRET_FORBIDDEN"',
+    'echo "2026-10-09T11:30:02Z WARN RETRY_POSSIBLE"',
+    "exit 0; fi",
+    "exit 73"
+  ].join("\n");
+  fs.writeFileSync(docker,script+"\n",{mode:0o700});
+  const queued=f.service.request({command_id:"service.debug_ai_logs",arguments:["debug-ai","12"]});
+  const file=path.join(f.service.queueRoot(),"requests",queued.id+".json");
+  const request=JSON.parse(fs.readFileSync(file,"utf8"));
+  fs.writeFileSync(file,JSON.stringify({...request,repo:"/workspace/debug-ai"}));
+  const done=f.execute({DEBUG_AI_SERVER_COMMAND_DOCKER_BIN:docker});
+  assert.equal(done.status,0,done.stderr);
+  const status=f.service.status(queued.id);
+  assert.equal(status.state,"PASS",status.error);
+  assert.equal(status.result.command_id,"service.debug_ai_logs");
+  assert.equal(status.result.read_only,true);
+  assert.match(status.result.stdout,/CODE_CONNECTION_FAILED/);
+  assert.match(status.result.stdout,/\[REDACTED_SENSITIVE_LINE\]/);
+  assert.match(status.result.stdout,/RETRY_POSSIBLE/);
+  assert.doesNotMatch(status.result.stdout,/SECRET_FORBIDDEN/);
+});
