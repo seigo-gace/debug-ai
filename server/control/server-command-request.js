@@ -15,7 +15,7 @@ function normalizeArguments(commandId,value){
   }
   if(commandId==="system.project_file_inspect"){
     const args=Array.isArray(value)?value.map(v=>String(v)):fail("SERVER_COMMAND_ARGUMENTS_INVALID");
-    if(args.length!==2)fail("SERVER_COMMAND_ARGUMENTS_INVALID");
+    if(args.length<2||args.length>4)fail("SERVER_COMMAND_ARGUMENTS_INVALID");
     const entry=args[0].trim();
     const rel=args[1].replaceAll("\\","/").trim();
     if(!entry||entry.length>120||!/^[A-Za-z0-9._-]+$/.test(entry))fail("PROJECT_FILE_INSPECT_ENTRY_INVALID");
@@ -27,7 +27,18 @@ function normalizeArguments(commandId,value){
       if(part===".env"||part===".git"||part===".debugai-input"||lower.endsWith(".pem")||lower.endsWith(".key"))fail("PROJECT_FILE_INSPECT_PATH_FORBIDDEN");
       if(/credentials|id_rsa|token|secret|private_key/.test(lower))fail("PROJECT_FILE_INSPECT_PATH_FORBIDDEN");
     }
-    return[entry,rel];
+    const out=[entry,rel];
+    if(args.length>=3){
+      const offset=args[2].trim();
+      if(!/^(?:0|[1-9][0-9]{0,5})$/.test(offset)||Number(offset)>999999)fail("PROJECT_FILE_INSPECT_OFFSET_INVALID");
+      out.push(offset);
+    }
+    if(args.length===4){
+      const rootKey=args[3].trim();
+      if(rootKey!=="projects"&&rootKey!=="worktrees")fail("PROJECT_FILE_INSPECT_ROOT_KEY_INVALID");
+      out.push(rootKey);
+    }
+    return out;
   }
   if(commandId==="project.python_unittest"){
     const args=Array.isArray(value)?value.map(v=>String(v)):fail("SERVER_COMMAND_ARGUMENTS_INVALID");

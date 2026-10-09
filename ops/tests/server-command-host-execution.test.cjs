@@ -39,14 +39,33 @@ test("real host runner inspects a bounded workspace file via helper roots overri
   const f = fixture(t);
   const realRepo = path.resolve(__dirname, "../..");
   fs.mkdirSync(path.join(f.repo, "scripts"), { recursive: true });
+  fs.mkdirSync(path.join(f.repo, "operations"), { recursive: true });
   fs.copyFileSync(
     path.join(realRepo, "scripts/host-workspace-file-inspect.py"),
     path.join(f.repo, "scripts/host-workspace-file-inspect.py"),
+  );
+  fs.copyFileSync(
+    path.join(realRepo, "operations/host-admitted-workspace-entries.json"),
+    path.join(f.repo, "operations/host-admitted-workspace-entries.json"),
   );
   const roots = path.join(f.repo, "workspace-roots");
   const entry = path.join(roots, "fixture-app");
   fs.mkdirSync(entry, { recursive: true });
   fs.writeFileSync(path.join(entry, "note.txt"), "fixture inspect ok\n", "utf8");
+  fs.writeFileSync(
+    path.join(f.repo, "operations/host-admitted-workspace-entries.json"),
+    JSON.stringify({
+      schema: "debugai.host-admitted-workspace-entries/v1",
+      entries: {
+        "fixture-app": {
+          root_key: "projects",
+          repository: "test/fixture-app",
+          owners: ["test"],
+        },
+      },
+    }),
+    "utf8",
+  );
   const queued = f.service.request({
     command_id: "system.project_file_inspect",
     arguments: ["fixture-app", "note.txt"],
@@ -60,7 +79,8 @@ test("real host runner inspects a bounded workspace file via helper roots overri
   assert.equal(status.state, "PASS");
   const payload = JSON.parse(status.result.stdout);
   assert.equal(payload.schema, "debugai.host-workspace-file-inspect/v1");
-  assert.match(payload.content_preview, /fixture inspect ok/);
+  assert.match(payload.content_chunk, /fixture inspect ok/);
+  assert.equal(payload.complete, true);
 });
 
 test("real host runner rejects forbidden project file inspect paths at validation", t => {

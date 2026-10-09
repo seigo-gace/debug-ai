@@ -135,17 +135,42 @@ test("one existing GitHub Actions invocation collects all bounded server workspa
   assert.throws(()=>m.validateTarget({...target,server_command_id:"system.projects_inventory",inventory_all:"yes"}),/PROJECT_INVENTORY_MODE_INVALID/);
 });
 
-test("bounded project file inspect uses two-arg read contract and sanitized markers",async t=>{
-  const targetFile=targetFixture(t,{server_command_id:"system.project_file_inspect",file_inspect_entry:"webhook-gateway",file_inspect_path:"package.json"});
-  const payload={schema:"debugai.host-workspace-file-inspect/v1",entry_name:"webhook-gateway",relative_path:"package.json",path:"/home/admin1/projects/webhook-gateway/package.json",size:100,sha256:"a".repeat(64),content_preview:"{\"name\":\"ok\"}"};
+test("bounded project file inspect uses offset read contract and sanitized markers",async t=>{
+  const targetFile=targetFixture(t,{server_command_id:"system.project_file_inspect",file_inspect_entry:"webhook-gateway",file_inspect_path:"package.json",file_inspect_offset:0});
+  const payload={schema:"debugai.host-workspace-file-inspect/v1",entry_name:"webhook-gateway",relative_path:"package.json",file_size:100,mtime_iso:"2026-01-01T00:00:00+00:00",sha256:"a".repeat(64),file_identity:{size:100,mtime_iso:"2026-01-01T00:00:00+00:00",sha256:"a".repeat(64)},content_offset:0,content_length:12,content_chunk:"{\"name\":\"ok\"}",next_offset:null,complete:true};
   const logs=[],calls=[],id="cmd_"+"c".repeat(24);
   const request=async(url,args)=>{
     calls.push({url,body:JSON.parse(args.body)});
     return {status:url.endsWith("/request")?202:200,json:async()=>url.endsWith("/request")?{id}:{id,state:"PASS",result:{read_only:true,command_id:"system.project_file_inspect",exit_code:0,stdout:JSON.stringify(payload)}}};
   };
   await m.run({request,sleep:async()=>{},log:x=>logs.push(x),env:{CF_ACCESS_CLIENT_ID:"id",CF_ACCESS_CLIENT_SECRET:"secret"},targetFile});
-  assert.deepEqual(calls[0].body,{repo:"/workspace/debug-ai",command_id:"system.project_file_inspect",arguments:["webhook-gateway","package.json"]});
+  assert.deepEqual(calls[0].body,{repo:"/workspace/debug-ai",command_id:"system.project_file_inspect",arguments:["webhook-gateway","package.json","0"]});
   assert.ok(logs.includes("HOST_FILE_SHA256="+"a".repeat(64)));
+  assert.ok(logs.includes("HOST_FILE_OFFSET=0"));
   assert.ok(logs.includes("SERVER_COMMAND_READ_ONLY=TRUE"));
   assert.throws(()=>m.validateTarget({...target,server_command_id:"system.project_file_inspect",file_inspect_path:"../x"}),/PROJECT_FILE_INSPECT_TARGET_INVALID/);
+});
+
+test("bounded project file inspect can collect all pages in one invocation",async t=>{
+  const targetFile=targetFixture(t,{server_command_id:"system.project_file_inspect",file_inspect_entry:"debug-ai",file_inspect_path:"README.md",file_inspect_all_pages:true});
+  const requests=[],logs=[],cmdIds=["cmd_"+"a".repeat(24),"cmd_"+"b".repeat(24)];
+  let nextCommand=0;
+  const sha="f".repeat(64);
+  const request=async(url,args)=>{
+    const body=JSON.parse(args.body);requests.push({url,body});
+    if(url.endsWith("/request")){
+      const id=cmdIds[nextCommand++];
+      return {status:202,json:async()=>({id})};
+    }
+    const index=cmdIds.indexOf(body.id);
+    const offset=Number(requests.filter(x=>x.url.endsWith("/request"))[index].body.arguments[2]);
+    const complete=offset>=512;
+    const payload={schema:"debugai.host-workspace-file-inspect/v1",entry_name:"debug-ai",relative_path:"README.md",file_size:600,mtime_iso:"2026-01-01T00:00:00+00:00",sha256:sha,file_identity:{size:600,mtime_iso:"2026-01-01T00:00:00+00:00",sha256:sha},content_offset:offset,content_length:complete?88:512,content_chunk:complete?"tail":"x".repeat(512),next_offset:complete?null:512,complete};
+    return {status:200,json:async()=>({id:body.id,state:"PASS",result:{read_only:true,command_id:"system.project_file_inspect",exit_code:0,stdout:JSON.stringify(payload)}})};
+  };
+  await m.run({request,sleep:async()=>{},log:s=>logs.push(s),env:{CF_ACCESS_CLIENT_ID:"id",CF_ACCESS_CLIENT_SECRET:"secret"},targetFile});
+  assert.equal(nextCommand,2);
+  assert.deepEqual(requests.filter(x=>x.url.endsWith("/request")).map(x=>x.body.arguments),[["debug-ai","README.md","0"],["debug-ai","README.md","512"]]);
+  assert.ok(logs.includes("HOST_FILE_SHA256_MATCH="+sha));
+  assert.ok(logs.includes("HOST_FILE_SCAN_COMPLETE=TRUE"));
 });
