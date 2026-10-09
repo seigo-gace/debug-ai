@@ -128,7 +128,7 @@ async function run({request=fetch,sleep=delay,log=console.log,env=process.env,ta
         finished=true;
         break;
       }
-      if(state.state==="FAIL")throw Error("SERVER_COMMAND_STATE_FAIL");
+      if(state.state==="FAIL"){const failureClass=String(state.error||"UNKNOWN").split(":")[0];log("SERVER_COMMAND_FAILURE_CLASS="+(/^[A-Z0-9_]{3,80}$/.test(failureClass)?failureClass:"UNKNOWN"));throw Error("SERVER_COMMAND_STATE_FAIL");}
       if(state.state!=="QUEUED"&&state.state!=="RUNNING")throw Error("SERVER_COMMAND_UNEXPECTED_STATE");
       await sleep(2000);
     }
