@@ -134,3 +134,18 @@ test("one existing GitHub Actions invocation collects all bounded server workspa
   assert.deepEqual(log.filter(x=>x.startsWith("SERVER_COMMAND_REQUEST_ID=")).map(x=>x.slice(26)),cmdIds);
   assert.throws(()=>m.validateTarget({...target,server_command_id:"system.projects_inventory",inventory_all:"yes"}),/PROJECT_INVENTORY_MODE_INVALID/);
 });
+
+test("bounded project file inspect uses two-arg read contract and sanitized markers",async t=>{
+  const targetFile=targetFixture(t,{server_command_id:"system.project_file_inspect",file_inspect_entry:"webhook-gateway",file_inspect_path:"package.json"});
+  const payload={schema:"debugai.host-workspace-file-inspect/v1",entry_name:"webhook-gateway",relative_path:"package.json",path:"/home/admin1/projects/webhook-gateway/package.json",size:100,sha256:"a".repeat(64),content_preview:"{\"name\":\"ok\"}"};
+  const logs=[],calls=[],id="cmd_"+"c".repeat(24);
+  const request=async(url,args)=>{
+    calls.push({url,body:JSON.parse(args.body)});
+    return {status:url.endsWith("/request")?202:200,json:async()=>url.endsWith("/request")?{id}:{id,state:"PASS",result:{read_only:true,command_id:"system.project_file_inspect",exit_code:0,stdout:JSON.stringify(payload)}}};
+  };
+  await m.run({request,sleep:async()=>{},log:x=>logs.push(x),env:{CF_ACCESS_CLIENT_ID:"id",CF_ACCESS_CLIENT_SECRET:"secret"},targetFile});
+  assert.deepEqual(calls[0].body,{repo:"/workspace/debug-ai",command_id:"system.project_file_inspect",arguments:["webhook-gateway","package.json"]});
+  assert.ok(logs.includes("HOST_FILE_SHA256="+"a".repeat(64)));
+  assert.ok(logs.includes("SERVER_COMMAND_READ_ONLY=TRUE"));
+  assert.throws(()=>m.validateTarget({...target,server_command_id:"system.project_file_inspect",file_inspect_path:"../x"}),/PROJECT_FILE_INSPECT_TARGET_INVALID/);
+});

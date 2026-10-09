@@ -3,7 +3,9 @@ const fs=require("node:fs");
 const {setTimeout:delay}=require("node:timers/promises");
 const API="https://debugai.asterav8.jp";
 const DEFAULT_REPO="/workspace/debug-ai";
-const ALLOWED=new Set(["project.git_head","service.debug_ai_state","service.sandbox_state","service.debug_ai_health","canonical.devlog_activate_status","system.projects_inventory"]);
+const ALLOWED=new Set(["project.git_head","service.debug_ai_state","service.sandbox_state","service.debug_ai_health","canonical.devlog_activate_status","system.projects_inventory","system.project_file_inspect"]);
+const ENTRY_NAME_RE=/^[A-Za-z0-9._-]{1,120}$/;
+const REL_PATH_RE=/^[A-Za-z0-9_./-]{1,180}$/;
 function validateTarget(t){
   if(!t||typeof t!=="object")throw Error("INVALID_TARGET");
   const command=String(t.server_command_id||"");
@@ -12,6 +14,11 @@ function validateTarget(t){
   if(t.mode!=="readonly"||t.base_url!==API)throw Error("SERVER_COMMAND_SCOPE_DENIED");
   if(command==="system.projects_inventory" && !/^(?:0|[1-9][0-9]{0,3})$/.test(String(t.inventory_page??0)))throw Error("PROJECT_INVENTORY_PAGE_INVALID");
   if(command==="system.projects_inventory" && t.inventory_all!==undefined && typeof t.inventory_all!=="boolean")throw Error("PROJECT_INVENTORY_MODE_INVALID");
+  if(command==="system.project_file_inspect"){
+    const entry=String(t.file_inspect_entry||"");
+    const rel=String(t.file_inspect_path||"");
+    if(!ENTRY_NAME_RE.test(entry)||!REL_PATH_RE.test(rel)||rel==="."||rel.includes(".."))throw Error("PROJECT_FILE_INSPECT_TARGET_INVALID");
+  }
   return command;
 }
 function safeResult(command,raw){
@@ -40,6 +47,11 @@ function safeResult(command,raw){
     const eid=/^[a-f0-9]{64}$/.test(s.event_id||"")?s.event_id:"NONE";
     return ["DEVLOG_ACTIVATION_STATE="+s.state,"DEVLOG_HELPER_ACTUAL="+helper,"DEVLOG_EVENT_ID="+eid,"DEVLOG_ERROR_PRESENT="+Boolean(s.error)];
   }
+  if(command==="system.project_file_inspect"){
+    let d;try{d=JSON.parse(stdout);}catch{throw Error("PROJECT_FILE_INSPECT_RESULT_INVALID");}
+    if(d?.schema!=="debugai.host-workspace-file-inspect/v1"||typeof d.entry_name!=="string"||typeof d.relative_path!=="string"||typeof d.sha256!=="string"||!/^[a-f0-9]{64}$/.test(d.sha256)||typeof d.size!=="number"||stdout.length>4096)throw Error("PROJECT_FILE_INSPECT_RESULT_INVALID");
+    return["HOST_FILE_ENTRY="+d.entry_name,"HOST_FILE_REL="+d.relative_path,"HOST_FILE_SHA256="+d.sha256,"HOST_FILE_SIZE="+d.size,"HOST_FILE_PREVIEW="+JSON.stringify(String(d.content_preview||"").slice(0,512))];
+  }
   throw Error("SERVER_COMMAND_DENIED");
 }
 async function post(endpoint,payload,headers,request=fetch){
@@ -61,7 +73,7 @@ async function run({request=fetch,sleep=delay,log=console.log,env=process.env,ta
   for(;;){
     if(seenPages.has(page)||seenPages.size>=200)throw Error("PROJECT_INVENTORY_PAGINATION_INVALID");
     seenPages.add(page);
-    const args=command==="system.projects_inventory"?[String(page)]:[];
+    const args=command==="system.projects_inventory"?[String(page)]:command==="system.project_file_inspect"?[String(target.file_inspect_entry),String(target.file_inspect_path)]:[];
     const q=await post("/v1/server-command/request",{repo:DEFAULT_REPO,command_id:command,arguments:args},headers,request);
     if(!/^cmd_[0-9a-f]{24}$/.test(q.id||""))throw Error("SERVER_COMMAND_ID_INVALID");
     log("SERVER_COMMAND_REQUEST_ID="+q.id);
