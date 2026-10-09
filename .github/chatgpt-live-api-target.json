@@ -2,8 +2,6 @@
   "base_url": "https://debugai.asterav8.jp",
   "mode": "readonly",
   "repo": "/workspace/debug-ai",
-  "request": "One-time scoped read-only inventory proof for DebugAI PR61 after Composer Host-only functional report. Existing GitHub Actions -> CF Access -> DebugAI bounded Server Command -> Host. No deploy, secret, or GitOps operation. Collect all inventory pages.",
-  "server_command_id": "system.projects_inventory",
-  "inventory_page": 0,
-  "inventory_all": true
+  "request": "G-ACE Project #1 PR36 route_debugai_live_read CHAT acceptance, 2026-10-09 JST. Project control=https://github.com/seigo-gace/debug-ai/issues/41; route contract SHA=88b64cf7d4f65c8d4b37e33954086b19de11a07d; command=service.debug_ai_health; authorized read-only Host health via existing workflow, no model run, deploy, approval bypass, new transport or secret mutation. Distinct from old git_head E2E 37801337126.",
+  "server_command_id": "service.debug_ai_health"
 }

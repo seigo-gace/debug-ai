@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - feat/tgserver-async-log-sink-20261003
-      - fix/host-workspace-inventory-read-20261009
     paths:
       - .github/chatgpt-live-api-target.json
       - .github/workflows/chatgpt-live-api-verify.yml
