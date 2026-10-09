@@ -39,7 +39,9 @@ function toEvidence(result,check){
     snapshot_qualification:result.snapshot_qualification||"NOT_VERIFIED",
     snapshot_manifest_digest:result.snapshot?.manifest?.digest||null,
     snapshot_completeness:"NOT_VERIFIED",
-    candidate_construction:"NOT_CONFIGURED",
+    candidate_construction:result.candidate_construction==="MATERIALIZED_VERIFIED"?"MATERIALIZED_VERIFIED":"NOT_CONFIGURED",
+    candidate_manifest_digest:result.candidate_snapshot?.manifest?.digest||null,
+    candidate_changed_paths:Array.isArray(result.candidate_snapshot?.changed_paths)?result.candidate_snapshot.changed_paths.map(x=>x.path):[],
     sandbox:{backend:result?.isolation?.backend||null,job_id:result.job_id,network:result?.isolation?.network||null,workspace_mount:result?.isolation?.workspace_mount||null,secret_mounts:result?.isolation?.secret_mounts||null,docker_socket:result?.isolation?.docker_socket||null},
   };
 }
