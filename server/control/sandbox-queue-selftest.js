@@ -55,7 +55,7 @@ async function enqueue(){
     // multi-file candidate rather than the untouched baseline.
     const sha=old=>crypto.createHash("sha256").update(old).digest("hex");
     const packageBefore=fs.readFileSync(path.join(source,"package.json"),"utf8");
-    const candidatePackage=JSON.stringify({name:"sandbox-queue-fixture",private:true,scripts:{test:"node -e \\"if(require('./source.js')!==43)process.exit(7);process.stdout.write('QUEUE_CANDIDATE_PASS')\\""}});
+    const candidatePackage=JSON.stringify({name:"sandbox-queue-fixture",private:true,scripts:{test:`node -e "if(require('./source.js')!==43)process.exit(7);process.stdout.write('QUEUE_CANDIDATE_PASS')"`}});
     const candidate=prepareSandboxJob({sourceRepo:source,jobRoot,action:"package.test",args:{},timeoutMs:30000,candidate:{operations:[
       {type:"replace",path:"source.js",expected_sha256:sha(before),content_utf8:"module.exports=43;\n"},
       {type:"replace",path:"package.json",expected_sha256:sha(packageBefore),content_utf8:candidatePackage}
