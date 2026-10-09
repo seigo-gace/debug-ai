@@ -38,7 +38,7 @@ test("candidate stage rejects stale sha, traversal, protected, excluded, symlink
 test("tampered candidate snapshot or request fails before native helper execution",t=>{
  for(const change of ["bytes","mode","unexpected","manifest","delta"]){const f=fixture(t),job=sb.prepareSandboxJob(input(f,{operations:[op("replace","src/a.js","const a=1;\n","const a=8;\n")]})),p=path.join(job.job_dir,"repo","src","a.js"),rq=sb.readSandboxRequest(job.job_dir);
   if(change==="bytes")fs.writeFileSync(p,"tampered");
-  if(change==="mode")fs.chmodSync(p,0o755);
+  if(change==="mode"){const bytes=fs.readFileSync(p);fs.unlinkSync(p);fs.writeFileSync(p,bytes,{mode:0o755});}
   if(change==="unexpected")fs.writeFileSync(path.join(job.job_dir,"repo","src","surprise.js"),"unexpected");
   if(change==="manifest"){rq.candidate_snapshot.manifest.digest="0".repeat(64);fs.writeFileSync(path.join(job.job_dir,"request.json"),JSON.stringify(rq));}
   if(change==="delta"){rq.candidate_snapshot.changed_paths=[];fs.writeFileSync(path.join(job.job_dir,"request.json"),JSON.stringify(rq));}
