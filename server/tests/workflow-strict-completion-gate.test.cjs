@@ -59,6 +59,7 @@ test("approveAndVerify reaches COMPLETE only when all strict completion runtime 
   assert.deepEqual(result.completion_gate.failed_requirements,[]);
   assert.equal(authority.run.state,"COMPLETE");
   assert.ok(runtimeEvidence.writes.some(x=>x.type==="completion_gate"&&x.payload.complete===true));
+  assert.ok(runtimeEvidence.writes.some(x=>x.type==="external_final_review"&&x.payload.stage==="final"&&x.payload.combined_verdict==="PASS"&&x.payload.provider==="fixture"));
 });
 
 test("external final PASS cannot complete when analysis evidence has a blocking gap",async()=>{
