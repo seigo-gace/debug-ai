@@ -354,3 +354,16 @@ Required runtime evidence:
 - UNKNOWN / INSUFFICIENT_EVIDENCE calibration preserved
 - no mutation/apply/deploy regression
 - no code-generation semantic changes in this workstream
+
+
+## 11. GPT CHAT independent A/B client error redaction CU (2026-10-09)
+
+**Owner/scope:** Master assigned Composer the existing external Groq/Gemini free-quota, Host/branch-duplication reconciliation. GPT CHAT separately owns `PR #70` branched **exactly from product PR69 commit `82e3abdd9fe30247d05859b497ffd12f2be2eae8`**, touching only this model-benchmark design, existing `server/control/model-ab-benchmark.js` and existing `server/tests/model-ab-benchmark.test.cjs`. No Server parent/sibling/worktree was created. This is an independent product AI-control hygiene fix, not another Model A/B owner or benchmark redesign; one mutation writer per owned CU.
+
+**G1 Source finding:** `makeAiCoreCaller()` included the first 300 characters of an untrusted, non-2xx AI Core response body in a thrown Error. The same function passed raw malformed HTTP200 text to JSON.parse, whose syntax error message may reveal upstream bytes. Such text may contain raw context, credentials or fragments of private model input and be propagated into workflow/evaluation logs. The code path is independently auditable; **there is no claim a real credential was leaked**.
+
+**Narrow remediation:** Do not read HTTP error bodies at all; on non-2xx emit only a stable `AI_CORE_HTTP_<status>` code. Fail-closed on a successful HTTP response with unreadable or malformed JSON using `AI_CORE_ENVELOPE_READ_FAILED` or `AI_CORE_ENVELOPE_INVALID`, with no untrusted upstream text or causal data copied into the exception. Existing role selection, prompt, sampling, temperature, A/B score/holdouts and `AI_CORE_OUTPUT_TRUNCATED` semantics remain byte-identical. Do not change the protected production calling path, provider, model, backend or Secrets. A static error code is adequate for a read-only benchmark and preserves HTTP categorization.
+
+**Fail-first verification:** Two mock-response regressions added first on separate new branch commit `405ad0aabd17faa6573f4712c6aa21134bbbc5ff`: (1) HTTP503 body deliberately contains synthetic Bearer and private marker, must not appear in error fields; (2) HTTP200 malformed JSON body contains private marker, must return a typed opaque error. Both are test-only, no network requests to AI services. The repair is the existing function (not a duplicate API client), commit `4438db51ed863e3b9668d2c3f665b8ee707e5c53`.
+
+**Acceptance and state separation:** Full benchmark negative+positive tests and exact-head Verify/Core/Public/Volume must be read back before PASS. This isolates a **logging privacy weakness**; it is not evidence of an A/B semantic quality gain, real AI Runtime capability, credential billing status, model config optimization or a paid provider invocation. Further required genuine semantic 50/60 evaluation remains unchanged. Rollback: revert this one existing A/B function, two regression tests and this Design Delta; no stored schemas, model settings or external behavior contract change outside the benchmark client.
