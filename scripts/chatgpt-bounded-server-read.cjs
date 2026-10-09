@@ -3,7 +3,7 @@ const fs=require("node:fs");
 const {setTimeout:delay}=require("node:timers/promises");
 const API="https://debugai.asterav8.jp";
 const DEFAULT_REPO="/workspace/debug-ai";
-const ALLOWED=new Set(["project.git_head","project.git_recent_commits","github.actions_recent","service.debug_ai_state","service.sandbox_state","service.debug_ai_health","canonical.devlog_activate_status","system.projects_inventory","system.project_file_inspect"]);
+const ALLOWED=new Set(["project.git_head","project.git_recent_commits","github.actions_recent","service.debug_ai_logs","service.debug_ai_state","service.sandbox_state","service.debug_ai_health","canonical.devlog_activate_status","system.projects_inventory","system.project_file_inspect"]);
 const ENTRY_NAME_RE=/^[A-Za-z0-9._-]{1,120}$/;
 const REL_PATH_RE=/^[A-Za-z0-9_./-]{1,180}$/;
 const FILE_INSPECT_MAX_PAGES=32;
@@ -15,6 +15,10 @@ function validateTarget(t){
   if(t.mode!=="readonly"||t.base_url!==API)throw Error("SERVER_COMMAND_SCOPE_DENIED");
   if(command==="system.projects_inventory" && !/^(?:0|[1-9][0-9]{0,3})$/.test(String(t.inventory_page??0)))throw Error("PROJECT_INVENTORY_PAGE_INVALID");
   if(command==="system.projects_inventory" && t.inventory_all!==undefined && typeof t.inventory_all!=="boolean")throw Error("PROJECT_INVENTORY_MODE_INVALID");
+  if(command==="service.debug_ai_logs"){
+    if(!["debug-ai","sandbox-runner"].includes(t.log_service??"debug-ai"))throw Error("SERVER_LOG_SERVICE_DENIED");
+    if(!/^(?:[1-9]|1[0-9]|20)$/.test(String(t.log_lines??10)))throw Error("SERVER_LOG_LINES_INVALID");
+  }
   if(command==="system.project_file_inspect"){
     const entry=String(t.file_inspect_entry||"");
     const rel=String(t.file_inspect_path||"");
@@ -63,6 +67,15 @@ function safeResult(command,raw){
       return{id:x.databaseId,name:x.name,status:x.status,conclusion:x.conclusion??null,sha:x.headSha,url:x.url};
     });
     return["SERVER_ACTIONS_LOG="+JSON.stringify(items)];
+  }
+  if(command==="service.debug_ai_logs"){
+    if(stdout.length>3400)throw Error("SERVER_RUNTIME_LOG_INVALID");
+    const lines=stdout.split("\n").filter(Boolean).slice(-20).map(s=>{
+      const plain=s.replace(/\x1b\[[0-9;]*[A-Za-z]/g,"");
+      if(/token|secret|bearer|password|credential|authorization|cookie|private.key|api.key/i.test(plain))return "[REDACTED_SENSITIVE_LINE]";
+      return plain.slice(0,400);
+    });
+    return["SERVER_RUNTIME_LOG_LINES="+JSON.stringify(lines)];
   }
   if(command==="project.git_head"){
     if(!/^[a-f0-9]{40}$/.test(stdout))throw Error("SERVER_HEAD_INVALID");
@@ -124,7 +137,7 @@ async function run({request=fetch,sleep=delay,log=console.log,env=process.env,ta
       if(seenFileOffsets.has(fileOffset)||seenFileOffsets.size>=FILE_INSPECT_MAX_PAGES)throw Error("PROJECT_FILE_INSPECT_PAGINATION_INVALID");
       seenFileOffsets.add(fileOffset);
     }
-    const args=command==="system.projects_inventory"?[String(page)]:command==="system.project_file_inspect"?fileInspectArguments(target,fileOffset):[];
+    const args=command==="system.projects_inventory"?[String(page)]:command==="system.project_file_inspect"?fileInspectArguments(target,fileOffset):command==="service.debug_ai_logs"?[String(target.log_service??"debug-ai"),String(target.log_lines??10)]:[];
     const q=await post("/v1/server-command/request",{repo:DEFAULT_REPO,command_id:command,arguments:args},headers,request);
     if(!/^cmd_[0-9a-f]{24}$/.test(q.id||""))throw Error("SERVER_COMMAND_ID_INVALID");
     log("SERVER_COMMAND_REQUEST_ID="+q.id);
