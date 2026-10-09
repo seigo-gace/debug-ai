@@ -124,3 +124,13 @@ test("model AB cannot score a truncated reply supplied by an injected caller",as
     assert.equal(e.code,"AI_CORE_OUTPUT_TRUNCATED");assert.equal(e.benchmark_metadata.role,"local_reviewer");assert.equal(e.benchmark_metadata.completion_tokens,100);assert.equal(JSON.stringify(e).includes("PRIVATE_"),false);return true;
   });
 });
+
+test("model-specific A/B qualification refuses coerced fractional or absent scores",()=>{
+  for(const score of ["6",true,null,undefined,6.5,NaN,Infinity]){
+    assert.throws(()=>validateScored("diagnoser","holdout","candidate",{score,max_score:7}),/MODEL_AB_SCORE_INVALID/);
+  }
+  for(const max_score of ["7",true,null,undefined,7.5,NaN,Infinity]){
+    assert.throws(()=>validateScored("local_reviewer","holdout","baseline",{score:6,max_score}),/MODEL_AB_SCORE_INVALID/);
+  }
+  assert.deepEqual(validateScored("diagnoser","holdout","candidate",{score:0,max_score:7}),{score:0,max_score:7});
+});
