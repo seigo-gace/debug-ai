@@ -96,3 +96,18 @@ test("public final-review summary preserves anonymized test failure, skip and ex
     assert.equal(encoded.includes(secret),false,secret);
   }
 });
+
+test("explicit failed or skipped review evidence cannot be upgraded by contradictory boolean pass",()=>{
+  const p=makeReviewPacket({
+    candidateRef:"cand",applyReceiptRef:"receipt",repositoryRevision:"git_after",
+    changedPaths:["private/name"],diff:"PRIVATE DIFF",
+    executedTests:[{status:"PASS"}],
+    testResults:[{status:"FAIL",pass:true},{status:"SKIP",pass:true},{status:"PASS",pass:false}],
+    invariants:[{status:"FAIL",pass:true},{status:"SKIP",pass:true}],
+    evidenceRefs:[]
+  });
+  const s=publicReviewPacketSummary(p);
+  assert.deepEqual(s.test_result_statuses,{PASS:0,FAIL:2,SKIP:1,UNKNOWN:0});
+  assert.deepEqual(s.invariant_statuses,{PASS:0,FAIL:1,SKIP:1,UNKNOWN:0});
+  assert.equal(s.invariants_pass,false);
+});
