@@ -2,8 +2,6 @@
   "base_url": "https://debugai.asterav8.jp",
   "mode": "readonly",
   "repo": "/workspace/debug-ai",
-  "request": "2026-10-10 GPT CHAT direct host E2E: existing bounded DebugAI logs 10 lines; read-only, no AI inference, no deploy; confirm exact response through Actions logs.",
-  "server_command_id": "service.debug_ai_logs",
-  "log_service": "debug-ai",
-  "log_lines": 10
+  "request": "2026-10-10 GPT CHAT runtime dogfood follow-up: bounded DebugAI state after live logs showed incompatible=133, archive_errors=42, durable_gc_errors=3; read-only, no inference/deploy.",
+  "server_command_id": "service.debug_ai_state"
 }
