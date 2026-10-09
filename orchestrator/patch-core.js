@@ -488,6 +488,8 @@ module.exports = {
   preparePatchCandidate,
   assertCandidateIntegrity,
   revalidatePatchCandidate,
+  candidateExpectedState,
+  renderExistingText,
   contractOperationsFromCandidate,
   applyPatchCandidateTransactional,
 };
