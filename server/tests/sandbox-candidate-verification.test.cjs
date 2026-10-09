@@ -66,6 +66,40 @@ test("holdout preserves source edits beside unchanged configs and ordinary confi
  }});
  const result=await lane.collectCandidate(candidate);assert.equal(result.status,"FINAL_VALID");assert.equal(result.checks.length,3);assert.equal(result.semantic_verification,"UNKNOWN");
 });
+test("package-manager locks and dependency execution configs cannot bypass candidate oracle admission",async t=>{
+ const protectedPaths=[
+  "pnpm-lock.yaml","client/pnpm-lock.yaml","yarn.lock","client/yarn.lock",
+  "bun.lock","bun.lockb","client/bun.lock","client/bun.lockb",
+  ".npmrc","client/.npmrc",".yarnrc",".yarnrc.yml",
+  ".pnp.cjs",".pnp.loader.mjs",".pnpmfile.cjs","pnpm-workspace.yaml",
+  "bunfig.toml",".yarn/plugins/third-party.cjs"
+ ];
+ for(const file of protectedPaths){
+  const f=fixture(t);fs.mkdirSync(path.dirname(path.join(f.repo,file)),{recursive:true});
+  fs.writeFileSync(path.join(f.repo,file),"original\\n");
+  const candidate=patch.preparePatchCandidate({repo:f.repo,selectedPaths:[file],task:"alter verification execution authority",requestHash:"1".repeat(64),stage:"debug",result:{operations:[{type:"replace",path:file,old:"original",new:"modified"}]}});
+  let waits=0;const root=path.join(f.root,"jobs");
+  const lane=createSandboxVerificationLane({jobRoot:root,wait:async()=>{waits++;throw Error("UNQUALIFIED_CHECK_DISPATCHED");}});
+  const result=await lane.collectCandidate(candidate);
+  assert.equal(result.status,"NOT_CONFIGURED",file);
+  assert.equal(result.reason,"CANDIDATE_ORACLE_CHANGE_NOT_QUALIFIED",file);
+  assert.equal(result.checks.length,0,file);assert.equal(waits,0,file);
+  assert.equal(fs.existsSync(root),false,file);
+  assert.equal(fs.readFileSync(path.join(f.repo,file),"utf8"),"original\\n",file);
+ }
+});
+test("ordinary application edits beside unchanged package-manager locks are still verifiable",async t=>{
+ const f=fixture(t);
+ for(const file of ["pnpm-lock.yaml",".npmrc","bunfig.toml"])fs.writeFileSync(path.join(f.repo,file),"untouched\\n");
+ const lane=createSandboxVerificationLane({jobRoot:path.join(f.root,"jobs"),wait:async({jobId})=>{
+  const request=JSON.parse(fs.readFileSync(path.join(f.root,"jobs","jobs",jobId,"request.json")));
+  return{schema:"debugai.sandbox-result/v1",job_id:jobId,action:request.action,pass:true,code:0,snapshot:request.source_snapshot,candidate_snapshot:request.candidate_snapshot,candidate_construction:"MATERIALIZED_VERIFIED"};
+ }});
+ const result=await lane.collectCandidate(f.candidate);
+ assert.equal(result.status,"FINAL_VALID");assert.equal(result.checks.length,3);
+ assert.equal(result.semantic_verification,"UNKNOWN");
+ for(const file of ["pnpm-lock.yaml",".npmrc","bunfig.toml"])assert.equal(fs.readFileSync(path.join(f.repo,file),"utf8"),"untouched\\n");
+});
 test("independent unedited source drift during check invalidates otherwise bound PASS",async t=>{
  const f=fixture(t),lane=createSandboxVerificationLane({jobRoot:path.join(f.root,"jobs"),wait:async({jobId})=>{
   const request=JSON.parse(fs.readFileSync(path.join(f.root,"jobs","jobs",jobId,"request.json")));
