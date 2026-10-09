@@ -1,3 +1,4 @@
+const {createMockAdapter:createExternalReviewAdapter}=require('./helpers/external-review-mock.cjs');
 const test=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
@@ -188,14 +189,14 @@ test('TGserver adapter uses existing ingest/search APIs, separates P004/P005, an
   assert.match(promote.b.message,/"event_type":"knowledge"/);
 });
 
-const {assertPublicOpaque,createExternalReviewAdapter}=require('../adapters/external-review.js');
+const {assertPublicOpaque}=require('../adapters/external-review.js');
 test('external review is restricted to sanitized PUBLIC opaque payload',async()=>{
   assert.throws(()=>assertPublicOpaque({privacy:{privacy_class:'PRIVATE',sanitized:true,opaque_evidence:true}}),/PRIVACY/);
   assert.throws(()=>assertPublicOpaque({privacy:{privacy_class:'PUBLIC',sanitized:true,opaque_evidence:true},detail:'/home/example/secret'}),/PRIVACY_BLOCK/);
   let got;
   const a=createExternalReviewAdapter({groqKey:'k',geminiKey:null,fetchImpl:async(u,o)=>{
     got=JSON.parse(o.body);
-    return new Response(JSON.stringify({choices:[{message:{content:'{"verdict":"PASS"}'}}]}),{status:200});
+    return new Response(JSON.stringify({choices:[{finish_reason:"stop",message:{content:'{"verdict":"PASS"}'}}]}),{status:200});
   }});
   const r=await a.hypothesis({privacy:{privacy_class:'PUBLIC',sanitized:true,opaque_evidence:true},claim:'opaque'});
   assert.equal(r.json.verdict,'PASS');

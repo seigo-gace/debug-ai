@@ -1,4 +1,5 @@
 "use strict";
+const {createMockAdapter,qualification}=require('./helpers/external-review-mock.cjs');
 
 const test=require("node:test");
 const assert=require("node:assert/strict");
@@ -43,7 +44,7 @@ async function post(base,route,body){
   return json;
 }
 
-test("HTTP entry points complete the deterministic analyze-to-approved-patch closed loop",async t=>{
+for(const finalMode of ["PASS","PENDING","UNVERIFIED"])test(`HTTP closed loop with real mock adapter: final ${finalMode}`,async t=>{
   const {root,repo,runtimeRoot}=fixture();
   t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
 
@@ -64,9 +65,14 @@ test("HTTP entry points complete the deterministic analyze-to-approved-patch clo
     return {content:JSON.stringify(outputs[role])};
   }};
   const externalCalls=[];
+  let now=Date.now(),inFinal=false,httpDispatches=0;
+  const adapter=createMockAdapter({groqKey:"g",geminiKey:"",nowFn:()=>now,
+    qualificationReader:()=>{const q=qualification(now,{groq:"g",gemini:""});if(inFinal&&finalMode==="UNVERIFIED")q.providers.groq.plan="UNKNOWN";return q;},
+    fetchImpl:async()=>{httpDispatches++;const verdict=inFinal?finalMode:"PASS";now+=3_660_000;return new Response(JSON.stringify({choices:[{finish_reason:"stop",message:{content:JSON.stringify({verdict})}}]}));}
+  });
   const externalReview={
-    hypothesis:async payload=>{externalCalls.push({stage:"hypothesis",payload});return {json:{verdict:"PASS"}};},
-    final:async payload=>{externalCalls.push({stage:"final",payload});return {json:{verdict:"PASS"}};}
+    hypothesis:async payload=>{externalCalls.push({stage:"hypothesis",payload});return adapter.hypothesis(payload);},
+    final:async payload=>{inFinal=true;externalCalls.push({stage:"final",payload});return adapter.final(payload);}
   };
   const authority=new RunAuthority({runtimeRoot});
   const patchService=new PatchService({runtimeRoot});
@@ -103,21 +109,32 @@ test("HTTP entry points complete the deterministic analyze-to-approved-patch clo
   assert.equal(authority.load(analysis.run_id).state,"WAITING_APPROVAL");
   assert.equal(fs.readFileSync(path.join(repo,"value.js"),"utf8"),"module.exports=1;\n");
 
-  const completed=await post(base,"/v1/approve-apply-verify",{
+  const applyRequest={
     runId:analysis.run_id,
     candidateId:patch.candidate.id,
     candidateHash:patch.candidate.candidate_hash,
     decision:"approve",
     repo
-  });
-  assert.equal(completed.state,"COMPLETE",JSON.stringify(completed.completion_gate));
+  };
+  if(finalMode==="UNVERIFIED"){
+    const response=await fetch(`${base}/v1/approve-apply-verify`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(applyRequest)});
+    assert.equal(response.ok,false);
+    assert.match(JSON.stringify(await response.json()),/LIVE_BLOCKED_FREE_TIER_UNVERIFIED/);
+    assert.notEqual(authority.load(analysis.run_id).state,"COMPLETE");
+    assert.equal(httpDispatches,1);
+    assert.equal(roleCalls.at(-1).role,"local_reviewer");
+    assert.deepEqual(externalCalls.map(c=>c.stage),["hypothesis","final"]);
+    return;
+  }
+  const completed=await post(base,"/v1/approve-apply-verify",applyRequest);
+  assert.equal(completed.state,finalMode==="PASS"?"COMPLETE":"AWAITING_EXTERNAL_FINAL_REVIEW",JSON.stringify(completed.completion_gate));
   assert.equal(completed.pass,true);
   assert.equal(completed.local_review.verdict,"PASS");
   assert.equal(completed.review_packet.schema,"debugai.review-packet/v1");
-  assert.equal(completed.external_final_review.json.verdict,"PASS");
-  assert.equal(completed.completion_gate.complete,true);
+  assert.equal(completed.external_final_review.json.verdict,finalMode);
+  assert.equal(completed.completion_gate.complete,finalMode==="PASS");
   assert.equal(completed.post_apply_repository_revision,completed.current_repository_revision);
-  assert.equal(authority.load(analysis.run_id).state,"COMPLETE");
+  assert.equal(authority.load(analysis.run_id).state,finalMode==="PASS"?"COMPLETE":"RETESTING");
   assert.equal(fs.readFileSync(path.join(repo,"value.js"),"utf8"),"module.exports=2;\n");
   assert.deepEqual(roleCalls.map(call=>call.role),["code_scout","causal_scout","researcher","diagnoser","patch_engineer","local_reviewer"]);
   const localReviewInput=roleCalls.find(call=>call.role==="local_reviewer").user;
