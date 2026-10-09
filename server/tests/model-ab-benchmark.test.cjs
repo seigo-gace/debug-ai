@@ -124,3 +124,33 @@ test("model AB cannot score a truncated reply supplied by an injected caller",as
     assert.equal(e.code,"AI_CORE_OUTPUT_TRUNCATED");assert.equal(e.benchmark_metadata.role,"local_reviewer");assert.equal(e.benchmark_metadata.completion_tokens,100);assert.equal(JSON.stringify(e).includes("PRIVATE_"),false);return true;
   });
 });
+
+test("model A/B remote HTTP error never exposes upstream response text or credentials",async()=>{
+  const config=qualifyConfigForRuntime("diagnoser",baselineConfig("diagnoser"),8192).config;
+  const secrets=["Bearer TOKEN_MUST_STAY_PRIVATE","customer-document-marker"];
+  const call=makeAiCoreCaller({
+    baseUrl:"http://example.invalid",apiKey:"test",dispatcher:{},runtimeContextTokens:8192,
+    fetchImpl:async()=>new Response(secrets.join(" - "),{status:503})
+  });
+  await assert.rejects(()=>call({role:"diagnoser",config,system:"s",user:"u"}),error=>{
+    assert.equal(error.code,"AI_CORE_HTTP_503");
+    assert.equal(error.message,"AI_CORE_HTTP_503");
+    const serialized=JSON.stringify({message:error.message,...error});
+    for(const secret of secrets)assert.equal(serialized.includes(secret),false);
+    return true;
+  });
+});
+test("model A/B malformed HTTP200 envelope fails closed without echoing upstream body",async()=>{
+  const config=qualifyConfigForRuntime("diagnoser",baselineConfig("diagnoser"),8192).config;
+  const secret="PRIVATE_MODEL_SERVER_DETAILS";
+  const call=makeAiCoreCaller({
+    baseUrl:"http://example.invalid",apiKey:"test",dispatcher:{},runtimeContextTokens:8192,
+    fetchImpl:async()=>new Response(secret,{status:200})
+  });
+  await assert.rejects(()=>call({role:"diagnoser",config,system:"s",user:"u"}),error=>{
+    assert.equal(error.code,"AI_CORE_ENVELOPE_INVALID");
+    assert.equal(error.message,"AI_CORE_ENVELOPE_INVALID");
+    assert.equal(JSON.stringify({message:error.message,...error}).includes(secret),false);
+    return true;
+  });
+});
