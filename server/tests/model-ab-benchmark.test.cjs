@@ -154,3 +154,30 @@ test("model A/B malformed HTTP200 envelope fails closed without echoing upstream
     return true;
   });
 });
+
+test("model A/B refuses non-completed finish states before scoring a valid-looking JSON answer",async()=>{
+  const config=qualifyConfigForRuntime("diagnoser",baselineConfig("diagnoser"),8192).config;
+  for(const reason of [null,"content_filter","tool_calls","function_call","unknown_private_upstream_value"]){
+    const call=makeAiCoreCaller({
+      baseUrl:"http://example.invalid",apiKey:"test",dispatcher:{},runtimeContextTokens:8192,
+      fetchImpl:async()=>new Response(JSON.stringify({choices:[{finish_reason:reason,message:{content:'{"verdict":"PASS"}'}}]}),{status:200})
+    });
+    await assert.rejects(()=>call({role:"diagnoser",config,system:"s",user:"u"}),error=>{
+      assert.equal(error.code,"AI_CORE_OUTPUT_NOT_COMPLETE");
+      assert.equal(error.message,"AI_CORE_OUTPUT_NOT_COMPLETE");
+      const meta=error.benchmark_metadata;
+      assert.equal(meta.role,"diagnoser");
+      assert.equal(meta.finish_reason,["content_filter","tool_calls","function_call"].includes(reason)?reason:null);
+      assert.equal(JSON.stringify(error).includes("unknown_private_upstream_value"),false);
+      return true;
+    });
+  }
+});
+test("model A/B injected caller cannot promote incomplete JSON response as semantic score",async()=>{
+  await assert.rejects(
+    ()=>runModelAbBenchmark({role:"local_reviewer",axis:"temperature",candidate:"0.2",callModel:async({testCase})=>({
+      content:JSON.stringify(perfectLocal(testCase)),finish_reason:"content_filter",usage:{completion_tokens:7}
+    })}),
+    error=>error.code==="AI_CORE_OUTPUT_NOT_COMPLETE"&&error.benchmark_metadata.finish_reason==="content_filter"
+  );
+});
