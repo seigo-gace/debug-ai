@@ -5,3 +5,8 @@ node_modules
 .env.*
 *.log
 .debugai-input
+
+# Parent-owned isolated workspaces are not product/build artifacts.
+.worktrees/
+
+.verification/

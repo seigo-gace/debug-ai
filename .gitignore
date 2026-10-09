@@ -16,3 +16,10 @@ backups/
 
 .DS_Store
 Thumbs.db
+
+# Parent-owned isolated workspaces are not product/build artifacts.
+.worktrees/
+
+.verification/
+build/
+.debugai-input/

@@ -1,7 +1,9 @@
 "use strict";
 const fs=require("node:fs");
 const path=require("node:path");
-const {prepareSandboxJob,waitSandboxResult}=require("./sandbox-runtime.js");
+const {prepareSandboxJob,waitSandboxResult,snapshotInventory}=require("./sandbox-runtime.js");
+
+const {isolatedOperations,preparePatchCandidateSandboxJob}=require("./sandbox-patch-candidate.js");
 
 const CHECKS=Object.freeze([
   Object.freeze({action:"package.lint",script:"lint",check_type:"LINT",timeout_ms:120000}),
@@ -19,6 +21,21 @@ function configuredChecks(repo){
   const pkg=readPackage(repo);if(!pkg)return [];
   const scripts=pkg.scripts||{};
   return CHECKS.filter(c=>typeof scripts[c.script]==="string"&&scripts[c.script].trim());
+}
+function changesVerificationOracle(relative){
+  if(/(^|\/)(?:package(?:-lock)?\.json|npm-shrinkwrap\.json|[^/]*\.(?:test|spec)\.[^/]+)$|(^|\/)(?:tests?|__tests__)(\/|$)/i.test(relative))return true;
+  // Config edits can disable otherwise unchanged checks. Qualification is held,
+  // rather than treating a successful weakened command as candidate evidence.
+  const parts=relative.toLowerCase().split("/");
+  // Package manager locks, plugin paths and execution configuration determine
+  // which code/checks run; no candidate may rewrite this oracle without
+  // independently qualified artifact and test-strength admission.
+  if(parts.includes(".yarn"))return true;
+  const name=path.posix.basename(relative).toLowerCase();
+  if(/^(?:pnpm-lock\.yaml|yarn\.lock|bun\.lockb?|\.npmrc|\.yarnrc(?:\.yml)?|\.pnp(?:\.loader)?\.[cm]?js|\.pnpmfile\.[cm]?js|pnpm-workspace\.yaml|bunfig\.toml)$/.test(name))return true;
+  return /^tsconfig(?:\.[^/]+)?\.json$/.test(name)||
+    /^(?:eslint|jest|vitest)\.config\.(?:[cm]?[jt]s|json)$/.test(name)||
+    /^\.eslintrc(?:\.(?:[cm]?js|json|ya?ml))?$/.test(name);
 }
 function toEvidence(result,check){
   return {
@@ -59,6 +76,33 @@ function createSandboxVerificationLane({jobRoot=process.env.DEBUG_AI_SANDBOX_JOB
     }
     return {status:"FINAL_VALID",checks:out};
   }
-  return {collect};
+  async function collectCandidate(patchCandidate){
+    // Validate canonical integrity and current preconditions even if execution is unavailable.
+    const operations=isolatedOperations(patchCandidate).operations;
+    const unavailable=reason=>({status:"NOT_CONFIGURED",reason,checks:[],patch_candidate_id:patchCandidate.id,patch_candidate_hash:patchCandidate.candidate_hash});
+    // This bounded slice preserves the baseline oracle. Changed tests/configuration
+    // need a separately qualified test-strength/dependency admission path.
+    if(operations.some(x=>changesVerificationOracle(x.path)))return unavailable("CANDIDATE_ORACLE_CHANGE_NOT_QUALIFIED");
+    const pkg=readPackage(patchCandidate.repo);
+    if(!pkg)return unavailable("CANDIDATE_PACKAGE_NOT_CONFIGURED");
+    if(["dependencies","devDependencies","optionalDependencies","peerDependencies"].some(key=>Object.keys(pkg[key]||{}).length))return unavailable("CANDIDATE_DEPENDENCIES_NOT_QUALIFIED");
+    const checks=configuredChecks(patchCandidate.repo);
+    if(!checks.length)return unavailable("CANDIDATE_CHECKS_NOT_CONFIGURED");
+    const out=[];let baselineDigest=null,candidateDigest=null;
+    for(const check of checks){
+      const {job}=preparePatchCandidateSandboxJob({patchCandidate,jobRoot,action:check.action,timeoutMs:check.timeout_ms,requiredPaths:["package.json"]});
+      const expected=job.request;
+      if(baselineDigest&& (baselineDigest!==expected.source_snapshot.manifest.digest||candidateDigest!==expected.candidate_snapshot.manifest.digest))throw new Error("SANDBOX_CANDIDATE_SOURCE_CHANGED_BETWEEN_CHECKS");
+      baselineDigest=expected.source_snapshot.manifest.digest;candidateDigest=expected.candidate_snapshot.manifest.digest;
+      const result=await wait({jobRoot,jobId:job.job_id,timeoutMs:check.timeout_ms+15000});
+      if(result?.schema!=="debugai.sandbox-result/v1"||result.job_id!==job.job_id||result.action!==check.action||result.candidate_construction!=="MATERIALIZED_VERIFIED"||result.snapshot?.manifest?.digest!==baselineDigest||result.candidate_snapshot?.manifest?.digest!==candidateDigest||result.candidate_snapshot?.digest!==expected.candidate_snapshot.digest||result.candidate_snapshot?.patch_candidate_ref?.id!==patchCandidate.id||result.candidate_snapshot?.patch_candidate_ref?.candidate_hash!==patchCandidate.candidate_hash)throw new Error("SANDBOX_CANDIDATE_RESULT_BINDING_INVALID");
+      // Revalidate the owning source after the check; a stale result cannot qualify it.
+      isolatedOperations(patchCandidate);
+      if(snapshotInventory(patchCandidate.repo,{requiredPaths:["package.json"]}).digest!==baselineDigest)throw new Error("SANDBOX_CANDIDATE_SOURCE_CHANGED_DURING_CHECK");
+      out.push(toEvidence(result,check));
+    }
+    return {status:out.some(x=>x.status!=="PASS")?"FINAL_INVALID":"FINAL_VALID",checks:out,patch_candidate_id:patchCandidate.id,patch_candidate_hash:patchCandidate.candidate_hash,semantic_verification:"UNKNOWN"};
+  }
+  return {collect,collectCandidate};
 }
 module.exports={CHECKS,configuredChecks,toEvidence,createSandboxVerificationLane};

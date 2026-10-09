@@ -243,3 +243,158 @@ This document is a formal design delta only.
 `MAIN_MERGE=NO`
 `DEPLOY=NO`
 `PRODUCTION_CHANGE=NONE`
+
+## 15. Candidate-aware preapproval verification — Codex CU, 2026-10-09
+
+Purpose: close the actual Source gap where `collect(repo)` checked only BASELINE
+and Workflow returned a generated candidate without executing its changed code.
+The adopted Unified Plan §13.1(4), reliability delta §13 and Codex execution §5
+remain the baseline: construct first, verify isolated modified code, bind evidence,
+then retain explicit approval. PR63–65 already qualify bounded construction,
+canonical PatchCandidate adaptation and identity; this CU extends those owners.
+
+Chosen method: reuse `preparePatchCandidateSandboxJob` for every configured
+lint/typecheck/test/build action in `collectCandidate`. Revalidate canonical hash
+and current preconditions before execution and after each check; bind job/action,
+BASELINE/CANDIDATE manifest/delta digests and canonical ID/hash on readback. All
+checks must start from the same BASELINE and CANDIDATE digests. Reinventory the
+owning source after each execution, rejecting unrelated-file drift as well as
+selected-file drift. Each check gets a fresh isolated copy; build side effects do
+not contaminate the next check. `FINAL_VALID` describes configured command outcomes
+only; semantic correctness and whole-tree completeness stay UNKNOWN/NOT_VERIFIED.
+
+Workflow owns invocation for initial Patch Engineer candidates and bounded re-fix
+candidates before PATCH_READY/WAITING_APPROVAL. It registers deterministic check
+Evidence, persists `candidate_verification` through existing RuntimeEvidence and
+returns it with the candidate. A failed command yields FINAL_INVALID evidence;
+a transport/integrity exception is persisted as failure and propagated. Existing
+approval states remain candidate-only; neither FAIL nor PASS grants apply or
+Strict Completion. Fresh failing-check-driven preapproval re-fix remains a next
+CU; this change does not automatically consume new model calls or approve a fix.
+
+Dependency admission is deliberately explicit: declared dependencies/dev/optional/
+peer dependencies return NOT_CONFIGURED / CANDIDATE_DEPENDENCIES_NOT_QUALIFIED.
+Candidate jobs do not receive Sidecar-global node_modules or NODE_PATH. No npm
+install, host cache/native artifact injection, network expansion, SIGKILL
+supervisor or alternative execution path is introduced. This qualifies Node-based
+JS scripts needing no package dependencies. TS compiler-backed candidate execution
+requires future exact dependency admission; ordinary real TS7 regression is a
+separate existing gate. Missing scripts/package remain NOT_CONFIGURED.
+
+In this slice, candidate edits to conventional test/spec files/test directories or
+package manifests/lockfiles return CANDIDATE_ORACLE_CHANGE_NOT_QUALIFIED. The
+configuration-oracle follow-up also holds changes to tsconfig*.json, ESLint,
+Jest and Vitest conventional configuration names (including nested paths). This is
+an execution qualification restriction, not a rejection of the product's required
+future test-generation/configuration capabilities. Baseline test oracle is preserved;
+arbitrary test-strength/overmock/semantic-diff proof remains unqualified.
+
+Configuration-oracle follow-up (2026-10-09): the first collector guarded tests and
+package files but allowed edits to configuration that can weaken the same checks.
+Before widening dependency execution, reuse the collector's existing pre-job
+qualification predicate to hold these edits before creating a job. The fail-first
+regression on PR69's prior head reached execution for tsconfig.json; the corrected
+negative covers six conventional paths. An independent ordinary configuration.js
+source-edit holdout beside an unchanged strict tsconfig remains executable.
+Existing real Sidecar controls retain baseline PASS, wrong-code/syntax FAIL and
+equivalent-code/boundary holdout PASS; an additional wrong-code plus weakened
+configuration candidate stays NOT_CONFIGURED with zero checks and unchanged
+owning source. These measurements qualify a bounded name-based guard, not ESLint
+or TS compiler semantic execution for the new candidate.
+
+Alternatives: expanding dependency admission first would widen an oracle gap;
+interpreting changed configuration or trusting command PASS needs independent
+test-strength evidence and is deferred. Rejecting all files containing "config"
+would unnecessarily withhold ordinary product edits. Keep conventional names
+only and preserve the same NOT_CONFIGURED reason and approval state. Config edits
+are not forbidden product capabilities; execution qualification waits for their
+test-strength gate. Custom configuration names, imported test helpers, alternate
+lockfiles and arbitrary oracle-dependency closure remain unqualified; this predicate
+is not exhaustive protection or evidence that unchanged tests are strong.
+Rollback: revert this follow-up's predicate, tests and selftest changes; stored
+candidate identity/state formats, dependency policy and Sandbox permissions do not
+change. Source/CI final counts and exact readback are recorded on #41/#42.
+
+Alternatives rejected: checking the untouched owning repo (cannot attest candidate);
+new executor/optional model tool (duplicates existing ownership and lets checks be
+skipped); borrowing global dependencies (unbound target artifacts); automatically
+installing generated dependencies (unqualified execution/network); silently trusting
+changed tests (false PASS). Existing isolated copies give direct provenance with
+less implementation than a new workspace subsystem. No architecture replacement.
+
+Verification: fail-first 3/3 new regressions failed on the handoff baseline because
+collectCandidate was absent. Corrected focused regressions cover edited bytes,
+runtime FAIL, tamper/stale rejection, unrelated result rejection, workflow invocation
+and Evidence persistence, test-oracle weakening, unrelated source drift, global-dependency denial and inspect readback. Ordinary canonical verify:
+571/571 PASS, zero failures/skips. Existing Core Verify queue gate additionally
+runs actual Sidecar baseline + bad-runtime + bad-syntax + valid equivalent candidate,
+including unchanged independent negative/zero holdouts; exact CI and local Sidecar
+results are recorded on the owning PR and Issues #41/#42 after execution.
+
+Safety/compatibility/rollback: no owning source mutation, candidate approval/apply,
+merge/deploy, Role/model/provider/Secret/Host authority change. `collect(repo)`
+retains its prior read-only contract. Legacy/unconfigured lane returns explicit
+NOT_CONFIGURED, preserving older fixtures without inventing candidate success.
+Rollback is a normal revert of this CU; no stored PatchCandidate hashes or approval
+receipts are reinterpreted. Source/CI qualification does not qualify live Runtime,
+50/60 semantic improvement, large trees, archive support or Strict Completion.
+
+### 2026-10-09 GPT CHAT handoff — package-manager oracle admission
+
+**Owner and scope**: Master reported Codex capacity exhausted and transferred this
+one bounded product CU to GPT CHAT. Existing PR69 branch/worktree and other
+projects are preserved; no new Branch, Server checkout, executor, or Sandbox
+permission is required. Source finding (the basis of this follow-up):
+`orchestrator/verify-core.js:packageManager()` selects pnpm/yarn/bun from their
+lockfiles, yet preapproval `changesVerificationOracle()` previously only held
+npm manifests, tests and selected compiler/test configurations. A candidate
+can therefore edit dependency execution authority while keeping its
+application implementation unchanged. This is a proven *code-path policy
+gap*, not a claim of a real exploit or successful model repair.
+
+**Adopted narrow guard**: Extend the existing pre-job deny predicate to
+cover `pnpm-lock.yaml`, `yarn.lock`, `bun.lock`/`bun.lockb`,
+`.npmrc`, `.yarnrc`/`.yarnrc.yml`, `.pnp.*` runtime files,
+`.pnpmfile.*`, `pnpm-workspace.yaml`, `bunfig.toml` and the
+`.yarn/` package-manager plugin/release/cache tree, including nested
+package paths. Unqualified candidate edits return
+`NOT_CONFIGURED / CANDIDATE_ORACLE_CHANGE_NOT_QUALIFIED` before
+job creation. Ordinary source files, including application configuration
+not governing package/test execution, remain eligible under existing scope
+rules; unedited package lock/config files may coexist with eligible changes.
+Package dependencies are **still NOT_CONFIGURED** until a separate immutable
+artifact provenance admission gate is independently verified.
+
+**Why, and alternatives rejected**: Automatically executing with modified
+lockfiles/manager config lets an unqualified candidate control verification
+dependencies or weaken the oracle. Broadly banning every source filename
+containing `config` would degrade valid application repairs. Introducing
+another artifact provisioner, arbitrary package-manager install, network,
+or global dependency mounts would bypass the existing Sidecar trust owner
+and requires additional qualification. Thus only widen the existing
+conventional-artifact hold now, while preserving the original design,
+approval/apply policy and an evidence-based path to future valid
+dependency updates.
+
+**Acceptance and safety**: fail-first candidate modification negatives
+must show unqualified artifact edits previously reached job dispatch.
+After the fix, each lock/manager policy negative must return
+`NOT_CONFIGURED` with zero Sidecar wait calls and zero job creation,
+and original files unchanged. Independent holdout must allow a normal
+source-only candidate beside unchanged package files. Preserve
+preapproval-only verification, Sidecar+Landlock+seccomp boundaries,
+strict result ID/hash binding, false-PASS rejection and no owning source
+writes. Exact-head canonical and real Sidecar/CI qualification is
+recorded separately in #41/#42 **only after actual execution**.
+
+**Remaining limitations**: this bounded *name/path* admission is
+deliberately not a full arbitrary code/helper/script provenance proof:
+custom-named config imports, script-invoked alternate tools, yarn/PnP
+resolver semantics, symlinked artifacts, and complete test strength remain
+UNQUALIFIED. It does not provide real TS7 compiler execution for
+third-party candidate projects, install dependencies, permit changing tests,
+or establish live AI semantic success. Later immutable dependency artifact
+admission must reuse trusted existing provenance owners with explicit
+mismatch/unavailable negative tests. Rollback is a normal revert of this
+single source predicate, two new regressions and this addition; no
+stored candidate schema or runtime permission changes.

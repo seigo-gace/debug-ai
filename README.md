@@ -1,5 +1,7 @@
 # DebugAI
 
+FREE Groq/Gemini reviews use the existing hypothesis/final gates with durable rolling quota reservations. Live HTTP stays blocked until Host-owned account and remaining-budget evidence is qualified; Source/CI does not prove runtime reflection. Contract and protected activation gate: [Product decision context §12](docs/DEBUGAI_PRODUCT_DECISION_CONTEXT_20261009.md#12-codex-p0-free-reviewer-protection--2026-10-09).
+
 ## Master Internal Persistent Delegation — source implementation
 
 Master-only persistent delegation reuses the existing Workspace registry, MCP and
@@ -80,6 +82,13 @@ The live `399781...` reflection remains the verified Guarded GitOps infrastructu
 Historical live/source records below remain evidence for their recorded revisions and do not override this block.
 
 ## What DebugAI does
+
+Generated canonical PatchCandidates now receive workflow-owned preapproval checks
+on their actual isolated edited snapshot. Configured command results and candidate
+identity are returned and retained as Evidence; explicit apply approval remains
+required. Dependency admission and changed test-oracle qualification remain
+NOT_CONFIGURED where unsupported. See [the candidate verification delta](docs/CODEGEN_SANDBOX_SNAPSHOT_DESIGN_DELTA.md#15-candidate-aware-preapproval-verification--codex-cu-2026-10-09).
+
 
 Patch and Review Packet payloads are detached from their input objects and
 recursively frozen before hashing. Nested requirements, failed-check evidence
