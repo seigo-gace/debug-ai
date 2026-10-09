@@ -28,6 +28,11 @@ function allowedFromBoundedRead(text) {
 }
 
 test("host read bundle keeps request, runner, CHAT preflight and helpers aligned", () => {
+  const serviceUnit = read("ops/systemd-user/debugai-server-command.service");
+  assert.match(
+    serviceUnit,
+    /\/home\/admin1\/projects\/debug-ai\/scripts\/host-server-command-runner\.sh/
+  );
   const requestText = read("server/control/server-command-request.js");
   const runnerText = read("scripts/host-server-command-runner.sh");
   const chatText = read("scripts/chatgpt-bounded-server-read.cjs");
