@@ -282,10 +282,38 @@ requires future exact dependency admission; ordinary real TS7 regression is a
 separate existing gate. Missing scripts/package remain NOT_CONFIGURED.
 
 In this slice, candidate edits to conventional test/spec files/test directories or
-package manifests/lockfiles return CANDIDATE_ORACLE_CHANGE_NOT_QUALIFIED. This is
+package manifests/lockfiles return CANDIDATE_ORACLE_CHANGE_NOT_QUALIFIED. The
+configuration-oracle follow-up also holds changes to tsconfig*.json, ESLint,
+Jest and Vitest conventional configuration names (including nested paths). This is
 an execution qualification restriction, not a rejection of the product's required
 future test-generation/configuration capabilities. Baseline test oracle is preserved;
 arbitrary test-strength/overmock/semantic-diff proof remains unqualified.
+
+Configuration-oracle follow-up (2026-10-09): the first collector guarded tests and
+package files but allowed edits to configuration that can weaken the same checks.
+Before widening dependency execution, reuse the collector's existing pre-job
+qualification predicate to hold these edits before creating a job. The fail-first
+regression on PR69's prior head reached execution for tsconfig.json; the corrected
+negative covers six conventional paths. An independent ordinary configuration.js
+source-edit holdout beside an unchanged strict tsconfig remains executable.
+Existing real Sidecar controls retain baseline PASS, wrong-code/syntax FAIL and
+equivalent-code/boundary holdout PASS; an additional wrong-code plus weakened
+configuration candidate stays NOT_CONFIGURED with zero checks and unchanged
+owning source. These measurements qualify a bounded name-based guard, not ESLint
+or TS compiler semantic execution for the new candidate.
+
+Alternatives: expanding dependency admission first would widen an oracle gap;
+interpreting changed configuration or trusting command PASS needs independent
+test-strength evidence and is deferred. Rejecting all files containing "config"
+would unnecessarily withhold ordinary product edits. Keep conventional names
+only and preserve the same NOT_CONFIGURED reason and approval state. Config edits
+are not forbidden product capabilities; execution qualification waits for their
+test-strength gate. Custom configuration names, imported test helpers, alternate
+lockfiles and arbitrary oracle-dependency closure remain unqualified; this predicate
+is not exhaustive protection or evidence that unchanged tests are strong.
+Rollback: revert this follow-up's predicate, tests and selftest changes; stored
+candidate identity/state formats, dependency policy and Sandbox permissions do not
+change. Source/CI final counts and exact readback are recorded on #41/#42.
 
 Alternatives rejected: checking the untouched owning repo (cannot attest candidate);
 new executor/optional model tool (duplicates existing ownership and lets checks be

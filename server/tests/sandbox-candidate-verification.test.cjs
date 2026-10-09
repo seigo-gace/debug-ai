@@ -47,6 +47,25 @@ test("oracle weakening and dependency declarations are not qualified as successf
  const lane=createSandboxVerificationLane({jobRoot:path.join(f.root,"jobs"),wait:async()=>{throw Error("MUST_NOT_EXECUTE");}});
  const out=await lane.collectCandidate(changed);assert.equal(out.status,"NOT_CONFIGURED");assert.equal(out.reason,"CANDIDATE_ORACLE_CHANGE_NOT_QUALIFIED");
 });
+test("verification configuration changes cannot qualify candidate command success",async t=>{
+ for(const file of ["tsconfig.json","client/tsconfig.strict.json","eslint.config.cjs",".eslintrc.json","jest.config.js","vitest.config.ts"]){
+  const f=fixture(t);fs.mkdirSync(path.dirname(path.join(f.repo,file)),{recursive:true});fs.writeFileSync(path.join(f.repo,file),"baseline\n");
+  const candidate=patch.preparePatchCandidate({repo:f.repo,selectedPaths:[file],task:"disable checks",requestHash:"1".repeat(64),stage:"debug",result:{operations:[{type:"replace",path:file,old:"baseline",new:"weakened"}]}});
+  let calls=0;const lane=createSandboxVerificationLane({jobRoot:path.join(f.root,"jobs"),wait:async()=>{calls++;throw Error("MUST_NOT_EXECUTE");}});
+  const result=await lane.collectCandidate(candidate);
+  assert.equal(result.status,"NOT_CONFIGURED",file);assert.equal(result.reason,"CANDIDATE_ORACLE_CHANGE_NOT_QUALIFIED",file);assert.equal(calls,0);assert.equal(fs.existsSync(path.join(f.root,"jobs")),false);
+ }
+});
+test("holdout preserves source edits beside unchanged configs and ordinary configuration modules",async t=>{
+ const f=fixture(t);fs.writeFileSync(path.join(f.repo,"tsconfig.json"),"{\"compilerOptions\":{\"strict\":true}}\n");
+ fs.writeFileSync(path.join(f.repo,"configuration.js"),"module.exports=1;\n");
+ const candidate=patch.preparePatchCandidate({repo:f.repo,selectedPaths:["configuration.js"],task:"ordinary source edit",requestHash:"1".repeat(64),stage:"debug",result:{operations:[{type:"replace",path:"configuration.js",old:"module.exports=1;",new:"module.exports=2;"}]}});
+ const lane=createSandboxVerificationLane({jobRoot:path.join(f.root,"jobs"),wait:async({jobId})=>{
+  const request=JSON.parse(fs.readFileSync(path.join(f.root,"jobs","jobs",jobId,"request.json")));
+  return{schema:"debugai.sandbox-result/v1",job_id:jobId,action:request.action,pass:true,code:0,snapshot:request.source_snapshot,candidate_snapshot:request.candidate_snapshot,candidate_construction:"MATERIALIZED_VERIFIED"};
+ }});
+ const result=await lane.collectCandidate(candidate);assert.equal(result.status,"FINAL_VALID");assert.equal(result.checks.length,3);assert.equal(result.semantic_verification,"UNKNOWN");
+});
 test("independent unedited source drift during check invalidates otherwise bound PASS",async t=>{
  const f=fixture(t),lane=createSandboxVerificationLane({jobRoot:path.join(f.root,"jobs"),wait:async({jobId})=>{
   const request=JSON.parse(fs.readFileSync(path.join(f.root,"jobs","jobs",jobId,"request.json")));

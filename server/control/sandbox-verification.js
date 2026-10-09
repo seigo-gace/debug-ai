@@ -22,6 +22,15 @@ function configuredChecks(repo){
   const scripts=pkg.scripts||{};
   return CHECKS.filter(c=>typeof scripts[c.script]==="string"&&scripts[c.script].trim());
 }
+function changesVerificationOracle(relative){
+  if(/(^|\/)(?:package(?:-lock)?\.json|npm-shrinkwrap\.json|[^/]*\.(?:test|spec)\.[^/]+)$|(^|\/)(?:tests?|__tests__)(\/|$)/i.test(relative))return true;
+  // Config edits can disable otherwise unchanged checks. Qualification is held,
+  // rather than treating a successful weakened command as candidate evidence.
+  const name=path.posix.basename(relative).toLowerCase();
+  return /^tsconfig(?:\.[^/]+)?\.json$/.test(name)||
+    /^(?:eslint|jest|vitest)\.config\.(?:[cm]?[jt]s|json)$/.test(name)||
+    /^\.eslintrc(?:\.(?:[cm]?js|json|ya?ml))?$/.test(name);
+}
 function toEvidence(result,check){
   return {
     kind:"deterministic_sandbox_check",
@@ -67,7 +76,7 @@ function createSandboxVerificationLane({jobRoot=process.env.DEBUG_AI_SANDBOX_JOB
     const unavailable=reason=>({status:"NOT_CONFIGURED",reason,checks:[],patch_candidate_id:patchCandidate.id,patch_candidate_hash:patchCandidate.candidate_hash});
     // This bounded slice preserves the baseline oracle. Changed tests/configuration
     // need a separately qualified test-strength/dependency admission path.
-    if(operations.some(x=>/(^|\/)(?:package(?:-lock)?\.json|npm-shrinkwrap\.json|[^/]*\.(?:test|spec)\.[^/]+)$|(^|\/)(?:tests?|__tests__)(\/|$)/i.test(x.path)))return unavailable("CANDIDATE_ORACLE_CHANGE_NOT_QUALIFIED");
+    if(operations.some(x=>changesVerificationOracle(x.path)))return unavailable("CANDIDATE_ORACLE_CHANGE_NOT_QUALIFIED");
     const pkg=readPackage(patchCandidate.repo);
     if(!pkg)return unavailable("CANDIDATE_PACKAGE_NOT_CONFIGURED");
     if(["dependencies","devDependencies","optionalDependencies","peerDependencies"].some(key=>Object.keys(pkg[key]||{}).length))return unavailable("CANDIDATE_DEPENDENCIES_NOT_QUALIFIED");

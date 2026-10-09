@@ -116,8 +116,9 @@ async function verifyCandidates(){
     fs.writeFileSync(path.join(source,"package.json"),JSON.stringify({private:true,scripts}));
     const original="module.exports=x=>x+1;\n";
     fs.writeFileSync(path.join(source,"value.js"),original);
+    fs.writeFileSync(path.join(source,"eslint.config.cjs"),"module.exports={enforce:true};\n");
     // Independent boundary oracle: baseline passes; candidate's wrong edit fails.
-    fs.writeFileSync(path.join(source,"value.test.cjs"),"const t=require('node:test'),a=require('node:assert/strict'),v=require('./value.js');t('positive',()=>a.equal(v(1),2));t('negative holdout',()=>a.equal(v(-1),0));t('zero holdout',()=>a.equal(v(0),1));\n");
+    fs.writeFileSync(path.join(source,"value.test.cjs"),"const t=require('node:test'),a=require('node:assert/strict'),v=require('./value.js'),policy=require('./eslint.config.cjs');t('positive',()=>{if(policy.enforce)a.equal(v(1),2)});t('negative holdout',()=>{if(policy.enforce)a.equal(v(-1),0)});t('zero holdout',()=>{if(policy.enforce)a.equal(v(0),1)});\n");
     const lane=createSandboxVerificationLane({jobRoot});
     const baseline=await lane.collect(source);
     if(baseline.checks.some(x=>x.status!=="PASS"))throw new Error("CANDIDATE_CHECK_BASELINE_FAILED");
@@ -132,6 +133,11 @@ async function verifyCandidates(){
       if(fs.readFileSync(path.join(source,"value.js"),"utf8")!==original)throw new Error("CANDIDATE_CHECK_SOURCE_MUTATED");
       console.log("SANDBOX_CANDIDATE_VERIFICATION="+label+"|STATUS="+result.status+"|CHECKS="+result.checks.length+"|HASH="+candidate.candidate_hash+"|BACKEND=sidecar+landlock+seccomp");
     }
+    const weakened=preparePatchCandidate({repo:source,selectedPaths:["value.js","eslint.config.cjs"],task:"weaken oracle",requestHash:"1".repeat(64),stage:"debug",result:{operations:[{type:"replace",path:"value.js",old:original.trim(),new:"module.exports=x=>x+2;"},{type:"replace",path:"eslint.config.cjs",old:"enforce:true",new:"enforce:false"}]}});
+    const blocked=await lane.collectCandidate(weakened);
+    if(blocked.status!=="NOT_CONFIGURED"||blocked.reason!=="CANDIDATE_ORACLE_CHANGE_NOT_QUALIFIED"||blocked.checks.length)throw new Error("CANDIDATE_CONFIG_ORACLE_FALSE_PASS");
+    if(fs.readFileSync(path.join(source,"eslint.config.cjs"),"utf8")!=="module.exports={enforce:true};\n")throw new Error("CANDIDATE_CONFIG_ORACLE_SOURCE_MUTATED");
+    console.log("SANDBOX_CANDIDATE_VERIFICATION=CONFIG_ORACLE_DENIED|STATUS=NOT_CONFIGURED|CHECKS=0");
   }finally{fs.rmSync(source,{recursive:true,force:true});}
 }
 function main(){const mode=process.argv[2];return mode==="enqueue"?enqueue():mode==="verify"?verify():mode==="enqueue-self"?enqueueSelf():mode==="verify-self"?verifySelf():mode==="verify-candidates"?verifyCandidates():Promise.reject(new Error("SANDBOX_QUEUE_MODE_REQUIRED"));}
