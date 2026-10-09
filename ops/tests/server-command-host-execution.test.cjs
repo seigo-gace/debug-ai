@@ -19,10 +19,11 @@ function fixture(t) {
   const head = "a".repeat(40);
   fs.writeFileSync(git, `#!/bin/sh\n[ "$1" = rev-parse ] && [ "$2" = HEAD ] || exit 99\nprintf '%s\\n' '${head}'\n`, { mode: 0o700 });
   const service = new ServerCommandRequestService({ defaultRepo: repo, repoPolicy: { assertRepo: value => value } });
-  const execute = () => spawnSync("bash", [runner], { encoding: "utf8", env: {
+  const execute = (extraEnv = {}) => spawnSync("bash", [runner], { encoding: "utf8", env: {
     ...process.env, DEBUG_AI_HOST_REPO: repo, DEBUG_AI_SERVER_COMMAND_GIT_BIN: git,
     DEBUG_AI_SERVER_COMMAND_DOCKER_BIN: "true", DEBUG_AI_SERVER_COMMAND_CURL_BIN: "true",
     DEBUG_AI_SERVER_COMMAND_DF_BIN: "true",
+    ...extraEnv,
   } });
   const enqueue = (overrides = {}) => {
     const queued = service.request({ command_id: "project.git_head" });
@@ -33,6 +34,67 @@ function fixture(t) {
   };
   return { repo, service, execute, enqueue, head };
 }
+
+test("real host runner inspects a bounded workspace file via helper roots override", t => {
+  const f = fixture(t);
+  const realRepo = path.resolve(__dirname, "../..");
+  fs.mkdirSync(path.join(f.repo, "scripts"), { recursive: true });
+  fs.mkdirSync(path.join(f.repo, "operations"), { recursive: true });
+  fs.copyFileSync(
+    path.join(realRepo, "scripts/host-workspace-file-inspect.py"),
+    path.join(f.repo, "scripts/host-workspace-file-inspect.py"),
+  );
+  fs.copyFileSync(
+    path.join(realRepo, "operations/host-admitted-workspace-entries.json"),
+    path.join(f.repo, "operations/host-admitted-workspace-entries.json"),
+  );
+  const roots = path.join(f.repo, "workspace-roots");
+  const entry = path.join(roots, "fixture-app");
+  fs.mkdirSync(entry, { recursive: true });
+  fs.writeFileSync(path.join(entry, "note.txt"), "fixture inspect ok\n", "utf8");
+  fs.writeFileSync(
+    path.join(f.repo, "operations/host-admitted-workspace-entries.json"),
+    JSON.stringify({
+      schema: "debugai.host-admitted-workspace-entries/v1",
+      entries: {
+        "fixture-app": {
+          root_key: "projects",
+          repository: "test/fixture-app",
+          owners: ["test"],
+        },
+      },
+    }),
+    "utf8",
+  );
+  const queued = f.service.request({
+    command_id: "system.project_file_inspect",
+    arguments: ["fixture-app", "note.txt"],
+  });
+  const file = path.join(f.service.queueRoot(), "requests", `${queued.id}.json`);
+  const request = JSON.parse(fs.readFileSync(file));
+  fs.writeFileSync(file, JSON.stringify({ ...request, repo: "/workspace/debug-ai" }));
+  const result = f.execute({ DEBUG_AI_HOST_WORKSPACE_ROOTS: roots });
+  assert.equal(result.status, 0, result.stderr);
+  const status = f.service.status(queued.id);
+  assert.equal(status.state, "PASS");
+  const payload = JSON.parse(status.result.stdout);
+  assert.equal(payload.schema, "debugai.host-workspace-file-inspect/v1");
+  assert.match(payload.content_chunk, /fixture inspect ok/);
+  assert.equal(payload.complete, true);
+});
+
+test("real host runner rejects forbidden project file inspect paths at validation", t => {
+  const f = fixture(t);
+  const id = f.enqueue({
+    command_id: "system.project_file_inspect",
+    arguments: ["fixture-app", "../escape.txt"],
+  });
+  const result = f.execute();
+  assert.equal(result.status, 0, result.stderr);
+  const status = f.service.status(id);
+  assert.equal(status.state, "FAIL");
+  assert.equal(status.error, "REQUEST_SCHEMA_OR_BOUNDARY_INVALID");
+});
 
 test("real bash/jq host runner completes a valid command with exact correlated readback", t => {
   const f = fixture(t), id = f.enqueue();
@@ -47,6 +109,22 @@ test("real bash/jq host runner completes a valid command with exact correlated r
   assert.ok(fs.existsSync(path.join(f.service.queueRoot(), "done", `${id}.json`)));
   fs.unlinkSync(path.join(f.service.queueRoot(), "status", `${id}.json`));
   assert.deepEqual(f.service.status(id), status);
+});
+
+test("real existing Bash/jq Host runner returns the new inventory page with exact command ID", t => {
+  const f=fixture(t),dir=path.join(f.repo,"scripts");fs.mkdirSync(dir);
+  fs.copyFileSync(path.resolve(__dirname,"../../scripts/host-workspace-inventory.py"),path.join(dir,"host-workspace-inventory.py"));
+  const id=f.enqueue({command_id:"system.projects_inventory",arguments:["0"]});
+  const p=f.execute();
+  assert.equal(p.status,0,p.stderr);
+  const result=f.service.status(id);
+  assert.equal(result.state,"PASS",result.error);
+  assert.equal(result.result.command_id,"system.projects_inventory");
+  assert.equal(result.result.read_only,true);
+  const payload=JSON.parse(result.result.stdout);
+  assert.equal(payload.schema,"debugai.host-workspace-inventory/v1");
+  assert.equal(payload.page,0);
+  assert.ok(Array.isArray(payload.entries));
 });
 
 for (const [label, overrides, error] of [
@@ -137,4 +215,34 @@ test("GitOps waits for Docker healthy when HTTP becomes ready during starting", 
   assert.ok(Number(fs.readFileSync(inspections, "utf8")) >= 3);
   assert.equal(fs.existsSync(path.join(approvals, `${id}.approve`)), false);
   assert.equal(fs.readdirSync(approvals).filter(v => v.endsWith(".used")).length, 1);
+});
+
+test("real existing Host runner returns bounded Docker development log and removes sensitive lines",t=>{
+  const f=fixture(t);
+  const docker=path.join(f.repo,"test-bin","docker-logs");
+  const script=[
+    "#!/bin/sh",
+    'if [ "$1" = "compose" ] && [ "$2" = "ps" ] && [ "$3" = "-q" ] && [ "$4" = "debug-ai" ]; then echo fixture-container; exit 0; fi',
+    'if [ "$1" = "logs" ] && [ "$2" = "--tail" ] && [ "$3" = "12" ] && [ "$4" = "--timestamps" ] && [ "$5" = "fixture-container" ]; then',
+    'echo "2026-10-09T11:30:00Z ERROR CODE_CONNECTION_FAILED"',
+    'echo "2026-10-09T11:30:01Z Authorization: Bearer SECRET_FORBIDDEN"',
+    'echo "2026-10-09T11:30:02Z WARN RETRY_POSSIBLE"',
+    "exit 0; fi",
+    "exit 73"
+  ].join("\n");
+  fs.writeFileSync(docker,script+"\n",{mode:0o700});
+  const queued=f.service.request({command_id:"service.debug_ai_logs",arguments:["debug-ai","12"]});
+  const file=path.join(f.service.queueRoot(),"requests",queued.id+".json");
+  const request=JSON.parse(fs.readFileSync(file,"utf8"));
+  fs.writeFileSync(file,JSON.stringify({...request,repo:"/workspace/debug-ai"}));
+  const done=f.execute({DEBUG_AI_SERVER_COMMAND_DOCKER_BIN:docker});
+  assert.equal(done.status,0,done.stderr);
+  const status=f.service.status(queued.id);
+  assert.equal(status.state,"PASS",status.error);
+  assert.equal(status.result.command_id,"service.debug_ai_logs");
+  assert.equal(status.result.read_only,true);
+  assert.match(status.result.stdout,/CODE_CONNECTION_FAILED/);
+  assert.match(status.result.stdout,/\[REDACTED_SENSITIVE_LINE\]/);
+  assert.match(status.result.stdout,/RETRY_POSSIBLE/);
+  assert.doesNotMatch(status.result.stdout,/SECRET_FORBIDDEN/);
 });
