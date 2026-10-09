@@ -102,6 +102,16 @@ test("HTTP and CLI reuse Server Command service request/status and GitOps contra
   try{for(const route of ["request","status"]){const r=await fetch(`http://127.0.0.1:${unavailable.address().port}/v1/server-command/${route}`,{method:"POST",body:"{}"});assert.equal(r.status,400);assert.equal((await r.json()).error,"SERVER_COMMAND_UNAVAILABLE");}}finally{await new Promise(resolve=>unavailable.close(resolve));}
 });
 
+test("server command rejects queue when host runner script lacks the command id",()=>{
+  const f=fixture();try{
+    const runnerDir=path.join(f.repo,"scripts");
+    fs.mkdirSync(runnerDir,{recursive:true});
+    fs.writeFileSync(path.join(runnerDir,"host-server-command-runner.sh"),"project.pwd\nproject.git_head\n");
+    assert.throws(()=>f.service.request({command_id:"system.project_file_inspect",arguments:["debug-ai","README.md"]}),/HOST_RUNNER_COMMAND_UNSUPPORTED/);
+    assert.equal(f.service.request({command_id:"project.pwd"}).command_id,"project.pwd");
+  }finally{f.cleanup();}
+});
+
 test("existing Host bounded Docker devlog read permits only known Compose service and a short tail",()=>{
   const f=fixture();try{
     const x=f.service.request({command_id:"service.debug_ai_logs",arguments:["debug-ai","12"]});
