@@ -73,3 +73,18 @@ test("benchmark oracle rejects wrong primitive types instead of coercing them to
   }
   assert.equal(score(target,{...valid,relevant_files:"src/api.js"}).pass,false);
 });
+
+test("oracle prevents type-coerced status and handles malformed diagnosis evidence safely",()=>{
+  const causal=CASES.find(x=>x.id==="L1-CA1");
+  assert.equal(score(causal,{...causal.expected,failure_family:0}).pass,false);
+  const research=CASES.find(x=>x.id==="L1-RS1");
+  assert.equal(score(research,{...research.expected,research_status:0}).pass,false);
+  const diagnosis=CASES.find(x=>x.id==="L1-DG1");
+  const valid={...diagnosis.expected};
+  assert.equal(score(diagnosis,valid).pass,true);
+  for(const field of ["evidence_refs","counter_evidence_refs"]){
+    const corrupted={...valid,hypotheses:valid.hypotheses.map(h=>({...h,[field]:42}))};
+    assert.equal(score(diagnosis,corrupted).pass,false,field);
+  }
+  assert.equal(score(diagnosis,{...valid,unsupported_claims:[0]}).pass,false);
+});
