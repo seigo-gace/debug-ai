@@ -67,8 +67,9 @@ test("one malformed Groq review response gets exactly one schema correction atte
     return calls.length===1?reply(200,"not-json"):reply(200,'{"verdict":"PASS"}');
   }});
   const result=await adapter.final(payload);
-  assert.equal(result.provider,"groq");assert.equal(result.json.verdict,"PASS");
-  assert.equal(calls.length,2);assert.match(calls[1].body.messages[0].content,/verdict/);
+  assert.equal(result.provider,"groq+gemini");assert.equal(result.json.verdict,"PASS");
+  assert.equal(calls.length,3);assert.match(calls[1].body.messages[0].content,/verdict/);
+  assert.match(calls[2].url,/generativelanguage/);
 });
 test("repeated malformed Groq output falls through to Gemini and never accepts malformed",async()=>{
   const calls=[];const adapter=createExternalReviewAdapter({groqKey:"g",geminiKey:"m",fetchImpl:async(url)=>{
