@@ -230,3 +230,17 @@ test("transport retry receives only its remaining absolute role budget",async()=
     assert.equal(out.telemetry.attempts,2);
   }finally{Date.now=originalNow;}
 });
+
+test("reasoning-capable role rejects reasoning-only reply without confusing it with a final answer",async()=>{
+  let attempts=0;
+  const fetchImpl=async()=>{attempts++;return{ok:true,status:200,text:async()=>JSON.stringify({choices:[{message:{content:"",reasoning_content:"internal reasoning only"},finish_reason:"stop"}]})};};
+  const ai=createAiCoreAdapter({baseUrl:"http://127.0.0.1:18080",apiKey:"test",fetchImpl});
+  await assert.rejects(()=>ai.call("local_reviewer",{user:"review"}),e=>e?.code==="AI_CORE_REASONING_ONLY"&&e?.meta?.reasoning_content_present===true&&e?.meta?.telemetry?.attempts===1);
+  assert.equal(attempts,1);
+});
+test("final JSON remains authoritative when reasoning content is separately present",async()=>{
+  const fetchImpl=async()=>({ok:true,status:200,text:async()=>JSON.stringify({choices:[{message:{content:'{"verdict":"PASS"}',reasoning_content:"not an answer"},finish_reason:"stop"}]})});
+  const ai=createAiCoreAdapter({baseUrl:"http://127.0.0.1:18080",apiKey:"test",fetchImpl});
+  const out=await ai.call("local_reviewer",{user:"review"});
+  assert.equal(out.content,'{"verdict":"PASS"}');
+});
