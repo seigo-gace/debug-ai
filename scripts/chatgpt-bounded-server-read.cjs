@@ -45,7 +45,7 @@ function safeResult(command,raw){
       const match=/^([0-9a-f]{7,40}) (.{1,200})$/u.exec(row);
       if(!match)throw Error("SERVER_GIT_LOG_INVALID");
       const subject=match[2];
-      const ok=/^[\\p{L}\\p{N} .,:#()\\[\\]/_+-]{1,120}$/u.test(subject)&&!/token|secret|password|credential|bearer|authorization|api[_.-]?key/i.test(subject);
+      const ok=subject.length<=120&&!/[\r\n\x00-\x1f\x7f<>]/.test(subject)&&!/token|secret|password|credential|bearer|authorization|api[_.-]?key/i.test(subject);
       return{sha:match[1],subject:ok?subject:"REDACTED"};
     });
     return["SERVER_GIT_LOG="+JSON.stringify(parsed)];
@@ -57,8 +57,8 @@ function safeResult(command,raw){
       if(!Number.isSafeInteger(x?.databaseId)||x.databaseId<=0||!/^([a-f0-9]{40})$/.test(x.headSha||"")||
         !["queued","in_progress","completed","requested","waiting","pending"].includes(x.status)||
         ![null,"success","failure","cancelled","skipped","timed_out","action_required","neutral","stale","startup_failure"].includes(x.conclusion??null)||
-        typeof x.name!=="string"||!/^[\\p{L}\\p{N} .,:#()\\[\\]/_+-]{1,120}$/u.test(x.name)||
-        !/^https:\\/\\/github\\.com\\/seigo-gace\\/debug-ai\\/actions\\/runs\\/[0-9]+$/.test(x.url||""))
+        typeof x.name!=="string"||x.name.length>120||/[\r\n\x00-\x1f\x7f<>]/.test(x.name)||/token|secret|password|bearer|credential/i.test(x.name)||
+        !/^https:\/\/github[.]com\/seigo-gace\/debug-ai\/actions\/runs\/[0-9]+$/.test(x.url||""))
         throw Error("SERVER_ACTIONS_LOG_INVALID");
       return{id:x.databaseId,name:x.name,status:x.status,conclusion:x.conclusion??null,sha:x.headSha,url:x.url};
     });
