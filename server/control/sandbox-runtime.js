@@ -109,11 +109,21 @@ function snapshotDelta(baseline,candidate){
   }
   return out;
 }
+function assertPatchCandidateRef(ref){
+ if(!ref||typeof ref!=="object"||Array.isArray(ref)||!/^patch_[a-f0-9]{24}$/.test(ref.id)||!^([a-f0-9]{64})$/.test(ref.candidate_hash)||ref.id!=="patch_"+ref.candidate_hash.slice(0,24))throw new Error("SANDBOX_CANDIDATE_PATCH_REF_INVALID");
+ return ref;
+}
 function verifyCandidateSnapshot(repo,request){
   const b=request?.source_snapshot?.manifest,c=request?.candidate_snapshot;
   if(!c||c.construction!=="MATERIALIZED_VERIFIED"||!b||!c.manifest||!Array.isArray(c.changed_paths)||!c.changed_paths.length)throw new Error("SANDBOX_CANDIDATE_REQUEST_INVALID");
   assertSnapshotManifest(b);assertSnapshotManifest(c.manifest);
-  const expected=snapshotHash(JSON.stringify({baseline_digest:b.digest,candidate_digest:c.manifest.digest,changed_paths:c.changed_paths}));
+  const declared=c.patch_candidate_ref||null,origin=request.patch_candidate_origin||null;
+  if(Boolean(declared)!==Boolean(origin))throw new Error("SANDBOX_CANDIDATE_ORIGIN_MISSING");
+  if(declared){
+    assertPatchCandidateRef(declared);assertPatchCandidateRef(origin);
+    if(JSON.stringify(declared)!==JSON.stringify(origin))throw new Error("SANDBOX_CANDIDATE_ORIGIN_MISMATCH");
+  }
+  const expected=snapshotHash(JSON.stringify({baseline_digest:b.digest,candidate_digest:c.manifest.digest,changed_paths:c.changed_paths,...(declared?{patch_candidate_ref:declared}:{})}));
   if(c.digest!==expected)throw new Error("SANDBOX_CANDIDATE_BINDING_INVALID");
   if(c.manifest.digest===b.digest)throw new Error("SANDBOX_CANDIDATE_NO_DELTA");
   const before=new Map(b.entries.map(e=>[e.path,e]));
@@ -165,9 +175,10 @@ function stageSandboxCandidate(snapshot,baseline,candidate){
   const manifest=snapshotInventory(snapshot,{...baseline.limits,requiredPaths:baseline.required_paths});
   const changed_paths=snapshotDelta(baseline,manifest);
   if(JSON.stringify(changed_paths.map(x=>x.path).sort())!==JSON.stringify([...seen].sort()))throw new Error("SANDBOX_CANDIDATE_UNEXPECTED_DELTA");
-  const out={construction:"MATERIALIZED_VERIFIED",manifest,changed_paths};
-  out.digest=snapshotHash(JSON.stringify({baseline_digest:baseline.digest,candidate_digest:manifest.digest,changed_paths}));
-  verifyCandidateSnapshot(snapshot,{source_snapshot:{manifest:baseline},candidate_snapshot:out});
+  const declared=candidate.patch_candidate_ref===undefined?null:assertPatchCandidateRef(candidate.patch_candidate_ref);
+  const out={construction:"MATERIALIZED_VERIFIED",manifest,changed_paths,...(declared?{patch_candidate_ref:{id:declared.id,candidate_hash:declared.candidate_hash}}:{})};
+  out.digest=snapshotHash(JSON.stringify({baseline_digest:baseline.digest,candidate_digest:manifest.digest,changed_paths,...(out.patch_candidate_ref?{patch_candidate_ref:out.patch_candidate_ref}:{})}));
+  verifyCandidateSnapshot(snapshot,{source_snapshot:{manifest:baseline},candidate_snapshot:out,...(out.patch_candidate_ref?{patch_candidate_origin:out.patch_candidate_ref}:{})});
   return freezeSnapshot(out);
 }
 function buildSandboxArgs({snapshotDir,tmpDir,timeoutMs,command,args=[],nodeModules=null,allowLoopbackTcp=false}={}){if(!snapshotDir||!tmpDir||!command||!Number.isInteger(timeoutMs))throw new Error("SANDBOX_HELPER_ARGS_REQUIRED");const out=["--snapshot",snapshotDir,"--tmp",tmpDir,"--timeout-ms",String(timeoutMs)];if(nodeModules)out.push("--node-modules",nodeModules);if(allowLoopbackTcp)out.push("--allow-loopback-tcp");return[...out,"--",command,...args];}
@@ -182,7 +193,7 @@ function prepareSandboxJob({sourceRepo,jobRoot,action,args={},timeoutMs=120000,r
   const source=fs.realpathSync(sourceRepo),root=normalizeJobRoot(jobRoot),jobs=path.join(root,"jobs");fs.mkdirSync(jobs,{recursive:true});
   const jobId=`JOB_${crypto.randomBytes(12).toString("hex")}`,pending=path.join(jobs,`.pending-${jobId}`),finalDir=path.join(jobs,jobId),snapshot=path.join(pending,"repo"),tmpDir=path.join(pending,"tmp");fs.mkdirSync(pending,{recursive:false});fs.mkdirSync(tmpDir,{recursive:true});
   try{
-    const copied=copySnapshot(source,snapshot,{requiredPaths:required}),staged=candidate===undefined?null:stageSandboxCandidate(snapshot,copied.manifest,candidate),request={schema:"debugai.sandbox-job/v1",job_id:jobId,action,args,timeout_ms:timeoutMs,source_snapshot:{files:copied.files,bytes:copied.bytes,skipped_symlinks:copied.skipped_symlinks,manifest:copied.manifest},...(staged?{candidate_snapshot:staged}:{})};
+    const copied=copySnapshot(source,snapshot,{requiredPaths:required}),staged=candidate===undefined?null:stageSandboxCandidate(snapshot,copied.manifest,candidate),request={schema:"debugai.sandbox-job/v1",job_id:jobId,action,args,timeout_ms:timeoutMs,source_snapshot:{files:copied.files,bytes:copied.bytes,skipped_symlinks:copied.skipped_symlinks,manifest:copied.manifest},...(staged?{candidate_snapshot:staged,...(staged.patch_candidate_ref?{patch_candidate_origin:staged.patch_candidate_ref}:{})}:{})};
     fs.writeFileSync(path.join(pending,"request.json"),JSON.stringify(request));fs.renameSync(pending,finalDir);return{job_id:jobId,job_dir:finalDir,request};
   }catch(error){fs.rmSync(pending,{recursive:true,force:true});throw error;}
 }
