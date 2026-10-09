@@ -2,8 +2,8 @@
   "base_url": "https://debugai.asterav8.jp",
   "mode": "readonly",
   "repo": "/workspace/debug-ai",
-  "request": "P0 GPT CHAT bounded read-only inventory page zero after project file inspect execution failure; no mutations, models or GitOps.",
+  "request": "Read-only complete bounded Host projects inventory P0 to validate canonical server-core parent placement; no file write/model/GitOps.",
   "server_command_id": "system.projects_inventory",
   "inventory_page": 0,
-  "inventory_all": false
+  "inventory_all": true
 }
