@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feat/tgserver-async-log-sink-20261003
+      - feat/chat-gitops-request-20261009
     paths:
       - .github/chatgpt-live-api-target.json
       - .github/workflows/chatgpt-live-api-verify.yml
@@ -37,6 +38,9 @@ jobs:
           run_id="$(jq -r '.run_id // ""' .github/chatgpt-live-api-target.json)"
           [[ "$base" == "https://debugai.asterav8.jp" ]]
           [[ "$mode" =~ ^(readonly|dogfood)$ ]]
+          gitops_enabled="$(jq -r '.gitops_request.enabled // false' .github/chatgpt-live-api-target.json)"
+          [[ "$gitops_enabled" == "true" || "$gitops_enabled" == "false" ]]
+          echo "gitops_enabled=$gitops_enabled" >> "$GITHUB_OUTPUT"
           [[ "$repo" == "/workspace/debug-ai" || "$repo" =~ ^/workspace/debug-ai/\.debugai-input/test-repos/[A-Za-z0-9._-]+$ ]]
           [[ ${#request} -le 2000 ]]
           [[ -z "$run_id" || "$run_id" =~ ^run_[A-Za-z0-9_]+$ ]]
@@ -141,6 +145,77 @@ jobs:
           test "$code" = "200"
           jq -r '"FINAL_ANALYSIS_PRESENT="+((.artifacts.analysis!=null)|tostring), "FINAL_PATCH_CANDIDATE_PRESENT="+((.artifacts.patch_candidate!=null)|tostring), "FINAL_DIAGNOSIS_PRESENT="+((.artifacts.analysis.payload.diagnosis!=null)|tostring), "FINAL_EVIDENCE_STATUS="+((.artifacts.analysis.payload.evidence_status//"UNKNOWN")|tostring)' /tmp/final-inspect.json
 
+      - name: Admitted GitOps deployment via existing DebugAI API
+        if: ${{ steps.target.outputs.gitops_enabled == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF_NAME" == "feat/chat-gitops-request-20261009" ]] || { echo "CHAT_GITOPS_TRIGGER_BRANCH_DENIED"; exit 31; }
+          file=".github/chatgpt-live-api-target.json"
+          jq -e '.gitops_request | type=="object" and (.enabled==true) and ((keys|sort)==(["branch","enabled","sha"]|sort))' "$file" >/dev/null
+          branch="$(jq -r '.gitops_request.branch' "$file")"
+          sha="$(jq -r '.gitops_request.sha' "$file")"
+          [[ "$branch" == "feat/tgserver-async-log-sink-20261003" ]] || { echo "CHAT_GITOPS_DEPLOY_BRANCH_DENIED"; exit 32; }
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "CHAT_GITOPS_SHA_INVALID"; exit 33; }
+          remote="$(git ls-remote origin "refs/heads/$branch" | awk 'NR==1{print $1}')"
+          [[ "$remote" == "$sha" ]] || { echo "CHAT_GITOPS_REMOTE_SHA_MISMATCH"; exit 34; }
+          [[ -n "${CF_ACCESS_CLIENT_ID:-}" && -n "${CF_ACCESS_CLIENT_SECRET:-}" ]]
+          jq -nc --arg branch "$branch" --arg sha "$sha" '
+            {action:"deploy",repo:"/workspace/debug-ai",branch:$branch,sha:$sha,
+             expected_head:$sha,human_approved:true,
+             delegation:{id:"dlg_debugai_reflect_v1",scope:"debugai.compose.reflect"}}
+          ' >/tmp/chat-gitops-body.json
+          touch /tmp/chat-gitops-request-sent
+          http="$(curl -sS --max-time 35 -o /tmp/chat-gitops-response.json -w '%{http_code}'
+            -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID"
+            -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET"
+            -H "content-type: application/json" --data-binary @/tmp/chat-gitops-body.json
+            "https://debugai.asterav8.jp/v1/gitops/request")"
+          echo "CHAT_GITOPS_REQUEST_HTTP=$http"
+          [[ "$http" == "202" ]] || { echo "CHAT_GITOPS_REQUEST_REJECTED"; exit 35; }
+          id="$(jq -r '.id // empty' /tmp/chat-gitops-response.json)"
+          [[ "$id" =~ ^gitops_[0-9a-f]{24}$ ]] || { echo "CHAT_GITOPS_ID_INVALID"; exit 36; }
+          echo "CHAT_GITOPS_REQUEST_ID=$id"
+          deadline=$((SECONDS+1500))
+          while ((SECONDS < deadline)); do
+            body="$(jq -nc --arg id "$id" '{repo:"/workspace/debug-ai",id:$id}')"
+            http="$(curl -sS --max-time 35 -o /tmp/chat-gitops-status.json -w '%{http_code}'
+              -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID"
+              -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET"
+              -H "content-type: application/json" --data-binary "$body"
+              "https://debugai.asterav8.jp/v1/gitops/status")"
+            [[ "$http" == "200" ]] || { sleep 10; continue; }
+            [[ "$(jq -r '.id // empty' /tmp/chat-gitops-status.json)" == "$id" ]] || exit 37
+            state="$(jq -r '.state // "UNKNOWN"' /tmp/chat-gitops-status.json)"
+            if [[ "$state" == "PASS" ]]; then
+              deployed="$(jq -r '.result.deployed_sha // empty' /tmp/chat-gitops-status.json)"
+              [[ "$deployed" == "$sha" ]] || { echo "CHAT_GITOPS_DEPLOYED_SHA_MISMATCH"; exit 38; }
+              echo "CHAT_GITOPS_TERMINAL=PASS"
+              echo "CHAT_GITOPS_DEPLOYED_SHA=$deployed"
+              break
+            fi
+            if [[ "$state" == "FAIL" ]]; then
+              cause="$(jq -r '.error // "UNKNOWN"' /tmp/chat-gitops-status.json)"
+              [[ "$cause" =~ ^[A-Z][A-Z0-9_]{0,79}$ ]] || cause="REDACTED_OR_UNKNOWN"
+              echo "CHAT_GITOPS_TERMINAL=FAIL"
+              echo "CHAT_GITOPS_FAILURE_CLASS=$cause"
+              exit 39
+            fi
+            [[ "$state" == "RUNNING" || "$state" == "QUEUED" ]] || exit 40
+            sleep 10
+          done
+          [[ "${state:-}" == "PASS" ]] || { echo "CHAT_GITOPS_TERMINAL=TIMEOUT"; exit 41; }
+          code="$(curl -sS --max-time 30 -o /tmp/chat-post-health.json -w '%{http_code}'
+            -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID"
+            -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET"
+            "https://debugai.asterav8.jp/health")"
+          [[ "$code" == "200" ]] || { echo "CHAT_GITOPS_POST_HEALTH_HTTP=$code"; exit 42; }
+          jq -e '.ok==true and .service=="debug-ai"' /tmp/chat-post-health.json >/dev/null
+          echo "CHAT_GITOPS_POST_HEALTH=PASS"
+          echo "CHAT_GITOPS_POST_HEAD_READBACK_BEGIN"
+          node scripts/chatgpt-bounded-server-read.cjs | tee /tmp/chat-gitops-post-host-head.log
+          grep -Fx "SERVER_GIT_HEAD=$sha" /tmp/chat-gitops-post-host-head.log >/dev/null || { echo "CHAT_GITOPS_POST_HEAD_MISMATCH"; exit 43; }
+          echo "CHAT_GITOPS_POST_HOST_SHA_MATCH=TRUE"
       - name: Safety assertion
         if: always()
         shell: bash
@@ -148,4 +223,4 @@ jobs:
           echo "APPROVE_APPLY_VERIFY_CALLED=NO"
           echo "PATCH_CANDIDATE_ENDPOINT_CALLED=NO"
           echo "ASSET_PROMOTE_CALLED=NO"
-          echo "PRODUCTION_DEPLOY_CALLED=NO"
+          if [[ -f /tmp/chat-gitops-request-sent ]]; then echo "PRODUCTION_DEPLOY_REQUEST_SENT=YES"; else echo "PRODUCTION_DEPLOY_REQUEST_SENT=NO"; fi
