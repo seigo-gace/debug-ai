@@ -3,7 +3,7 @@ const fs=require("node:fs");
 const {setTimeout:delay}=require("node:timers/promises");
 const API="https://debugai.asterav8.jp";
 const DEFAULT_REPO="/workspace/debug-ai";
-const ALLOWED=new Set(["project.git_head","service.debug_ai_state","service.sandbox_state","service.debug_ai_health","canonical.devlog_activate_status","system.projects_inventory","system.project_file_inspect"]);
+const ALLOWED=new Set(["project.git_head","project.git_recent_commits","github.actions_recent","service.debug_ai_state","service.sandbox_state","service.debug_ai_health","canonical.devlog_activate_status","system.projects_inventory","system.project_file_inspect"]);
 const ENTRY_NAME_RE=/^[A-Za-z0-9._-]{1,120}$/;
 const REL_PATH_RE=/^[A-Za-z0-9_./-]{1,180}$/;
 const FILE_INSPECT_MAX_PAGES=32;
@@ -37,6 +37,32 @@ function safeResult(command,raw){
     let d;try{d=JSON.parse(stdout);}catch{throw Error("PROJECT_INVENTORY_RESULT_INVALID");}
     if(d?.schema!=="debugai.host-workspace-inventory/v1"||!Number.isInteger(d.page)||!Number.isInteger(d.total)||!Array.isArray(d.entries)||!Array.isArray(d.missing_roots)||stdout.length>4096)throw Error("PROJECT_INVENTORY_RESULT_INVALID");
     return["SERVER_PROJECTS_PAGE="+d.page,"SERVER_PROJECTS_TOTAL="+d.total,"SERVER_PROJECTS_NEXT="+(d.next_page??"NONE"),"SERVER_PROJECTS_DATA="+JSON.stringify(d)];
+  }
+  if(command==="project.git_recent_commits"){
+    const rows=stdout.split("\n").filter(Boolean);
+    if(!rows.length||rows.length>8||stdout.length>4096)throw Error("SERVER_GIT_LOG_INVALID");
+    const parsed=rows.map(row=>{
+      const match=/^([0-9a-f]{7,40}) (.{1,200})$/u.exec(row);
+      if(!match)throw Error("SERVER_GIT_LOG_INVALID");
+      const subject=match[2];
+      const ok=/^[\\p{L}\\p{N} .,:#()\\[\\]/_+-]{1,120}$/u.test(subject)&&!/token|secret|password|credential|bearer|authorization|api[_.-]?key/i.test(subject);
+      return{sha:match[1],subject:ok?subject:"REDACTED"};
+    });
+    return["SERVER_GIT_LOG="+JSON.stringify(parsed)];
+  }
+  if(command==="github.actions_recent"){
+    let data;try{data=JSON.parse(stdout);}catch{throw Error("SERVER_ACTIONS_LOG_INVALID");}
+    if(!Array.isArray(data)||data.length>8||stdout.length>4096)throw Error("SERVER_ACTIONS_LOG_INVALID");
+    const items=data.map(x=>{
+      if(!Number.isSafeInteger(x?.databaseId)||x.databaseId<=0||!/^([a-f0-9]{40})$/.test(x.headSha||"")||
+        !["queued","in_progress","completed","requested","waiting","pending"].includes(x.status)||
+        ![null,"success","failure","cancelled","skipped","timed_out","action_required","neutral","stale","startup_failure"].includes(x.conclusion??null)||
+        typeof x.name!=="string"||!/^[\\p{L}\\p{N} .,:#()\\[\\]/_+-]{1,120}$/u.test(x.name)||
+        !/^https:\\/\\/github\\.com\\/seigo-gace\\/debug-ai\\/actions\\/runs\\/[0-9]+$/.test(x.url||""))
+        throw Error("SERVER_ACTIONS_LOG_INVALID");
+      return{id:x.databaseId,name:x.name,status:x.status,conclusion:x.conclusion??null,sha:x.headSha,url:x.url};
+    });
+    return["SERVER_ACTIONS_LOG="+JSON.stringify(items)];
   }
   if(command==="project.git_head"){
     if(!/^[a-f0-9]{40}$/.test(stdout))throw Error("SERVER_HEAD_INVALID");
