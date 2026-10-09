@@ -19,10 +19,11 @@ function fixture(t) {
   const head = "a".repeat(40);
   fs.writeFileSync(git, `#!/bin/sh\n[ "$1" = rev-parse ] && [ "$2" = HEAD ] || exit 99\nprintf '%s\\n' '${head}'\n`, { mode: 0o700 });
   const service = new ServerCommandRequestService({ defaultRepo: repo, repoPolicy: { assertRepo: value => value } });
-  const execute = () => spawnSync("bash", [runner], { encoding: "utf8", env: {
+  const execute = (extraEnv = {}) => spawnSync("bash", [runner], { encoding: "utf8", env: {
     ...process.env, DEBUG_AI_HOST_REPO: repo, DEBUG_AI_SERVER_COMMAND_GIT_BIN: git,
     DEBUG_AI_SERVER_COMMAND_DOCKER_BIN: "true", DEBUG_AI_SERVER_COMMAND_CURL_BIN: "true",
     DEBUG_AI_SERVER_COMMAND_DF_BIN: "true",
+    ...extraEnv,
   } });
   const enqueue = (overrides = {}) => {
     const queued = service.request({ command_id: "project.git_head" });
@@ -33,6 +34,47 @@ function fixture(t) {
   };
   return { repo, service, execute, enqueue, head };
 }
+
+test("real host runner inspects a bounded workspace file via helper roots override", t => {
+  const f = fixture(t);
+  const realRepo = path.resolve(__dirname, "../..");
+  fs.mkdirSync(path.join(f.repo, "scripts"), { recursive: true });
+  fs.copyFileSync(
+    path.join(realRepo, "scripts/host-workspace-file-inspect.py"),
+    path.join(f.repo, "scripts/host-workspace-file-inspect.py"),
+  );
+  const roots = path.join(f.repo, "workspace-roots");
+  const entry = path.join(roots, "fixture-app");
+  fs.mkdirSync(entry, { recursive: true });
+  fs.writeFileSync(path.join(entry, "note.txt"), "fixture inspect ok\n", "utf8");
+  const queued = f.service.request({
+    command_id: "system.project_file_inspect",
+    arguments: ["fixture-app", "note.txt"],
+  });
+  const file = path.join(f.service.queueRoot(), "requests", `${queued.id}.json`);
+  const request = JSON.parse(fs.readFileSync(file));
+  fs.writeFileSync(file, JSON.stringify({ ...request, repo: "/workspace/debug-ai" }));
+  const result = f.execute({ DEBUG_AI_HOST_WORKSPACE_ROOTS: roots });
+  assert.equal(result.status, 0, result.stderr);
+  const status = f.service.status(queued.id);
+  assert.equal(status.state, "PASS");
+  const payload = JSON.parse(status.result.stdout);
+  assert.equal(payload.schema, "debugai.host-workspace-file-inspect/v1");
+  assert.match(payload.content_preview, /fixture inspect ok/);
+});
+
+test("real host runner rejects forbidden project file inspect paths at validation", t => {
+  const f = fixture(t);
+  const id = f.enqueue({
+    command_id: "system.project_file_inspect",
+    arguments: ["fixture-app", "../escape.txt"],
+  });
+  const result = f.execute();
+  assert.equal(result.status, 0, result.stderr);
+  const status = f.service.status(id);
+  assert.equal(status.state, "FAIL");
+  assert.equal(status.error, "REQUEST_SCHEMA_OR_BOUNDARY_INVALID");
+});
 
 test("real bash/jq host runner completes a valid command with exact correlated readback", t => {
   const f = fixture(t), id = f.enqueue();
