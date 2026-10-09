@@ -2,6 +2,6 @@
   "base_url": "https://debugai.asterav8.jp",
   "mode": "readonly",
   "repo": "/workspace/debug-ai",
-  "request": "2026-10-10 GPT CHAT runtime dogfood follow-up: bounded DebugAI state after live logs showed incompatible=133, archive_errors=42, durable_gc_errors=3; read-only, no inference/deploy.",
-  "server_command_id": "service.debug_ai_state"
+  "request": "2026-10-10 GPT CHAT read-only actual DebugAI server repository HEAD attribution for durable recovery and retention incidents; no mutation or model calls.",
+  "server_command_id": "project.git_head"
 }
