@@ -1,0 +1,20 @@
+{
+  "schema": "debugai.host-admitted-workspace-entries/v1",
+  "entries": {
+    "debug-ai": {
+      "root_key": "projects",
+      "repository": "seigo-gace/debug-ai",
+      "owners": ["seigo-gace", "G-ACE-inc"]
+    },
+    "server-core": {
+      "root_key": "projects",
+      "repository": "G-ACE-inc/server-core",
+      "owners": ["G-ACE-inc", "seigo-gace"]
+    },
+    "webhook-gateway": {
+      "root_key": "projects",
+      "repository": "seigo-gace/webhook-gateway",
+      "owners": ["seigo-gace"]
+    }
+  }
+}
