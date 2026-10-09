@@ -1,6 +1,13 @@
+const {createMockAdapter:createExternalReviewAdapter}=require('./helpers/external-review-mock.cjs');
+const fs=require('node:fs');
+const os=require('node:os');
+const path=require('node:path');
 const test=require('node:test');
 const assert=require('node:assert/strict');
-const {createExternalReviewAdapter}=require('../adapters/external-review.js');
+function quotaFixture(){
+  const ledgerRoot=fs.mkdtempSync(path.join(os.tmpdir(),"debugai-er-quota-"));
+  return{ledgerRoot,cleanup:()=>fs.rmSync(ledgerRoot,{recursive:true,force:true})};
+}
 
 const payload={
   privacy:{privacy_class:'PUBLIC',sanitized:true,opaque_evidence:true},
@@ -14,7 +21,7 @@ test('Gemini 503 preserves Groq non-PASS result without aborting analysis',async
     geminiKey:'m',
     fetchImpl:async()=>{
       calls++;
-      if(calls===1)return new Response(JSON.stringify({choices:[{message:{content:'{"verdict":"FAIL","reason":"needs second opinion"}'}}]}),{status:200});
+      if(calls===1)return new Response(JSON.stringify({choices:[{finish_reason:"stop",message:{content:'{"verdict":"FAIL","reason":"needs second opinion"}'}}]}),{status:200});
       return new Response('unavailable',{status:503});
     }
   });
@@ -32,7 +39,7 @@ test('Gemini auth failure remains hard failure',async()=>{
     geminiKey:'m',
     fetchImpl:async()=>{
       calls++;
-      if(calls===1)return new Response(JSON.stringify({choices:[{message:{content:'{"verdict":"FAIL"}'}}]}),{status:200});
+      if(calls===1)return new Response(JSON.stringify({choices:[{finish_reason:"stop",message:{content:'{"verdict":"FAIL"}'}}]}),{status:200});
       return new Response('unauthorized',{status:401});
     }
   });
@@ -40,7 +47,7 @@ test('Gemini auth failure remains hard failure',async()=>{
 });
 
 function reply(status,body){
-  return new Response(status===200?JSON.stringify({choices:[{message:{content:body}}]}):"unavailable",{status});
+  return new Response(status===200?JSON.stringify({choices:[{finish_reason:"stop",message:{content:body}}]}):"unavailable",{status});
 }
 test("Gemini-only configured review uses Gemini without trying missing Groq",async()=>{
   const calls=[];const adapter=createExternalReviewAdapter({groqKey:"",geminiKey:"free",fetchImpl:async(url)=>{calls.push(url);return reply(200,'{"verdict":"PASS"}');}});
@@ -109,4 +116,37 @@ test("private review evidence is never sent to either provider",async()=>{
   const a=createExternalReviewAdapter({groqKey:"g",geminiKey:"m",fetchImpl:async()=>{calls++;throw Error("DISPATCHED");}});
   await assert.rejects(()=>a.hypothesis({privacy:{privacy_class:"PRIVATE",sanitized:false,opaque_evidence:false}}),/EXTERNAL_PRIVACY_METADATA_REQUIRED/);
   assert.equal(calls,0);
+});
+
+test("Composer quota intent: exhausted rolling day blocks without resetting at UTC midnight",async()=>{
+  const {createExternalReviewQuotaLedger}=require('../adapters/external-review-quota');
+  const {qualification}=require('./helpers/external-review-mock.cjs');
+  const f=quotaFixture();
+  try{
+    const root=path.join(f.ledgerRoot,'ledger');
+    let now=Date.parse('2026-10-08T23:59:00Z');
+    const ledger=createExternalReviewQuotaLedger({root,nowFn:()=>now});
+    for(let i=0;i<4;i++){ledger.reserveDispatch('groq',1,qualification(now).providers.groq);now+=3_660_000;}
+    assert.throws(()=>ledger.reserveDispatch('groq',1,qualification(now).providers.groq),/QUOTA_DAY_EXHAUSTED/);
+  }finally{f.cleanup();}
+});
+test("Composer quota intent: invalid HTTP response consumes persisted reservation",async()=>{
+  const {createExternalReviewQuotaLedger}=require('../adapters/external-review-quota');
+  const f=quotaFixture();
+  try{
+    const root=path.join(f.ledgerRoot,'ledger');let calls=0;
+    const a=createExternalReviewAdapter({groqKey:'g',geminiKey:'',ledgerRoot:root,fetchImpl:async()=>{calls++;return reply(503,'');}});
+    await assert.rejects(()=>a.hypothesis(payload),/GROQ_HTTP_503/);
+    assert.equal(calls,1);assert.equal(createExternalReviewQuotaLedger({root}).readStateSync().providers.groq.events.length,1);
+  }finally{f.cleanup();}
+});
+test("Composer quota intent: process restart reloads consumed reservation",async()=>{
+  const {createExternalReviewQuotaLedger}=require('../adapters/external-review-quota');
+  const {qualification}=require('./helpers/external-review-mock.cjs');
+  const f=quotaFixture();
+  try{
+    const root=path.join(f.ledgerRoot,'ledger'),now=Date.now();
+    createExternalReviewQuotaLedger({root,nowFn:()=>now}).reserveDispatch('groq',1,qualification(now).providers.groq);
+    assert.throws(()=>createExternalReviewQuotaLedger({root,nowFn:()=>now}).reserveDispatch('groq',1,qualification(now).providers.groq),/QUOTA_MINUTE_EXHAUSTED/);
+  }finally{f.cleanup();}
 });

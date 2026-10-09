@@ -155,3 +155,6 @@ negatives and actual Workflow ownership. The existing `sandbox-queue-selftest.js
 `verify-candidates` mode qualifies real Sidecar candidate syntax/runtime failure and
 independent boundary holdouts in Core Verify. Design/limitations belong to
 `CODEGEN_SANDBOX_SNAPSHOT_DESIGN_DELTA.md` §15.
+
+- `server/adapters/external-review-quota.js` — Host-owned FREE evidence validation and atomic rolling quota reservations for the existing external reviewer.
+- `scripts/external-review-volume-probe.cjs` — offline container-recreation persistence probe used by the existing Runtime Volume CI.
