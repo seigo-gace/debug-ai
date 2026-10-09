@@ -72,3 +72,27 @@ test("public review summary exposes only opaque review metadata and never diff c
   assert.equal(serialized.includes("do-not-export"),false);
   assert.equal(serialized.includes(secretDiff),false);
 });
+
+test("public final-review summary preserves anonymized test failure, skip and execution evidence",()=>{
+  const packet=makeReviewPacket({
+    candidateRef:"cand",applyReceiptRef:"receipt",repositoryRevision:"git_after",
+    changedPaths:["private/secret.js"],diff:"PRIVATE CODE NOT FOR PROVIDERS",
+    executedTests:[{name:"PRIVATE_UNIT",status:"PASS",executed:true}],
+    testResults:[
+      {name:"PRIVATE_UNIT",status:"PASS",executed:true,stdout:"SECRET_OUTPUT_A"},
+      {name:"PRIVATE_FAIL",status:"FAIL",executed:true,stderr:"SECRET_OUTPUT_B"},
+      {name:"PRIVATE_SKIPPED",status:"SKIP",executed:false,stderr:"SECRET_OUTPUT_C"}
+    ],
+    invariants:[{name:"PRIVATE_SCOPE",status:"PASS"},{name:"PRIVATE_BOUNDARY",status:"FAIL"}],
+    evidenceRefs:["EVIDENCE_PRIVATE"]
+  });
+  const summary=publicReviewPacketSummary(packet,{localVerdict:"PASS"});
+  assert.deepEqual(summary.test_result_statuses,{PASS:1,FAIL:1,SKIP:1,UNKNOWN:0});
+  assert.deepEqual(summary.invariant_statuses,{PASS:1,FAIL:1,SKIP:0,UNKNOWN:0});
+  assert.equal(summary.test_result_not_executed_count,1);
+  assert.equal(summary.invariants_pass,false);
+  const encoded=JSON.stringify(summary);
+  for(const secret of ["PRIVATE_CODE","PRIVATE_UNIT","PRIVATE_FAIL","PRIVATE_SKIPPED","SECRET_OUTPUT","PRIVATE_SCOPE","PRIVATE_BOUNDARY","EVIDENCE_PRIVATE","private/secret.js"]){
+    assert.equal(encoded.includes(secret),false,secret);
+  }
+});
