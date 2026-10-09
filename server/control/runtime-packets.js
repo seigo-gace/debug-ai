@@ -112,7 +112,7 @@ function publicReviewStatusCounts(items){
   const counts={PASS:0,FAIL:0,SKIP:0,UNKNOWN:0};
   for(const item of Array.isArray(items)?items:[]){
     const status=String(item?.status||"").toUpperCase();
-    const safe=status==="PASS"||item?.pass===true?"PASS":status==="FAIL"||item?.pass===false?"FAIL":status==="SKIP"?"SKIP":"UNKNOWN";
+    const safe=status==="FAIL"||item?.pass===false?"FAIL":status==="SKIP"?"SKIP":status==="PASS"||(!status&&item?.pass===true)?"PASS":"UNKNOWN";
     counts[safe]+=1;
   }
   return Object.freeze(counts);
