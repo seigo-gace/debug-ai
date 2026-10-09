@@ -73,7 +73,7 @@ C("L5-VR1","L5","local_reviewer",{verification_evidence:[{evidence_id:"V1",kind:
 C("L5-VR2","L5","local_reviewer",{verification_evidence:[{evidence_id:"V1",kind:"targeted",status:"PASS"},{evidence_id:"V2",kind:"regression",status:"FAIL"},{evidence_id:"V3",kind:"invariants",pass:true},{evidence_id:"V4",kind:"scope",status:"PASS"}]},{verdict:"FAIL",decision:"BLOCKED"})
 ]);
 
-function arr(v){return Array.isArray(v)?v.map(String):[];}
+function arr(v){return Array.isArray(v)&&v.every(x=>typeof x==="string")?v:null;}
 function same(a,b){return JSON.stringify(a)===JSON.stringify(b);}
 function score(testCase,value){
   let checks={};
