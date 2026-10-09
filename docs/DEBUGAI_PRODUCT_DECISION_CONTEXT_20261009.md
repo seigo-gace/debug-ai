@@ -67,3 +67,36 @@ At the Codex product handoff, real live-model Code Scout→Diagnoser→Patch Eng
 - If a relevant historical premise is NOT actually captured here, identify that *specific gap* in #41/#42 with source/context/impact and continue unaffected approved work. Do not invent a historical decision. Ask Master only for a genuinely protected **product intent** choice that blocks that specific action, not a technical decision.
 
 No Secrets/private raw logs/hardcoded credentials in this document. The references are provenance, not permission to expand execution scope.
+
+
+## 9. Legacy two-gate external free review contract — 2026-10-09 re-audit
+
+**MASTER-ADOPTED DESIGN, NOT A NEW EXTERNAL ROLE:** The local Ministral Reviewer remains local. External Groq and Gemini FREE models are used ONLY at TWO logical review points: (1) after diagnosis, independent Hypothesis Review; (2) after deterministic retest and Local Reviewer, independent Final Review before Strict Completion. A bounded evidence-driven re-fix may revisit Hypothesis Review without creating new review kinds. The original provider name is **Groq**, not Grok/xAI. Neither external output is a substitute for deterministic evidence, user-approved protected apply or complete revision identity.
+
+**Original design provenance:** https://app.notion.com/p/3e4cdcf128e481fb9c90f39ede1092c2 (2026-09-25 Master clarification) and https://app.notion.com/p/3dfcdcf128e48161b3def7d02192a182 (2026-09-24 Windows/FreeGuard r26 history). Codex does NOT need Notion access: necessary decisions are copied here. Historical Windows r26 required single bounded same-provider format correction, strict canonical hypothesis/final JSON, Groq→Gemini free fallback on invalid result/429/timeout/envelope, quota ledger including invalid responses, paid-fallback=false, and fail-closed when neither qualifies. Gateway fault-injection 27/27 passed THEN; this is NOT current Server runtime proof.
+
+**Current Server Source actual status:** existing server/adapters/external-review.js has identical Git blob SHA 47815983c43df7f619931e46bb2181ee441c9995 on main, PR40 and PR69. Existing server/main.js initializes the adapter, and server/workflow.js connects hypothesis after diagnosis/refictions and final after Local Reviewer. BOTH LOCATIONS ARE IMPLEMENTED; actual latest live dual-provider proof NOT_VERIFIED.
+
+**CONFIRMED present-source gaps (not fixed by this audit):**
+- Groq is called FIRST without a catch. If its call fails, Gemini fallback never runs. In particular, main accepts Gemini-only key configuration but review() then fails on missing Groq key.
+- Current Gemini second opinion runs only after a non-PASS Groq result or an explicit second-opinion request. It is NOT a fallback from a thrown Groq error. This is different from the older FreeGuard r26.
+- No free-quota ledger, explicit paidFallback=false policy, provider free-tier account/billing validation or bounded same-provider schema-correction retry is implemented in the current adapter. Do not assume the key or URL guarantees zero cost.
+- The current tests cover selected mock verdict/transient behavior, NOT the old 27-case Gateway parity, real live free-quota enforcement or current two-stage AI run.
+
+**Repair requirement:** Reuse existing adapter/workflow; DO NOT create new Gateway/Reviewer. Once the owner/Current is fresh and sole-writer, add real missing protection with fail-first tests of missing Groq key, Groq 429/network/invalid JSON and Gemini-only flow, both unavailable, no paid fallback, privacy, quota, canonical schema and exactly-two-stage control; preserve previous positive cases and evidence binding. Any external live calls require actual verified free-tier and cost guard, otherwise BLOCKED/UNKNOWN. Never silently add expensive providers.
+
+## 10. Branch inventory and anti-duplicate engineering rule — 2026-10-09 read-only audit
+
+**GitHub snapshot:** 76 Branch names and 67 PRs: 31 OPEN, 33 MERGED, 3 CLOSED_UNMERGED. All 31 open PR head-vs-base changed-file comparisons inspected. These are inventory/diff results, NOT 76 full file-by-file audits nor a merge authorization.
+
+- Duplicate EXACT HEAD set A: feat/codegen-js-candidate-preflight-20261009 and feat/codegen-candidate-evidence-binding-20261009 both 504fce8af8139f0fde546ab4ba494524fb8e9c91.
+- Duplicate EXACT HEAD set B: phase0b-telemetry-staging-20260929, tmp-do-not-use, tmp-no-op all 0b0c00391cdd0f083764c46633c241ab78b69723.
+  Result: two duplicate-head sets; 3 redundant extra names. No deletion.
+- Historical open PR23→24→25→26→27→28→29→30→31→32→33→34 are nested ancestors of PR69; comparison from PR34 to PR69 AHEAD=381, BEHIND=0. More recent product PR56→59→60→63→64→65→66→69 is another stacked chain, not separate blank products. PR58 was intentionally evidence-only NEVER-MERGE.
+- **DIVERGED HEADS:** PR40 e4d5167d6049e244a8852d5c9ceaf3fd8daeac36 versus product PR69 6d157ff8e7d15ade2bd4269721987bdc78d05085: PR40 has 40 not-in-product commits, PR69 has 63 not-in-PR40 commits. PR40-only changed-file contrast is concentrated in 17 GitOps/Host/CHAT read/inspection paths. Thus green PR69 CI CANNOT mean all PR40/latest Host features are included. Main also diverged: 2 main-only vs 650 product-only commits.
+- **HIDDEN DISTINCT TECHNICAL FIX:** no-PR branch fix/ai-core-retry-deadline-20261008 has 3 commits absent from PR69, touching ai-core.js and timeout tests. It bounds absolute deadline across retries and records only dispatched calls; PR69 currently computes one effective timeout before retry loop. REVIEW AND REUSE THIS BRANCH before proposing a fresh timeout solution. Older fix/ai-core-transient-retry-20260926 also diverged, not proof of an equivalent fix.
+- Other independent/not-yet-reconciled lines include automation/chatgpt-verify (62 product-relative branch-only commits), recovery/inventory-host-f360421-20261009 (9 branch-only Host commits), old PR3 migration/PR5 evaluator, PR54/55 Host, and Dependabot PR35–39. Each has separate owner/scope; do not bulk-merge or delete.
+
+**Mandatory before every NEW CU:** Fresh GitHub Project Current and sole owner → list all relevant branches/PRs and actual Source/test/design by feature → check if an implementation exists in the HEAD ancestry or a divergent branch → classify EXISTING_KEEP / EXISTING_IMPROVE / DISTINCT_PENDING / SUPERSEDED_EVIDENCED / ACTUALLY_MISSING. Only after checking compare/base and actual Source may one implement a missing part. Preserve pre-existing branches until exact source, tests, Runtime and protected integration owner prove safe consolidation. Do not assert a duplicate feature is absent merely because an older PR is OPEN or the currently checked-out Branch lacks it.
+
+**State:** AUDIT_DONE; CODE_CHANGED=NO within this documentation CU; no merge/branch delete/force push/deploy; review provider remediation and 40-commit reconciliation NOT_IMPLEMENTED.
