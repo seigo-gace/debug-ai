@@ -2,6 +2,8 @@
   "base_url": "https://debugai.asterav8.jp",
   "mode": "readonly",
   "repo": "/workspace/debug-ai",
-  "request": "2026-10-10 GPT CHAT read-only actual DebugAI server repository HEAD attribution for durable recovery and retention incidents; no mutation or model calls.",
-  "server_command_id": "project.git_head"
+  "request": "Existing GPT CHAT bounded read-only DebugAI Docker log verification, 10 sanitized lines. No model calls, file writes, or GitOps.",
+  "server_command_id": "service.debug_ai_logs",
+  "log_service": "debug-ai",
+  "log_lines": 10
 }
