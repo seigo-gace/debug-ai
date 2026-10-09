@@ -74,7 +74,7 @@ function createSandboxVerificationLane({jobRoot=process.env.DEBUG_AI_SANDBOX_JOB
       const result=await wait({jobRoot,jobId:job.job_id,timeoutMs:check.timeout_ms+15000});
       out.push(toEvidence(result,check));
     }
-    return {status:"FINAL_VALID",checks:out};
+    return {status:out.some(check=>check.status!=="PASS")?"FINAL_INVALID":"FINAL_VALID",checks:out};
   }
   async function collectCandidate(patchCandidate){
     // Validate canonical integrity and current preconditions even if execution is unavailable.

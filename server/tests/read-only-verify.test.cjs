@@ -19,12 +19,12 @@ function fixture(scripts={lint:"node --check value.js",test:"node --test value.t
   return{workspace,repo,runtimeRoot,cleanup:()=>fs.rmSync(workspace,{recursive:true,force:true})};
 }
 
-function workflowFor(f,{failedAction=null,stdoutByAction={},aiCall=null}={}){
+function workflowFor(f,{failedAction=null,stdoutByAction={},aiCall=null,mutateDuringWait=null}={}){
   const prepared=[];
   const sandboxVerification=createSandboxVerificationLane({
     jobRoot:"/sandbox-jobs",
     prepare(input){prepared.push(input);return{job_id:`JOB_${prepared.length}`};},
-    async wait({jobId}){const action=prepared[Number(jobId.slice(4))-1].action,pass=action!==failedAction;return{job_id:jobId,action,command:`fixture:${action}`,code:pass?0:1,pass,timed_out:false,duration_ms:4,stdout:stdoutByAction[action]??(pass?"ok":""),stderr:pass?"":"failed",isolation:{backend:"sidecar+landlock+seccomp",network:"DENY",workspace_mount:"ABSENT",secret_mounts:"ABSENT",docker_socket:"ABSENT"}};}
+    async wait({jobId}){if(mutateDuringWait){const target=path.join(f.repo,mutateDuringWait.path);fs.writeFileSync(target,mutateDuringWait.content??`${fs.readFileSync(target,"utf8")}// mutated\n`);}const action=prepared[Number(jobId.slice(4))-1].action,pass=action!==failedAction;return{job_id:jobId,action,command:`fixture:${action}`,code:pass?0:1,pass,timed_out:false,duration_ms:4,stdout:stdoutByAction[action]??(pass?"ok":""),stderr:pass?"":"failed",isolation:{backend:"sidecar+landlock+seccomp",network:"DENY",workspace_mount:"ABSENT",secret_mounts:"ABSENT",docker_socket:"ABSENT"}};}
   });
   const repoPolicy=new RepoPolicy({workspaceRoot:f.workspace,allowlist:"repo"}),authority=new RunAuthority({runtimeRoot:f.runtimeRoot,repoPolicy}),runtimeEvidence=new RuntimeEvidenceStore(path.join(f.runtimeRoot,"evidence"));let patchCalls=0;
   const workflow=createWorkflow({aiCore:{call:async(role,options)=>{assert.equal(role,"local_reviewer");if(aiCall)return aiCall(role,options);return{content:JSON.stringify({verdict:"PASS",decision:"DONE",claims:[]})};}},sandboxVerification,repoPolicy,authority,runtimeEvidence,patchService:{create(){patchCalls++;throw new Error("PATCH_CREATE_FORBIDDEN");},apply(){patchCalls++;throw new Error("PATCH_APPLY_FORBIDDEN");}}});
@@ -49,6 +49,30 @@ test("read-only verify compacts successful command output only for Local Reviewe
   assert.ok(invocation);assert.ok(Buffer.byteLength(invocation.user,"utf8")<12000);assert.equal(invocation.user.includes(fullOutput),false);
   const evidence=JSON.parse(invocation.user).verification_evidence;const testCheck=evidence.find(x=>x.payload?.name==="sandbox:test").payload;
   assert.equal(testCheck.stdout.bytes,Buffer.byteLength(fullOutput));assert.match(testCheck.stdout.sha256,/^[a-f0-9]{64}$/);assert.equal(testCheck.stdout.excerpt,null);
+});
+
+test("read-only verify fails when selected source mutates during sandbox collect despite local reviewer PASS",async t=>{
+  const f=fixture();t.after(f.cleanup);
+  const h=workflowFor(f,{mutateDuringWait:{path:"value.js",content:"module.exports=99;\n"}});
+  const result=await h.workflow.verifyReadOnly({repo:f.repo,selectedPaths:["value.js"]});
+  assert.equal(result.verdict,"FAIL");
+  assert.equal(result.invariants.pass,false);
+  assert.ok(result.invariants.failures.some(x=>x.startsWith("SOURCE_MUTATED:")));
+  assert.equal(result.local_review.verdict,"PASS");
+});
+
+test("read-only verify fails in repository scope when tree mutates during sandbox collect",async t=>{
+  const f=fixture();t.after(f.cleanup);
+  const h=workflowFor(f,{mutateDuringWait:{path:"value.js",content:"module.exports=99;\n"}});
+  const result=await h.workflow.verifyReadOnly({repo:f.repo});
+  assert.equal(result.scope.mode,"REPOSITORY");
+  assert.equal(result.verdict,"FAIL");
+  assert.equal(result.invariants.pass,false);
+  assert.equal(result.invariants.failures.includes("SOURCE_TREE_MUTATED"),true);
+  assert.equal(result.invariants.checked_receipts,1);
+  assert.match(result.invariants.snapshot_before,/^tree_[a-f0-9]{64}$/);
+  assert.match(result.invariants.snapshot_after,/^tree_[a-f0-9]{64}$/);
+  assert.notEqual(result.invariants.snapshot_before,result.invariants.snapshot_after);
 });
 
 test("status and inspect expose only the existing authority checkpoint and scrubbed runtime artifacts",async t=>{
