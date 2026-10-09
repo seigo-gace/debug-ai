@@ -2,11 +2,8 @@
   "base_url": "https://debugai.asterav8.jp",
   "mode": "readonly",
   "repo": "/workspace/debug-ai",
-  "request": "P0 CHAT actual bounded read-only server-core README file inspection, first page only, no models, no writes, no GitOps.",
-  "server_command_id": "system.project_file_inspect",
-  "file_inspect_entry": "server-core",
-  "file_inspect_path": "README.md",
-  "file_inspect_offset": 0,
-  "file_inspect_root_key": "projects",
-  "file_inspect_all_pages": false
+  "request": "P0 GPT CHAT bounded read-only inventory page zero after project file inspect execution failure; no mutations, models or GitOps.",
+  "server_command_id": "system.projects_inventory",
+  "inventory_page": 0,
+  "inventory_all": false
 }
