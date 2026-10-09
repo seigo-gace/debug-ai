@@ -125,6 +125,7 @@ test("both configured free reviewers independently examine each of the two exist
     assert.match(calls[1].url,/generativelanguage/);
     assert.match(calls[0].body.messages[0].content,new RegExp(stage));
     assert.match(calls[1].body.messages[0].content,new RegExp(stage));
+    for(const call of calls){assert.match(call.body.messages[0].content,/sanitized public evidence/);assert.match(call.body.messages[0].content,/Never return PASS merely/);assert.match(call.body.messages[0].content,/evidence_refs/);}
     assert.equal(result.provider,"groq+gemini");
     assert.equal(result.json.verdict,"PASS");
     assert.equal(result.primary.json.verdict,"PASS");
