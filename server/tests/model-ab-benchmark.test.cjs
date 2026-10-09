@@ -124,3 +124,111 @@ test("model AB cannot score a truncated reply supplied by an injected caller",as
     assert.equal(e.code,"AI_CORE_OUTPUT_TRUNCATED");assert.equal(e.benchmark_metadata.role,"local_reviewer");assert.equal(e.benchmark_metadata.completion_tokens,100);assert.equal(JSON.stringify(e).includes("PRIVATE_"),false);return true;
   });
 });
+
+test("model A/B remote HTTP error never exposes upstream response text or credentials",async()=>{
+  const config=qualifyConfigForRuntime("diagnoser",baselineConfig("diagnoser"),8192).config;
+  const secrets=["Bearer TOKEN_MUST_STAY_PRIVATE","customer-document-marker"];
+  const call=makeAiCoreCaller({
+    baseUrl:"http://example.invalid",apiKey:"test",dispatcher:{},runtimeContextTokens:8192,
+    fetchImpl:async()=>new Response(secrets.join(" - "),{status:503})
+  });
+  await assert.rejects(()=>call({role:"diagnoser",config,system:"s",user:"u"}),error=>{
+    assert.equal(error.code,"AI_CORE_HTTP_503");
+    assert.equal(error.message,"AI_CORE_HTTP_503");
+    const serialized=JSON.stringify({message:error.message,...error});
+    for(const secret of secrets)assert.equal(serialized.includes(secret),false);
+    return true;
+  });
+});
+test("model A/B malformed HTTP200 envelope fails closed without echoing upstream body",async()=>{
+  const config=qualifyConfigForRuntime("diagnoser",baselineConfig("diagnoser"),8192).config;
+  const secret="PRIVATE_MODEL_SERVER_DETAILS";
+  const call=makeAiCoreCaller({
+    baseUrl:"http://example.invalid",apiKey:"test",dispatcher:{},runtimeContextTokens:8192,
+    fetchImpl:async()=>new Response(secret,{status:200})
+  });
+  await assert.rejects(()=>call({role:"diagnoser",config,system:"s",user:"u"}),error=>{
+    assert.equal(error.code,"AI_CORE_ENVELOPE_INVALID");
+    assert.equal(error.message,"AI_CORE_ENVELOPE_INVALID");
+    assert.equal(JSON.stringify({message:error.message,...error}).includes(secret),false);
+    return true;
+  });
+});
+
+test("model A/B refuses non-completed finish states before scoring a valid-looking JSON answer",async()=>{
+  const config=qualifyConfigForRuntime("diagnoser",baselineConfig("diagnoser"),8192).config;
+  for(const reason of [null,"content_filter","tool_calls","function_call","unknown_private_upstream_value"]){
+    const call=makeAiCoreCaller({
+      baseUrl:"http://example.invalid",apiKey:"test",dispatcher:{},runtimeContextTokens:8192,
+      fetchImpl:async()=>new Response(JSON.stringify({choices:[{finish_reason:reason,message:{content:'{"verdict":"PASS"}'}}]}),{status:200})
+    });
+    await assert.rejects(()=>call({role:"diagnoser",config,system:"s",user:"u"}),error=>{
+      assert.equal(error.code,"AI_CORE_OUTPUT_NOT_COMPLETE");
+      assert.equal(error.message,"AI_CORE_OUTPUT_NOT_COMPLETE");
+      const meta=error.benchmark_metadata;
+      assert.equal(meta.role,"diagnoser");
+      assert.equal(meta.finish_reason,["content_filter","tool_calls","function_call"].includes(reason)?reason:null);
+      assert.equal(JSON.stringify(error).includes("unknown_private_upstream_value"),false);
+      return true;
+    });
+  }
+});
+test("model A/B injected caller cannot promote incomplete JSON response as semantic score",async()=>{
+  await assert.rejects(
+    ()=>runModelAbBenchmark({role:"local_reviewer",axis:"temperature",candidate:"0.2",callModel:async({testCase})=>({
+      content:JSON.stringify(perfectLocal(testCase)),finish_reason:"content_filter",usage:{completion_tokens:7}
+    })}),
+    error=>error.code==="AI_CORE_OUTPUT_NOT_COMPLETE"&&error.benchmark_metadata.finish_reason==="content_filter"
+  );
+});
+
+test("model A/B records transient candidate failures across all cases without claiming improvement",async()=>{
+  let failureCount=0,calls=0;
+  const report=await runModelAbBenchmark({role:"local_reviewer",axis:"temperature",candidate:"0.2",callModel:async({mode,testCase})=>{
+    calls++;
+    if(mode==="candidate"&&failureCount++===0){
+      const error=new Error("MODEL_SERVER_RETRYABLE_WITH_PRIVATE_BODY");error.code="AI_CORE_HTTP_503";throw error;
+    }
+    return{content:JSON.stringify(perfectLocal(testCase)),finish_reason:"stop",usage:{prompt_tokens:10,completion_tokens:5,total_tokens:15}};
+  }});
+  assert.equal(report.completed,false);
+  assert.equal(report.promotion_authorized,false);
+  assert.equal(report.quality.assessment,"INCOMPLETE_MEASUREMENT");
+  assert.equal(report.quality.delta,null);
+  assert.equal(report.quality.baseline,null);
+  assert.equal(report.quality.candidate,null);
+  assert.equal(report.quality.max,null);
+  assert.equal(report.failures.baseline,0);
+  assert.equal(report.failures.candidate,1);
+  assert.equal(report.cases.length,calls/2);
+  assert.equal(report.telemetry.baseline.calls,report.cases.length);
+  assert.equal(report.telemetry.candidate.calls,report.cases.length);
+  assert.equal(report.telemetry.candidate.usage_complete,false);
+  assert.equal(report.cases.filter(p=>p.candidate.status==="ERROR").length,1);
+  const failing=report.cases.find(p=>p.candidate.status==="ERROR");
+  assert.equal(failing.candidate.error_code,"AI_CORE_HTTP_503");
+  assert.equal(failing.candidate.score,null);
+  assert.equal(JSON.stringify(report).includes("PRIVATE_BODY"),false);
+});
+test("model A/B counts bounded timeout and 429 faults on both arms without scoring partial results",async()=>{
+  const seen=[];
+  const report=await runModelAbBenchmark({role:"local_reviewer",axis:"top_p",candidate:"0.8",callModel:async({mode,testCase})=>{
+    seen.push(mode+":"+testCase.id);
+    if(mode==="baseline"&&testCase.id===seen[0].split(":")[1]){const e=new Error("private abort");e.name="AbortError";throw e;}
+    if(mode==="candidate"&&testCase.id===seen[0].split(":")[1]){const e=new Error("private 429");e.code="AI_CORE_HTTP_429";throw e;}
+    return{content:JSON.stringify(perfectLocal(testCase)),finish_reason:"stop",usage:{}};
+  }});
+  assert.equal(report.completed,false);assert.equal(report.quality.assessment,"INCOMPLETE_MEASUREMENT");
+  assert.equal(report.failures.baseline,1);assert.equal(report.failures.candidate,1);
+  assert.equal(report.telemetry.baseline.usage_complete,false);
+  assert.equal(report.telemetry.candidate.usage_complete,false);
+  assert.equal(report.cases[0].baseline.error_code,"AI_CORE_TIMEOUT");
+  assert.equal(report.cases[0].candidate.error_code,"AI_CORE_HTTP_429");
+});
+test("model A/B still fails closed for nonretryable/authentication/configuration errors",async()=>{
+  let calls=0;
+  await assert.rejects(()=>runModelAbBenchmark({role:"local_reviewer",axis:"temperature",candidate:"0.2",callModel:async()=>{
+    calls++;const e=new Error("raw secret must never become output");e.code="AI_CORE_HTTP_401";throw e;
+  }}),e=>e.code==="AI_CORE_HTTP_401");
+  assert.equal(calls,1);
+});
