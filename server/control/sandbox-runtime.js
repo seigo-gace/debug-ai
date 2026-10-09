@@ -110,7 +110,7 @@ function snapshotDelta(baseline,candidate){
   return out;
 }
 function assertPatchCandidateRef(ref){
- if(!ref||typeof ref!=="object"||Array.isArray(ref)||!/^patch_[a-f0-9]{24}$/.test(ref.id)||!^([a-f0-9]{64})$/.test(ref.candidate_hash)||ref.id!=="patch_"+ref.candidate_hash.slice(0,24))throw new Error("SANDBOX_CANDIDATE_PATCH_REF_INVALID");
+ if(!ref||typeof ref!=="object"||Array.isArray(ref)||!/^patch_[a-f0-9]{24}$/.test(ref.id)||!/^[a-f0-9]{64}$/.test(ref.candidate_hash)||ref.id!=="patch_"+ref.candidate_hash.slice(0,24))throw new Error("SANDBOX_CANDIDATE_PATCH_REF_INVALID");
  return ref;
 }
 function verifyCandidateSnapshot(repo,request){
