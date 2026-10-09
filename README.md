@@ -81,6 +81,13 @@ Historical live/source records below remain evidence for their recorded revision
 
 ## What DebugAI does
 
+Generated canonical PatchCandidates now receive workflow-owned preapproval checks
+on their actual isolated edited snapshot. Configured command results and candidate
+identity are returned and retained as Evidence; explicit apply approval remains
+required. Dependency admission and changed test-oracle qualification remain
+NOT_CONFIGURED where unsupported. See [the candidate verification delta](docs/CODEGEN_SANDBOX_SNAPSHOT_DESIGN_DELTA.md#15-candidate-aware-preapproval-verification--codex-cu-2026-10-09).
+
+
 Patch and Review Packet payloads are detached from their input objects and
 recursively frozen before hashing. Nested requirements, failed-check evidence
 and source preconditions cannot change under an already issued packet digest.

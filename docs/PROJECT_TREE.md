@@ -144,3 +144,14 @@ Automatic re-fix is candidate-generation only. It does not own approval, apply, 
 ## Bounded control surface extension — 2026-10-07
 
 `server/http.js` exposes Server Command request/status through the existing `server/control/server-command-request.js` service. `server/main.js` passes its existing instance; no second service is constructed. `bin/debugai.js` forwards structured control JSON to HTTP, and `mcp/server.mjs` delegates the four appended control tools to that CLI. Existing GitOps routes, service, Host runners, systemd units and queues are reused unchanged. Regression coverage remains in the existing MCP, Server Command and GitOps test files; the pre-server audit requires the exact thirteen-tool surface and forbids approve/apply tools.
+
+## Candidate preapproval verification
+
+`server/control/sandbox-verification.js` owns baseline collection and candidate-aware
+lint/typecheck/test/build collection through the canonical adapter. `server/workflow.js`
+invokes and persists this evidence before initial/refix candidates wait for approval.
+`server/tests/sandbox-candidate-verification.test.cjs` covers identity/source/false-PASS
+negatives and actual Workflow ownership. The existing `sandbox-queue-selftest.js`
+`verify-candidates` mode qualifies real Sidecar candidate syntax/runtime failure and
+independent boundary holdouts in Core Verify. Design/limitations belong to
+`CODEGEN_SANDBOX_SNAPSHOT_DESIGN_DELTA.md` §15.

@@ -243,3 +243,70 @@ This document is a formal design delta only.
 `MAIN_MERGE=NO`
 `DEPLOY=NO`
 `PRODUCTION_CHANGE=NONE`
+
+## 15. Candidate-aware preapproval verification — Codex CU, 2026-10-09
+
+Purpose: close the actual Source gap where `collect(repo)` checked only BASELINE
+and Workflow returned a generated candidate without executing its changed code.
+The adopted Unified Plan §13.1(4), reliability delta §13 and Codex execution §5
+remain the baseline: construct first, verify isolated modified code, bind evidence,
+then retain explicit approval. PR63–65 already qualify bounded construction,
+canonical PatchCandidate adaptation and identity; this CU extends those owners.
+
+Chosen method: reuse `preparePatchCandidateSandboxJob` for every configured
+lint/typecheck/test/build action in `collectCandidate`. Revalidate canonical hash
+and current preconditions before execution and after each check; bind job/action,
+BASELINE/CANDIDATE manifest/delta digests and canonical ID/hash on readback. All
+checks must start from the same BASELINE and CANDIDATE digests. Reinventory the
+owning source after each execution, rejecting unrelated-file drift as well as
+selected-file drift. Each check gets a fresh isolated copy; build side effects do
+not contaminate the next check. `FINAL_VALID` describes configured command outcomes
+only; semantic correctness and whole-tree completeness stay UNKNOWN/NOT_VERIFIED.
+
+Workflow owns invocation for initial Patch Engineer candidates and bounded re-fix
+candidates before PATCH_READY/WAITING_APPROVAL. It registers deterministic check
+Evidence, persists `candidate_verification` through existing RuntimeEvidence and
+returns it with the candidate. A failed command yields FINAL_INVALID evidence;
+a transport/integrity exception is persisted as failure and propagated. Existing
+approval states remain candidate-only; neither FAIL nor PASS grants apply or
+Strict Completion. Fresh failing-check-driven preapproval re-fix remains a next
+CU; this change does not automatically consume new model calls or approve a fix.
+
+Dependency admission is deliberately explicit: declared dependencies/dev/optional/
+peer dependencies return NOT_CONFIGURED / CANDIDATE_DEPENDENCIES_NOT_QUALIFIED.
+Candidate jobs do not receive Sidecar-global node_modules or NODE_PATH. No npm
+install, host cache/native artifact injection, network expansion, SIGKILL
+supervisor or alternative execution path is introduced. This qualifies Node-based
+JS scripts needing no package dependencies. TS compiler-backed candidate execution
+requires future exact dependency admission; ordinary real TS7 regression is a
+separate existing gate. Missing scripts/package remain NOT_CONFIGURED.
+
+In this slice, candidate edits to conventional test/spec files/test directories or
+package manifests/lockfiles return CANDIDATE_ORACLE_CHANGE_NOT_QUALIFIED. This is
+an execution qualification restriction, not a rejection of the product's required
+future test-generation/configuration capabilities. Baseline test oracle is preserved;
+arbitrary test-strength/overmock/semantic-diff proof remains unqualified.
+
+Alternatives rejected: checking the untouched owning repo (cannot attest candidate);
+new executor/optional model tool (duplicates existing ownership and lets checks be
+skipped); borrowing global dependencies (unbound target artifacts); automatically
+installing generated dependencies (unqualified execution/network); silently trusting
+changed tests (false PASS). Existing isolated copies give direct provenance with
+less implementation than a new workspace subsystem. No architecture replacement.
+
+Verification: fail-first 3/3 new regressions failed on the handoff baseline because
+collectCandidate was absent. Corrected focused regressions cover edited bytes,
+runtime FAIL, tamper/stale rejection, unrelated result rejection, workflow invocation
+and Evidence persistence, test-oracle weakening, unrelated source drift, global-dependency denial and inspect readback. Ordinary canonical verify:
+571/571 PASS, zero failures/skips. Existing Core Verify queue gate additionally
+runs actual Sidecar baseline + bad-runtime + bad-syntax + valid equivalent candidate,
+including unchanged independent negative/zero holdouts; exact CI and local Sidecar
+results are recorded on the owning PR and Issues #41/#42 after execution.
+
+Safety/compatibility/rollback: no owning source mutation, candidate approval/apply,
+merge/deploy, Role/model/provider/Secret/Host authority change. `collect(repo)`
+retains its prior read-only contract. Legacy/unconfigured lane returns explicit
+NOT_CONFIGURED, preserving older fixtures without inventing candidate success.
+Rollback is a normal revert of this CU; no stored PatchCandidate hashes or approval
+receipts are reinterpreted. Source/CI qualification does not qualify live Runtime,
+50/60 semantic improvement, large trees, archive support or Strict Completion.

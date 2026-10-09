@@ -53,6 +53,7 @@ test("read-only verify compacts successful command output only for Local Reviewe
 
 test("status and inspect expose only the existing authority checkpoint and scrubbed runtime artifacts",async t=>{
   const f=fixture();t.after(f.cleanup);const h=workflowFor(f);const run=h.authority.start({rawRequest:"inspect fixture",repo:f.repo,projectId:"fixture"});h.runtimeEvidence.write(run.run_id,"analysis",{state:"HYPOTHESIS_APPROVED",api_key:"must-not-leak"});
+  h.runtimeEvidence.write(run.run_id,"candidate_verification",{status:"FINAL_INVALID",patch_candidate_id:"fixture"});
   const status=h.workflow.status(run.run_id);assert.equal(status.run_id,run.run_id);assert.equal(status.state,"RECEIVED");
-  const inspection=h.workflow.inspect(run.run_id);assert.equal(inspection.run.run_id,run.run_id);assert.equal(inspection.artifacts.analysis.payload.state,"HYPOTHESIS_APPROVED");assert.equal(inspection.artifacts.analysis.payload.api_key,"[REDACTED]");assert.throws(()=>h.workflow.inspect("../escape"),/RUN_ID_INVALID|RUN_NOT_FOUND/);
+  const inspection=h.workflow.inspect(run.run_id);assert.equal(inspection.run.run_id,run.run_id);assert.equal(inspection.artifacts.analysis.payload.state,"HYPOTHESIS_APPROVED");assert.equal(inspection.artifacts.analysis.payload.api_key,"[REDACTED]");assert.equal(inspection.artifacts.candidate_verification.payload.status,"FINAL_INVALID");assert.throws(()=>h.workflow.inspect("../escape"),/RUN_ID_INVALID|RUN_NOT_FOUND/);
 });

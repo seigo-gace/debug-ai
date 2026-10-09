@@ -205,6 +205,7 @@ jobs:
           docker run --rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 --security-opt no-new-privileges:true --cap-drop ALL -v "$volume:/sandbox-jobs" debug-ai-app-ci node server/control/sandbox-queue-selftest.js verify
           docker run --rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 --security-opt no-new-privileges:true --cap-drop ALL -e DEBUG_AI_SELFTEST_SOURCE_ROOT=/debugai-source -v "$PWD:/debugai-source:ro" -v "$volume:/sandbox-jobs" debug-ai-app-ci node server/control/sandbox-queue-selftest.js enqueue-self
           docker run --rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 --security-opt no-new-privileges:true --cap-drop ALL -v "$volume:/sandbox-jobs" debug-ai-app-ci node server/control/sandbox-queue-selftest.js verify-self
+          docker run --rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 --security-opt no-new-privileges:true --cap-drop ALL -v "$volume:/sandbox-jobs" debug-ai-app-ci node server/control/sandbox-queue-selftest.js verify-candidates
           docker logs "$name"
       - name: Compose sandbox boundary render gate
         env:
