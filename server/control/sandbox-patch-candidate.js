@@ -33,7 +33,7 @@ function isolatedOperations(patchCandidate){
 }
 function preparePatchCandidateSandboxJob({patchCandidate,jobRoot,action,args={},timeoutMs=120000,requiredPaths=[]}={}){
  const candidate=isolatedOperations(patchCandidate);
- const job=prepareSandboxJob({sourceRepo:patchCandidate.repo,jobRoot,action,args,timeoutMs,requiredPaths,candidate});
+ const job=prepareSandboxJob({sourceRepo:patchCandidate.repo,jobRoot,action,args,timeoutMs,requiredPaths,candidate:{...candidate,patch_candidate_ref:{id:patchCandidate.id,candidate_hash:patchCandidate.candidate_hash}}});
  return {job,patch_candidate_ref:{id:patchCandidate.id,candidate_hash:patchCandidate.candidate_hash,integrity_verified:true},candidate_manifest_digest:job.request.candidate_snapshot?.manifest?.digest||null};
 }
 module.exports={isolatedOperations,preparePatchCandidateSandboxJob};
