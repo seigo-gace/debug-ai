@@ -1,11 +1,50 @@
 "use strict";
 const crypto=require("node:crypto"),fs=require("node:fs"),path=require("node:path");
-const SCHEMA="debugai.server-command-request/v1",STATUS_SCHEMA="debugai.server-command-status/v1",COMMANDS=new Set(["project.pwd","project.git_head","project.git_status","project.git_changed_paths","project.git_recent_commits","project.python_unittest","service.debug_ai_state","service.sandbox_state","service.debug_ai_health","system.disk_usage","asteria.baseline_probe_start","asteria.baseline_probe_status","canonical.devlog_activate_start","canonical.devlog_activate_status","github.auth_status","github.repo_view","github.pr_current","github.actions_recent","github.control_current"]),REQUEST_ID_RE=/^cmd_[0-9a-f]{24}$/;
+const SCHEMA="debugai.server-command-request/v1",STATUS_SCHEMA="debugai.server-command-status/v1",COMMANDS=new Set(["project.pwd","project.git_head","project.git_status","project.git_changed_paths","project.git_recent_commits","project.python_unittest","service.debug_ai_state","service.sandbox_state","service.debug_ai_health","service.debug_ai_logs","system.disk_usage","system.projects_inventory","system.project_file_inspect","asteria.baseline_probe_start","asteria.baseline_probe_status","canonical.devlog_activate_start","canonical.devlog_activate_status","github.auth_status","github.repo_view","github.pr_current","github.actions_recent","github.control_current"]),REQUEST_ID_RE=/^cmd_[0-9a-f]{24}$/;
 function fail(code){const e=new Error(code);e.code=String(code).split(":")[0];throw e;}
 function ensureDir(d){fs.mkdirSync(d,{recursive:true,mode:0o700});}
 function atomicJsonWrite(file,value){const d=path.dirname(file);ensureDir(d);const tmp=`${file}.tmp-${process.pid}-${Date.now()}`;fs.writeFileSync(tmp,JSON.stringify(value,null,2),{encoding:"utf8",mode:0o600,flag:"wx"});fs.renameSync(tmp,file);}
 function normalizeCommandId(value){const id=String(value||"").trim();if(!COMMANDS.has(id)&&id!=="github.gh_read")fail("SERVER_COMMAND_NOT_ALLOWED");return id;}
 function normalizeArguments(commandId,value){
+  if(commandId==="system.projects_inventory"){
+    const args=value===undefined||value===null?[]:value;
+    if(!Array.isArray(args)||args.length>1)fail("SERVER_COMMAND_ARGUMENTS_INVALID");
+    const page=args.length?String(args[0]):"0";
+    if(!/^(?:0|[1-9][0-9]{0,3})$/.test(page))fail("PROJECT_INVENTORY_PAGE_INVALID");
+    return[page];
+  }
+  if(commandId==="system.project_file_inspect"){
+    const args=Array.isArray(value)?value.map(v=>String(v)):fail("SERVER_COMMAND_ARGUMENTS_INVALID");
+    if(args.length<2||args.length>4)fail("SERVER_COMMAND_ARGUMENTS_INVALID");
+    const entry=args[0].trim();
+    const rel=args[1].replaceAll("\\","/").trim();
+    if(!entry||entry.length>120||!/^[A-Za-z0-9._-]+$/.test(entry))fail("PROJECT_FILE_INSPECT_ENTRY_INVALID");
+    if(!rel||rel.length>180||rel==="."||rel.startsWith("/")||rel.split("/").includes("..")||/[\r\n\0]/.test(rel)||!/^[A-Za-z0-9_./-]+$/.test(rel))fail("PROJECT_FILE_INSPECT_PATH_INVALID");
+    const parts=rel.split("/");
+    for(const part of parts){
+      if(!part||part===".")continue;
+      const lower=part.toLowerCase();
+      if(part===".env"||part===".git"||part===".debugai-input"||lower.endsWith(".pem")||lower.endsWith(".key"))fail("PROJECT_FILE_INSPECT_PATH_FORBIDDEN");
+      if(/credentials|id_rsa|token|secret|private_key/.test(lower))fail("PROJECT_FILE_INSPECT_PATH_FORBIDDEN");
+    }
+    const out=[entry,rel];
+    if(args.length>=3){
+      const offset=args[2].trim();
+      if(!/^(?:0|[1-9][0-9]{0,5})$/.test(offset)||Number(offset)>999999)fail("PROJECT_FILE_INSPECT_OFFSET_INVALID");
+      out.push(offset);
+    }
+    if(args.length===4){
+      const rootKey=args[3].trim();
+      if(rootKey!=="projects"&&rootKey!=="worktrees")fail("PROJECT_FILE_INSPECT_ROOT_KEY_INVALID");
+      out.push(rootKey);
+    }
+    return out;
+  }
+  if(commandId==="service.debug_ai_logs"){
+    const args=Array.isArray(value)?value.map(v=>String(v)):fail("SERVER_COMMAND_ARGUMENTS_INVALID");
+    if(args.length!==2||!["debug-ai","sandbox-runner"].includes(args[0])||!/^(?:[1-9]|1[0-9]|20)$/.test(args[1]))fail("SERVER_LOG_TAIL_ARGUMENTS_INVALID");
+    return args;
+  }
   if(commandId==="project.python_unittest"){
     const args=Array.isArray(value)?value.map(v=>String(v)):fail("SERVER_COMMAND_ARGUMENTS_INVALID");
     if(args.length!==1)fail("SERVER_COMMAND_ARGUMENTS_INVALID");
