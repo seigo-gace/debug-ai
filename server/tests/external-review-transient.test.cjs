@@ -38,3 +38,54 @@ test('Gemini auth failure remains hard failure',async()=>{
   });
   await assert.rejects(()=>a.hypothesis(payload),e=>e?.code==='GEMINI_HTTP_401');
 });
+
+function reply(status,body){
+  return new Response(status===200?JSON.stringify({choices:[{message:{content:body}}]}):"unavailable",{status});
+}
+test("Gemini-only configured review uses Gemini without trying missing Groq",async()=>{
+  const calls=[];const adapter=createExternalReviewAdapter({groqKey:"",geminiKey:"free",fetchImpl:async(url)=>{calls.push(url);return reply(200,'{"verdict":"PASS"}');}});
+  const result=await adapter.hypothesis(payload);
+  assert.equal(result.json.verdict,"PASS");assert.equal(result.provider,"gemini");
+  assert.equal(calls.length,1);assert.match(calls[0],/generativelanguage/);
+});
+test("Groq 429 or transport failure falls back once to available Gemini",async()=>{
+  for(const failure of ["429","network"]){
+    const calls=[];const adapter=createExternalReviewAdapter({groqKey:"g",geminiKey:"m",fetchImpl:async(url)=>{
+      calls.push(url);
+      if(calls.length===1){if(failure==="429")return reply(429,"");throw Error("network");}
+      return reply(200,'{"verdict":"PASS"}');
+    }});
+    const result=await adapter.hypothesis(payload);
+    assert.equal(result.json.verdict,"PASS",failure);
+    assert.equal(result.provider,"gemini",failure);
+    assert.equal(calls.length,2,failure);
+  }
+});
+test("one malformed Groq review response gets exactly one schema correction attempt",async()=>{
+  const calls=[];const adapter=createExternalReviewAdapter({groqKey:"g",geminiKey:"m",fetchImpl:async(url,opts)=>{
+    calls.push({url,body:JSON.parse(opts.body)});
+    return calls.length===1?reply(200,"not-json"):reply(200,'{"verdict":"PASS"}');
+  }});
+  const result=await adapter.final(payload);
+  assert.equal(result.provider,"groq");assert.equal(result.json.verdict,"PASS");
+  assert.equal(calls.length,2);assert.match(calls[1].body.messages[0].content,/verdict/);
+});
+test("repeated malformed Groq output falls through to Gemini and never accepts malformed",async()=>{
+  const calls=[];const adapter=createExternalReviewAdapter({groqKey:"g",geminiKey:"m",fetchImpl:async(url)=>{
+    calls.push(url);
+    return calls.length<3?reply(200,"not-json"):reply(200,'{"verdict":"PASS"}');
+  }});
+  const out=await adapter.final(payload);
+  assert.equal(out.provider,"gemini");assert.equal(out.json.verdict,"PASS");
+  assert.equal(calls.length,3);
+});
+test("both free review providers unavailable fails closed, not PASS",async()=>{
+  const calls=[];const adapter=createExternalReviewAdapter({groqKey:"g",geminiKey:"m",fetchImpl:async(url)=>{calls.push(url);return reply(429,"");}});
+  await assert.rejects(()=>adapter.hypothesis(payload),e=>e?.code==="EXTERNAL_FREE_PROVIDERS_UNAVAILABLE");
+  assert.equal(calls.length,2);
+});
+test("Groq authentication failure is not hidden by Gemini fallback",async()=>{
+  const calls=[];const adapter=createExternalReviewAdapter({groqKey:"g",geminiKey:"m",fetchImpl:async(url)=>{calls.push(url);return reply(401,"");}});
+  await assert.rejects(()=>adapter.final(payload),e=>e?.code==="GROQ_HTTP_401");
+  assert.equal(calls.length,1);
+});
