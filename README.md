@@ -231,7 +231,7 @@ Cache is an acceleration layer only. Cached execution never becomes evidence aut
 
 The last measured live AI Core context remains `8192`; `--cache-ram` was last measured at 4096. Prompt caching does not enlarge `n_ctx`. Any live context increase above 8192 must be separately measured for RAM pressure, cache behavior, prompt-eval latency, decode speed, and end-to-end role latency before a separate Master-approved Server change.
 
-Researcher A→E durable Work Unit reuse is implemented. A general Block Core execution path across every workflow is not connected and remains a separate unfinished capability.
+All six workflow roles now use bounded durable Work Unit maps (Code Scout / Causal Scout A→C, Researcher A→E, Diagnoser A→C, Patch Engineer A→B, Local Reviewer A→B) via the shared `runRoleContinuation` runner, with compact validated handoffs and restart/resume without replaying completed blocks.
 
 ## Local Reviewer canonical output
 
