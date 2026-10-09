@@ -101,3 +101,15 @@ test("HTTP and CLI reuse Server Command service request/status and GitOps contra
   const unavailable=createServer({workflow:{}});await new Promise(resolve=>unavailable.listen(0,"127.0.0.1",resolve));
   try{for(const route of ["request","status"]){const r=await fetch(`http://127.0.0.1:${unavailable.address().port}/v1/server-command/${route}`,{method:"POST",body:"{}"});assert.equal(r.status,400);assert.equal((await r.json()).error,"SERVER_COMMAND_UNAVAILABLE");}}finally{await new Promise(resolve=>unavailable.close(resolve));}
 });
+
+test("existing Host bounded Docker devlog read permits only known Compose service and a short tail",()=>{
+  const f=fixture();try{
+    const x=f.service.request({command_id:"service.debug_ai_logs",arguments:["debug-ai","12"]});
+    assert.equal(x.action,"read");assert.deepEqual(x.arguments,["debug-ai","12"]);
+    const y=f.service.request({command_id:"service.debug_ai_logs",arguments:["sandbox-runner","1"]});
+    assert.deepEqual(y.arguments,["sandbox-runner","1"]);
+    for(const invalid of [[],["server-core","12"],["debug-ai","21"],["debug-ai","0"],["debug-ai","10","exec"],["debug-ai","1;rm"]]){
+      assert.throws(()=>f.service.request({command_id:"service.debug_ai_logs",arguments:invalid}),/SERVER_COMMAND|LOG_TAIL/);
+    }
+  }finally{f.cleanup();}
+});
