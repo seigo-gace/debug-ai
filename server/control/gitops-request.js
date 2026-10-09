@@ -39,7 +39,10 @@ function normalizeSha(value, code) {
 
 function normalizeBranch(value) {
   const branch = String(value || "").trim();
-  if (!BRANCH_RE.test(branch) || branch.startsWith("-") || branch.includes("..") || branch.includes("@{")) fail("GITOPS_BRANCH_INVALID");
+  const components = branch.split("/");
+  if (!BRANCH_RE.test(branch) || branch.startsWith("-") || branch.includes("..") || branch.includes("@{") ||
+      branch.endsWith(".") || components.some(part => !part || part.startsWith(".") || part.endsWith(".lock")))
+    fail("GITOPS_BRANCH_INVALID");
   return branch;
 }
 

@@ -5,7 +5,14 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { GitOpsRequestService } = require("../control/gitops-request.js");
+const { GitOpsRequestService, normalizeBranch } = require("../control/gitops-request.js");
+test("GitOps rejects malformed Git ref segments before queuing a deployment", () => {
+  assert.equal(normalizeBranch("feat/tgserver-async-log-sink-20261003"), "feat/tgserver-async-log-sink-20261003");
+  for (const invalid of ["foo//bar", "/foo", "foo/", "foo/.hidden", "foo/./bar", "foo/fix.lock", "foo."]) {
+    assert.throws(() => normalizeBranch(invalid), /GITOPS_BRANCH_INVALID/, invalid);
+  }
+});
+
 
 function fixture() {
   const repo = fs.mkdtempSync(path.join(os.tmpdir(), "debugai-gitops-"));
