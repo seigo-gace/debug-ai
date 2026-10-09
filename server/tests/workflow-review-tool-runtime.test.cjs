@@ -48,6 +48,6 @@ test("read-only verify Local Reviewer can inspect registered verification eviden
 test("post-apply Local Reviewer is no longer wired with a null tool runtime",()=>{
   const source=fs.readFileSync(require.resolve("../workflow.js"),"utf8");
   assert.doesNotMatch(source,/role:\"local_reviewer\"[^\n]*toolRuntime:null/);
-  assert.ok((source.match(/makeReadOnlyToolRuntime\(targetRepo,(?:runId|verificationId)\)/g)||[]).length>=2);
+  assert.ok((source.match(/toolRuntime:makeReadOnlyToolRuntime\(targetRepo,(?:runId|verificationId)\)/g)||[]).length>=2);
   assert.doesNotMatch(source,/callDirectRole\(\"patch_engineer\"/);
 });

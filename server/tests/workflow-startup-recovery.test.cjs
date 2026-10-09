@@ -29,7 +29,7 @@ test("startup recovery restores input/cursor and resumes C with same role execut
   assert.match(interrupted.message,/TIMEOUT/);const runId=interrupted.durable.run_id,roleExecutionId=interrupted.durable.role_execution_id;
   assert.deepEqual(interrupted.durable.completed_work_ids,["researcher.A","researcher.B"]);
   assert.equal(authority1.loadDurable(runId).state.job_status,"RETRY_WAIT");
-  assert.equal(calls.code_scout,2);assert.equal(calls.causal_scout,2);assert.equal(calls.researcher||0,0);assert.equal(calls.diagnoser||0,0);
+  assert.equal(calls.code_scout,1);assert.equal(calls.causal_scout,1);assert.equal(calls.researcher||0,0);assert.equal(calls.diagnoser||0,0);
 
   const authority2=new RunAuthority({runtimeRoot,repoPolicy:policy,durableIo:io});
   const workflow2=createWorkflow({aiCore:fakeAi(calls,diagnoserInputs),authority:authority2,repoPolicy:policy,repositorySnapshot:()=>"git_fixture",externalReview:{hypothesis:async()=>({provider:"fixture",json:{verdict:"PASS"}})},recoveryHooks:{beforeResearcherWorkUnit:async({unit,roleExecutionId:actual,attemptNo})=>workEvents.push({phase:"before",unit:unit.work_unit_id,roleExecutionId:actual,attemptNo})}});
@@ -40,7 +40,7 @@ test("startup recovery restores input/cursor and resumes C with same role execut
   assert.equal(researchRef.role_execution_id,roleExecutionId);assert.equal(researchRef.attempt_no,2);assert.equal(researchRef.status,"ROLE_DONE");
   assert.equal(workEvents.filter(x=>x.unit==="researcher.A").length,1);assert.equal(workEvents.filter(x=>x.unit==="researcher.B").length,1);assert.equal(workEvents.filter(x=>x.unit==="researcher.C").length,2);
   assert.equal(workEvents.filter(x=>x.attemptNo===2).every(x=>x.roleExecutionId===roleExecutionId),true);
-  assert.equal(calls.code_scout,2);assert.equal(calls.causal_scout,2);assert.equal(calls.researcher,1);assert.equal(calls.diagnoser,1);
+  assert.equal(calls.code_scout,1);assert.equal(calls.causal_scout,1);assert.equal(calls.researcher,1);assert.equal(calls.diagnoser,1);
   assert.equal(diagnoserInputs[0].researcher_role_result.source_role_execution_id,roleExecutionId);assert.equal(diagnoserInputs[0].researcher_role_result.source_role_result_id,researchRef.final_role_result_ref.split("/").pop().replace(/\.json$/,""));
   const patchService=new PatchService({runtimeRoot,repoPolicy:policy}),packetPrompts=[];
   const patchWorkflow=createWorkflow({authority:authority2,repoPolicy:policy,patchService,aiCore:{call:async(_role,input)=>{packetPrompts.push(JSON.parse(input.user));return{content:JSON.stringify({operations:[{type:"write",path:"a.js",content:"module.exports=43;\n"}]})};}}});
