@@ -29,7 +29,7 @@ test("sandbox verification prepares snapshot jobs and returns deterministic evid
   try{
     const lane=createSandboxVerificationLane({jobRoot:"/sandbox-jobs",prepare,wait});
     const out=await lane.collect(repo);
-    assert.equal(out.status,"FINAL_VALID");
+    assert.equal(out.status,"FINAL_INVALID");
     assert.equal(prepared.length,2);
     assert.equal(prepared.every(x=>x.sourceRepo===repo),true);
     assert.deepEqual(out.checks.map(x=>x.status),["PASS","FAIL"]);
@@ -54,5 +54,19 @@ test("repo without configured verification remains NOT_CONFIGURED",async()=>{
     const lane=createSandboxVerificationLane({prepare(){throw new Error("SHOULD_NOT_PREPARE");},wait(){throw new Error("SHOULD_NOT_WAIT");}});
     const out=await lane.collect(repo);
     assert.deepEqual(out,{status:"NOT_CONFIGURED",checks:[]});
+  }finally{fs.rmSync(repo,{recursive:true,force:true});}
+});
+
+
+test("sandbox verification returns FINAL_VALID only if every configured check passes",async()=>{
+  const repo=repoWith({lint:"eslint .",test:"node --test"});
+  const prepared=[];
+  const prepare=input=>{prepared.push(input);return {job_id:`JOB_${prepared.length}`};};
+  const wait=async({jobId})=>({schema:"debugai.sandbox-result/v1",job_id:jobId,action:prepared[Number(jobId.split("_")[1])-1].action,command:"npm run fixture",code:0,pass:true,timed_out:false,duration_ms:1,isolation:{backend:"sidecar+landlock+seccomp"}});
+  try{
+    const out=await createSandboxVerificationLane({prepare,wait}).collect(repo);
+    assert.equal(out.status,"FINAL_VALID");
+    assert.equal(prepared.length,2);
+    assert.deepEqual(out.checks.map(x=>x.status),["PASS","PASS"]);
   }finally{fs.rmSync(repo,{recursive:true,force:true});}
 });
