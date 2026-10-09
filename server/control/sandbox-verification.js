@@ -26,7 +26,13 @@ function changesVerificationOracle(relative){
   if(/(^|\/)(?:package(?:-lock)?\.json|npm-shrinkwrap\.json|[^/]*\.(?:test|spec)\.[^/]+)$|(^|\/)(?:tests?|__tests__)(\/|$)/i.test(relative))return true;
   // Config edits can disable otherwise unchanged checks. Qualification is held,
   // rather than treating a successful weakened command as candidate evidence.
+  const parts=relative.toLowerCase().split("/");
+  // Package manager locks, plugin paths and execution configuration determine
+  // which code/checks run; no candidate may rewrite this oracle without
+  // independently qualified artifact and test-strength admission.
+  if(parts.includes(".yarn"))return true;
   const name=path.posix.basename(relative).toLowerCase();
+  if(/^(?:pnpm-lock\.yaml|yarn\.lock|bun\.lockb?|\.npmrc|\.yarnrc(?:\.yml)?|\.pnp(?:\.loader)?\.[cm]?js|\.pnpmfile\.[cm]?js|pnpm-workspace\.yaml|bunfig\.toml)$/.test(name))return true;
   return /^tsconfig(?:\.[^/]+)?\.json$/.test(name)||
     /^(?:eslint|jest|vitest)\.config\.(?:[cm]?[jt]s|json)$/.test(name)||
     /^\.eslintrc(?:\.(?:[cm]?js|json|ya?ml))?$/.test(name);
