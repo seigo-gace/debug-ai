@@ -59,7 +59,66 @@ function makeAiCoreCaller({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=process.
 function assessScores(baselineScore,candidateScore){if(candidateScore<baselineScore)return"QUALITY_REGRESSION";if(candidateScore>baselineScore)return"QUALITY_IMPROVEMENT_MEASURED";return"NO_QUALITY_GAIN";}
 function executionOrder(repeat,caseIndex){if(!Number.isInteger(repeat)||repeat<1||!Number.isInteger(caseIndex)||caseIndex<0)throw new Error("MODEL_AB_ORDER_INPUT_INVALID");return(repeat+caseIndex)%2===1?Object.freeze(["baseline","candidate"]):Object.freeze(["candidate","baseline"]);}
 function validateScored(role,caseId,mode,scored){const score=Number(scored?.score),maxScore=Number(scored?.max_score);if(!Number.isFinite(score)||!Number.isFinite(maxScore)||maxScore<=0||score<0||score>maxScore)throw new Error(`MODEL_AB_SCORE_INVALID:${role}:${caseId}:${mode}`);return Object.freeze({score,max_score:maxScore});}
-async function runModelAbBenchmark({role,axis,candidate,repeats=1,callModel=null,clock=performance}={}){if(!ROLE_ORDER.includes(role))throw new Error(`MODEL_AB_ROLE_INVALID:${role}`);if(!Number.isInteger(repeats)||repeats<1||repeats>5)throw new Error("MODEL_AB_REPEATS_INVALID");const requestedVariant=buildVariant(role,axis,candidate),mod=moduleForRole(role),cases=benchmarkCases(role),caller=callModel||makeAiCoreCaller(),qualified=typeof caller.qualify_variant==="function"?caller.qualify_variant(role,axis,requestedVariant):null,variant=qualified?Object.freeze({baseline:qualified.baseline,candidate:qualified.candidate,candidate_authority:requestedVariant.candidate_authority}):requestedVariant,results=[],totals={baseline:0,candidate:0,max:0},telemetry={baseline:telemetryAccumulator(),candidate:telemetryAccumulator()},orderStarts={baseline:0,candidate:0},started=clock.now();for(let repeat=1;repeat<=repeats;repeat++)for(let caseIndex=0;caseIndex<cases.length;caseIndex++){const testCase=cases[caseIndex],systems=systemsFor(mod,testCase),system=systems.on,user=benchmarkUser(testCase),order=executionOrder(repeat,caseIndex),pair={repeat,case_id:testCase.id,execution_order:order};orderStarts[order[0]]++;let pairMax=null;for(const mode of order){const config=variant[mode],t0=clock.now(),reply=assertCompleteReply(role,config,await caller({role,axis,mode,config,system,user,testCase})),elapsed=Math.max(0,Math.round(clock.now()-t0)),parsed=mod.parseJson(reply.content),scored=mod.scoreCase(testCase,parsed),validated=validateScored(role,testCase.id,mode,scored);if(pairMax===null)pairMax=validated.max_score;else if(pairMax!==validated.max_score)throw new Error(`MODEL_AB_SCORE_CEILING_MISMATCH:${role}:${testCase.id}`);pair[mode]={score:validated.score,max_score:validated.max_score,elapsed_ms:elapsed,finish_reason:reply.finish_reason??null};totals[mode]+=validated.score;addTelemetry(telemetry[mode],reply,elapsed);}totals.max+=pairMax;results.push(Object.freeze(pair));}const assessment=assessScores(totals.baseline,totals.candidate);return Object.freeze({schema:SCHEMA,authority:"MEASUREMENT_ONLY",completed:true,promotion_authorized:false,role,axis,repeats,requested_baseline:requestedVariant.baseline,requested_candidate:requestedVariant.candidate,baseline:variant.baseline,candidate:variant.candidate,runtime_context_tokens:caller.runtime_context_tokens??null,runtime_context_limited:qualified?Object.freeze({baseline:qualified.budgets.baseline.context_limited,candidate:qualified.budgets.candidate.context_limited}):null,candidate_authority:variant.candidate_authority,sampling_scope:SAMPLING_SCOPE,invariant:Object.freeze({same_model:true,same_cases:true,same_input:true,same_system:true,exactly_one_axis_changed:true,counterbalanced_execution_order:true,dynamic_score_ceiling:true}),execution_balance:Object.freeze({baseline_first:orderStarts.baseline,candidate_first:orderStarts.candidate,difference:Math.abs(orderStarts.baseline-orderStarts.candidate)}),quality:Object.freeze({baseline:totals.baseline,candidate:totals.candidate,max:totals.max,delta:totals.candidate-totals.baseline,assessment}),telemetry:Object.freeze({baseline:publicTelemetry(telemetry.baseline),candidate:publicTelemetry(telemetry.candidate)}),cases:Object.freeze(results),elapsed_ms:Math.max(0,Math.round(clock.now()-started)),qualification:"MEASUREMENT_ONLY_REQUIRES_REVIEW_AND_REPEAT_BEFORE_PROFILE_CHANGE"});}
-async function cli(){try{const args=parseArgs(process.argv.slice(2));if(!args.role||!args.axis||args.candidate===undefined)throw new Error("MODEL_AB_USAGE_REQUIRED:--role --axis --candidate");const repeats=args.repeats===undefined?1:Number(args.repeats);process.stdout.write(`${JSON.stringify(await runModelAbBenchmark({role:String(args.role),axis:String(args.axis),candidate:args.candidate,repeats}),null,2)}\n`);}catch(error){process.stdout.write(`${JSON.stringify({schema:SCHEMA,authority:"MEASUREMENT_ONLY",completed:false,promotion_authorized:false,sampling_scope:SAMPLING_SCOPE,error_code:String(error?.code||error?.message||error).split(":")[0],error:String(error?.message||error).slice(0,500)},null,2)}\n`);process.exitCode=1;}}
+function boundedTransportFailure(error){
+  const code=typeof error?.code==="string"?error.code:"";
+  if(/^AI_CORE_HTTP_(?:429|5[0-9][0-9])$/.test(code))return code;
+  if(code==="AI_CORE_NETWORK"||code==="AI_CORE_TIMEOUT"||error?.name==="AbortError"||error?.name==="TimeoutError")return code==="AI_CORE_NETWORK"?"AI_CORE_NETWORK":"AI_CORE_TIMEOUT";
+  return null;
+}
+async function runModelAbBenchmark({role,axis,candidate,repeats=1,callModel=null,clock=performance}={}){
+  if(!ROLE_ORDER.includes(role))throw new Error("MODEL_AB_ROLE_INVALID:"+role);
+  if(!Number.isInteger(repeats)||repeats<1||repeats>5)throw new Error("MODEL_AB_REPEATS_INVALID");
+  const requestedVariant=buildVariant(role,axis,candidate),mod=moduleForRole(role),cases=benchmarkCases(role);
+  const caller=callModel||makeAiCoreCaller(),qualified=typeof caller.qualify_variant==="function"?caller.qualify_variant(role,axis,requestedVariant):null;
+  const variant=qualified?Object.freeze({baseline:qualified.baseline,candidate:qualified.candidate,candidate_authority:requestedVariant.candidate_authority}):requestedVariant;
+  const results=[],totals={baseline:0,candidate:0,max:0};
+  const failures={baseline:0,candidate:0},successes={baseline:0,candidate:0};
+  const telemetry={baseline:telemetryAccumulator(),candidate:telemetryAccumulator()},orderStarts={baseline:0,candidate:0},started=clock.now();
+  for(let repeat=1;repeat<=repeats;repeat++)for(let caseIndex=0;caseIndex<cases.length;caseIndex++){
+    const testCase=cases[caseIndex],systems=systemsFor(mod,testCase),system=systems.on,user=benchmarkUser(testCase),order=executionOrder(repeat,caseIndex);
+    const pair={repeat,case_id:testCase.id,execution_order:order};orderStarts[order[0]]++;
+    let pairMax=null;
+    for(const mode of order){
+      const config=variant[mode],t0=clock.now();
+      let reply;
+      try{reply=await caller({role,axis,mode,config,system,user,testCase});}
+      catch(error){
+        const errorCode=boundedTransportFailure(error);
+        if(!errorCode)throw error; // Contract, auth, identity and programming errors remain fail-closed.
+        const elapsed=Math.max(0,Math.round(clock.now()-t0));
+        failures[mode]++;addTelemetry(telemetry[mode],null,elapsed);
+        pair[mode]=Object.freeze({status:"ERROR",error_code:errorCode,retryable:true,score:null,max_score:null,elapsed_ms:elapsed,finish_reason:null});
+        continue;
+      }
+      const elapsed=Math.max(0,Math.round(clock.now()-t0));
+      // Truncated, filtered or diverted output is NOT a recoverable transport error.
+      assertCompleteReply(role,config,reply);
+      const parsed=mod.parseJson(reply.content),scored=mod.scoreCase(testCase,parsed),validated=validateScored(role,testCase.id,mode,scored);
+      if(pairMax===null)pairMax=validated.max_score;
+      else if(pairMax!==validated.max_score)throw new Error("MODEL_AB_SCORE_CEILING_MISMATCH:"+role+":"+testCase.id);
+      pair[mode]=Object.freeze({status:"PASS",score:validated.score,max_score:validated.max_score,elapsed_ms:elapsed,finish_reason:reply.finish_reason??null});
+      totals[mode]+=validated.score;successes[mode]++;addTelemetry(telemetry[mode],reply,elapsed);
+    }
+    if(pairMax!==null)totals.max+=pairMax;
+    results.push(Object.freeze(pair));
+  }
+  const complete=failures.baseline===0&&failures.candidate===0;
+  const quality=complete?Object.freeze({baseline:totals.baseline,candidate:totals.candidate,max:totals.max,delta:totals.candidate-totals.baseline,assessment:assessScores(totals.baseline,totals.candidate)}):
+    Object.freeze({baseline:null,candidate:null,max:null,delta:null,assessment:"INCOMPLETE_MEASUREMENT"});
+  return Object.freeze({
+    schema:SCHEMA,authority:"MEASUREMENT_ONLY",completed:complete,promotion_authorized:false,role,axis,repeats,
+    requested_baseline:requestedVariant.baseline,requested_candidate:requestedVariant.candidate,
+    baseline:variant.baseline,candidate:variant.candidate,runtime_context_tokens:caller.runtime_context_tokens??null,
+    runtime_context_limited:qualified?Object.freeze({baseline:qualified.budgets.baseline.context_limited,candidate:qualified.budgets.candidate.context_limited}):null,
+    candidate_authority:variant.candidate_authority,sampling_scope:SAMPLING_SCOPE,
+    invariant:Object.freeze({same_model:true,same_cases:true,same_input:true,same_system:true,exactly_one_axis_changed:true,counterbalanced_execution_order:true,dynamic_score_ceiling:true}),
+    execution_balance:Object.freeze({baseline_first:orderStarts.baseline,candidate_first:orderStarts.candidate,difference:Math.abs(orderStarts.baseline-orderStarts.candidate)}),
+    quality,failures:Object.freeze(failures),successes:Object.freeze(successes),
+    telemetry:Object.freeze({baseline:publicTelemetry(telemetry.baseline),candidate:publicTelemetry(telemetry.candidate)}),
+    cases:Object.freeze(results),elapsed_ms:Math.max(0,Math.round(clock.now()-started)),
+    qualification:complete?"MEASUREMENT_ONLY_REQUIRES_REVIEW_AND_REPEAT_BEFORE_PROFILE_CHANGE":"INCOMPLETE_MEASUREMENT_NO_PROFILE_PROMOTION"
+  });
+}
+async function cli(){try{const args=parseArgs(process.argv.slice(2));if(!args.role||!args.axis||args.candidate===undefined)throw new Error("MODEL_AB_USAGE_REQUIRED:--role --axis --candidate");const repeats=args.repeats===undefined?1:Number(args.repeats);const result=await runModelAbBenchmark({role:String(args.role),axis:String(args.axis),candidate:args.candidate,repeats});process.stdout.write(`${JSON.stringify(result,null,2)}\n`);if(!result.completed)process.exitCode=2;}catch(error){process.stdout.write(`${JSON.stringify({schema:SCHEMA,authority:"MEASUREMENT_ONLY",completed:false,promotion_authorized:false,sampling_scope:SAMPLING_SCOPE,error_code:String(error?.code||error?.message||error).split(":")[0],error:String(error?.message||error).slice(0,500)},null,2)}\n`);process.exitCode=1;}}
 if(require.main===module)void cli();
 module.exports={SCHEMA,AXES,SAMPLING_SCOPE,ROLE_ORDER,MODULES,OFFICIAL_SAMPLING_CANDIDATES,parseArgs,baselineConfig,officialCandidate,candidateValue,buildVariant,assertSingleAxisDifference,qualifyConfigForRuntime,qualifyVariantForRuntime,moduleForRole,systemsFor,benchmarkCases,benchmarkUser,telemetryAccumulator,addTelemetry,publicTelemetry,requestBody,assertCompleteReply,makeAiCoreCaller,assessScores,executionOrder,validateScored,runModelAbBenchmark};
