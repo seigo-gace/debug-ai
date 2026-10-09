@@ -134,7 +134,7 @@ Use relevant evidence URLs/IDs and do not reproduce sensitive files, credentials
 1. Live server-core Bootstrap and full current SERVER_AI #16 → GitHub Project #1 current → DebugAI #41/#42/PR HEAD and exact Source/CI/Host evidence.
 2. [`DEBUGAI_UNIFIED_IMPROVEMENT_PLAN_20261008.md`](DEBUGAI_UNIFIED_IMPROVEMENT_PLAN_20261008.md) §1–§14 (approved objectives, §13 superseding gate order).
 3. [`DEBUGAI_PRODUCT_DECISION_CONTEXT_20261009.md`](DEBUGAI_PRODUCT_DECISION_CONTEXT_20261009.md) (adoption reasons, choices/rejected/deferred options, evidence strength, unknown assumptions and **repository persistence policy**).
-4. This execution addendum §5–§10 and applicable existing investigation/codegen/5V/Sandbox Design and Delta; then current Source/tests for the owned CU.
+4. This execution addendum §5–§9 and applicable existing investigation/codegen/5V/Sandbox Design and Delta; then current Source/tests for the owned CU.
 
 **No duplication or competing authority:** GitHub Project+Issues own Current CU/Gate/owner; approved plan and relevant repository Delta own Product design; Source/CI and authorized Runtime own implementation proof. Repository decision-context records *why*, not changing live state. Never replace existing design with a backward-looking Notion note, and never infer adopted functionality from an older research suggestion.
 
