@@ -2,8 +2,6 @@
   "base_url": "https://debugai.asterav8.jp",
   "mode": "readonly",
   "repo": "/workspace/debug-ai",
-  "request": "Read-only complete bounded Host projects inventory P0 to validate canonical server-core parent placement; no file write/model/GitOps.",
-  "server_command_id": "system.projects_inventory",
-  "inventory_page": 0,
-  "inventory_all": true
+  "request": "2026-10-10 GPT CHAT read-only actual DebugAI server repository HEAD attribution for durable recovery and retention incidents; no mutation or model calls.",
+  "server_command_id": "project.git_head"
 }
