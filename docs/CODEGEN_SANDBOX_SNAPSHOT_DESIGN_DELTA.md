@@ -338,3 +338,63 @@ NOT_CONFIGURED, preserving older fixtures without inventing candidate success.
 Rollback is a normal revert of this CU; no stored PatchCandidate hashes or approval
 receipts are reinterpreted. Source/CI qualification does not qualify live Runtime,
 50/60 semantic improvement, large trees, archive support or Strict Completion.
+
+### 2026-10-09 GPT CHAT handoff — package-manager oracle admission
+
+**Owner and scope**: Master reported Codex capacity exhausted and transferred this
+one bounded product CU to GPT CHAT. Existing PR69 branch/worktree and other
+projects are preserved; no new Branch, Server checkout, executor, or Sandbox
+permission is required. Source finding (the basis of this follow-up):
+`orchestrator/verify-core.js:packageManager()` selects pnpm/yarn/bun from their
+lockfiles, yet preapproval `changesVerificationOracle()` previously only held
+npm manifests, tests and selected compiler/test configurations. A candidate
+can therefore edit dependency execution authority while keeping its
+application implementation unchanged. This is a proven *code-path policy
+gap*, not a claim of a real exploit or successful model repair.
+
+**Adopted narrow guard**: Extend the existing pre-job deny predicate to
+cover `pnpm-lock.yaml`, `yarn.lock`, `bun.lock`/`bun.lockb`,
+`.npmrc`, `.yarnrc`/`.yarnrc.yml`, `.pnp.*` runtime files,
+`.pnpmfile.*`, `pnpm-workspace.yaml`, `bunfig.toml` and the
+`.yarn/` package-manager plugin/release/cache tree, including nested
+package paths. Unqualified candidate edits return
+`NOT_CONFIGURED / CANDIDATE_ORACLE_CHANGE_NOT_QUALIFIED` before
+job creation. Ordinary source files, including application configuration
+not governing package/test execution, remain eligible under existing scope
+rules; unedited package lock/config files may coexist with eligible changes.
+Package dependencies are **still NOT_CONFIGURED** until a separate immutable
+artifact provenance admission gate is independently verified.
+
+**Why, and alternatives rejected**: Automatically executing with modified
+lockfiles/manager config lets an unqualified candidate control verification
+dependencies or weaken the oracle. Broadly banning every source filename
+containing `config` would degrade valid application repairs. Introducing
+another artifact provisioner, arbitrary package-manager install, network,
+or global dependency mounts would bypass the existing Sidecar trust owner
+and requires additional qualification. Thus only widen the existing
+conventional-artifact hold now, while preserving the original design,
+approval/apply policy and an evidence-based path to future valid
+dependency updates.
+
+**Acceptance and safety**: fail-first candidate modification negatives
+must show unqualified artifact edits previously reached job dispatch.
+After the fix, each lock/manager policy negative must return
+`NOT_CONFIGURED` with zero Sidecar wait calls and zero job creation,
+and original files unchanged. Independent holdout must allow a normal
+source-only candidate beside unchanged package files. Preserve
+preapproval-only verification, Sidecar+Landlock+seccomp boundaries,
+strict result ID/hash binding, false-PASS rejection and no owning source
+writes. Exact-head canonical and real Sidecar/CI qualification is
+recorded separately in #41/#42 **only after actual execution**.
+
+**Remaining limitations**: this bounded *name/path* admission is
+deliberately not a full arbitrary code/helper/script provenance proof:
+custom-named config imports, script-invoked alternate tools, yarn/PnP
+resolver semantics, symlinked artifacts, and complete test strength remain
+UNQUALIFIED. It does not provide real TS7 compiler execution for
+third-party candidate projects, install dependencies, permit changing tests,
+or establish live AI semantic success. Later immutable dependency artifact
+admission must reuse trusted existing provenance owners with explicit
+mismatch/unavailable negative tests. Rollback is a normal revert of this
+single source predicate, two new regressions and this addition; no
+stored candidate schema or runtime permission changes.
