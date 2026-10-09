@@ -5,7 +5,7 @@
   "bin":{"debugai":"bin/debugai.js","debugai-mcp":"bin/debugai-mcp.mjs"},
   "engines":{"node":"24.20.0"},
   "dependencies":{"@modelcontextprotocol/server":"2.2.0","typescript":"7.0.2","undici":"8.11.2","zod":"4.6.5"},
-  "devDependencies":{"@modelcontextprotocol/client":"2.2.0"},
+  "devDependencies":{"@modelcontextprotocol/client":"2.3.1"},
   "scripts":{
     "build:durable-native":"node scripts/build-durable-native.cjs",
     "check":"find server orchestrator tests mcp bin -type f \\( -name '*.js' -o -name '*.mjs' -o -name '*.cjs' \\) -print0 | xargs -0 -n1 node --check",
