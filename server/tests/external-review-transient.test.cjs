@@ -89,3 +89,24 @@ test("Groq authentication failure is not hidden by Gemini fallback",async()=>{
   await assert.rejects(()=>adapter.final(payload),e=>e?.code==="GROQ_HTTP_401");
   assert.equal(calls.length,1);
 });
+
+test("free reviewer attempt budget includes invalid responses and rejects exhausted routes",async()=>{
+  let calls=0;
+  const a=createExternalReviewAdapter({groqKey:"g",geminiKey:"m",fetchImpl:async()=>{
+    calls++;return reply(200,'{"confidence":"UNKNOWN"}');
+  }});
+  await assert.rejects(()=>a.final(payload),e=>e?.code==="EXTERNAL_FREE_PROVIDERS_UNAVAILABLE"&&e?.meta?.primary_code==="EXTERNAL_REVIEW_SCHEMA");
+  assert.equal(calls,4);
+});
+test("no free review keys fails before any network dispatch",async()=>{
+  let calls=0;
+  const a=createExternalReviewAdapter({groqKey:"",geminiKey:"",fetchImpl:async()=>{calls++;throw Error("DISPATCHED");}});
+  await assert.rejects(()=>a.final(payload),e=>e?.code==="EXTERNAL_FREE_PROVIDERS_UNAVAILABLE");
+  assert.equal(calls,0);
+});
+test("private review evidence is never sent to either provider",async()=>{
+  let calls=0;
+  const a=createExternalReviewAdapter({groqKey:"g",geminiKey:"m",fetchImpl:async()=>{calls++;throw Error("DISPATCHED");}});
+  await assert.rejects(()=>a.hypothesis({privacy:{privacy_class:"PRIVATE",sanitized:false,opaque_evidence:false}}),/EXTERNAL_PRIVACY_METADATA_REQUIRED/);
+  assert.equal(calls,0);
+});
