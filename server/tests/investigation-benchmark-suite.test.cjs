@@ -4,7 +4,7 @@ const assert=require("node:assert/strict");
 const fs=require("node:fs");
 const os=require("node:os");
 const path=require("node:path");
-const {CASES,LEVELS,ROLES,POLICIES,BENCHMARK_MAX_TOKENS,runInvestigationBenchmarkCase}=require("../control/investigation-benchmark-suite.js");
+const {CASES,LEVELS,ROLES,POLICIES,BENCHMARK_MAX_TOKENS,score,runInvestigationBenchmarkCase}=require("../control/investigation-benchmark-suite.js");
 const {createWorkflow}=require("../workflow.js");
 const {RuntimeEvidenceStore}=require("../runtime-evidence.js");
 
@@ -59,4 +59,17 @@ test("async investigation benchmark persists DONE result without patch service",
   assert.equal(status.result.case_id,"L1-CS1");
   assert.equal(status.result.role,"code_scout");
   assert.equal(status.result.tool_calls,0);
+});
+
+test("benchmark oracle rejects wrong primitive types instead of coercing them to strings",()=>{
+  const target=CASES.find(x=>x.id==="L1-CS1");
+  const valid={...target.expected};
+  assert.equal(score(target,valid).pass,true);
+  for(const field of ["relevant_files","excluded_files","call_path","unknowns"]){
+    const malformed={...valid,[field]:field==="unknowns"?[]:[...valid[field]]};
+    if(field==="unknowns")malformed.unknowns=[1];
+    else malformed[field][0]=42;
+    assert.equal(score(target,malformed).pass,false,field);
+  }
+  assert.equal(score(target,{...valid,relevant_files:"src/api.js"}).pass,false);
 });
