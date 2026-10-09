@@ -2,6 +2,6 @@
   "base_url": "https://debugai.asterav8.jp",
   "mode": "readonly",
   "repo": "/workspace/debug-ai",
-  "request": "CHAT_FROM_GITHUB_PROJECT_EXISTING_DEBUGAI_SERVER_GIT_LOG_READBACK_20261009; READ_ONLY; NO_DEPLOY",
+  "request": "CHAT_EXISTING_DEBUGAI_VPS_GIT_DEVELOPMENT_LOG_RETRY_AFTER_TESTED_SYNTAX_FIX_20261009; READ_ONLY",
   "server_command_id": "project.git_recent_commits"
 }
