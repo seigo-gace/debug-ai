@@ -3,7 +3,7 @@
   "mode": "readonly",
   "run_id": "",
   "repo": "/workspace/debug-ai",
-  "request": "2026-10-11 Tool B registered_container_logs E2E webhook-gateway-api log_lines=5.",
+  "request": "2026-10-11 Tool B registered_container_logs deny E2E unknown-entry-deny.",
   "gitops_request": {
     "enabled": false
   },
@@ -11,6 +11,6 @@
     "enabled": false
   },
   "server_command_id": "service.registered_container_logs",
-  "registered_container_entry": "webhook-gateway-api",
+  "registered_container_entry": "unknown-entry-deny",
   "log_lines": 5
 }
