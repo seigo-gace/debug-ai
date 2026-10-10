@@ -158,3 +158,13 @@ independent boundary holdouts in Core Verify. Design/limitations belong to
 
 - `server/adapters/external-review-quota.js` — Host-owned FREE evidence validation and atomic rolling quota reservations for the existing external reviewer.
 - `scripts/external-review-volume-probe.cjs` — offline container-recreation persistence probe used by the existing Runtime Volume CI.
+
+## Actions Artifact evidence intake
+
+- `scripts/actions-artifact-evidence.cjs`: on-demand CLI; existing private registry, RuntimeEvidence retention and ZERO producer.
+- `server/control/actions-artifact-github.js`: authenticated bounded Host gh GET adapter.
+- `server/control/actions-artifact-zip.js`: memory-only restricted ZIP/path/size/CRC gate.
+- `server/control/actions-artifact-evidence.js`: metadata/provenance/masking/EVI registration and retained-ID localEvidence handoff.
+- `server/tests/actions-artifact-evidence.test.cjs`: hostile archive, provenance, masking, retention and existing Diagnoser input regressions.
+
+Design: Unified Plan §15/15.1; real slice and separate pending production gate: TGserver ZERO Development Evidence §7.
