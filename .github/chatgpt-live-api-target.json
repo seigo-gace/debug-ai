@@ -2,11 +2,11 @@
   "base_url": "https://debugai.asterav8.jp",
   "mode": "readonly",
   "repo": "/workspace/debug-ai",
-  "request": "Reflect verified archive receipt fix exact SHA through admitted existing GitOps and inspect original Run; no new model execution",
-  "server_command_id": "project.git_head",
+  "request": "Read only after archive receipt exact-SHA reflection: capture retention sweep error classes and existing run status, no new model run",
+  "server_command_id": "service.debug_ai_logs",
   "run_id": "run_mv24304l_700ed16315",
   "gitops_request": {
-    "enabled": true,
+    "enabled": false,
     "branch": "fix/p1c-refix-no-new-evidence-20261010",
     "sha": "26b4221669c91147becafdbbf9951dfff38533d5"
   },
