@@ -131,6 +131,9 @@ function createExternalReviewQuotaLedger({root=defaultQuotaRoot(),nowFn=Date.now
     if(!state.providers[provider])fail('EXTERNAL_REVIEW_QUOTA_LEDGER_CORRUPT');
     state.providers[provider].blocks={at:state.last_now,code};writeState(state);
   });}
-  return {reserveDispatch,blockProvider,readStateSync,filePath};
+  // Explicit offline/Host provisioning only; live adapters still pass allowInitialize=false.
+  // withLock initializes only a newly created root and validates existing history unchanged.
+  function provisionEmptyLedger(){return withLock(state=>state);}
+  return {reserveDispatch,blockProvider,readStateSync,provisionEmptyLedger,filePath};
 }
 module.exports={ExternalReviewError,createExternalReviewQuotaLedger,readTrustedQualification,validateQualification,defaultQuotaRoot,QUALIFICATION_SCHEMA,PROVIDERS,WINDOWS,CAPS};
