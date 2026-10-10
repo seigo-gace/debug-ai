@@ -162,3 +162,31 @@ test("preapproval retry rejects fresh failed hypothesis review without generatin
  assert.ok(entries.some(e=>e.type==="preapproval_refix_review"&&e.payload.verdict==="FAIL"));
  assert.equal(fs.readFileSync(path.join(f.repo,"value.js"),"utf8"),"module.exports=1;\n");
 });
+
+
+test("real last-element defect candidate remains failing until a repaired candidate passes isolated tests",async t=>{
+ const cp=require("node:child_process");
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),"debugai-last-element-")),repo=path.join(root,"repo"),jobs=path.join(root,"jobs");
+ t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+ fs.mkdirSync(repo);fs.mkdirSync(path.join(repo,".git"));
+ const broken="function countActive(items){let count=0;for(let i=0;i<items.length-1;i++){if(items[i]===true)count++;}return count;}module.exports={countActive};\n";
+ const fixed=broken.replace("i<items.length-1","i<items.length");
+ fs.writeFileSync(path.join(repo,"count.js"),broken);
+ fs.writeFileSync(path.join(repo,"count.test.cjs"),"const t=require('node:test'),a=require('node:assert/strict'),{countActive}=require('./count.js');t('empty',()=>a.equal(countActive([]),0));t('single active',()=>a.equal(countActive([true]),1));t('last active',()=>a.equal(countActive([false,true]),1));t('all active',()=>a.equal(countActive([true,true]),2));t('strict bool',()=>a.equal(countActive([1,true]),1));\n");
+ fs.writeFileSync(path.join(repo,"package.json"),JSON.stringify({scripts:{lint:"node --check count.js",test:"node --test count.test.cjs",build:"node --check count.js"}}));
+ const make=content=>patch.preparePatchCandidate({repo,selectedPaths:["count.js"],task:"Fix last-element count regression without changing boolean semantics",requestHash:"a".repeat(64),stage:"debug",result:{operations:[{type:"replace",path:"count.js",old:broken,new:content}]}});
+ const lane=createSandboxVerificationLane({jobRoot:jobs,wait:async({jobId})=>{
+   const dir=path.join(jobs,"jobs",jobId),request=JSON.parse(fs.readFileSync(path.join(dir,"request.json"))),staged=path.join(dir,"repo");
+   const script=request.action==="node.check"?"node --check count.js":request.action==="package.test"?"node --test count.test.cjs":"node --check count.js";
+   const proc=cp.spawnSync(process.execPath,script.split(" ").slice(1),{cwd:staged,encoding:"utf8",timeout:15000});
+   return{schema:"debugai.sandbox-result/v1",job_id:jobId,action:request.action,pass:proc.status===0,code:proc.status??1,stdout:proc.stdout||"",stderr:proc.stderr||"",snapshot:request.source_snapshot,candidate_snapshot:request.candidate_snapshot,candidate_construction:"MATERIALIZED_VERIFIED"};
+ }});
+ const brokenCandidate=make(broken.replace("count=0","count=0 "));
+ const failed=await lane.collectCandidate(brokenCandidate);
+ assert.equal(failed.status,"FINAL_INVALID");
+ assert.equal(failed.checks.find(x=>x.check_type==="UNIT").status,"FAIL");
+ const repaired=await lane.collectCandidate(make(fixed));
+ assert.equal(repaired.status,"FINAL_VALID");
+ assert.equal(repaired.semantic_verification,"UNKNOWN");
+ assert.equal(fs.readFileSync(path.join(repo,"count.js"),"utf8"),broken);
+});
