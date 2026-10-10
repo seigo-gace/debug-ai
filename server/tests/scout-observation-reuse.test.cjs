@@ -112,11 +112,11 @@ test("existing current-run trace exposes bounded failure and invocation records"
   assert.ok(records.some(x=>x.payload.event_kind==="OBSERVATION"));assert.equal(new Set(records.map(x=>x.payload.last_progress_at)).size,1);
   assert.equal(records[0].payload.phase,"TOOL_WAIT");assert.equal(records[0].payload.backend_progress,"UNKNOWN");assert.equal(JSON.stringify(records).includes("private-secret"),false);
   const result={status:"OK",data:{secret:"private-secret"}};finish(result);assert.equal(await pending,result);
-  assert.equal(store.list("run_tool_wait",{types:["tool_invocation"],limit:1})[0].payload.phase,"SUCCEEDED");
+  assert.equal(store.list("run_tool_wait",{types:["tool_invocation"],limit:32}).sort((a,b)=>b.payload.event_sequence-a.payload.event_sequence)[0].payload.phase,"SUCCEEDED");
  });
 
 test("completed parallel Scout checkpoint keeps cursor on its still-running peer",async t=>{
- const f=fixture(t),original=f.aiCore.call;let rejectPeer;
+ const f=fixture(t),original=f.aiCore.call,realNow=Date.now,frozenNow=realNow();Date.now=()=>frozenNow;t.after(()=>{Date.now=realNow;});let rejectPeer;
  f.aiCore.call=(role,input)=>role==="causal_scout"?new Promise((resolve,reject)=>{rejectPeer=reject;}):original(role,input);
  const {workflow,authority}=f.make();const pending=workflow.runAnalysis({repo:f.repo,rawRequest:"Investigate count-active.cjs",failure:{message:"last item omitted"}});const failed=assert.rejects(pending,e=>e.code==="AI_CORE_TIMEOUT");
  try{await new Promise(resolve=>setTimeout(resolve,30));const id=authority.listRunIds()[0],state=authority.loadDurable(id);assert.ok(state.manifest.workflow_input_refs.code_scout);assert.equal(state.manifest.workflow_cursor.step_id,"CAUSAL_SCOUT");assert.equal(state.manifest.workflow_cursor.step_phase,"RUNNING");assert.equal(state.manifest.workflow_cursor.step_input_ref,state.manifest.workflow_input_refs.analysis_input);assert.equal(workflow.inspect(id).artifacts.workflow_progress.payload.step,"CAUSAL_SCOUT");}

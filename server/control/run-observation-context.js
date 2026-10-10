@@ -56,12 +56,12 @@ function observeAiCalls({aiCore,runId,runtimeEvidence,onEvent=null}={}){
       if(property!=="call")return Reflect.get(target,property);
       return async(role,options={})=>{
         const invocationId=`call_${crypto.randomBytes(12).toString("hex")}`,startedAt=Date.now();
-        let last=null;
+        let last=null,eventSequence=0;
         function persist(event){
           // Reuse the existing telemetry projection; never retain prompts, raw
           // backend errors, hidden reasoning or arbitrary provider metadata.
           const telemetry=event.telemetry?require("./tool-loop.js").summarizeAiTelemetry([event.telemetry]):null;
-          const payload={schema:"debugai.ai-invocation/v1",invocation_id:invocationId,adapter_invocation_id:event.invocation_id||null,role,model:ROLES[role]?.backend_model||null,phase:event.phase,event_kind:event.event_kind||"PROGRESS",dispatch_attempt:event.dispatch_attempt??null,started_at:startedAt,last_progress_at:event.last_progress_at??Date.now(),last_observed_at:Date.now(),elapsed_ms:Date.now()-startedAt,phase_elapsed_ms:event.phase_elapsed_ms??null,queue_wait_ms:event.queue_wait_ms??null,prepare_ms:event.prepare_ms??null,backend_phase:null,backend_progress:"UNKNOWN",continuation_assessment:event.continuation_assessment||null,failure_code:event.failure_code||null,timeout_class:event.timeout_class||null,telemetry};
+          const payload={schema:"debugai.ai-invocation/v1",event_sequence:++eventSequence,invocation_id:invocationId,adapter_invocation_id:event.invocation_id||null,role,model:ROLES[role]?.backend_model||null,phase:event.phase,event_kind:event.event_kind||"PROGRESS",dispatch_attempt:event.dispatch_attempt??null,started_at:startedAt,last_progress_at:event.last_progress_at??Date.now(),last_observed_at:Date.now(),elapsed_ms:Date.now()-startedAt,phase_elapsed_ms:event.phase_elapsed_ms??null,queue_wait_ms:event.queue_wait_ms??null,prepare_ms:event.prepare_ms??null,backend_phase:null,backend_progress:"UNKNOWN",continuation_assessment:event.continuation_assessment||null,failure_code:event.failure_code||null,timeout_class:event.timeout_class||null,telemetry};
           last=payload;runtimeEvidence?.write(runId,"ai_invocation",payload);
           if(onEvent)Promise.resolve(onEvent({run_id:runId,kind:"ai_invocation",severity:payload.phase==="FAILED"?"error":"info",...payload})).catch(()=>console.error("DebugAI AI observation log delivery failed"));
         }
@@ -87,11 +87,11 @@ function observeToolCalls({toolRuntime,runId,runtimeEvidence,onEvent=null,observ
     if(property!=="execute")return Reflect.get(target,property);
     return async(request)=>{
       const startedAt=Date.now(),invocationId=`tool_${crypto.randomBytes(12).toString("hex")}`;
-      const role=Object.hasOwn(ROLES,request.role)?request.role:null;
+      let eventSequence=0;const role=Object.hasOwn(ROLES,request.role)?request.role:null;
       const tool=String(request.tool||"");const toolName=/^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$/.test(tool)?tool:null;
       function persist(phase,eventKind="PROGRESS",failureCode=null){
         const elapsed=Date.now()-startedAt;
-        const payload={schema:"debugai.tool-invocation/v1",invocation_id:invocationId,role,tool:toolName,phase,event_kind:eventKind,started_at:startedAt,last_progress_at:phase==="TOOL_WAIT"?startedAt:Date.now(),last_observed_at:Date.now(),elapsed_ms:elapsed,backend_progress:"UNKNOWN",failure_code:failureCode,continuation_assessment:phase!=="TOOL_WAIT"?"TERMINAL":elapsed>=120000?"REVIEW_CONTINUATION":elapsed>=60000?"OBSERVE_WAIT":"CONTINUE"};
+        const payload={schema:"debugai.tool-invocation/v1",event_sequence:++eventSequence,invocation_id:invocationId,role,tool:toolName,phase,event_kind:eventKind,started_at:startedAt,last_progress_at:phase==="TOOL_WAIT"?startedAt:Date.now(),last_observed_at:Date.now(),elapsed_ms:elapsed,backend_progress:"UNKNOWN",failure_code:failureCode,continuation_assessment:phase!=="TOOL_WAIT"?"TERMINAL":elapsed>=120000?"REVIEW_CONTINUATION":elapsed>=60000?"OBSERVE_WAIT":"CONTINUE"};
         runtimeEvidence?.write(runId,"tool_invocation",payload);
         if(onEvent)Promise.resolve(onEvent({run_id:runId,kind:"tool_invocation",severity:phase==="FAILED"?"error":"info",...payload})).catch(()=>console.error("DebugAI tool observation log delivery failed"));
       }

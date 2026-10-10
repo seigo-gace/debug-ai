@@ -1110,3 +1110,8 @@ completed Code Scout marked CODE_SCOUT/PENDING while Causal Scout was still
 UPSTREAM_WAIT. The bounded correction preserves the immutable successful Stage
 but projects the still-running peer's step/input/RUNNING status to the existing
 single cursor and workflow_progress. No additional Work Unit is introduced.
+
+Invocation records carry a local event_sequence for deterministic readback when
+multiple observations share a millisecond. Scout inspection chooses an actually
+recorded progress event matching the authoritative durable cursor; UUID filename
+ordering is not execution ordering. This creates no additional durable owner.
