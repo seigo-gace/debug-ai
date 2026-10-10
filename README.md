@@ -81,6 +81,33 @@ Historical live/source records below remain evidence for their recorded revision
 
 ## What DebugAI does
 
+Patch and Review Packet payloads are detached from their input objects and
+recursively frozen before hashing. Nested requirements, failed-check evidence
+and source preconditions cannot change under an already issued packet digest.
+This preserves handed-off constraints; immutability alone does not establish
+candidate semantic correctness.
+
+New workflow candidates use `debugai.patch-packet/v2` with an immutable
+Requirement/Evidence contract. Explicit arrays may be supplied in existing
+`context.requirements` or analysis `failure.requirements`: requested_behavior,
+preserved_behavior, forbidden_changes, forbidden_paths, acceptance_conditions,
+boundary_cases, negative_cases, unknowns and required_tests. Optional
+repository_revision/source_hashes/evidence_refs must match admitted current
+bindings. Omitted fields remain null/INSUFFICIENT_EVIDENCE; semantic verification
+is always UNKNOWN at generation. Original request/context are retained with
+Secret redaction, without extracting a specification from prose. Candidate
+identity covers the whole packet; forbidden paths and stale bindings are checked
+before persistence. Durable input and re-fix retain the original obligations;
+re-fix gets fresh current source/retest bindings without relabeling original
+Evidence as current. Stored v1 packets/candidates retain their historical digests.
+
+Sandbox copies now retain a deterministic manifest of bytes, executable bits and
+explicit exclusions, reject missing declared required files, and re-read staging
+before execution. This qualifies copied entries only: whole-tree completeness
+remains NOT_VERIFIED and isolated candidate construction is NOT_CONFIGURED under
+the existing action allowlist. See the Step 14 slice in
+`docs/DURABLE-CONTINUATION-DESIGN.md` §6.10; command PASS does not close those gaps.
+
 ```text
 Failure / request / local evidence
         |
@@ -347,6 +374,20 @@ Live MCP stdio on approved b30649a passed initialize, the exact ordered nine-too
 
 Model confidence is not evidence.
 
+Source search preserves its match array and adds integrity-bound search coverage:
+inspected paths, limits, truncation and read failures. Zero hits never prove
+repository-wide absence; complete coverage applies only to the declared search
+scope. Bounded evidence projections retain a coverage summary.
+
+The central role-output validator checks Code Scout's localization fields,
+Diagnoser's typed hypothesis/status contract, and non-empty Patch Engineer
+operations. The default semantic mode remains `shadow`: contract violations are
+reported as WARN; explicit `enforce` rejects them. Evidence binding is enforced
+independently, including diagnosis support, counter-evidence and root references
+against the admitted evidence window. A contract PASS establishes neither causal
+correctness nor executed verification. See the role-output contract delta in
+[`docs/DURABLE-CONTINUATION-DESIGN.md`](docs/DURABLE-CONTINUATION-DESIGN.md).
+
 DebugAI separates and validates evidence from:
 
 - local deterministic checks;
@@ -363,6 +404,11 @@ Read-only evidence/control-plane capabilities include `evidence.read`, `runtime.
 ## Durable continuation
 
 `RunAuthority` is the single authoritative execution/state owner. Durable state preserves run/role identity, attempts, generation, execution epoch, workflow cursor, checkpoint/result/effect references, retry/timeout/cancellation/no-progress state, and integrity bindings.
+
+Git RepositorySnapshot identity binds tracked dirty source bytes and mode changes,
+not only HEAD/status. Clean Git identities remain compatible; untracked-only
+changes remain outside this established Git scope. Snapshot identity still does
+not prove candidate materialization or executed verification.
 
 Replay-safe continuation reuses compatible committed read-only/deterministic effects while refusing to replay mutation-capable effects automatically. Researcher uses durable A/B/C/D/E work units. Real SIGKILL recovery is covered by regression tests.
 
@@ -485,6 +531,10 @@ npm run benchmark:model-ab -- --role <role> --axis <thinking|temperature|top_p|t
 ```
 
 A source audit never converts an unexecuted, aborted, incomplete, or failed real benchmark into PASS.
+The Patch Engineer role-only scorer validates required string arrays and exact
+typed reproduction/rollback fields before awarding their points; malformed
+empty fields cannot receive full credit. Its fixture score does not measure
+actual candidate execution or semantic repair success.
 
 Current Model A/B axes are:
 

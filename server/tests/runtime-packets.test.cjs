@@ -2,6 +2,41 @@
 const test=require("node:test");
 const assert=require("node:assert/strict");
 const {REVIEW_EXCLUDED_FIELDS,makePatchPacket,makeReviewPacket,publicReviewPacketSummary}=require("../control/runtime-packets.js");
+const {contentHash}=require("../../orchestrator/durable-contracts.js");
+
+function patchInput(){return{runId:"r",diagnosisRef:"diag",repositoryRevision:"git_baseline",paths:["src/a.js"],reproductionSummary:{status:"FAILED_RETEST",checks:[{status:"FAIL",evidence_refs:["E_FAILED"]}]},invariants:[{name:"requirements",preserved_behavior:["input unchanged"],acceptance_conditions:[{test:"boundary",expected:{status:"PASS"}}],unknowns:["external dependency"]}],testInventory:[{name:"unit",args:["--boundary"]}]};}
+
+test("patch packet retains nested requirements and failed evidence after caller mutation",()=>{
+  const input=patchInput(),packet=makePatchPacket(input),before=JSON.stringify(packet);
+  input.reproductionSummary.checks[0].status="PASS";
+  input.reproductionSummary.checks[0].evidence_refs[0]="E_NOT_EXECUTED";
+  input.invariants[0].preserved_behavior.length=0;
+  input.invariants[0].acceptance_conditions[0].expected.status="SKIP";
+  input.testInventory[0].args.push("--skip");
+  assert.equal(JSON.stringify(packet),before);
+  assert.equal(packet.packet_digest,contentHash({schema:packet.schema,payload:packet.payload}));
+  assert.equal(Object.isFrozen(input.reproductionSummary.checks),false);
+});
+
+test("patch packet rejects direct nested requirement and evidence mutation",()=>{
+  const packet=makePatchPacket(patchInput());
+  assert.throws(()=>{packet.payload.reproduction_summary.checks[0].status="PASS";},TypeError);
+  assert.throws(()=>packet.payload.invariants[0].unknowns.push("fabricated"),TypeError);
+  assert.throws(()=>{packet.payload.invariants[0].acceptance_conditions[0].expected.status="SKIP";},TypeError);
+  assert.equal(packet.payload.reproduction_summary.checks[0].status,"FAIL");
+});
+
+test("review packet holdout cannot change nested acceptance verdict through input alias",()=>{
+  const condition={status:"FAIL",evidence_refs:["E_TEST_FAILURE"]};
+  const input={candidateRef:"candidate",applyReceiptRef:"receipt",repositoryRevision:"git_after",changedPaths:["src/a.js"],diff:"diff",executedTests:[{name:"unit",details:condition}],testResults:[{name:"unit",details:condition}],invariants:[{name:"acceptance",status:"FAIL",details:condition}],prePostHashes:{"src/a.js":{before:"before",after:"after"}}};
+  const packet=makeReviewPacket(input),before=JSON.stringify(packet);
+  assert.equal(packet.packet_digest,"9db700dc219fc28034cd54348b6a5ec6ee9fa5e92da7efc1dbb6bba55f31d268");
+  condition.status="PASS";condition.evidence_refs.length=0;input.prePostHashes["src/a.js"].after="different";
+  assert.equal(JSON.stringify(packet),before);
+  assert.throws(()=>{packet.payload.test_results[0].details.status="PASS";},TypeError);
+  assert.equal(publicReviewPacketSummary(packet).invariants_pass,false);
+  assert.equal(packet.packet_digest,contentHash({schema:packet.schema,payload:packet.payload}));
+});
 
 test("patch packet binds diagnosis, revision, scope and evidence without model-side mutation authority",()=>{
   const packet=makePatchPacket({runId:"r1",diagnosisRef:"diag_1",repositoryRevision:"git_abc",paths:["src/a.js","src/a.js"],sourceExcerpts:[{path:"src/a.js",excerpt:"const x=1"}],preconditionHashes:{"src/a.js":"a".repeat(64)},reproductionSummary:{status:"REPRODUCED"},testInventory:[{name:"test",configured:true}],invariants:[{name:"scope",status:"PASS"}],prohibitedPaths:[".env"],evidenceRefs:["EVI_1","EVI_1"]});

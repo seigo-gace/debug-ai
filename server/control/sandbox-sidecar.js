@@ -1,7 +1,7 @@
 "use strict";
 const fs=require("node:fs");
 const path=require("node:path");
-const {normalizeJobRoot,runPreparedSandboxJob,gcSandboxJobs}=require("./sandbox-runtime.js");
+const {normalizeJobRoot,runPreparedSandboxJob,gcSandboxJobs,readSandboxRequest,verifySnapshotCopy}=require("./sandbox-runtime.js");
 const {provisionSandboxPackageTest}=require("./sandbox-artifact-provision.js");
 const {DAP_JOB_SCHEMA,runPreparedDapJob}=require("./dap-sandbox-runtime.js");
 
@@ -13,7 +13,7 @@ function nextJob(jobRoot){
 }
 function jobSchema(jobDir){const request=JSON.parse(fs.readFileSync(path.join(jobDir,"request.json"),"utf8"));return String(request?.schema||"");}
 function runOnce({jobRoot=process.env.DEBUG_AI_SANDBOX_JOB_ROOT||"/sandbox-jobs",sandboxCommand=process.env.DEBUG_AI_SANDBOX_COMMAND||"/usr/local/bin/debugai-sandbox-exec",dapRoot=process.env.DEBUG_AI_DAP_ROOT||"/opt/debugai-dap",runtimeRoot=process.env.DEBUG_AI_SANDBOX_RUNTIME_ROOT||"/app",nativeArtifactRoot=process.env.DEBUG_AI_SANDBOX_NATIVE_ARTIFACT_ROOT||"/app/build/native"}={}){
-  const jobDir=nextJob(jobRoot);if(!jobDir)return null;const active=path.join(jobDir,".active");fs.writeFileSync(active,JSON.stringify({pid:process.pid,started_at:new Date().toISOString()}),{flag:"wx"});try{const schema=jobSchema(jobDir);if(schema===DAP_JOB_SCHEMA)return runPreparedDapJob({jobDir,sandboxCommand,dapRoot});const provision=provisionSandboxPackageTest({jobDir,runtimeRoot,nativeArtifactRoot});const exactSourcePackageTest=provision?.status==="PROVISIONED_EXACT_SOURCE_BOUND";return runPreparedSandboxJob({jobDir,sandboxCommand,allowSupervisedSigkill:exactSourcePackageTest,requireTypeScript7Real:exactSourcePackageTest});}finally{try{fs.unlinkSync(active);}catch(error){if(error.code!=="ENOENT")throw error;}}
+  const jobDir=nextJob(jobRoot);if(!jobDir)return null;const active=path.join(jobDir,".active");fs.writeFileSync(active,JSON.stringify({pid:process.pid,started_at:new Date().toISOString()}),{flag:"wx"});try{const schema=jobSchema(jobDir);if(schema===DAP_JOB_SCHEMA)return runPreparedDapJob({jobDir,sandboxCommand,dapRoot});const request=readSandboxRequest(jobDir);if(request.source_snapshot?.manifest)verifySnapshotCopy(path.join(jobDir,"repo"),request.source_snapshot.manifest);const provision=provisionSandboxPackageTest({jobDir,runtimeRoot,nativeArtifactRoot});const exactSourcePackageTest=provision?.status==="PROVISIONED_EXACT_SOURCE_BOUND";return runPreparedSandboxJob({jobDir,sandboxCommand,allowSupervisedSigkill:exactSourcePackageTest,requireTypeScript7Real:exactSourcePackageTest});}finally{try{fs.unlinkSync(active);}catch(error){if(error.code!=="ENOENT")throw error;}}
 }
 async function main(){
   const once=process.argv.includes("--once"),pollMs=Math.max(50,Math.min(2000,Number(process.env.DEBUG_AI_SANDBOX_POLL_MS)||250)),gcMs=Math.max(60000,Math.min(3600000,Number(process.env.DEBUG_AI_SANDBOX_GC_MS)||900000));

@@ -58,6 +58,18 @@ server/adapters/
 
 server/tests/
   server/control/adapter/security/regression tests, including guarded GitOps host-executor policy contract and bounded automatic re-fix regression
+  role-contract-correctness.test.cjs covers malformed role fields, diagnosis Evidence binding,
+  unsupported confirmation, UNKNOWN, shadow compatibility and held-out false-pass cases
+  source-search-coverage.test.cjs covers bounded search negatives, receipt integrity and evidence rehydration
+  patch-engineer-skill-effect-benchmark.test.cjs includes deterministic oracle false-pass and typed-field holdouts
+  runtime-packets.test.cjs covers nested constraint/evidence immutability and input-alias isolation
+  requirement-handoff.test.cjs covers actual workflow/candidate requirement binding, forbidden paths,
+  stale references, insufficient input and re-fix retention; startup recovery also covers durable origin
+  sandbox-snapshot-integrity.test.cjs covers LOCAL_FIXTURE_ONLY manifest/copy integrity,
+  required omissions, unsupported links, changed bytes/modes and unconfigured construction
+
+ops/tests/repository-snapshot-real-git.test.cjs
+  explicit offline real-Git snapshot regression; separate from Git-command unit fixtures in the canonical Sandbox suite
 
 orchestrator/
   platform-neutral canonical cores and durable primitives

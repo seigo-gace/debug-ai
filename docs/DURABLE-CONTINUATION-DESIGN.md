@@ -225,7 +225,218 @@ Classification is not implementation. Do not convert all gaps mechanically into 
 
 Role-disposition/search-gate components exist, but broad production skip activation is not complete. Shadow decisions must be compared with real outcomes first, with false-skip risk treated as a blocking safety issue. Search necessity should be gated before invoking TGserver/official search when the evidence need can be decided safely.
 
+### 6.4 Role output correctness — additive source delta, 2026-10-08
+
+The earlier `expected_any` check admitted malformed Code Scout localization,
+invalid diagnosis statuses/fields and empty patch operations even with explicit
+semantic enforcement. Diagnosis hypothesis and root evidence references were also
+outside the central binding traversal unless duplicated in `claims`.
+
+Reuse `role-output-validator.js` with the existing invocation compiler. Code
+Scout requires all five production localization fields with typed string arrays
+and a null or typed contract mismatch. Diagnoser requires its four production
+fields, unique hypothesis IDs, typed references and falsification conditions,
+valid statuses, counter-evidence for REJECTED, and no active HYPOTHESIS under
+NO_ACTIVE_HYPOTHESIS. UNKNOWN and INSUFFICIENT_EVIDENCE remain valid; empty support
+does not become confirmation. A non-null confirmed root is a statement/reference
+object, with non-empty support cited by an active hypothesis and a compatible
+diagnosis status. This makes support inspectable; it cannot prove the causal
+chain by itself. Patch Engineer requires non-empty typed candidate operations;
+repository/path/exact replacement and deletion authorization remain PatchService
+and patch-core responsibilities, not a second patch engine.
+
+Structural role checks remain WARN in default shadow and fail closed only under
+explicit enforce. The existing observed production workflow's enforce context
+is preserved; this delta does not activate a new global mode. Existing hard claim validation and Evidence binding remain
+independent of this mode; the binding traversal also covers diagnosis hypothesis,
+counter and root references. Registered-window membership is checked for all
+references in strict mode, and for runtime TRE_/EVI_ IDs in compatibility mode.
+Malformed individual reference IDs are rejected without string coercion. This
+does not invent freshness metadata: the caller owns the admitted current window
+and Source/Runtime identity. Structural validity, binding validity and actual
+task correctness are separate conclusions.
+
+Compatibility: preserve default mode, Causal Scout/Researcher/Reviewer shapes,
+WeakMap-only shadow storage and existing transport/state/approval contracts.
+Legacy partial Code Scout/Diagnoser/empty operation output can still be parsed
+in shadow, but no longer receives a contract PASS. Reverting this source delta
+restores the previous checks without persistent-state migration. No Runtime
+reflection is implied. Regression authority:
+`server/tests/role-contract-correctness.test.cjs` and existing semantic/tool tests.
+
+### 6.5 Dirty Git snapshot identity — additive source delta, 2026-10-08
+
+The existing Git RepositorySnapshot hashed HEAD and porcelain status only. Two
+different versions of an already-modified tracked file produced identical IDs.
+Bind a bounded binary tracked diff against HEAD, including staged/net worktree
+changes and file modes, into the existing Git snapshot hash when status is dirty.
+Disable external diff and textconv so repository configuration cannot substitute
+another program/output for the source comparison. Preserve existing file/byte
+limits and fail-closed content-tree fallback when Git is unavailable or fails.
+
+Clean Git IDs remain byte-compatible with the previous HEAD/status contract.
+Dirty IDs change intentionally; historical dirty checkpoints must fail closed
+rather than be silently rebound. Untracked files remain excluded from this Git
+scope. This is a point-in-time source binding, not a claim of atomic filesystem
+capture or complete candidate construction. Existing BASELINE/isolated CANDIDATE,
+approval and Strict Completion gates remain necessary. Rollback restores the old
+Source implementation without persistent-state migration; it must never rewrite
+saved checkpoint identities. Git binding unit regression authority:
+`server/tests/repository-snapshot-auto-bind.test.cjs`. These tests inject command
+evidence so the existing Sandbox needs no Git executable or permission changes.
+Actual Git execution regressions are separately run through
+`ops/tests/repository-snapshot-real-git.test.cjs`; unit/Sandbox PASS does not imply
+that executable is configured inside a sandbox job.
+
+### 6.6 Source search coverage — additive source delta, 2026-10-08
+
+The existing bounded source search returned an empty match array when a query
+appeared beyond the 128000-character read prefix, without exposing incomplete
+coverage. Reuse the existing walk/read/search and Tool Result/Evidence contracts.
+Keep the result `data` match array and tool arguments unchanged. Add optional
+`integrity.search_coverage` with query, inspected paths/counts, limits, file/match
+cap flags, directory/read errors and truncated-file count. Bind the receipt into
+the existing result digest/Evidence ID and reject tampering. Legacy Tool Results
+without a receipt retain their old digest and integrity validation; their search
+coverage remains UNKNOWN, not implicitly complete.
+
+COMPLETE_WITHIN_SEARCH_SCOPE means the selected regular searchable files were
+fully read within the existing exclusions, not exhaustive repository absence.
+Any cap, read failure or truncation marks INCOMPLETE. File-cap detection is
+conservative at the limit. `repository_absence_proven` stays false even for a
+complete scoped query. Preserve source/permission/Secret filtering; no new search
+engine, tool, traversal expansion or MCP interface is introduced.
+
+Existing evidence projections prepend a small coverage summary before bounded
+matches, retaining the full receipt in durable results for admitted evidence.read.
+Source identity/admitted-window checks remain the owning workflow's responsibility.
+The invocation compiler explains scope and zero-hit limits without supplying any
+benchmark answers. Rollback removes optional receipts and restores old Source
+behavior; historical Evidence IDs are never rewritten. Regression authority:
+`server/tests/source-search-coverage.test.cjs` and existing tool-loop tests.
+
 ---
+
+### 6.7 Patch Engineer evaluation oracle — additive source delta, 2026-10-08
+
+The existing role-only Patch Engineer skill-effect scorer awarded full credit to
+the BLOCKED case with required arrays set to null, because missing or malformed
+arrays became empty arrays. Array members were also string-coerced. The scorer
+now checks actual string arrays, exact reproduction keys and typed explicit
+limitation/rollback fields before awarding the associated points. Valid fixed
+outputs retain 5/5; partial scores retain their individual check meanings.
+
+This is deterministic evaluation correctness, not a production contract change
+or a model-quality result. Existing benchmark cases, paired inputs, prompts,
+model assignments and historical 60-case codegen results remain unchanged.
+No Python execution, live model rerun, candidate application or semantic repair
+success is inferred. Negative and independent malformed-member cases run offline.
+
+### 6.8 Runtime Packet immutable handoff — Step 12 source delta, 2026-10-08
+
+Patch/Review Packet creation previously froze only outer containers and retained
+references to nested checks, requirements carried in invariants, and hash maps.
+Changing a caller's failed-check status or nested acceptance condition altered
+the packet while retaining its original digest. The existing packet provider now
+copies and recursively freezes JSON-shaped payloads before computing the digest.
+Caller inputs remain writable; issued packets reject nested mutation. Existing
+schemas, payload fields and digests for unchanged plain data remain compatible.
+Both packet types reuse this one provider; consumers and approval paths are unchanged.
+
+This closes the reproduced immutable-handoff defect only. Independently required
+structured requested/preserved/forbidden behavior, acceptance, UNKNOWN and test
+contracts are still missing from the current workflow caller. No such fields
+are invented from task text. Their integration requires isolated caller ownership.
+Baseline/candidate materialization identity and language oracle qualification are
+separate prerequisites. This change does not qualify Python execution, a live
+workflow, model semantic accuracy or Strict Completion.
+
+### 6.9 Structured Requirement/Evidence handoff — Step 13 source delta, 2026-10-08
+
+The old workflow supplied task/context beside a v1 Patch Packet, and neither the
+packet nor candidate hash bound explicit preservation/exclusion/test obligations.
+The existing provider now emits v2 only when a requirement input or prior v2
+packet is supplied. Constructor-only legacy v1 calls and old stored digests remain
+unchanged. v2 includes the typed `debugai.requirement-evidence/v1` contract:
+explicit requested/preserved/forbidden behavior, forbidden paths, acceptance,
+boundary/negative cases, UNKNOWNs and required tests. Each is a string array or
+null when unavailable; no language-wide rule or intended behavior is inferred.
+Original request, task and context are retained after existing Secret redaction.
+v2 source/check excerpts are also redacted before hashing and binding persistence;
+the observed source hashes still bind the original bytes.
+Coverage means field presence, never semantic success; semantic_verification is UNKNOWN.
+
+Origin is caller `context.requirements` or original analysis `failure.requirements`.
+The existing durable input already persists failure/raw request; the workflow
+reads that integrity-bound manifest on candidate generation after resume rather
+than trusting a caller's replacement analysis. Conflicting explicit replacements
+fail. Optional origin source/hash/Evidence assertions must match the current
+packet's observed revision, selected-source hashes and admitted Evidence IDs.
+Exact-string requested/forbidden contradictions fail; broader semantic conflicts
+remain unproven and cannot receive PASS.
+
+The existing workflow checks packet digest, current snapshot/source/Evidence and
+forbidden operation paths after model handoff. PatchService checks again before
+persisting, and the existing candidate hash includes optional requirement_binding.
+Changed/dropped binding therefore changes the approval identity; stored candidate
+load checks its integrity. Legacy candidates without a binding remain compatible.
+No candidate is applied by this new path.
+
+Existing bounded re-fix carries the original immutable contract through diagnosis,
+Patch Engineer and replacement candidate. Its original revision/Evidence provenance
+stays original; the outer new packet supplies fresh current source/retest bindings.
+Legacy re-fix without structured input stays v1 and does not invent obligations.
+Requirement fulfillment still needs identity-bound actual tests/semantic review.
+Isolated materialized candidate, candidate snapshot/preflight/oracle and live
+Strict Completion are later gates, not implied by this handoff qualification.
+
+### 6.10 Sandbox snapshot integrity slice — Step 14 source delta, 2026-10-08
+
+Gate 1 retains PatchService create/load, preparePatchCandidate, requirement-bound
+candidate identity, explicit approval and transactional apply. The existing
+Sandbox still permits only node.check and package lint/typecheck/test/build.
+No permitted candidate-construction operation currently connects PatchService
+to an isolated writable candidate workspace. This CU therefore implements the
+independent manifest/completeness slice authorized by Step 14, not Phase 3 completion.
+
+The existing copySnapshot provider now inventories the allowed tree deterministically:
+normalized path, regular-file/directory type, exact byte hash/length, executable
+bits, empty directories, file/entry/byte totals, limits and explicit exclusions.
+Protected contents are not read; unsupported symlinks are recorded by target hash
+without dereferencing. The manifest and nested arrays are immutable in memory and
+have an integrity digest. This digest identifies allowed snapshot material, not
+a replacement RepositorySnapshot authority or an authenticated signature.
+
+Copies go to new destinations outside the source. Source is re-inventoried after
+copying; destination entries are independently re-read and compared, including
+extra files, omissions, changed bytes and executable bits. Existing destinations,
+overlaps, path aliases/traversal and symlinked parents fail closed. Required paths
+must be present regular files; omitted/excluded/dependency/native/symlink-backed
+requirements throw SANDBOX_SNAPSHOT_INCOMPLETE before publication. Node check
+requires its target; package actions require package.json. Additional requiredPaths
+must be explicitly supplied; no dependency graph or required asset is inferred.
+
+New existing-schema jobs retain this manifest in source_snapshot. The sidecar
+rechecks it before existing artifact provisioning; execution rechecks again before
+the helper probe/command. Only existing exact-source package-test provisioning
+admits top-level build/node_modules artifacts after its unchanged provenance checks.
+Landlock/seccomp, action/network/socket/environment restrictions are unchanged.
+Legacy v1 requests without manifests remain executable but snapshot qualification
+stays NOT_VERIFIED. No old candidate/approval hash is reinterpreted.
+
+MATERIALIZED_ENTRIES_MATCH proves only copied entries, not whole-repository
+completeness. Completeness remains NOT_VERIFIED, exclusions retain their reasons,
+and candidate construction remains NOT_CONFIGURED. Command PASS requires a real
+zero exit without timeout and is carried separately from these qualifications;
+an injected pass flag with a failed exit cannot manufacture PASS. A candidate
+argument to prepareSandboxJob is rejected as construction NOT_CONFIGURED.
+
+New tests are LOCAL_FIXTURE_ONLY. Source/CI does not prove immutable physical
+BASELINE storage, isolated multi-file candidate construction, candidate diff/re-read
+bound to original requirements/revision, a generated-language oracle, live Runtime,
+semantic correctness or Strict Completion. Those are the next exact construction
+gate under the existing security/action authority; no Host execution, Python
+substitute, new Sandbox/tool/executor, deployment or production apply is authorized.
 
 ## 7. Evidence model
 
@@ -698,6 +909,28 @@ At the reviewed snapshot:
 Never run an implicit server pull/reset/sync merely because GitHub source advanced. Server Runtime remains Docker/Compose based; do not install persistent host Node/npm as a shortcut.
 
 ---
+
+### Step14 Gate3 resumption — upstream test contract correction (2026-10-09 JST)
+
+The actual upstream feature branch now includes the reviewed and verified
+health-only CHAT read fixture correction from PR #57 (squash merge
+`b3dcffc55e9a2b7844474ff08ae43a5344659bea`). Previously, the PR #56
+integration run failed Verify/Core because upstream selected
+`service.debug_ai_health` without a GitOps status ID but three existing
+test expectations still assumed `project.git_head` and an active GitOps ID.
+The isolated PR #57 checks passed; independent draft PR #58 combined the
+unchanged Step14 source with the current upstream target and corrected test,
+qualifying six Actions and a real isolated full-suite 549/549 with no skips.
+
+This is an additive **source/CI evidence checkpoint**, not a design rewrite,
+live reflection or assertion that a prior PR #56 integration SHA passed.
+The existing snapshot integrity implementation and fail-closed behavior remain
+unchanged. Gate3 on PR #56 requires fresh six-workflow results for its new
+exact HEAD with the corrected upstream integration; any failure remains
+BLOCKED and its original evidence stays visible. Whole-tree completeness,
+isolated candidate construction, generated-candidate semantics, live Runtime
+and Strict Completion remain NOT_VERIFIED or NOT_CONFIGURED as applicable.
+Review/GitHub Project/Host owner and approval boundaries remain unchanged.
 
 ## 23. Stop conditions
 

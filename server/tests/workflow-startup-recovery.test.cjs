@@ -7,6 +7,7 @@ const path=require("node:path");
 const {RunAuthority}=require("../run-authority.js");
 const {RepoPolicy}=require("../repo-policy.js");
 const {createWorkflow}=require("../workflow.js");
+const {PatchService}=require("../patch-service.js");
 
 class FakeDurableIo{
   constructor(){this.records=new Map();}
@@ -23,7 +24,8 @@ test("startup recovery restores input/cursor and resumes C with same role execut
   const io=new FakeDurableIo(),policy=new RepoPolicy({workspaceRoot:root}),calls={},diagnoserInputs=[],workEvents=[];
   const authority1=new RunAuthority({runtimeRoot,repoPolicy:policy,durableIo:io});let interrupt=true;
   const workflow1=createWorkflow({aiCore:fakeAi(calls,diagnoserInputs),authority:authority1,repoPolicy:policy,repositorySnapshot:()=>"git_fixture",recoveryHooks:{beforeResearcherWorkUnit:async({unit,roleExecutionId,attemptNo})=>{workEvents.push({phase:"before",unit:unit.work_unit_id,roleExecutionId,attemptNo});if(interrupt&&unit.work_unit_id==="researcher.C"){interrupt=false;throw new Error("TIMEOUT:forced C interruption");}}}});
-  let interrupted;try{await workflow1.runAnalysis({repo,projectId:"P",rawRequest:"investigate restart",failure:{message:"fixture failure"},localEvidence:[]});assert.fail("expected interruption");}catch(error){interrupted=error;}
+  const requirements={preserved_behavior:["retain empty input behavior"],forbidden_paths:["keep.js"],required_tests:["empty-regression"]};
+  let interrupted;try{await workflow1.runAnalysis({repo,projectId:"P",rawRequest:"investigate restart",failure:{message:"fixture failure",requirements},localEvidence:[]});assert.fail("expected interruption");}catch(error){interrupted=error;}
   assert.match(interrupted.message,/TIMEOUT/);const runId=interrupted.durable.run_id,roleExecutionId=interrupted.durable.role_execution_id;
   assert.deepEqual(interrupted.durable.completed_work_ids,["researcher.A","researcher.B"]);
   assert.equal(authority1.loadDurable(runId).state.job_status,"RETRY_WAIT");
@@ -40,6 +42,14 @@ test("startup recovery restores input/cursor and resumes C with same role execut
   assert.equal(workEvents.filter(x=>x.attemptNo===2).every(x=>x.roleExecutionId===roleExecutionId),true);
   assert.equal(calls.code_scout,1);assert.equal(calls.causal_scout,1);assert.equal(calls.researcher,1);assert.equal(calls.diagnoser,1);
   assert.equal(diagnoserInputs[0].researcher_role_result.source_role_execution_id,roleExecutionId);assert.equal(diagnoserInputs[0].researcher_role_result.source_role_result_id,researchRef.final_role_result_ref.split("/").pop().replace(/\.json$/,""));
+  const patchService=new PatchService({runtimeRoot,repoPolicy:policy}),packetPrompts=[];
+  const patchWorkflow=createWorkflow({authority:authority2,repoPolicy:policy,patchService,aiCore:{call:async(_role,input)=>{packetPrompts.push(JSON.parse(input.user));return{content:JSON.stringify({operations:[{type:"write",path:"a.js",content:"module.exports=43;\n"}]})};}}});
+  const request={runId,repo,selectedPaths:["a.js"],task:"later candidate request",analysis:{diagnosis:{},external_hypothesis_review:{json:{verdict:"PASS"}},evidence_registry:{evidence_ids:[]}}};
+  await assert.rejects(()=>patchWorkflow.patchCandidate({...request,context:{requirements:{...requirements,preserved_behavior:[]}}}),/REQUIREMENT_INPUT_CONFLICT/);
+  assert.equal(packetPrompts.length,0);
+  const candidate=await patchWorkflow.patchCandidate(request),contract=patchService.load(candidate.candidate.id).requirement_binding.payload.requirement_contract;
+  assert.equal(contract.input.verbatim_request,"investigate restart");assert.deepEqual(contract.fields.preserved_behavior,requirements.preserved_behavior);
+  assert.deepEqual(contract.fields.required_tests,requirements.required_tests);
 });
 
 test("duplicate async resume shares one active execution",async t=>{
