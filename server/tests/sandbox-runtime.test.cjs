@@ -51,3 +51,17 @@ test("terminal sandbox cleanup removes heavy work data but preserves request and
 test("terminal sandbox cleanup rejects non-job directories",()=>{
   const f=fixture();try{assert.throws(()=>cleanupTerminalSandboxArtifacts(path.join(f.root,"not-a-job")),/SANDBOX_JOB_DIR_INVALID/);}finally{f.cleanup();}
 });
+
+
+test("candidate node.check accepts newly constructed JS only in isolated snapshot",()=>{
+  const f=fixture();
+  try{
+    const job=prepareSandboxJob({sourceRepo:f.repo,jobRoot:f.jobs,action:"node.check",args:{path:"added.js"},timeoutMs:5000,candidate:{operations:[{type:"create",path:"added.js",content_utf8:"const created = true;\n"}]}});
+    const req=readSandboxRequest(job.job_dir);
+    assert.equal(req.action,"node.check");
+    assert.equal(req.candidate_snapshot.construction,"MATERIALIZED_VERIFIED");
+    assert.equal(fs.readFileSync(path.join(job.job_dir,"repo","added.js"),"utf8"),"const created = true;\n");
+    assert.equal(fs.existsSync(path.join(f.repo,"added.js")),false);
+    assert.throws(()=>prepareSandboxJob({sourceRepo:f.repo,jobRoot:f.jobs,action:"node.check",args:{path:"uncreated.js"},timeoutMs:5000}),/SANDBOX_SNAPSHOT_REQUIRED_PATH_MISSING|SANDBOX_REQUIRED_PATH|SNAPSHOT/);
+  }finally{f.cleanup();}
+});

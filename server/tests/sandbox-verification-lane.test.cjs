@@ -4,7 +4,7 @@ const assert=require("node:assert/strict");
 const fs=require("node:fs");
 const os=require("node:os");
 const path=require("node:path");
-const {configuredChecks,toEvidence,createSandboxVerificationLane}=require("../control/sandbox-verification.js");
+const {configuredChecks,candidateSyntaxChecks,toEvidence,createSandboxVerificationLane}=require("../control/sandbox-verification.js");
 
 function repoWith(scripts){
   const repo=fs.mkdtempSync(path.join(os.tmpdir(),"debugai-sandbox-verification-"));
@@ -69,4 +69,10 @@ test("sandbox verification returns FINAL_VALID only if every configured check pa
     assert.equal(prepared.length,2);
     assert.deepEqual(out.checks.map(x=>x.status),["PASS","PASS"]);
   }finally{fs.rmSync(repo,{recursive:true,force:true});}
+});
+
+
+test("candidate syntax plan uses existing Node gate without modifying oracle or deleted files",()=>{
+  const checks=candidateSyntaxChecks([{type:"replace",path:"src/a.js"},{type:"create",path:"lib/new.mjs"},{type:"delete",path:"old.cjs"},{type:"replace",path:"src/a.js"},{type:"replace",path:"module.ts"}]);
+  assert.deepEqual(checks.map(c=>[c.action,c.args.path,c.check_type]),[["node.check","src/a.js","SYNTAX"],["node.check","lib/new.mjs","SYNTAX"]]);
 });

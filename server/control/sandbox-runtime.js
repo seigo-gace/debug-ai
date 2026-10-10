@@ -189,7 +189,9 @@ function prepareSandboxJob({sourceRepo,jobRoot,action,args={},timeoutMs=120000,r
   // Candidate operations remain strictly within the copied, isolated job directory.
   if(!sourceRepo||!jobRoot)throw new Error("SANDBOX_JOB_INPUT_REQUIRED");if(!ACTIONS.has(action))throw new Error(`SANDBOX_ACTION_INVALID:${action}`);if(!Number.isInteger(timeoutMs)||timeoutMs<1000||timeoutMs>300000)throw new Error("SANDBOX_TIMEOUT_INVALID");
   if(!Array.isArray(requiredPaths))throw new Error("SANDBOX_SNAPSHOT_POLICY_INVALID");
-  const required=[...requiredPaths,action==="node.check"?snapshotPath(path.posix.normalize(safeRel(args.path))):"package.json"];
+  const checkPath=action==="node.check"?snapshotPath(path.posix.normalize(safeRel(args.path))):null;
+  const candidateCreatesCheckPath=checkPath&&Array.isArray(candidate?.operations)&&candidate.operations.some(op=>op?.type==="create"&&op.path===checkPath);
+  const required=[...requiredPaths,...(checkPath?(candidateCreatesCheckPath?[]:[checkPath]):["package.json"])];
   const source=fs.realpathSync(sourceRepo),root=normalizeJobRoot(jobRoot),jobs=path.join(root,"jobs");fs.mkdirSync(jobs,{recursive:true});
   const jobId=`JOB_${crypto.randomBytes(12).toString("hex")}`,pending=path.join(jobs,`.pending-${jobId}`),finalDir=path.join(jobs,jobId),snapshot=path.join(pending,"repo"),tmpDir=path.join(pending,"tmp");fs.mkdirSync(pending,{recursive:false});fs.mkdirSync(tmpDir,{recursive:true});
   try{
