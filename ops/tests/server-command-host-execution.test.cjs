@@ -246,3 +246,39 @@ test("real existing Host runner returns bounded Docker development log and remov
   assert.match(status.result.stdout,/RETRY_POSSIBLE/);
   assert.doesNotMatch(status.result.stdout,/SECRET_FORBIDDEN/);
 });
+
+test("real existing Host runner returns bounded registered container logs", t => {
+  const f = fixture(t);
+  const realRepo = path.resolve(__dirname, "../..");
+  fs.mkdirSync(path.join(f.repo, "operations"), { recursive: true });
+  fs.copyFileSync(
+    path.join(realRepo, "operations/host-managed-container-entries.json"),
+    path.join(f.repo, "operations/host-managed-container-entries.json"),
+  );
+  const docker = path.join(f.repo, "test-bin", "docker-logs");
+  const script = [
+    "#!/bin/sh",
+    'if [ "$1" = "ps" ] && [ "$2" = "-q" ] && [ "$3" = "-f" ] && [ "$4" = "name=^webhook-gateway-api-1$" ]; then echo fixture-wg; exit 0; fi',
+    'if [ "$1" = "logs" ] && [ "$2" = "--tail" ] && [ "$3" = "5" ] && [ "$4" = "--timestamps" ] && [ "$5" = "fixture-wg" ]; then',
+    'echo "2026-10-09T11:30:00Z INFO webhook ready"',
+    'echo "2026-10-09T11:30:01Z token=SECRET_FORBIDDEN"',
+    "exit 0; fi",
+    "exit 73",
+  ].join("\n");
+  fs.writeFileSync(docker, script + "\n", { mode: 0o700 });
+  const queued = f.service.request({
+    command_id: "service.registered_container_logs",
+    arguments: ["webhook-gateway-api", "5"],
+  });
+  const file = path.join(f.service.queueRoot(), "requests", `${queued.id}.json`);
+  const request = JSON.parse(fs.readFileSync(file, "utf8"));
+  fs.writeFileSync(file, JSON.stringify({ ...request, repo: "/workspace/debug-ai" }));
+  const done = f.execute({ DEBUG_AI_SERVER_COMMAND_DOCKER_BIN: docker });
+  assert.equal(done.status, 0, done.stderr);
+  const status = f.service.status(queued.id);
+  assert.equal(status.state, "PASS", status.error);
+  assert.equal(status.result.command_id, "service.registered_container_logs");
+  assert.match(status.result.stdout, /webhook ready/);
+  assert.match(status.result.stdout, /\[REDACTED_SENSITIVE_LINE\]/);
+  assert.doesNotMatch(status.result.stdout, /SECRET_FORBIDDEN/);
+});

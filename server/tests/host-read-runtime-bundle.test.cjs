@@ -9,6 +9,7 @@ const READ_COMMANDS = [
   "system.projects_inventory",
   "system.project_file_inspect",
   "service.debug_ai_logs",
+  "service.registered_container_logs",
 ];
 
 function read(rel) {
@@ -46,10 +47,14 @@ test("host read bundle keeps request, runner, CHAT preflight and helpers aligned
   assert.match(runnerText, /SERVER_LOG_SERVICE_DENIED/);
   assert.match(runnerText, /GH_CLI_UNAVAILABLE/);
 
+  assert.match(runnerText, /host-managed-container-entries\.json/);
+  assert.match(runnerText, /REGISTERED_CONTAINER_ENTRY_DENIED/);
+
   for (const rel of [
     "scripts/host-workspace-inventory.py",
     "scripts/host-workspace-file-inspect.py",
     "operations/host-admitted-workspace-entries.json",
+    "operations/host-managed-container-entries.json",
   ]) {
     assert.equal(fs.existsSync(path.join(ROOT, rel)), true, rel);
   }

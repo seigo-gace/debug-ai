@@ -217,3 +217,21 @@ test("CHAT Docker development logs stay scoped, short, sanitized and read-only",
   for(const count of [0,21,100,"1;whoami"])assert.throws(()=>m.validateTarget({...target,server_command_id:"service.debug_ai_logs",log_lines:count}),/SERVER_LOG_LINES_INVALID/);
   assert.deepEqual(m.safeResult("service.debug_ai_logs","Authorization Bearer SUPER_SECRET"),["SERVER_RUNTIME_LOG_LINES="+JSON.stringify(["[REDACTED_SENSITIVE_LINE]"])]);
 });
+
+test("CHAT registered host container logs stay scoped, short, sanitized and read-only",async t=>{
+  const targetFile=targetFixture(t,{server_command_id:"service.registered_container_logs",registered_container_entry:"webhook-gateway-api",log_lines:5});
+  const logs=[],requests=[],id="cmd_"+"a".repeat(24);
+  const request=async(url,args)=>{
+    requests.push(JSON.parse(args.body));
+    return{status:url.endsWith("/request")?202:200,json:async()=>url.endsWith("/request")?{id}:{id,state:"PASS",result:{
+      read_only:true,command_id:"service.registered_container_logs",exit_code:0,
+      stdout:"2026-10-09 INFO webhook ready\nBearer SUPER_SECRET\n2026-10-09 INFO ok"
+    }}};
+  };
+  await m.run({request,sleep:async()=>{},log:v=>logs.push(v),env:{CF_ACCESS_CLIENT_ID:"id",CF_ACCESS_CLIENT_SECRET:"secret"},targetFile});
+  assert.deepEqual(requests[0],{repo:"/workspace/debug-ai",command_id:"service.registered_container_logs",arguments:["webhook-gateway-api","5"]});
+  assert.ok(logs.includes("SERVER_COMMAND_STATE=PASS"));
+  assert.ok(logs.join(" ").includes("[REDACTED_SENSITIVE_LINE]"));
+  const base=JSON.parse(fs.readFileSync(targetFile,"utf8"));
+  for(const entry of ["","../x","webhook;rm"])assert.throws(()=>m.validateTarget({...base,server_command_id:"service.registered_container_logs",registered_container_entry:entry,log_lines:5}),/REGISTERED_CONTAINER|SERVER_LOG/);
+});
