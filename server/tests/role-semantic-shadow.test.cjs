@@ -117,3 +117,13 @@ test("P0-A preserves canonical causal/research benchmark field types",()=>{
   assert.throws(()=>parseAndValidateRoleOutput("researcher",invalid,{roleSemantics:"enforce"}),/ROLE_SEMANTIC_INVALID/);
   assert.equal(evaluateRoleSemantics("researcher",{...researcher,bound_version:"4.2"}).status,"PASS");
 });
+
+
+test("P0-A production role prompts retain causal and researcher benchmark output contracts",()=>{
+  const {compileInvocation}=require("../control/invocation-compiler.js");
+  for(const [role,fields] of [["causal_scout","failure_family,causal_chain,unsupported_links,alternate_hypotheses,confidence"],["researcher","research_status,answer,evidence_refs,rejected_source_refs,contradictions,bound_version"]]){
+    const system=compileInvocation(role,{task:"inspect bounded evidence"}).system;
+    assert.ok(system.includes(`OUTPUT_FIELDS=${fields}`),role);
+    assert.ok(system.includes("UNKNOWN")||role==="causal_scout");
+  }
+});
