@@ -125,10 +125,10 @@ async function verifyCandidates(){
     const make=body=>preparePatchCandidate({repo:source,selectedPaths:["value.js"],task:"preserve increment",requestHash:"1".repeat(64),stage:"debug",result:{operations:[{type:"replace",path:"value.js",old:original.trim(),new:body}]}});
     for(const [body,expected,label] of [["module.exports=x=>x+2;","FINAL_INVALID","RUNTIME_NEGATIVE"],["module.exports=x=>{","FINAL_INVALID","SYNTAX_NEGATIVE"],["module.exports=x=>1+x;","FINAL_VALID","HOLDOUT_PASS"]]){
       const candidate=make(body),result=await lane.collectCandidate(candidate);
-      if(result.status!==expected||result.checks.length!==3)throw new Error("CANDIDATE_CHECK_OUTCOME_INVALID:"+label);
+      if(result.status!==expected||result.checks.length!==4)throw new Error("CANDIDATE_CHECK_OUTCOME_INVALID:"+label);
       if(!result.checks.every(x=>x.patch_candidate_hash===candidate.candidate_hash&&x.sandbox.backend==="sidecar+landlock+seccomp"&&x.sandbox.workspace_mount==="ABSENT"&&x.sandbox.secret_mounts==="ABSENT"&&x.sandbox.docker_socket==="ABSENT"))throw new Error("CANDIDATE_CHECK_IDENTITY_BOUNDARY_INVALID");
       if(label==="RUNTIME_NEGATIVE"&&result.checks.find(x=>x.check_type==="UNIT")?.status!=="FAIL")throw new Error("CANDIDATE_RUNTIME_FALSE_PASS");
-      if(label==="SYNTAX_NEGATIVE"&&result.checks.find(x=>x.check_type==="LINT")?.status!=="FAIL")throw new Error("CANDIDATE_SYNTAX_FALSE_PASS");
+      if(label==="SYNTAX_NEGATIVE"&&(result.checks.find(x=>x.check_type==="SYNTAX")?.status!=="FAIL"||result.checks.find(x=>x.check_type==="LINT")?.status!=="FAIL"))throw new Error("CANDIDATE_SYNTAX_FALSE_PASS");
       if(label==="HOLDOUT_PASS")requirePassingTestSummary(result.checks.find(x=>x.check_type==="UNIT").stdout);
       if(fs.readFileSync(path.join(source,"value.js"),"utf8")!==original)throw new Error("CANDIDATE_CHECK_SOURCE_MUTATED");
       console.log("SANDBOX_CANDIDATE_VERIFICATION="+label+"|STATUS="+result.status+"|CHECKS="+result.checks.length+"|HASH="+candidate.candidate_hash+"|BACKEND=sidecar+landlock+seccomp");

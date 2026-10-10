@@ -88,3 +88,24 @@ test('Master Internal normalization routes through the same queue and refuses ca
   const q=service.request(input),r=JSON.parse(fs.readFileSync(path.join(service.queueRoot(repo),'requests',q.id+'.json')));
   assert.equal(r.delegation.operation_id,q.id);assert.equal(r.delegation.mode,delegation.mode);assert.equal(r.delegation.repository,delegation.repository);
 });
+
+
+test("source-only reflection enqueues only a persistent registered-target delegation", t => {
+  const { repo, service } = fixture();
+  t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
+  const input = { ...base(repo), action: "reflect", sha: base(repo).expected_head };
+  assert.throws(() => service.request(input), /GITOPS_SOURCE_REFLECT_DELEGATION_REQUIRED/);
+  assert.throws(() => service.request({ ...input, delegation: { id: "dlg_source", scope: "gace.source.reflect" } }), /GITOPS_DELEGATION_INPUT_INVALID/);
+  assert.throws(() => service.request({ ...input, sha: "f".repeat(40), delegation: { id: "dlg_source", scope: "gace.source.reflect", mode: "MASTER_INTERNAL_PERSISTENT", repository: "seigo-gace/TGserver", runtime_target: "tgserver.source" } }), /GITOPS_DEPLOY_SHA_HEAD_MISMATCH/);
+  const delegation = { id: "dlg_source", scope: "gace.source.reflect", mode: "MASTER_INTERNAL_PERSISTENT", repository: "seigo-gace/TGserver", runtime_target: "tgserver.source" };
+  assert.throws(() => service.request({ ...input, delegation: { ...delegation, request_identity: "caller" } }), /GITOPS_DELEGATION_INPUT_INVALID/);
+  const q = service.request({ ...input, delegation });
+  const requested = JSON.parse(fs.readFileSync(path.join(repo, ".debugai-input", "gitops", "requests", q.id + ".json"), "utf8"));
+  assert.equal(q.action, "reflect");
+  assert.equal(requested.sha, input.expected_head);
+  assert.equal(requested.delegation.repository, "seigo-gace/TGserver");
+  assert.equal(requested.delegation.mode, "MASTER_INTERNAL_PERSISTENT");
+  assert.equal(requested.delegation.request_identity, "debugai.authenticated-control");
+  assert.equal(requested.delegation.operation_id, q.id);
+  assert.equal(service.status({ repo, id: q.id }).state, "QUEUED");
+});

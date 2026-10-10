@@ -156,3 +156,22 @@ test("automatic refix closes the same run after the replacement candidate is exp
   assert.ok(runtimeEvidence.writes.some(x=>x.type==="completion_gate"&&x.payload.complete===true));
 });
 
+
+
+test("duplicate failed candidate and identical registered failure evidence escalates without a second model retry",async()=>{
+  const repo=repoFixture(),authority=authorityFixture(),runtimeEvidence=evidenceFixture(),patchService=patchFixture(repo),aiCore=aiFixture();
+  try{
+    const workflow=createWorkflow({aiCore,externalReview:{hypothesis:async()=>({json:{verdict:"PASS"}})},runtimeEvidence,patchService,authority,repositorySnapshot:()=>"git_fixture"});
+    const first=await workflow.approveAndVerify({runId:"run_1",candidateId:"patch_initial",candidateHash:"hash_initial",decision:"approve",repo});
+    assert.equal(first.state,"WAITING_APPROVAL");
+    const callsBefore=aiCore.calls.length;
+    const second=await workflow.approveAndVerify({runId:"run_1",candidateId:"patch_refix_1",candidateHash:"hash_refix_1",decision:"approve",repo});
+    assert.equal(second.state,"REFIX_NO_NEW_FAILURE_EVIDENCE");
+    assert.equal(second.reason,"NO_NEW_FAILURE_EVIDENCE");
+    assert.equal(authority.run.state,"ESCALATION_REQUIRED");
+    assert.equal(aiCore.calls.length,callsBefore);
+    assert.equal(patchService.creates,1);
+    assert.equal(runtimeEvidence.writes.filter(x=>x.type==="refix_attempt").length,1);
+    assert.ok(runtimeEvidence.writes.some(x=>x.type==="refix_escalation"&&x.payload.reason==="NO_NEW_FAILURE_EVIDENCE"));
+  }finally{fs.rmSync(repo,{recursive:true,force:true});}
+});

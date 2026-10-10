@@ -162,6 +162,11 @@ function createTgserverAdapter({
     return {status:"queued"};
   }
 
+  async function archiveLog(event){
+    if(!event||typeof event!=="object")throw new TgserverError("TGSERVER_EVENT_REQUIRED","archive event object required");
+    return ingest(logProjectId,String(event.severity||"info"),{schema_version:1,event_type:"runtime",...event},"debug-ai-runtime");
+  }
+
   async function log(event){
     if(!event||typeof event!=="object")throw new TgserverError("TGSERVER_EVENT_REQUIRED","runtime event object required");
     return enqueueRuntime(event);
@@ -200,7 +205,7 @@ function createTgserverAdapter({
     return Array.isArray(out?.hits)?out.hits:[];
   }
 
-  return {ingestEndpoint,bulkIngestEndpoint,searchEndpoint,logProjectId,kbProjectId,log,promote,search,redact,prewarmLogSink,flushLogs,shutdownLogSink,getLogStats};
+  return {ingestEndpoint,bulkIngestEndpoint,searchEndpoint,logProjectId,kbProjectId,log,archiveLog,promote,search,redact,prewarmLogSink,flushLogs,shutdownLogSink,getLogStats};
 }
 
 module.exports={TgserverError,createTgserverAdapter,redact};

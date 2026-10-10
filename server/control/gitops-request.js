@@ -5,7 +5,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const SCHEMA = "debugai.gitops-request/v1";
-const ACTIONS = new Set(["publish", "deploy"]);
+const ACTIONS = new Set(["publish", "deploy", "reflect"]);
 const GIT_SHA_RE = /^[0-9a-f]{40}$/;
 const HASH_RE = /^[0-9a-f]{64}$/;
 const CANDIDATE_ID_RE = /^patch_[0-9a-f]{24}$/;
@@ -109,7 +109,8 @@ class GitOpsRequestService {
     if (input.delegation !== undefined) {
       const d = input.delegation;
       const persistent = d?.mode === "MASTER_INTERNAL_PERSISTENT";
-      if (action !== "deploy" || !d || typeof d !== "object" || Array.isArray(d) ||
+      if ((action !== "deploy" && action !== "reflect") || (action === "reflect" && !persistent) ||
+          !d || typeof d !== "object" || Array.isArray(d) ||
           Object.keys(d).some(key => !(persistent ? ["id", "scope", "mode", "repository", "runtime_target"] : ["id", "scope"]).includes(key)) ||
           !/^dlg_[a-z0-9_-]{1,64}$/.test(d.id || "") || (persistent ? !/^[a-z][a-z0-9_.-]{1,80}$/.test(d.scope || "") ||
             !/^[A-Za-z0-9_-]+\/[A-Za-z0-9_.-]+$/.test(d.repository || "") ||
@@ -124,6 +125,10 @@ class GitOpsRequestService {
           provider_model: false, public_exposure: false } };
       if (persistent) Object.assign(request.delegation, {mode: d.mode, repository: d.repository, runtime_target: d.runtime_target});
     }
+    // Source-only reflection never accepts caller-declared authority: it
+    // requires an installed MASTER_INTERNAL_PERSISTENT Host policy.
+    if (action === "reflect" && request.delegation?.mode !== "MASTER_INTERNAL_PERSISTENT")
+      fail("GITOPS_SOURCE_REFLECT_DELEGATION_REQUIRED");
     const root = this.queueRoot(repo);
     atomicJsonWrite(path.join(root, "requests", `${request.id}.json`), request);
     return { schema: SCHEMA, id: request.id, action, state: "QUEUED", repo, branch, expected_head: expectedHead };

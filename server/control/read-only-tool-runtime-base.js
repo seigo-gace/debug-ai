@@ -152,6 +152,25 @@ function testInventory(repo){
   const checks=["lint","typecheck","test","build"].map(name=>({name,configured:typeof scripts[name]==="string"&&scripts[name].trim().length>0,command:typeof scripts[name]==="string"?scripts[name].slice(0,1000):null}));
   return{package_json:{path:item.path,sha256:item.sha256},package_manager:packageManager,checks};
 }
+function initialInvestigationEvidence(repo,{request="",failure=null,checks=[]}={}){
+  const explicit=[...(Array.isArray(failure?.source_paths)?failure.source_paths:[]),...(Array.isArray(failure?.test_paths)?failure.test_paths:[])];
+  const mentioned=String(request||failure?.message||"").match(/[A-Za-z0-9_./-]+\.(?:[cm]?[jt]sx?|py|go|rs|java|rb|php)\b/g)||[];
+  const records=[],unavailable=[];let inventory=null;
+  try{inventory=testInventory(repo);records.push({kind:"initial_test_inventory",value:inventory});}
+  catch(error){if(!String(error?.message||"").startsWith("READ_FILE_NOT_FOUND:"))throw error;}
+  const configuredTest=inventory?.checks?.find(item=>item.name==="test"&&item.configured);
+  const testPaths=String(configuredTest?.command||"").match(/[A-Za-z0-9_./-]+\.(?:[cm]?[jt]sx?|py)\b/g)||[];
+  for(const name of [...new Set([...explicit,...mentioned,...testPaths].map(String))].slice(0,4)){
+    try{const source=readText(repo,name,{maxChars:3000});records.push({kind:"initial_source",value:source});}
+    catch(error){unavailable.push({path:name,reason:String(error?.message||"SOURCE_UNAVAILABLE").split(":")[0]});}
+  }
+  // Local source and an actually executed failing check warrant a narrow first
+  // investigation, not a confirmed cause or exhaustive search receipt.
+  const pkg=inventory?JSON.parse(readText(repo,"package.json",{maxChars:1024*1024}).content):null;
+  const hasDependencies=pkg&&["dependencies","devDependencies","optionalDependencies","peerDependencies"].some(key=>Object.keys(pkg[key]||{}).length>0);
+  const local=records.some(item=>item.kind==="initial_source"&&!/\.(?:test|spec)\.[^/]+$/.test(item.value.path))&&!hasDependencies&&Boolean(configuredTest)&&checks.some(item=>item.executed===true&&item.status==="FAIL"&&!item.timed_out);
+  return {records,scope:{mode:local?"LOCAL_REPRODUCTION":"OPEN_INVESTIGATION",source_paths:records.filter(item=>item.kind==="initial_source").map(item=>item.value.path),unavailable,additional_search:"REQUEST_FOR_MISSING_OR_COUNTER_EVIDENCE",coverage:"PARTIAL"}};
+}
 function languageIdFor(rel){
   const low=String(rel).toLowerCase();
   if(low.endsWith(".tsx"))return "typescriptreact";
@@ -291,4 +310,4 @@ function createReadOnlyToolRuntime({repo,repoPolicy=new RepoPolicy(),tgserver=nu
   }
   return {repo:root,availableTools:[...AVAILABLE_TOOLS],createEvidenceContext,addEvidenceToContext,execute};
 }
-module.exports={AVAILABLE_TOOLS,stableStringify,normalizeRel,blockedReadPath,resolveSafeFile,readText,walkFiles,searchSource,localDependencyMap,testInventory,languageIdFor,repoRelativeLocation,sanitizeSymbols,symbolLookup,toolResultHash,makeToolResult,assertToolResultIntegrity,normalizeRegisteredEvidence,evidenceProjection,evidenceViewCandidates,addEvidenceToContext,createEvidenceContext,createReadOnlyToolRuntime};
+module.exports={AVAILABLE_TOOLS,stableStringify,normalizeRel,blockedReadPath,resolveSafeFile,readText,walkFiles,searchSource,localDependencyMap,testInventory,initialInvestigationEvidence,languageIdFor,repoRelativeLocation,sanitizeSymbols,symbolLookup,toolResultHash,makeToolResult,assertToolResultIntegrity,normalizeRegisteredEvidence,evidenceProjection,evidenceViewCandidates,addEvidenceToContext,createEvidenceContext,createReadOnlyToolRuntime};

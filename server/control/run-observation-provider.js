@@ -9,6 +9,10 @@ const TRACE_TYPES=Object.freeze([
   "analysis",
   "verification",
   "completion_gate",
+  "workflow_progress",
+  "ai_invocation","tool_invocation",
+  "execution_failure",
+  "stage_reuse",
 ]);
 const TRACE_TYPE_SET=new Set(TRACE_TYPES);
 

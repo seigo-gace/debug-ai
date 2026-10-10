@@ -244,6 +244,10 @@ This document is a formal design delta only.
 `DEPLOY=NO`
 `PRODUCTION_CHANGE=NONE`
 
+### 2026-10-10 Combined P1-B/P1-C integration note
+
+The existing Node candidate lane runs node.check before configured package checks for changed JS paths. Created files exist only in the isolated Candidate snapshot, not the baseline. All checks must preserve identical baseline and candidate digests. The combined workflow retains the previously qualified preapproval failed-evidence retry and strict hypothesis-review gate. Package checks follow syntax checks, so integrated tests must account for four checks, with no weakening of failure conditions. No Python, dependency, semantic, production or real-model qualification follows from this source integration.
+
 ## 15. Candidate-aware preapproval verification — Codex CU, 2026-10-09
 
 Purpose: close the actual Source gap where `collect(repo)` checked only BASELINE
@@ -271,6 +275,29 @@ a transport/integrity exception is persisted as failure and propagated. Existing
 approval states remain candidate-only; neither FAIL nor PASS grants apply or
 Strict Completion. Fresh failing-check-driven preapproval re-fix remains a next
 CU; this change does not automatically consume new model calls or approve a fix.
+
+### 2026-10-10 P1-C bounded preapproval refix wiring — current source delta
+
+The preapproval regeneration path is additionally gated on the existing\nconfigured hypothesis reviewer; it invokes the same external FREE-bounded\nreview with existing Local Reviewer fallback and proceeds to Patch Engineer\nonly on a fresh PASS. No reviewer configured, FAIL, PENDING or INSUFFICIENT\nmeans no regenerated candidate; negative verdict is persisted and the run\nremains incomplete. Offline regression uses a stub reviewer with zero HTTP.\n\nAfter the original candidate is checked in the unchanged isolated Sandbox,
+an actual FINAL_INVALID with at least one executed failing check may trigger
+**one** local-model preapproval re-diagnosis and Patch Engineer candidate
+regeneration, but only where existing persistent RuntimeEvidence read/write and
+PatchService are available. Existing failed-check records become registered
+Evidence and are supplied with the *same* immutable Patch Packet and source
+precondition boundary. The fresh candidate must differ in canonical candidate
+hash; a second isolated check is recorded and never fabricated as passing.
+Each run persists a preapproval_refix_attempt record before local role calls
+and at most one preapproval_refix_result. Subsequent entry to the same Run
+cannot consume another preapproval attempt. Source/CI may qualify the contract
+but are not proof of local inference success or true bug repair.
+
+This preapproval retry never applies a candidate or changes approval authority.
+A still-invalid second candidate remains explicitly FINAL_INVALID and must not
+be mistaken for semantic completion. The existing WAITING_APPROVAL state
+continues to mean candidate-only; it never means candidate verification passed.
+The post-approval bounded refix path remains separate. No Scout, AI Core
+transport, scheduler, provider quota, new model or parallel project is changed.
+
 
 Dependency admission is deliberately explicit: declared dependencies/dev/optional/
 peer dependencies return NOT_CONFIGURED / CANDIDATE_DEPENDENCIES_NOT_QUALIFIED.

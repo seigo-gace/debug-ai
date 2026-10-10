@@ -7,13 +7,23 @@
       "owners": ["seigo-gace", "G-ACE-inc"]
     },
     "server-core": {
-      "root_key": "projects",
+      "root_key": "worktrees",
       "repository": "G-ACE-inc/server-core",
       "owners": ["G-ACE-inc", "seigo-gace"]
     },
     "webhook-gateway": {
       "root_key": "projects",
       "repository": "seigo-gace/webhook-gateway",
+      "owners": ["seigo-gace"]
+    },
+    "TGserver": {
+      "root_key": "projects",
+      "repository": "seigo-gace/TGserver",
+      "owners": ["seigo-gace", "G-ACE-inc"]
+    },
+    "asteria": {
+      "root_key": "projects",
+      "repository": "seigo-gace/asteria",
       "owners": ["seigo-gace"]
     }
   }

@@ -1,0 +1,13 @@
+{
+  "schema": "debugai.host-managed-container-entries/v1",
+  "entries": {
+    "tgserver-tgs": {
+      "container_name": "tgserver-tgs-1",
+      "owners": ["seigo-gace", "G-ACE-inc"]
+    },
+    "webhook-gateway-api": {
+      "container_name": "webhook-gateway-api-1",
+      "owners": ["seigo-gace"]
+    }
+  }
+}

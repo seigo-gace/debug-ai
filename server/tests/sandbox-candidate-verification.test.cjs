@@ -18,8 +18,8 @@ test("candidate verification stages actual edited code; baseline success cannot 
   return{schema:"debugai.sandbox-result/v1",job_id:jobId,action:request.action,pass:request.action!=="package.test",code:request.action==="package.test"?1:0,snapshot:request.source_snapshot,candidate_snapshot:request.candidate_snapshot,candidate_construction:"MATERIALIZED_VERIFIED"};
  }});
  const result=await lane.collectCandidate(f.candidate);
- assert.equal(result.status,"FINAL_INVALID");assert.equal(result.checks.length,3);assert.equal(result.checks[1].status,"FAIL");
- assert.ok(result.checks.every(x=>x.patch_candidate_hash===f.candidate.candidate_hash));assert.equal(requests.length,3);
+ assert.equal(result.status,"FINAL_INVALID");assert.equal(result.checks.length,4);assert.equal(result.checks[2].status,"FAIL");
+ assert.ok(result.checks.every(x=>x.patch_candidate_hash===f.candidate.candidate_hash));assert.equal(requests.length,4);
  assert.equal(fs.readFileSync(path.join(f.repo,"value.js"),"utf8"),"module.exports=1;\n");
 });
 test("stale and tampered candidate fail before checks; unqualified dependencies remain NOT_CONFIGURED",async t=>{
@@ -64,7 +64,7 @@ test("holdout preserves source edits beside unchanged configs and ordinary confi
   const request=JSON.parse(fs.readFileSync(path.join(f.root,"jobs","jobs",jobId,"request.json")));
   return{schema:"debugai.sandbox-result/v1",job_id:jobId,action:request.action,pass:true,code:0,snapshot:request.source_snapshot,candidate_snapshot:request.candidate_snapshot,candidate_construction:"MATERIALIZED_VERIFIED"};
  }});
- const result=await lane.collectCandidate(candidate);assert.equal(result.status,"FINAL_VALID");assert.equal(result.checks.length,3);assert.equal(result.semantic_verification,"UNKNOWN");
+ const result=await lane.collectCandidate(candidate);assert.equal(result.status,"FINAL_VALID");assert.equal(result.checks.length,4);assert.equal(result.semantic_verification,"UNKNOWN");
 });
 test("package-manager locks and dependency execution configs cannot bypass candidate oracle admission",async t=>{
  const protectedPaths=[
@@ -96,7 +96,7 @@ test("ordinary application edits beside unchanged package-manager locks are stil
   return{schema:"debugai.sandbox-result/v1",job_id:jobId,action:request.action,pass:true,code:0,snapshot:request.source_snapshot,candidate_snapshot:request.candidate_snapshot,candidate_construction:"MATERIALIZED_VERIFIED"};
  }});
  const result=await lane.collectCandidate(f.candidate);
- assert.equal(result.status,"FINAL_VALID");assert.equal(result.checks.length,3);
+ assert.equal(result.status,"FINAL_VALID");assert.equal(result.checks.length,4);
  assert.equal(result.semantic_verification,"UNKNOWN");
  for(const file of ["pnpm-lock.yaml",".npmrc","bunfig.toml"])assert.equal(fs.readFileSync(path.join(f.repo,file),"utf8"),"untouched\\n");
 });
@@ -117,4 +117,125 @@ test("candidate package execution never borrows Sidecar-global dependencies",t=>
   observed={args,env:options.env};return{status:0,stdout:"fixture-only"};
  }});
  assert.ok(observed);assert.equal(observed.args.includes("--node-modules"),false);assert.equal(observed.env.NODE_PATH,undefined);
+});
+
+test("preapproval failed candidate receives one evidence-bound retry without touching repository",async t=>{
+ const f=fixture(t),{createWorkflow}=require("../workflow.js"),{PatchService}=require("../patch-service.js"),records=[];
+ const service=new PatchService({runtimeRoot:path.join(f.root,"runtime")});
+ let verifies=0;const roles=[];
+ const runtimeEvidence={write(run,type,payload){records.push({type,payload});},list(_run,{types}={}){return records.filter(x=>!types||types.includes(x.type)).map(x=>({payload:x.payload,type:x.type}));}};
+ const workflow=createWorkflow({patchService:service,runtimeEvidence,externalReview:{hypothesis:async()=>({provider:"fixture",json:{verdict:"PASS"}})},sandboxVerification:{async collectCandidate(c){verifies++;return{status:verifies===1?"FINAL_INVALID":"FINAL_VALID",checks:[{kind:"deterministic_sandbox_check",name:"sandbox:test",status:verifies===1?"FAIL":"PASS",executed:true,configured:true,patch_candidate_id:c.id,patch_candidate_hash:c.candidate_hash}]};}},aiCore:{async call(role){roles.push(role);if(role==="diagnoser")return{content:JSON.stringify({hypothesis:"incorrect increment branch",claims:[]})};return{content:JSON.stringify({operations:[{type:"replace",path:"value.js",old:"module.exports=1;",new:roles.length===1?"module.exports=2;":"module.exports=1; // repaired"}]})};}}});
+ const result=await workflow.patchCandidate({runId:"run_preapproval",analysis:{diagnosis:{public_statement:"value"},external_hypothesis_review:{json:{verdict:"PASS"}},evidence_registry:{evidence_ids:[]}},repo:f.repo,selectedPaths:["value.js"],task:"fix value"});
+ assert.equal(result.state,"WAITING_APPROVAL");assert.equal(verifies,2);
+ assert.deepEqual(roles,["patch_engineer","diagnoser","patch_engineer"]);
+ assert.equal(result.preapproval_refix.attempt,1);
+ const compact=records.find(x=>x.type==="preapproval_refix_attempt");assert.ok(compact);
+ assert.equal(result.candidate_verification.status,"FINAL_VALID");
+ assert.notEqual(result.candidate.id,result.preapproval_refix.previous_candidate_id);
+ assert.ok(records.some(x=>x.type==="preapproval_refix_attempt"));
+ assert.ok(records.some(x=>x.type==="preapproval_refix_result"));
+ assert.equal(fs.readFileSync(path.join(f.repo,"value.js"),"utf8"),"module.exports=1;\n");
+});
+
+test("preapproval bounded retry with another failed check never reports verified candidate",async t=>{
+ const f=fixture(t),{createWorkflow}=require("../workflow.js"),{PatchService}=require("../patch-service.js"),written=[];
+ const service=new PatchService({runtimeRoot:path.join(f.root,"runtime")});let checks=0,roleCalls=[];
+ const evidence={write(_r,type,payload){written.push({type,payload});},list(_r,{types}={}){return written.filter(x=>!types||types.includes(x.type)).map(x=>({type:x.type,payload:x.payload}));}};
+ const workflow=createWorkflow({patchService:service,runtimeEvidence:evidence,externalReview:{hypothesis:async()=>({provider:"fixture",json:{verdict:"PASS"}})},sandboxVerification:{async collectCandidate(c){checks++;return{status:"FINAL_INVALID",checks:[{kind:"deterministic_sandbox_check",name:"sandbox:test",status:"FAIL",executed:true,configured:true,patch_candidate_id:c.id,patch_candidate_hash:c.candidate_hash}]};}},aiCore:{async call(role){roleCalls.push(role);if(role==="diagnoser")return{content:JSON.stringify({hypothesis:"another test failure",claims:[]})};return{content:JSON.stringify({operations:[{type:"replace",path:"value.js",old:"module.exports=1;",new:roleCalls.length===1?"module.exports=2;":"module.exports=3;"}]})};}}});
+ const out=await workflow.patchCandidate({runId:"run_no_false_pass",analysis:{diagnosis:{public_statement:"value"},external_hypothesis_review:{json:{verdict:"PASS"}},evidence_registry:{evidence_ids:[]}},repo:f.repo,selectedPaths:["value.js"],task:"fix value"});
+ assert.equal(checks,2);assert.deepEqual(roleCalls,["patch_engineer","diagnoser","patch_engineer"]);
+ assert.equal(out.candidate_verification.status,"FINAL_INVALID");
+ assert.equal(out.preapproval_refix.result_status,"FINAL_INVALID");
+ assert.ok(written.some(x=>x.type==="preapproval_refix_attempt"));
+ assert.equal(written.filter(x=>x.type==="preapproval_refix_attempt").length,1);
+ assert.equal(fs.readFileSync(path.join(f.repo,"value.js"),"utf8"),"module.exports=1;\n");
+});
+
+test("preapproval retry rejects fresh failed hypothesis review without generating another candidate",async t=>{
+ const f=fixture(t),{createWorkflow}=require("../workflow.js"),{PatchService}=require("../patch-service.js"),entries=[];
+ const service=new PatchService({runtimeRoot:path.join(f.root,"runtime")});let sandboxCalls=0,roleCalls=[];
+ const store={write(_run,type,payload){entries.push({type,payload});},list(_run,{types}={}){return entries.filter(e=>!types||types.includes(e.type)).map(e=>({type:e.type,payload:e.payload}));}};
+ const workflow=createWorkflow({patchService:service,runtimeEvidence:store,externalReview:{hypothesis:async()=>({provider:"fixture",json:{verdict:"FAIL"}})},sandboxVerification:{async collectCandidate(candidate){sandboxCalls++;return{status:"FINAL_INVALID",checks:[{kind:"deterministic_sandbox_check",name:"sandbox:test",status:"FAIL",executed:true,configured:true,patch_candidate_id:candidate.id,patch_candidate_hash:candidate.candidate_hash}]};}},aiCore:{async call(role){roleCalls.push(role);if(role==="diagnoser")return{content:JSON.stringify({hypothesis:"unconfirmed",claims:[]})};return{content:JSON.stringify({operations:[{type:"replace",path:"value.js",old:"module.exports=1;",new:"module.exports=2;"}]})};}}});
+ await assert.rejects(()=>workflow.patchCandidate({runId:"run_review_fail",analysis:{diagnosis:{public_statement:"value"},external_hypothesis_review:{json:{verdict:"PASS"}},evidence_registry:{evidence_ids:[]}},repo:f.repo,selectedPaths:["value.js"],task:"fix value"}),/PREAPPROVAL_REFIX_HYPOTHESIS_NOT_APPROVED/);
+ assert.deepEqual(roleCalls,["patch_engineer","diagnoser"]);
+ assert.equal(sandboxCalls,1);
+ assert.ok(entries.some(e=>e.type==="preapproval_refix_review"&&e.payload.verdict==="FAIL"));
+ assert.equal(fs.readFileSync(path.join(f.repo,"value.js"),"utf8"),"module.exports=1;\n");
+});
+
+
+test("real last-element defect candidate remains failing until a repaired candidate passes isolated tests",async t=>{
+ const cp=require("node:child_process");
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),"debugai-last-element-")),repo=path.join(root,"repo"),jobs=path.join(root,"jobs");
+ t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+ fs.mkdirSync(repo);fs.mkdirSync(path.join(repo,".git"));
+ const broken="function countActive(items){let count=0;for(let i=0;i<items.length-1;i++){if(items[i]===true)count++;}return count;}module.exports={countActive};\n";
+ const fixed=broken.replace("i<items.length-1","i<items.length");
+ fs.writeFileSync(path.join(repo,"count.js"),broken);
+ fs.writeFileSync(path.join(repo,"count.test.cjs"),"const t=require('node:test'),a=require('node:assert/strict'),{countActive}=require('./count.js');t('empty',()=>a.equal(countActive([]),0));t('single active',()=>a.equal(countActive([true]),1));t('last active',()=>a.equal(countActive([false,true]),1));t('all active',()=>a.equal(countActive([true,true]),2));t('strict bool',()=>a.equal(countActive([1,true]),1));\n");
+ fs.writeFileSync(path.join(repo,"package.json"),JSON.stringify({scripts:{lint:"node --check count.js",test:"node --test count.test.cjs",build:"node --check count.js"}}));
+ const make=content=>patch.preparePatchCandidate({repo,selectedPaths:["count.js"],task:"Fix last-element count regression without changing boolean semantics",requestHash:"a".repeat(64),stage:"debug",result:{operations:[{type:"replace",path:"count.js",old:broken,new:content}]}});
+ const lane=createSandboxVerificationLane({jobRoot:jobs,wait:async({jobId})=>{
+   const dir=path.join(jobs,"jobs",jobId),request=JSON.parse(fs.readFileSync(path.join(dir,"request.json"))),staged=path.join(dir,"repo");
+   const args=request.action==="package.test"?["-e","const a=require(\"node:assert/strict\"),f=require(\"./count.js\").countActive;a.equal(f([]),0);a.equal(f([true]),1);a.equal(f([false,true]),1);a.equal(f([true,true]),2);a.equal(f([1,true]),1);"]:["--check","count.js"];
+   const proc=cp.spawnSync(process.execPath,args,{cwd:staged,encoding:"utf8",timeout:15000});
+   if(request.action==="package.test"){
+     const required=fs.readFileSync(path.join(staged,"count.js"),"utf8");
+     assert.match(required,/items\.length-1|items\.length/);
+     assert.equal(fs.existsSync(path.join(staged,"count.test.cjs")),true);
+   }
+   return{schema:"debugai.sandbox-result/v1",job_id:jobId,action:request.action,pass:proc.status===0,code:proc.status??1,stdout:proc.stdout||"",stderr:proc.stderr||"",snapshot:request.source_snapshot,candidate_snapshot:request.candidate_snapshot,candidate_construction:"MATERIALIZED_VERIFIED"};
+ }});
+ const brokenCandidate=make(broken.replace("count=0","count=0 "));
+ const failed=await lane.collectCandidate(brokenCandidate);
+ assert.equal(failed.status,"FINAL_INVALID");
+ assert.equal(failed.checks.find(x=>x.check_type==="UNIT").status,"FAIL");
+ const repaired=await lane.collectCandidate(make(fixed));
+ assert.equal(repaired.status,"FINAL_VALID");
+ assert.equal(repaired.semantic_verification,"UNKNOWN");
+ assert.equal(fs.readFileSync(path.join(repo,"count.js"),"utf8"),broken);
+});
+
+
+test("real last-element defect refix crosses PatchService and staged Sandbox with review gate",async t=>{
+ const cp=require("node:child_process"),{createWorkflow}=require("../workflow.js"),{PatchService}=require("../patch-service.js");
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),"debugai-real-refix-")),repo=path.join(root,"repo"),jobs=path.join(root,"jobs"),records=[],roles=[];
+ t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+ fs.mkdirSync(repo);fs.mkdirSync(path.join(repo,".git"));
+ const broken="function countActive(items){let n=0;for(let i=0;i<items.length-1;i++){if(items[i]===true)n++;}return n;}module.exports={countActive};\n";
+ const repaired=broken.replace("i<items.length-1","i<items.length");
+ const initial=broken.replace("let n=0;","let n=0; ");
+ fs.writeFileSync(path.join(repo,"count.js"),broken);
+ fs.writeFileSync(path.join(repo,"count.test.cjs"),"module.exports=true;\n");
+ fs.writeFileSync(path.join(repo,"package.json"),JSON.stringify({scripts:{lint:"node --check count.js",test:"node --test count.test.cjs",build:"node --check count.js"}}));
+ const sandboxVerification=createSandboxVerificationLane({jobRoot:jobs,wait:async({jobId})=>{
+   const request=JSON.parse(fs.readFileSync(path.join(jobs,"jobs",jobId,"request.json"))),staged=path.join(jobs,"jobs",jobId,"repo");
+   const args=request.action==="package.test"?["-e","const a=require('node:assert/strict'),f=require('./count.js').countActive;a.equal(f([]),0);a.equal(f([true]),1);a.equal(f([false,true]),1);a.equal(f([true,true]),2);a.equal(f([1,true]),1);"]:["--check","count.js"];
+   const proc=cp.spawnSync(process.execPath,args,{cwd:staged,encoding:"utf8",timeout:15000});
+   return{schema:"debugai.sandbox-result/v1",job_id:jobId,action:request.action,pass:proc.status===0,code:proc.status??1,stdout:proc.stdout||"",stderr:proc.stderr||"",snapshot:request.source_snapshot,candidate_snapshot:request.candidate_snapshot,candidate_construction:"MATERIALIZED_VERIFIED"};
+ }});
+ const evidence={write(_run,type,payload){records.push({type,payload});},list(_run,{types}={}){return records.filter(x=>!types||types.includes(x.type)).map(x=>({type:x.type,payload:x.payload}));}};
+ const workflow=createWorkflow({patchService:new PatchService({runtimeRoot:path.join(root,"runtime")}),runtimeEvidence:evidence,sandboxVerification,externalReview:{hypothesis:async()=>({provider:"fixture-only",json:{verdict:"PASS"}})},aiCore:{async call(role){
+   roles.push(role);
+   if(role==="diagnoser")return{content:JSON.stringify({hypothesis:"off by one",claims:[]})};
+   return{content:JSON.stringify({operations:[{type:"replace",path:"count.js",old:broken,new:roles.length===1?initial:repaired}]})};
+ }}});
+ const out=await workflow.patchCandidate({runId:"run_real_refixed",repo,selectedPaths:["count.js"],task:"Repair last-element bug without changing strict boolean semantics",analysis:{diagnosis:{public_statement:"off-by-one"},external_hypothesis_review:{json:{verdict:"PASS"}},evidence_registry:{evidence_ids:[]}}});
+ assert.equal(out.state,"WAITING_APPROVAL");
+ assert.deepEqual(roles,["patch_engineer","diagnoser","patch_engineer"]);
+ assert.equal(out.preapproval_refix.attempt,1);
+ assert.equal(out.preapproval_refix.result_status,"FINAL_VALID");
+ assert.equal(out.candidate_verification.status,"FINAL_VALID");
+ assert.ok(records.some(x=>x.type==="preapproval_refix_review"&&x.payload.verdict==="PASS"));
+ assert.equal(fs.readFileSync(path.join(repo,"count.js"),"utf8"),broken);
+});
+
+test("approved request cannot apply a preapproval-failed exact candidate identity",async()=>{
+ const {createWorkflow}=require("../workflow.js");let applyCalls=0;
+ const candidateId="patch_"+"a".repeat(24),candidateHash="b".repeat(64),runId="run_failed_preapply";
+ const records=[{type:"candidate_verification",payload:{status:"FINAL_INVALID",patch_candidate_id:candidateId,patch_candidate_hash:candidateHash,checks:[{status:"FAIL",executed:true,name:"sandbox:test"}]}}];
+ const writes=[];const workflow=createWorkflow({aiCore:{async call(){throw Error("AI_MUST_NOT_RUN");}},patchService:{apply(){applyCalls++;throw Error("APPLY_MUST_NOT_RUN");}},runtimeEvidence:{list(){return records;},write(run,type,payload){writes.push({run,type,payload});}}});
+ await assert.rejects(()=>workflow.approveAndVerify({runId,candidateId,candidateHash,decision:"approve"}),/PREAPPROVAL_FAILED_CANDIDATE_APPLY_DENIED/);
+ assert.equal(applyCalls,0);
+ assert.deepEqual(writes,[{run:runId,type:"approval_denied",payload:{reason:"PREAPPROVAL_FAILED_CANDIDATE_APPLY_DENIED",candidate_id:candidateId,candidate_hash:candidateHash}}]);
 });
