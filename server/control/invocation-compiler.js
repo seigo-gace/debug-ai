@@ -25,6 +25,7 @@ const KEYWORDS=Object.freeze({
   "rejected-hypothesis-avoidance":["history_available","rejected_history","rejected hypothesis","previously rejected"],
   "reproduce-before-fix":["reproduce","repro","failure","test"],
   "minimal-diff-planner":["patch","fix","change","diff","minimal"],
+  "python-edge-semantics":["python",".py","bool","unicode","hashab","iteration"],
   "regression-risk-map":["regression","invariant","adjacent","compatibility","risk"],
   "rollback-plan-builder":["rollback","revert","restore"],
   "fresh-context-review":["review","final","verify","completion","fresh"],
@@ -63,18 +64,20 @@ function normalizeTaskSpecificPolicy(value){
 }
 function keywordScore(skill,task){const q=String(task||"").toLowerCase();let score=0;for(const word of KEYWORDS[skill.id]||[])if(q.includes(word))score+=20;return score;}
 function activeRoleSkills(role){return getRoleSkills(role).filter(s=>ACTIVE_SKILL_STATUS.has(s.status));}
+function pythonSourceTask(task){return /(?:\bpython\b|\.py(?:\b|["\x27\\/])|\bpyproject\.toml\b)/i.test(String(task||""));}
+function taskEligibleSkills(role,task){return activeRoleSkills(role).filter(s=>s.id!=="python-edge-semantics"||(["patch_engineer","local_reviewer"].includes(role)&&pythonSourceTask(task)));}
 function assertMaxSkills(maxSkills){if(maxSkills===null||maxSkills===undefined)return;if(!Number.isInteger(maxSkills)||maxSkills<1||maxSkills>8)throw new Error("INVOCATION_MAX_SKILLS_INVALID");}
 function rejectedHistoryAvailable(role){if(role!=="diagnoser")return false;try{return currentRejectedHistoryProvider().read({},[]).count>0;}catch{return false;}}
 function ensureRejectedHistorySkill(role,selected,ranked,limit){if(role!=="diagnoser"||!rejectedHistoryAvailable(role))return selected;const rejected=ranked.find(skill=>skill.id==="rejected-hypothesis-avoidance");if(!rejected||selected.some(skill=>skill.id===rejected.id))return selected;if(selected.length<limit)return[...selected,rejected];const out=[...selected],crossIndex=out.findIndex(skill=>skill.id==="cross-refutation"),replaceIndex=crossIndex>=0?crossIndex:out.length-1;if(replaceIndex<0)return[rejected];out[replaceIndex]=rejected;return out;}
 function selectSkills(role,{task="",maxSkills=null}={}){
-  assertMaxSkills(maxSkills);const contract=getRoleContract(role),candidates=activeRoleSkills(role),byId=new Map(candidates.map(s=>[s.id,s])),limit=Math.min(maxSkills??candidates.length,candidates.length),selected=[];
+  assertMaxSkills(maxSkills);const contract=getRoleContract(role),candidates=taskEligibleSkills(role,task),byId=new Map(candidates.map(s=>[s.id,s])),limit=Math.min(maxSkills??candidates.length,candidates.length),selected=[];
   for(const id of FOUNDATION_SKILLS[role]||[]){const skill=byId.get(id);if(skill&&!selected.includes(skill)&&selected.length<limit)selected.push(skill);}
   const ranked=candidates.map(skill=>({skill,score:keywordScore(skill,task),preferred:contract.skill_ids.indexOf(skill.id)})).filter(item=>item.score>0).sort((a,b)=>b.score-a.score||a.preferred-b.preferred||a.skill.id.localeCompare(b.skill.id));
   for(const item of ranked){if(selected.length>=limit)break;if(!selected.some(s=>s.id===item.skill.id))selected.push(item.skill);}
   if(!selected.length&&candidates.length)selected.push(candidates[0]);return ensureRejectedHistorySkill(role,selected,candidates,limit);
 }
 function resolveSkills(role,{task="",maxSkills=null,selectedSkillIds=null}={}){
-  assertMaxSkills(maxSkills);const active=activeRoleSkills(role),limit=Math.min(maxSkills??active.length,active.length);
+  assertMaxSkills(maxSkills);const active=taskEligibleSkills(role,task),limit=Math.min(maxSkills??active.length,active.length);
   if(selectedSkillIds===null||selectedSkillIds===undefined)return{skills:selectSkills(role,{task,maxSkills:limit}),mode:"TASK_JIT"};
   if(!Array.isArray(selectedSkillIds)||selectedSkillIds.length<1||selectedSkillIds.length>limit)throw new Error(`INVOCATION_FIXED_SKILL_COUNT_INVALID:${role}`);
   const ids=selectedSkillIds.map(String);if(new Set(ids).size!==ids.length)throw new Error(`INVOCATION_FIXED_SKILL_DUPLICATE:${role}`);const allowed=new Map(active.map(s=>[s.id,s]));
@@ -91,4 +94,4 @@ function compileInvocation(role,{task="",extraSystem="",maxSkills=null,selectedS
 function assertInvocationCompiler(){
   for(const role of ["code_scout","causal_scout","researcher","diagnoser","patch_engineer","local_reviewer"]){const x=compileInvocation(role,{task:"evidence runtime regression",extraSystem:"Return one compact JSON object under 400 tokens. Use at most 3 items per array."}),available=activeRoleSkills(role).length;if(!x.system.includes(`ROLE=${role}`))throw new Error(`INVOCATION_ROLE_MISSING:${role}`);if(x.selected_skill_ids.length<1||x.selected_skill_ids.length>available)throw new Error(`INVOCATION_SKILL_COUNT_INVALID:${role}`);if(!x.system.includes("model output is not evidence"))throw new Error(`INVOCATION_EVIDENCE_POLICY_MISSING:${role}`);if(!x.system.includes("Never omit material information merely to save tokens"))throw new Error(`INVOCATION_COMPLETENESS_POLICY_MISSING:${role}`);if(/under 400 tokens|at most 3 items per array/i.test(x.system))throw new Error(`INVOCATION_BREVITY_LIMIT_SURVIVED:${role}`);if(role==="code_scout"&&!x.system.includes("OUTPUT_FIELDS=relevant_files,call_path,contract_mismatch,excluded_files,unknowns"))throw new Error("INVOCATION_CODE_SCOUT_OUTPUT_PROTOCOL_MISSING");if(role==="diagnoser"&&!x.system.includes("OUTPUT_FIELDS=diagnosis_status,hypotheses,confirmed_root_cause,unsupported_claims"))throw new Error("INVOCATION_DIAGNOSER_OUTPUT_PROTOCOL_MISSING");if(role==="patch_engineer"&&!x.system.includes("OUTPUT_FIELDS=operations,summary"))throw new Error("INVOCATION_PATCH_ENGINEER_OUTPUT_PROTOCOL_MISSING");if(role==="patch_engineer"&&!x.system.includes('create={type:"create",path,content}'))throw new Error("INVOCATION_PATCH_ENGINEER_OPERATION_PROTOCOL_MISSING");if(role==="local_reviewer"&&!x.system.includes("OUTPUT_FIELDS=verdict,decision,claims"))throw new Error("INVOCATION_LOCAL_REVIEWER_OUTPUT_PROTOCOL_MISSING");if(role==="local_reviewer"&&!x.system.includes("type field exactly equal to one of FACT, INFERENCE, HYPOTHESIS, UNKNOWN, REJECTED"))throw new Error("INVOCATION_LOCAL_REVIEWER_CLAIM_TYPE_PROTOCOL_MISSING");const fixed=compileInvocation(role,{task:"untrusted observations",selectedSkillIds:[x.selected_skill_ids[0]]});if(fixed.skill_selection_mode!=="RUNTIME_FIXED"||fixed.selected_skill_ids[0]!==x.selected_skill_ids[0])throw new Error(`INVOCATION_FIXED_SKILL_FAILED:${role}`);}return true;
 }
-module.exports={KEYWORDS,FOUNDATION_SKILLS,ROLE_OUTPUT_PROTOCOL,BREVITY_PATTERNS,normalizeTaskSpecificPolicy,keywordScore,rejectedHistoryAvailable,ensureRejectedHistorySkill,selectSkills,resolveSkills,compileInvocation,assertInvocationCompiler};
+module.exports={KEYWORDS,FOUNDATION_SKILLS,ROLE_OUTPUT_PROTOCOL,pythonSourceTask,taskEligibleSkills,BREVITY_PATTERNS,normalizeTaskSpecificPolicy,keywordScore,rejectedHistoryAvailable,ensureRejectedHistorySkill,selectSkills,resolveSkills,compileInvocation,assertInvocationCompiler};
