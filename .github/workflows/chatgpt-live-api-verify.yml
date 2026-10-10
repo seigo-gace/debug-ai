@@ -92,6 +92,7 @@ jobs:
           echo "INSPECT_HTTP=$code"
           test "$code" = "200"
           jq -r '"ANALYSIS_PRESENT="+((.artifacts.analysis!=null)|tostring), "PATCH_CANDIDATE_PRESENT="+((.artifacts.patch_candidate!=null)|tostring), "DIAGNOSIS_PRESENT="+((.artifacts.analysis.payload.diagnosis!=null)|tostring)' /tmp/inspect.json
+          jq -cr '(.artifacts.execution_failure.payload // {}) | {code:(.code // "NONE"),role:(.role // "UNKNOWN"),timeout_class:(.timeout_class // "NONE"),autonomous_retry_attempt:(.autonomous_retry_attempt // null),attempts:(.attempts // null)} | "LAST_FAILURE_META="+tojson' /tmp/inspect.json
 
       - name: Bounded existing Server Command readback
         shell: bash
