@@ -68,6 +68,12 @@ function canonicalRoleViolations(role,value){
     for(const key of ["relevant_files","call_path","excluded_files","unknowns"])requireField(key,stringArray);
     requireField("contract_mismatch",v=>v===null||(plainObject(v)&&["file","expected","observed"].every(key=>nonBlankString(v[key]))));
   }
+  if(role==="causal_scout"&&Object.prototype.hasOwnProperty.call(value,"candidates")&&!Array.isArray(value.candidates))violations.push("ROLE_FIELD_INVALID:candidates");
+  if(role==="researcher"){
+    for(const key of ["selected_evidence","evidence_refs","rejected_source_refs","contradictions"]){
+      if(Object.prototype.hasOwnProperty.call(value,key)&&!Array.isArray(value[key]))violations.push(`ROLE_FIELD_INVALID:${key}`);
+    }
+  }
   if(role==="diagnoser"){
     requireField("diagnosis_status",v=>DIAGNOSIS_STATUS.has(v));
     requireField("hypotheses",Array.isArray);
