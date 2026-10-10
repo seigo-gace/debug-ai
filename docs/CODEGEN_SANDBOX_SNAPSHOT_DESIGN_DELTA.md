@@ -272,6 +272,29 @@ approval states remain candidate-only; neither FAIL nor PASS grants apply or
 Strict Completion. Fresh failing-check-driven preapproval re-fix remains a next
 CU; this change does not automatically consume new model calls or approve a fix.
 
+### 2026-10-10 P1-C bounded preapproval refix wiring — current source delta
+
+After the original candidate is checked in the unchanged isolated Sandbox,
+an actual FINAL_INVALID with at least one executed failing check may trigger
+**one** local-model preapproval re-diagnosis and Patch Engineer candidate
+regeneration, but only where existing persistent RuntimeEvidence read/write and
+PatchService are available. Existing failed-check records become registered
+Evidence and are supplied with the *same* immutable Patch Packet and source
+precondition boundary. The fresh candidate must differ in canonical candidate
+hash; a second isolated check is recorded and never fabricated as passing.
+Each run persists a preapproval_refix_attempt record before local role calls
+and at most one preapproval_refix_result. Subsequent entry to the same Run
+cannot consume another preapproval attempt. Source/CI may qualify the contract
+but are not proof of local inference success or true bug repair.
+
+This preapproval retry never applies a candidate or changes approval authority.
+A still-invalid second candidate remains explicitly FINAL_INVALID and must not
+be mistaken for semantic completion. The existing WAITING_APPROVAL state
+continues to mean candidate-only; it never means candidate verification passed.
+The post-approval bounded refix path remains separate. No Scout, AI Core
+transport, scheduler, provider quota, new model or parallel project is changed.
+
+
 Dependency admission is deliberately explicit: declared dependencies/dev/optional/
 peer dependencies return NOT_CONFIGURED / CANDIDATE_DEPENDENCIES_NOT_QUALIFIED.
 Candidate jobs do not receive Sidecar-global node_modules or NODE_PATH. No npm

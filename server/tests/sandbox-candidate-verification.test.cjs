@@ -135,3 +135,17 @@ test("preapproval failed candidate receives one evidence-bound retry without tou
  assert.ok(records.some(x=>x.type==="preapproval_refix_result"));
  assert.equal(fs.readFileSync(path.join(f.repo,"value.js"),"utf8"),"module.exports=1;\n");
 });
+
+test("preapproval bounded retry with another failed check never reports verified candidate",async t=>{
+ const f=fixture(t),{createWorkflow}=require("../workflow.js"),{PatchService}=require("../patch-service.js"),written=[];
+ const service=new PatchService({runtimeRoot:path.join(f.root,"runtime")});let checks=0,roleCalls=[];
+ const evidence={write(_r,type,payload){written.push({type,payload});},list(_r,{types}={}){return written.filter(x=>!types||types.includes(x.type)).map(x=>({type:x.type,payload:x.payload}));}};
+ const workflow=createWorkflow({patchService:service,runtimeEvidence:evidence,sandboxVerification:{async collectCandidate(c){checks++;return{status:"FINAL_INVALID",checks:[{kind:"deterministic_sandbox_check",name:"sandbox:test",status:"FAIL",executed:true,configured:true,patch_candidate_id:c.id,patch_candidate_hash:c.candidate_hash}]};}},aiCore:{async call(role){roleCalls.push(role);if(role==="diagnoser")return{content:JSON.stringify({hypothesis:"another test failure",claims:[]})};return{content:JSON.stringify({operations:[{type:"replace",path:"value.js",old:"module.exports=1;",new:roleCalls.length===1?"module.exports=2;":"module.exports=3;"}]})};}}});
+ const out=await workflow.patchCandidate({runId:"run_no_false_pass",analysis:{diagnosis:{public_statement:"value"},external_hypothesis_review:{json:{verdict:"PASS"}},evidence_registry:{evidence_ids:[]}},repo:f.repo,selectedPaths:["value.js"],task:"fix value"});
+ assert.equal(checks,2);assert.deepEqual(roleCalls,["patch_engineer","diagnoser","patch_engineer"]);
+ assert.equal(out.candidate_verification.status,"FINAL_INVALID");
+ assert.equal(out.preapproval_refix.result_status,"FINAL_INVALID");
+ assert.ok(written.some(x=>x.type==="preapproval_refix_attempt"));
+ assert.equal(written.filter(x=>x.type==="preapproval_refix_attempt").length,1);
+ assert.equal(fs.readFileSync(path.join(f.repo,"value.js"),"utf8"),"module.exports=1;\n");
+});
