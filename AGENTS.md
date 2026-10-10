@@ -6,7 +6,7 @@ For this Codex repository, use current server-core Manifest → **SERVER_AI Rule
 
 **Branch is not forbidden or numerically capped.** Check current/reverted/abandoned same-purpose CU, PR, branch, worktree and owner first. Reuse when useful; create a justified new branch, in-parent module/test area or nested worktree for independent tests, parallel work, clean isolation or efficiency. Forbid derivative sibling Projects in the top-level server Project list, not useful branches. Keep branch/HEAD, owner, split reason and cleanup owner; verify dependencies after merge/rejection before pruning. Never delete other owners' work.
 
-When one Host/Codex/Provider/branch operation is denied, block only that operation. Replan and **execute** other authorized Source/offline tests or give an exact owner handoff. Never treat CI as deploy, an unsent instruction as handoff, or a rejected Master instruction as pending.
+When one Host/Codex/Provider/branch operation is denied, block only that operation. Replan and **execute** other authorized Source/offline tests or give an exact owner handoff. Never treat CI as deploy, an unsent instruction as handoff, or a rejected Master instruction as pending. Older product handoff wording about `one CU/report/stop per invocation` is **historical**, not a standing command to terminate an available authorized session; obey only an actual current invocation limit or explicit Master pause. Never create another background Codex launch to simulate continuity.
 
 ## CURRENT Master instruction — DebugAI PRODUCT Codex (2026-10-09)
 
