@@ -154,8 +154,9 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
     runtimeEvidence?.write(runId,"execution_failure",failure);
     Promise.resolve(logRuntime({run_id:runId,severity:"error",kind:"execution_failure",...failure})).catch(()=>console.error("DebugAI failure log delivery failed"));
     if(!authority?.durableEnabled?.())return;
-    const closed=failClosedRecoveryError(error),loaded=authority.loadDurable(runId),cursor=loaded.manifest.workflow_cursor,durable=error?.durable||null,made=makeDurableWorkflowStage({runId,key:"last_execution_failure",payload:failure});
-    await authority.commitDurable({runId,manifestPatch:{job:{status:closed?"BLOCKED":"RETRY_WAIT"},workflow_input_refs:{last_execution_failure:made.path},workflow_cursor:{...cursor,step_phase:closed?StepPhase.BLOCKED:StepPhase.PENDING,active_role_execution_id:durable?.role_execution_id||cursor.active_role_execution_id}},runStatePatch:{job_status:closed?"BLOCKED":"RETRY_WAIT"},immutableRecords:[{path:made.path,record:made.record}]});
+    const closed=failClosedRecoveryError(error),loaded=authority.loadDurable(runId),cursor=loaded.manifest.workflow_cursor,failureStep=meta.role==="code_scout"?WorkflowStepId.CODE_SCOUT:meta.role==="causal_scout"?WorkflowStepId.CAUSAL_SCOUT:cursor.step_id,durable=error?.durable||null,made=makeDurableWorkflowStage({runId,key:"last_execution_failure",payload:failure});
+    runtimeEvidence?.write(runId,"workflow_progress",{step:failureStep,phase:closed?StepPhase.BLOCKED:StepPhase.PENDING});
+    await authority.commitDurable({runId,manifestPatch:{job:{status:closed?"BLOCKED":"RETRY_WAIT"},workflow_input_refs:{last_execution_failure:made.path},workflow_cursor:{...cursor,step_id:failureStep,step_phase:closed?StepPhase.BLOCKED:StepPhase.PENDING,active_role_execution_id:durable?.role_execution_id||cursor.active_role_execution_id}},runStatePatch:{job_status:closed?"BLOCKED":"RETRY_WAIT"},immutableRecords:[{path:made.path,record:made.record}]});
   }
   async function executeAnalysis(prepared){
     const {runId,resuming,targetRepo,input,inputRecord,inputManifestRef}=prepared,{rawRequest,failure,localEvidence}=input;
@@ -185,6 +186,8 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
       runtimeEvidence?.write(runId,"failure",failure);await logRuntime({run_id:runId,severity:"error",kind:"failure",failure});if(deterministicChecks.length)await logRuntime({run_id:runId,severity:deterministicChecks.some(x=>x.status==="FAIL")?"warn":"info",kind:"deterministic_verification",status:deterministicVerification.status,check_count:deterministicChecks.length,failed:deterministicChecks.filter(x=>x.status==="FAIL").length});
       const query=String(failure?.message||failure?.summary||rawRequest||"debug failure");
       await logProgress(runId,"SCOUTS",StepPhase.RUNNING);
+      let scoutCommitTail=Promise.resolve();
+      function commitScout(operation){const next=scoutCommitTail.then(operation);scoutCommitTail=next.catch(()=>{});return next;}
       async function scout(role,system){
         const step=role==="code_scout"?WorkflowStepId.CODE_SCOUT:WorkflowStepId.CAUSAL_SCOUT;
         const user=JSON.stringify({task:rawRequest,failure,evidence:evidencePromptView(localRecords),initial_scope:initialScope,dap_hint:dapHint});
@@ -193,22 +196,25 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
           const out=saved.payload.result;parseAndValidateRoleOutput(role,JSON.stringify(out.validated_output),{availableEvidenceIds:mergeEvidenceIds(localIds,out.tool_loop?.evidence_ids||[]),strictEvidenceRefs:true});toolEvidenceRecords(out);
           runtimeEvidence?.write(runId,"stage_reuse",{stage:role,saved_at:saved.payload.saved_at,new_execution:false});return out;
         }
-        if(durable)await setCursor(runId,step,StepPhase.RUNNING,{stepInputRef:inputManifestRef});
+        if(durable)await commitScout(()=>setCursor(runId,step,StepPhase.RUNNING,{stepInputRef:inputManifestRef}));
         await logProgress(runId,step,StepPhase.RUNNING);
         const scoutStartedAt=Date.now();
         try{
           const out=await callReadOnlyRole(role,{system:[system,hintProtocol,"Use initial scoped source and reproduction evidence first. Request additional search only to resolve an explicit missing fact or obtain counter-evidence. PARTIAL source scope is not exhaustive coverage; retain UNKNOWNs and falsification checks."].filter(Boolean).join("\n"),user},toolRuntime,{baseEvidenceIds:localIds,runId});
           const output=roleOutput(out,role);toolEvidenceRecords(out);
           const reusable=(out.tool_loop?.observations||[]).every(observation=>(observation.results||[]).every(item=>["source.read","source.search","symbol.lookup","dependency.map","test.inventory"].includes(item.request?.tool)&&item.result?.status==="OK"));
-          if(durable)await saveStage(runId,role,{reuse_binding:scoutBinding,saved_at:Date.now(),reusable,result:{validated_output:output,tool_loop:out.tool_loop||null}},step);
+          if(durable)await commitScout(()=>saveStage(runId,role,{reuse_binding:scoutBinding,saved_at:Date.now(),reusable,result:{validated_output:output,tool_loop:out.tool_loop||null}},step));
           await logProgress(runId,step,StepPhase.DONE);return out;
         }catch(error){const invocation=invocationStatus(runId).find(item=>item.role===role&&item.started_at>=scoutStartedAt);error.meta={...error.meta,role,model:error.meta?.model||invocation?.model||null,invocation_id:error.meta?.invocation_id||invocation?.invocation_id||null};throw error;}
       }
-      // The adapter already serializes model dispatch. Commit each finished
-      // Scout before starting the next; do not race durable generations or lose
-      // one successful Scout when the other rejects Promise.all.
+      // Preserve parallel Scout orchestration and the adapter's global single
+      // dispatch slot. Serialize only existing durable commits; settle both
+      // Scouts before recording failure so successful work is not lost and no
+      // late callback can restore RUNNING after a terminal retry decision.
       const localFirst=initialScope.mode==="LOCAL_REPRODUCTION";
-      const combined=await Promise.all([(async()=>[await scout("code_scout","Code Scout. Return one compact JSON object under 400 tokens. Use at most 3 items per array and concise strings. No prose outside JSON."),await scout("causal_scout",CAUSAL_SCOUT_OUTPUT_POLICY)])(),localFirst?Promise.resolve([]):tgserver?tgserver.search(query):Promise.resolve([]),localFirst?Promise.resolve({official:[],evidenceGap:false,evidenceStatus:"NOT_REQUESTED_LOCAL_REPRODUCTION"}):getOfficialEvidence(query)]);
+      const settled=await Promise.allSettled([scout("code_scout","Code Scout. Return one compact JSON object under 400 tokens. Use at most 3 items per array and concise strings. No prose outside JSON."),scout("causal_scout",CAUSAL_SCOUT_OUTPUT_POLICY),localFirst?Promise.resolve([]):tgserver?tgserver.search(query):Promise.resolve([]),localFirst?Promise.resolve({official:[],evidenceGap:false,evidenceStatus:"NOT_REQUESTED_LOCAL_REPRODUCTION"}):getOfficialEvidence(query)]);
+      const rejected=settled.find(item=>item.status==="rejected");if(rejected)throw rejected.reason;
+      const combined=[[settled[0].value,settled[1].value],settled[2].value,settled[3].value];
       scouts=combined[0];await logProgress(runId,"SCOUTS",StepPhase.DONE);const knownKnowledge=combined[1],evidenceResult=combined[2];
       const scoutJson=[roleOutput(scouts[0],"code_scout"),roleOutput(scouts[1],"causal_scout")],scoutToolEvidence=[...toolEvidenceRecords(scouts[0]),...toolEvidenceRecords(scouts[1])],official=evidenceResult.official,evidenceGap=evidenceResult.evidenceGap,evidenceStatus=evidenceResult.evidenceStatus,knowledgeRecords=registerEvidenceList("INTERNAL_KB",knownKnowledge),officialRecords=registerEvidenceList("OFFICIAL_EXTERNAL",official),researchBase=mergeEvidenceIds(localIds,evidenceIds(knowledgeRecords),evidenceIds(officialRecords),scoutToolEvidence.map(x=>x.evidence_id));
       context={reuse_binding:binding,saved_at:Date.now(),initial_scope:initialScope,repo_snapshot_id:durable?snapshotRepo(targetRepo):null,deterministic_verification:deterministicVerification,deterministic_checks:deterministicChecks,dap_hint:dapHint,local_records:localRecords,local_ids:localIds,query,scout_json:scoutJson,scout_tool_evidence:scoutToolEvidence,scout_tool_audit:{code_scout:toolAudit(scouts[0]),causal_scout:toolAudit(scouts[1])},known_knowledge:knownKnowledge,knowledge_records:knowledgeRecords,official,evidence_gap:evidenceGap,evidence_status:evidenceStatus,official_records:officialRecords,research_base:researchBase};

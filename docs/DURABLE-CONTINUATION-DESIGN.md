@@ -1024,10 +1024,13 @@ model, Work Unit definition, Evidence binding or final gate is replaced.
 
 PR82 generalized six-role continuation was reverted at `1856c95…`; do not resurrect
 it. Keep specialized Researcher A/B/C/D/E/checkpoints. Save each complete Scout
-through existing immutable Stage records before starting the next Scout. This
-orders the two Scouts on the already serialized adapter, preserves global
-single-flight and avoids concurrent durable generation commits. It does not claim
-measured concurrency or latency improvement.
+through existing immutable Stage records independently. Preserve parallel Scout
+orchestration and globally serialized adapter dispatch. Only durable commit
+read/evolve/write operations are ordered within the owned Scout execution; no
+second persistent queue or state authority is introduced. Settle both Scouts
+before marking failure, preserving a healthy peer's result and preventing late
+Stage commits from overwriting RETRY_WAIT. Failure cursor identifies the rejected
+Scout. This does not claim measured concurrency or latency improvement.
 
 Reuse requires the existing revision plus full existing source-tree hashing
 (including untracked test/package bytes), persisted input digest, current role/tool

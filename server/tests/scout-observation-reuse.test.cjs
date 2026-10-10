@@ -34,7 +34,7 @@ async function interrupt(f){const {workflow,authority}=f.make();await assert.rej
 
 test("completed Scout and failing reproduction survive restart; only failed Scout reruns",async t=>{
   const f=fixture(t),first=await interrupt(f),status=first.workflow.status(first.runId);
-  assert.equal(status.durable.workflow_cursor.step_id,"CAUSAL_SCOUT");assert.equal(status.durable.last_execution_failure.role,"causal_scout");assert.equal(status.durable.last_execution_failure.timeout_class,"DEADLINE_ABORT");assert.equal(status.durable.last_execution_failure.attempts,1);
+  assert.equal(status.durable.workflow_cursor.step_id,"CAUSAL_SCOUT");assert.equal(first.workflow.inspect(first.runId).artifacts.workflow_progress.payload.step,"CAUSAL_SCOUT");assert.equal(status.durable.last_execution_failure.role,"causal_scout");assert.equal(status.durable.last_execution_failure.timeout_class,"DEADLINE_ABORT");assert.equal(status.durable.last_execution_failure.attempts,1);
   assert.equal(f.calls.code_scout,1);assert.equal(f.calls.causal_scout,1);assert.equal(f.reproductions(),1);assert.deepEqual(f.searches,{official:0,knowledge:0});
   const prompt=JSON.parse(f.prompts.find(x=>x.role==="code_scout").input.user);assert.equal(prompt.initial_scope.mode,"LOCAL_REPRODUCTION");assert.equal(prompt.initial_scope.coverage,"PARTIAL");assert.ok(prompt.evidence.some(x=>x.payload?.kind==="initial_source"&&x.payload.value.path==="count-active.test.cjs"));
   f.fix();const fresh=f.make();assert.equal(fresh.workflow.status(first.runId).durable.last_execution_error,"AI_CORE_TIMEOUT");
