@@ -36,27 +36,38 @@ master_verify_mapping() {
       ($e.server_project_path|ltrimstr($root+"/")|test("^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$")|not) or
       $e.repo!="/workspace/debug-ai" then "MASTER_MAPPING_INVALID"
     elif ($e.allowed_branches|type)!="array" or ($e.allowed_branches|length)<1 or any($e.allowed_branches[]; type!="string" or (test("^[A-Za-z0-9._/-]{1,160}$")|not) or startswith("-") or contains("..") or contains("@{")) then "MASTER_BRANCH_POLICY_INVALID"
-    elif $e.allowed_operations!=["deploy"] or ($e.allowed_scopes|type)!="array" or ($e.allowed_scopes|length)<1 or any($e.allowed_scopes[]; type!="string" or (test("^[a-z][a-z0-9_.-]{1,80}$")|not)) then "MASTER_OPERATION_POLICY_INVALID"
+    elif ($e.allowed_operations!=["deploy"] and $e.allowed_operations!=["reflect"]) or
+      ($e.allowed_operations==["reflect"] and $e.allowed_scopes!=["gace.source.reflect"]) or
+      ($e.allowed_scopes|type)!="array" or ($e.allowed_scopes|length)<1 or any($e.allowed_scopes[]; type!="string" or (test("^[a-z][a-z0-9_.-]{1,80}$")|not)) then "MASTER_OPERATION_POLICY_INVALID"
     elif $e.effects!={destructive:false,persistent_data:false,secrets:false,provider_model:false,public_exposure:false} or $e.allow_production!=true then "MASTER_PROTECTED_EFFECT_FORBIDDEN"
     elif ($e.enabled|type)!="boolean" or ($e.revoked|type)!="boolean" or $e.request_identity!="debugai.authenticated-control" or ($e.audit_identity|type)!="string" or ($e.audit_identity|length)<1 then "MASTER_REGISTRY_ENTRY_INVALID"
     elif ($e.allowed_paths|type)!="array" or ($e.allowed_paths|length)<1 or any($e.allowed_paths[]; type!="string" or length<1 or startswith("/") or contains("..") or contains("\\") or contains("*") or test("(^|/)(\\.git|\\.env|compose[^/]*|Dockerfile[^/]*|package[^/]*|[^/]*[Ss]ecret[^/]*)(/|$)")) then "MASTER_PATH_POLICY_INVALID"
-    elif ($e.runtime_target.id|type)!="string" or ($e.runtime_target.id|test("^[a-z][a-z0-9_.-]{1,80}$")|not) or $e.runtime_target.compose_file!="compose.yaml" or
-      ($e.runtime_target.compose_digest|type)!="string" or ($e.runtime_target.compose_digest|test("^[0-9a-f]{64}$")|not) or
-      ($e.runtime_target.services|type)!="array" or ($e.runtime_target.services|length)<1 or ($e.runtime_target.services|length)>8 or any($e.runtime_target.services[];type!="string" or (test("^[a-z][a-z0-9_-]{0,63}$")|not)) or
-      ($e.runtime_target.services|index($e.runtime_target.health_service))==null or
-      ($e.runtime_target.health_url|type)!="string" or ($e.runtime_target.health_url|test("^http://127\\.0\\.0\\.1:[0-9]{2,5}/health$")|not) then "MASTER_RUNTIME_POLICY_INVALID"
+    elif ($e.runtime_target.id|type)!="string" or ($e.runtime_target.id|test("^[a-z][a-z0-9_.-]{1,80}$")|not) or
+      (if $e.allowed_operations==["reflect"] then
+        (($e.runtime_target|keys)!=["id","kind"] or $e.runtime_target.kind!="source_only")
+       else
+        ($e.runtime_target.compose_file!="compose.yaml" or
+         ($e.runtime_target.compose_digest|type)!="string" or ($e.runtime_target.compose_digest|test("^[0-9a-f]{64}$")|not) or
+         ($e.runtime_target.services|type)!="array" or ($e.runtime_target.services|length)<1 or ($e.runtime_target.services|length)>8 or any($e.runtime_target.services[];type!="string" or (test("^[a-z][a-z0-9_-]{0,63}$")|not)) or
+         ($e.runtime_target.services|index($e.runtime_target.health_service))==null or
+         ($e.runtime_target.health_url|type)!="string" or ($e.runtime_target.health_url|test("^http://127\\.0\\.0\\.1:[0-9]{2,5}/health$")|not))
+       end) then "MASTER_RUNTIME_POLICY_INVALID"
     else "PASS" end' "$entry" 2>/dev/null)" || fail MASTER_REGISTRY_INVALID || return 1
   [ "$error" = PASS ] || fail "$error" || return 1
   path="$("$JQ_BIN" -r '.server_project_path' "$entry")"
   [ -d "$path/.git" ] && [ ! -L "$path" ] && [ "$(realpath -- "$path")" = "$path" ] || fail MASTER_SERVER_MAPPING_NOT_VERIFIED || return 1
   remote="$(cd "$path" && run_timed 30s "$GIT_BIN" remote get-url origin 2>/dev/null)" || fail MASTER_SERVER_MAPPING_NOT_VERIFIED || return 1
   [ "$remote" = "$("$JQ_BIN" -r '.remote' "$entry")" ] || fail MASTER_SERVER_MAPPING_MISMATCH || return 1
-  compose="$path/compose.yaml"
-  [ -f "$compose" ] && [ ! -L "$compose" ] || fail MASTER_RUNTIME_MAPPING_NOT_VERIFIED || return 1
-  digest="$(delegation_digest "$compose")"
-  [ "$digest" = "$("$JQ_BIN" -r '.runtime_target.compose_digest' "$entry")" ] || fail MASTER_RUNTIME_MAPPING_MISMATCH || return 1
-  services="$(cd "$path" && run_timed 30s "$DOCKER_BIN" compose config --services 2>/dev/null)" || fail MASTER_RUNTIME_MAPPING_NOT_VERIFIED || return 1
-  "$JQ_BIN" -e --arg services "$services" 'all(.runtime_target.services[]; . as $s | ($services|split("\n")|index($s))!=null)' "$entry" >/dev/null || fail MASTER_RUNTIME_SERVICES_MISMATCH || return 1
+  # Registered source-only targets must not be forced through Docker Compose.
+  # The same signed GitHub/Project/Host-root checks still apply below.
+  if "$JQ_BIN" -e '.allowed_operations==["deploy"]' "$entry" >/dev/null; then
+    compose="$path/compose.yaml"
+    [ -f "$compose" ] && [ ! -L "$compose" ] || fail MASTER_RUNTIME_MAPPING_NOT_VERIFIED || return 1
+    digest="$(delegation_digest "$compose")"
+    [ "$digest" = "$("$JQ_BIN" -r '.runtime_target.compose_digest' "$entry")" ] || fail MASTER_RUNTIME_MAPPING_MISMATCH || return 1
+    services="$(cd "$path" && run_timed 30s "$DOCKER_BIN" compose config --services 2>/dev/null)" || fail MASTER_RUNTIME_MAPPING_NOT_VERIFIED || return 1
+    "$JQ_BIN" -e --arg services "$services" 'all(.runtime_target.services[]; . as $s | ($services|split("\n")|index($s))!=null)' "$entry" >/dev/null || fail MASTER_RUNTIME_SERVICES_MISMATCH || return 1
+  fi
   principal="$(master_gh api user --jq .login)" || fail MASTER_GITHUB_UNAVAILABLE || return 1
   [ "$principal" = "$("$JQ_BIN" -r '.master_principal' "$entry")" ] || fail MASTER_PRINCIPAL_MISMATCH || return 1
   metadata="$(master_gh api "repos/$("$JQ_BIN" -r '.repository' "$entry")")" || fail MASTER_REPOSITORY_NOT_VERIFIED || return 1
@@ -101,7 +112,13 @@ master_resolve_target() {
   REPO="$("$JQ_BIN" -r '.server_project_path' "$delegation_policy")"
   REMOTE="$("$JQ_BIN" -r '.remote' "$delegation_policy")"
   BRANCH="$("$JQ_BIN" -r '.branch' "$1")"
-  mapfile -t master_services < <("$JQ_BIN" -r '.runtime_target.services[]' "$delegation_policy")
-  master_health_service="$("$JQ_BIN" -r '.runtime_target.health_service' "$delegation_policy")"
-  master_health_url="$("$JQ_BIN" -r '.runtime_target.health_url' "$delegation_policy")"
+  if "$JQ_BIN" -e '.allowed_operations==["deploy"]' "$delegation_policy" >/dev/null; then
+    mapfile -t master_services < <("$JQ_BIN" -r '.runtime_target.services[]' "$delegation_policy")
+    master_health_service="$("$JQ_BIN" -r '.runtime_target.health_service' "$delegation_policy")"
+    master_health_url="$("$JQ_BIN" -r '.runtime_target.health_url' "$delegation_policy")"
+  else
+    master_services=()
+    master_health_service=""
+    master_health_url=""
+  fi
 }
