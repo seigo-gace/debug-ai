@@ -7,7 +7,7 @@ const {RunAuthority}=require("../run-authority.js");
 const {RepoPolicy}=require("../repo-policy.js");
 const {createWorkflow}=require("../workflow.js");
 const {createRunObservationProvider}=require("../control/run-observation-provider.js");
-const {observeAiCalls}=require("../control/run-observation-context.js");
+const {observeAiCalls,observeToolCalls}=require("../control/run-observation-context.js");
 const {initialInvestigationEvidence}=require("../control/read-only-tool-runtime.js");
 const {localStageBinding,reusableLocalStage,LOCAL_STAGE_MAX_AGE_MS}=require("../control/durable-workflow-stage.js");
 class FakeDurableIo{
@@ -101,3 +101,16 @@ test("queue timeout observation records zero dispatches for the waiting role",as
 test("existing current-run trace exposes bounded failure and invocation records",async t=>{
   const f=fixture(t),first=await interrupt(f),provider=createRunObservationProvider({runId:first.runId,authority:first.authority,runtimeEvidence:f.store});const trace=provider.readTrace({types:["ai_invocation","execution_failure"],limit:24,max_chars_per_record:2000});assert.ok(trace.records.some(x=>x.type==="execution_failure"&&x.excerpt.includes("causal_scout")));assert.doesNotMatch(JSON.stringify(trace),/private-secret/);assert.throws(()=>provider.readTrace({run_id:"another_run"}),/RUN_ID_ARGUMENT_FORBIDDEN/);
 });
+
+ test("Scout tool wait remains visible without exporting arguments or resetting progress",async t=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),"scout-tool-observe-"));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+  const store=new RuntimeEvidenceStore(root);let finish;const raw={execute:()=>new Promise(resolve=>{finish=resolve;})};
+  const observed=observeToolCalls({toolRuntime:raw,runId:"run_tool_wait",runtimeEvidence:store,observationIntervalMs:5});
+  const pending=observed.execute({role:"code_scout",tool:"source.read",arguments:{path:"private-secret"}});
+  await new Promise(resolve=>setTimeout(resolve,20));
+  const records=store.list("run_tool_wait",{types:["tool_invocation"],limit:32});assert.ok(records.length>=2);
+  assert.ok(records.some(x=>x.payload.event_kind==="OBSERVATION"));assert.equal(new Set(records.map(x=>x.payload.last_progress_at)).size,1);
+  assert.equal(records[0].payload.phase,"TOOL_WAIT");assert.equal(records[0].payload.backend_progress,"UNKNOWN");assert.equal(JSON.stringify(records).includes("private-secret"),false);
+  const result={status:"OK",data:{secret:"private-secret"}};finish(result);assert.equal(await pending,result);
+  assert.equal(store.list("run_tool_wait",{types:["tool_invocation"],limit:1})[0].payload.phase,"SUCCEEDED");
+ });

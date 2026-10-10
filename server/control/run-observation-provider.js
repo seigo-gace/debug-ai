@@ -10,7 +10,7 @@ const TRACE_TYPES=Object.freeze([
   "verification",
   "completion_gate",
   "workflow_progress",
-  "ai_invocation",
+  "ai_invocation","tool_invocation",
   "execution_failure",
   "stage_reuse",
 ]);

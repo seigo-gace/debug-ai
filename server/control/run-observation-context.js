@@ -80,4 +80,27 @@ function observeAiCalls({aiCore,runId,runtimeEvidence,onEvent=null}={}){
   });
 }
 
-module.exports={runIdFromCall,bindCurrentRun,currentRunObservationProvider,wrapAuthorityForRunObservation,observeAiCalls};
+function observeToolCalls({toolRuntime,runId,runtimeEvidence,onEvent=null,observationIntervalMs=60000}={}){
+  if(!toolRuntime||typeof toolRuntime!=="object")return toolRuntime;
+  if(!Number.isInteger(observationIntervalMs)||observationIntervalMs<1||observationIntervalMs>60000)throw new Error("TOOL_OBSERVATION_INTERVAL_INVALID");
+  return new Proxy(toolRuntime,{get(target,property){
+    if(property!=="execute")return Reflect.get(target,property);
+    return async(request)=>{
+      const startedAt=Date.now(),invocationId=`tool_${crypto.randomBytes(12).toString("hex")}`;
+      const role=Object.hasOwn(ROLES,request.role)?request.role:null;
+      const tool=String(request.tool||"");const toolName=/^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$/.test(tool)?tool:null;
+      function persist(phase,eventKind="PROGRESS",failureCode=null){
+        const elapsed=Date.now()-startedAt;
+        const payload={schema:"debugai.tool-invocation/v1",invocation_id:invocationId,role,tool:toolName,phase,event_kind:eventKind,started_at:startedAt,last_progress_at:phase==="TOOL_WAIT"?startedAt:Date.now(),last_observed_at:Date.now(),elapsed_ms:elapsed,backend_progress:"UNKNOWN",failure_code:failureCode,continuation_assessment:phase!=="TOOL_WAIT"?"TERMINAL":elapsed>=120000?"REVIEW_CONTINUATION":elapsed>=60000?"OBSERVE_WAIT":"CONTINUE"};
+        runtimeEvidence?.write(runId,"tool_invocation",payload);
+        if(onEvent)Promise.resolve(onEvent({run_id:runId,kind:"tool_invocation",severity:phase==="FAILED"?"error":"info",...payload})).catch(()=>console.error("DebugAI tool observation log delivery failed"));
+      }
+      persist("TOOL_WAIT");const heartbeat=setInterval(()=>persist("TOOL_WAIT","OBSERVATION"),observationIntervalMs);heartbeat.unref?.();
+      try{const result=await target.execute(request);persist(result?.status==="OK"?"SUCCEEDED":"FAILED");return result;}
+      catch(error){persist("FAILED","PROGRESS","TOOL_EXECUTION_ERROR");throw error;}
+      finally{clearInterval(heartbeat);}
+    };
+  }});
+}
+
+module.exports={observeToolCalls,runIdFromCall,bindCurrentRun,currentRunObservationProvider,wrapAuthorityForRunObservation,observeAiCalls};

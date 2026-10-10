@@ -1097,3 +1097,10 @@ Rollback is an ordinary forward revert of this delta; preserve immutable evidenc
 existing role/checkpoint state and FREE Ledger. Old Stage schemas remain readable;
 missing reuse binding simply declines reuse. No retention, writer fencing, approval
 or quota bypass is introduced.
+
+Scout tool waits use the same Run Evidence/status/trace lane (`tool_invocation`):
+60-second observations distinguish TOOL_WAIT from AI queue/upstream wait, retain
+the original last-progress time, and offer the same advisory continuation assessment.
+Only role/tool identity and elapsed time are retained; tool arguments/results are
+not copied into telemetry. Existing Tool Runtime deadlines and retry decisions stay
+in force. PR92 integration baseline is now `e8ee5c5a775177d9f9638d382ada21272fa252a4`.
