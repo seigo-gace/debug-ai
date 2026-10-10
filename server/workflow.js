@@ -420,6 +420,9 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
     if(!patchService)throw new Error("PATCH_SERVICE_REQUIRED");
     let run=null;if(authority)run=authority.load(runId);
     if(decision!=="approve"){if(authority)authority.transition(run,"BLOCKED");throw new Error("PATCH_APPROVAL_REQUIRED");}
+    // A human approval does not certify a candidate already proven broken in the isolated sandbox.
+    const failedPreapproval=runtimeEvidence?.list?.(runId,{types:["candidate_verification"],limit:128})||[];
+    if(failedPreapproval.some(entry=>{const check=entry.payload||entry;return check.patch_candidate_id===candidateId&&check.patch_candidate_hash===candidateHash&&check.status==="FINAL_INVALID"&&check.checks?.some(c=>c.executed===true&&c.status==="FAIL");}))throw new Error("PREAPPROVAL_FAILED_CANDIDATE_APPLY_DENIED");
     if(authority)run=authority.transition(run,"APPLYING");
     let out;try{out=patchService.apply({candidateId,candidateHash,decision,repo});}catch(e){if(authority){try{authority.transition(run,"BLOCKED");}catch{}}throw e;}
     if(authority)run=authority.transition(run,"RETESTING");

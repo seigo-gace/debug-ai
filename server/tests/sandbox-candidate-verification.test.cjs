@@ -229,3 +229,12 @@ test("real last-element defect refix crosses PatchService and staged Sandbox wit
  assert.ok(records.some(x=>x.type==="preapproval_refix_review"&&x.payload.verdict==="PASS"));
  assert.equal(fs.readFileSync(path.join(repo,"count.js"),"utf8"),broken);
 });
+
+test("approved request cannot apply a preapproval-failed exact candidate identity",async()=>{
+ const {createWorkflow}=require("../workflow.js");let applyCalls=0;
+ const candidateId="patch_"+"a".repeat(24),candidateHash="b".repeat(64),runId="run_failed_preapply";
+ const records=[{type:"candidate_verification",payload:{status:"FINAL_INVALID",patch_candidate_id:candidateId,patch_candidate_hash:candidateHash,checks:[{status:"FAIL",executed:true,name:"sandbox:test"}]}}];
+ const workflow=createWorkflow({patchService:{apply(){applyCalls++;throw Error("APPLY_MUST_NOT_RUN");}},runtimeEvidence:{list(){return records;},write(){}}});
+ await assert.rejects(()=>workflow.approveAndVerify({runId,candidateId,candidateHash,decision:"approve"}),/PREAPPROVAL_FAILED_CANDIDATE_APPLY_DENIED/);
+ assert.equal(applyCalls,0);
+});
