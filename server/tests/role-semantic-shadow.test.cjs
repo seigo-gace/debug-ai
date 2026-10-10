@@ -45,7 +45,7 @@ test("semantic shadow stays outside role object and remains durable-json safe",(
 
 
 test("P0-A role semantics flags invalid causal and researcher collection types without changing shadow default",()=>{
-  for(const payload of [{role:"causal_scout",value:{candidates:42},field:"candidates"},{role:"researcher",value:{selected_evidence:"not-an-array"},field:"selected_evidence"},{role:"researcher",value:{evidence_refs:null},field:"evidence_refs"}]){
+  for(const payload of [{role:"causal_scout",value:{candidates:42},field:"candidates"},{role:"causal_scout",value:{hypotheses:"invalid"},field:"hypotheses"},{role:"researcher",value:{selected_evidence:"not-an-array"},field:"selected_evidence"},{role:"researcher",value:{evidence_refs:null},field:"evidence_refs"}]){
     const semantic=evaluateRoleSemantics(payload.role,payload.value);
     assert.equal(semantic.status,"WARN");
     assert.ok(semantic.violations.includes(`ROLE_FIELD_INVALID:${payload.field}`));
