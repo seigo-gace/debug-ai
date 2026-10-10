@@ -177,7 +177,7 @@ test("real last-element defect candidate remains failing until a repaired candid
  const make=content=>patch.preparePatchCandidate({repo,selectedPaths:["count.js"],task:"Fix last-element count regression without changing boolean semantics",requestHash:"a".repeat(64),stage:"debug",result:{operations:[{type:"replace",path:"count.js",old:broken,new:content}]}});
  const lane=createSandboxVerificationLane({jobRoot:jobs,wait:async({jobId})=>{
    const dir=path.join(jobs,"jobs",jobId),request=JSON.parse(fs.readFileSync(path.join(dir,"request.json"))),staged=path.join(dir,"repo");
-   const args=request.action==="package.test"?["-e","if(require(\"./count.js\").countActive([true])!==1)process.exitCode=1"]:["--check","count.js"];
+   const args=request.action==="package.test"?["-e","const a=require(\"node:assert/strict\"),f=require(\"./count.js\").countActive;a.equal(f([]),0);a.equal(f([true]),1);a.equal(f([false,true]),1);a.equal(f([true,true]),2);a.equal(f([1,true]),1);"]:["--check","count.js"];
    const proc=cp.spawnSync(process.execPath,args,{cwd:staged,encoding:"utf8",timeout:15000});
    if(request.action==="package.test"){
      const required=fs.readFileSync(path.join(staged,"count.js"),"utf8");
