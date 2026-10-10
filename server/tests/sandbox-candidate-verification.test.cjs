@@ -118,3 +118,20 @@ test("candidate package execution never borrows Sidecar-global dependencies",t=>
  }});
  assert.ok(observed);assert.equal(observed.args.includes("--node-modules"),false);assert.equal(observed.env.NODE_PATH,undefined);
 });
+
+test("preapproval failed candidate receives one evidence-bound retry without touching repository",async t=>{
+ const f=fixture(t),{createWorkflow}=require("../workflow.js"),{PatchService}=require("../patch-service.js"),records=[];
+ const service=new PatchService({runtimeRoot:path.join(f.root,"runtime")});
+ let verifies=0;const roles=[];
+ const runtimeEvidence={write(run,type,payload){records.push({type,payload});},list(_run,{types}={}){return records.filter(x=>!types||types.includes(x.type)).map(x=>({payload:x.payload,type:x.type}));}};
+ const workflow=createWorkflow({patchService:service,runtimeEvidence,sandboxVerification:{async collectCandidate(c){verifies++;return{status:verifies===1?"FINAL_INVALID":"FINAL_VALID",checks:[{kind:"deterministic_sandbox_check",name:"sandbox:test",status:verifies===1?"FAIL":"PASS",executed:true,configured:true,patch_candidate_id:c.id,patch_candidate_hash:c.candidate_hash}]};}},aiCore:{async call(role){roles.push(role);if(role==="diagnoser")return{content:JSON.stringify({hypothesis:"incorrect increment branch",claims:[]})};return{content:JSON.stringify({operations:[{type:"replace",path:"value.js",old:"module.exports=1;",new:roles.length===1?"module.exports=2;":"module.exports=1; // repaired"}]})};}}});
+ const result=await workflow.patchCandidate({runId:"run_preapproval",analysis:{diagnosis:{public_statement:"value"},external_hypothesis_review:{json:{verdict:"PASS"}},evidence_registry:{evidence_ids:[]}},repo:f.repo,selectedPaths:["value.js"],task:"fix value"});
+ assert.equal(result.state,"WAITING_APPROVAL");assert.equal(verifies,2);
+ assert.deepEqual(roles,["patch_engineer","diagnoser","patch_engineer"]);
+ assert.equal(result.preapproval_refix.attempt,1);
+ assert.equal(result.candidate_verification.status,"FINAL_VALID");
+ assert.notEqual(result.candidate.id,result.preapproval_refix.previous_candidate_id);
+ assert.ok(records.some(x=>x.type==="preapproval_refix_attempt"));
+ assert.ok(records.some(x=>x.type==="preapproval_refix_result"));
+ assert.equal(fs.readFileSync(path.join(f.repo,"value.js"),"utf8"),"module.exports=1;\n");
+});
