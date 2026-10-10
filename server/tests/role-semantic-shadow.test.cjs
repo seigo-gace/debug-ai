@@ -128,3 +128,21 @@ test("P0-A production role prompts retain causal and researcher benchmark output
     assert.ok(system.includes("UNKNOWN")||role==="causal_scout");
   }
 });
+
+
+test("P0-A benchmark graders never credit coerced collection members",()=>{
+  const causal=require("../control/causal-scout-skill-effect-benchmark.js");
+  const research=require("../control/researcher-skill-effect-benchmark.js");
+  const cc=causal.CASES[0];
+  const validCausal={failure_family:cc.expected.family,causal_chain:[...cc.expected.chain],unsupported_links:[cc.expected.unsupported],alternate_hypotheses:[cc.expected.alternate],confidence:"LOW"};
+  assert.equal(causal.scoreCase(cc,validCausal).checks.chain,true);
+  assert.equal(causal.scoreCase(cc,{...validCausal,causal_chain:[...cc.expected.chain,null]}).checks.chain,false);
+  assert.equal(causal.scoreCase(cc,{...validCausal,unsupported_links:[cc.expected.unsupported,42]}).checks.unsupported,false);
+  assert.equal(causal.scoreCase(cc,{...validCausal,alternate_hypotheses:[cc.expected.alternate,false]}).checks.alternate,false);
+  const rc=research.CASES[0];
+  const validResearch={research_status:rc.expected.status,answer:rc.expected.answer,evidence_refs:[...rc.expected.evidence],rejected_source_refs:[...rc.expected.rejected],contradictions:[...rc.expected.contradictions],bound_version:rc.expected.version};
+  assert.equal(research.scoreCase(rc,validResearch).checks.evidence,true);
+  assert.equal(research.scoreCase(rc,{...validResearch,evidence_refs:[...rc.expected.evidence,42]}).checks.evidence,false);
+  assert.equal(research.scoreCase(rc,{...validResearch,rejected_source_refs:[...rc.expected.rejected,null]}).checks.rejected,false);
+  assert.equal(research.scoreCase(rc,{...validResearch,contradictions:[...rc.expected.contradictions,{}]}).checks.context,false);
+});
