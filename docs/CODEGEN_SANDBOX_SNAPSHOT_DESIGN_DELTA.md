@@ -339,6 +339,26 @@ Rollback is a normal revert of this CU; no stored PatchCandidate hashes or appro
 receipts are reinterpreted. Source/CI qualification does not qualify live Runtime,
 50/60 semantic improvement, large trees, archive support or Strict Completion.
 
+### 2026-10-10 P1-B candidate syntax preflight — narrowly scoped source delta
+
+The existing Sandbox already admits `node.check`; this delta connects it to
+changed `.js/.cjs/.mjs` files in the previously qualified zero-dependency
+Node package-check candidate lane before configured package scripts run.
+Deleted files and non-JS files do not receive the check. Candidate newly
+created files are not required to exist in BASELINE: they are required to
+exist in the isolated, bound CANDIDATE after staging. All actions retain the
+same BASELINE/CANDIDATE digests, candidate identity, unchanged repository and
+standard Sidecar execution/security boundaries. A missing candidate path fails
+closed before queueing execution.
+
+The lane still requires qualified package scripts and rejects unqualified
+package dependencies and test/configuration-oracle changes. Syntax success
+alone is not semantic correctness, complete test coverage or authorization to
+apply. No new executor, model tool, dependency provisioning, language runner or
+production reflection is asserted. Rollback is source revert without state
+migration. Holdout/regression must verify new-file syntax path existence,
+identical manifests across syntax/package jobs, and false-PASS prevention.
+
 ### 2026-10-09 GPT CHAT handoff — package-manager oracle admission
 
 **Owner and scope**: Master reported Codex capacity exhausted and transferred this

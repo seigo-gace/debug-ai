@@ -65,3 +65,16 @@ test("candidate node.check accepts newly constructed JS only in isolated snapsho
     assert.throws(()=>prepareSandboxJob({sourceRepo:f.repo,jobRoot:f.jobs,action:"node.check",args:{path:"uncreated.js"},timeoutMs:5000}),/SANDBOX_SNAPSHOT_REQUIRED_PATH_MISSING|SANDBOX_REQUIRED_PATH|SNAPSHOT/);
   }finally{f.cleanup();}
 });
+
+
+test("candidate Node syntax job keeps exact BASELINE digest shared with package checks",()=>{
+  const f=fixture();
+  try{
+    const candidate={operations:[{type:"create",path:"added.js",content_utf8:"const fresh = true;\n"}]};
+    const check=prepareSandboxJob({sourceRepo:f.repo,jobRoot:f.jobs,action:"node.check",args:{path:"added.js"},timeoutMs:5000,requiredPaths:["package.json"],candidate});
+    const pkg=prepareSandboxJob({sourceRepo:f.repo,jobRoot:f.jobs,action:"package.test",timeoutMs:5000,requiredPaths:["package.json"],candidate});
+    assert.equal(check.request.source_snapshot.manifest.digest,pkg.request.source_snapshot.manifest.digest);
+    assert.equal(check.request.candidate_snapshot.manifest.digest,pkg.request.candidate_snapshot.manifest.digest);
+    assert.throws(()=>prepareSandboxJob({sourceRepo:f.repo,jobRoot:f.jobs,action:"node.check",args:{path:"absent.js"},timeoutMs:5000,requiredPaths:["package.json"],candidate}),/SANDBOX_NODE_CHECK_CANDIDATE_PATH_MISSING/);
+  }finally{f.cleanup();}
+});
