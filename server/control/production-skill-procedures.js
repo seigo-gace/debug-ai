@@ -54,6 +54,10 @@ const PRODUCTION_OVERRIDES=Object.freeze({
     "List only adjacent behaviors that the selected minimal change can affect, in deterministic order, and exclude unrelated modules.",
     "When patching is blocked or no candidate scope exists, return no regression risks rather than inventing a review surface."
   ]),
+  "python-edge-semantics":Object.freeze([
+    "Only for proven Python source tasks: inspect bool versus int identity/equality, Unicode versus ASCII, hashability, mutation/aliasing, iteration and last-element boundary assumptions against provided code and reproduction tests.",
+    "Require an actual failing or passing deterministic Python test for any correctness claim. Emit uncertain points as UNKNOWN, preserve exact source/scope; never treat model self-review as validation or change non-Python modules."
+  ]),
   "rollback-plan-builder":Object.freeze([
     "Bind rollback_boundary to the exact changed file and symbol using a reversible identifier derived from supplied patch scope.",
     "When patching is blocked or no candidate change exists, rollback_boundary must be null."
