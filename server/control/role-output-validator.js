@@ -41,6 +41,9 @@ function validateEvidenceBindings(value,{availableEvidenceIds=[],strictEvidenceR
     for(const ref of array(value.hypotheses[i]?.counter_evidence_refs))inspect(ref,i,"HYPOTHESIS_COUNTER_EVIDENCE_REF");
   }
   for(const ref of array(value?.confirmed_root_cause?.evidence_refs))inspect(ref,0,"ROOT_CAUSE_EVIDENCE_REF");
+  if(Array.isArray(value?.evidence_refs)){
+    for(const [index,ref] of value.evidence_refs.entries())inspect(ref,index,"TOP_LEVEL_EVIDENCE_REF");
+  }
   return errors;
 }
 function validateRequiredRoleShape(role,value){
@@ -67,6 +70,23 @@ function canonicalRoleViolations(role,value){
   if(role==="code_scout"){
     for(const key of ["relevant_files","call_path","excluded_files","unknowns"])requireField(key,stringArray);
     requireField("contract_mismatch",v=>v===null||(plainObject(v)&&["file","expected","observed"].every(key=>nonBlankString(v[key]))));
+  }
+  if(role==="causal_scout"){
+    for(const key of ["candidates","hypotheses"]){
+      if(Object.prototype.hasOwnProperty.call(value,key)&&!Array.isArray(value[key]))violations.push(`ROLE_FIELD_INVALID:${key}`);
+    }
+    for(const key of ["causal_chain","unsupported_links","alternate_hypotheses"]){
+      if(Object.prototype.hasOwnProperty.call(value,key)&&!stringArray(value[key]))violations.push(`ROLE_FIELD_INVALID:${key}`);
+    }
+    if(value.failure_family!==undefined&&!nonBlankString(value.failure_family))violations.push("ROLE_FIELD_INVALID:failure_family");
+    if(value.confidence!==undefined&&!["LOW","MEDIUM","HIGH"].includes(value.confidence))violations.push("ROLE_FIELD_INVALID:confidence");
+  }
+  if(role==="researcher"){
+    if(value.bound_version!==undefined&&value.bound_version!==null&&typeof value.bound_version!=="string")violations.push("ROLE_FIELD_INVALID:bound_version");
+    if(value.answer!==undefined&&typeof value.answer!=="string")violations.push("ROLE_FIELD_INVALID:answer");
+    for(const key of ["selected_evidence","evidence_refs","rejected_source_refs","contradictions"]){
+      if(Object.prototype.hasOwnProperty.call(value,key)&&!(["evidence_refs","rejected_source_refs","contradictions"].includes(key)?stringArray(value[key]):Array.isArray(value[key])))violations.push(`ROLE_FIELD_INVALID:${key}`);
+    }
   }
   if(role==="diagnoser"){
     requireField("diagnosis_status",v=>DIAGNOSIS_STATUS.has(v));

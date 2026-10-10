@@ -244,6 +244,10 @@ This document is a formal design delta only.
 `DEPLOY=NO`
 `PRODUCTION_CHANGE=NONE`
 
+### 2026-10-10 Combined P1-B/P1-C integration note
+
+The existing Node candidate lane runs node.check before configured package checks for changed JS paths. Created files exist only in the isolated Candidate snapshot, not the baseline. All checks must preserve identical baseline and candidate digests. The combined workflow retains the previously qualified preapproval failed-evidence retry and strict hypothesis-review gate. Package checks follow syntax checks, so integrated tests must account for four checks, with no weakening of failure conditions. No Python, dependency, semantic, production or real-model qualification follows from this source integration.
+
 ## 15. Candidate-aware preapproval verification — Codex CU, 2026-10-09
 
 Purpose: close the actual Source gap where `collect(repo)` checked only BASELINE

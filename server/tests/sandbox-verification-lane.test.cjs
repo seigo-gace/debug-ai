@@ -4,7 +4,7 @@ const assert=require("node:assert/strict");
 const fs=require("node:fs");
 const os=require("node:os");
 const path=require("node:path");
-const {configuredChecks,toEvidence,createSandboxVerificationLane}=require("../control/sandbox-verification.js");
+const {configuredChecks,candidateSyntaxChecks,toEvidence,createSandboxVerificationLane}=require("../control/sandbox-verification.js");
 
 function repoWith(scripts){
   const repo=fs.mkdtempSync(path.join(os.tmpdir(),"debugai-sandbox-verification-"));
@@ -29,7 +29,7 @@ test("sandbox verification prepares snapshot jobs and returns deterministic evid
   try{
     const lane=createSandboxVerificationLane({jobRoot:"/sandbox-jobs",prepare,wait});
     const out=await lane.collect(repo);
-    assert.equal(out.status,"FINAL_VALID");
+    assert.equal(out.status,"FINAL_INVALID");
     assert.equal(prepared.length,2);
     assert.equal(prepared.every(x=>x.sourceRepo===repo),true);
     assert.deepEqual(out.checks.map(x=>x.status),["PASS","FAIL"]);
@@ -55,4 +55,24 @@ test("repo without configured verification remains NOT_CONFIGURED",async()=>{
     const out=await lane.collect(repo);
     assert.deepEqual(out,{status:"NOT_CONFIGURED",checks:[]});
   }finally{fs.rmSync(repo,{recursive:true,force:true});}
+});
+
+
+test("sandbox verification returns FINAL_VALID only if every configured check passes",async()=>{
+  const repo=repoWith({lint:"eslint .",test:"node --test"});
+  const prepared=[];
+  const prepare=input=>{prepared.push(input);return {job_id:`JOB_${prepared.length}`};};
+  const wait=async({jobId})=>({schema:"debugai.sandbox-result/v1",job_id:jobId,action:prepared[Number(jobId.split("_")[1])-1].action,command:"npm run fixture",code:0,pass:true,timed_out:false,duration_ms:1,isolation:{backend:"sidecar+landlock+seccomp"}});
+  try{
+    const out=await createSandboxVerificationLane({prepare,wait}).collect(repo);
+    assert.equal(out.status,"FINAL_VALID");
+    assert.equal(prepared.length,2);
+    assert.deepEqual(out.checks.map(x=>x.status),["PASS","PASS"]);
+  }finally{fs.rmSync(repo,{recursive:true,force:true});}
+});
+
+
+test("candidate syntax plan uses existing Node gate without modifying oracle or deleted files",()=>{
+  const checks=candidateSyntaxChecks([{type:"replace",path:"src/a.js"},{type:"create",path:"lib/new.mjs"},{type:"delete",path:"old.cjs"},{type:"replace",path:"src/a.js"},{type:"replace",path:"module.ts"}]);
+  assert.deepEqual(checks.map(c=>[c.action,c.args.path,c.check_type]),[["node.check","src/a.js","SYNTAX"],["node.check","lib/new.mjs","SYNTAX"]]);
 });

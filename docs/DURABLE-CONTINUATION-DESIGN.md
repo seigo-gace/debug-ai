@@ -256,6 +256,29 @@ does not invent freshness metadata: the caller owns the admitted current window
 and Source/Runtime identity. Structural validity, binding validity and actual
 task correctness are separate conclusions.
 
+P0-A follow-up (2026-10-10): Existing role-output-validator checks top-level
+Researcher evidence_refs through the same registered evidence window as other
+claim and hypothesis references: TRE_/EVI_ IDs fail on unknown in compatibility
+mode, and all unknown IDs fail in explicit strict mode. The independent
+rejected_source_refs field retains semantic string-array checks, not evidence
+admission checks. Optional Causal Scout benchmark fields failure_family,
+causal_chain, unsupported_links, alternate_hypotheses and confidence, plus
+Researcher bound_version, answer strings and string contradictions now
+receive typed shadow/enforce checks while
+preserving legacy omitted fields and the existing six roles/model profiles.
+The existing Invocation Compiler now issues Causal Scout and Researcher
+production OUTPUT_FIELDS contracts matching their benchmark response shapes;
+existing role-specific skill, model and runtime ownership remain unchanged.
+Benchmark-only exact UNKNOWN answer expectations are not imposed on the
+production workflow: an evidence-insufficient explanation remains valid while
+claim/evidence binding and status stay independently enforced.
+The existing Causal Scout/Researcher skill-effect benchmark graders no
+longer coerce non-string array members into strings for scored fields;
+malformed evidence, alternate hypotheses or contradictions cannot earn
+normal typed-array credit. Historical score artifacts are not rewritten.
+Offline role-tool-loop tests verify this plumbing with stubbed AI responses;
+they do not qualify live model output or complete-product dogfood.
+
 Compatibility: preserve default mode, Causal Scout/Researcher/Reviewer shapes,
 WeakMap-only shadow storage and existing transport/state/approval contracts.
 Legacy partial Code Scout/Diagnoser/empty operation output can still be parsed
