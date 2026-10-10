@@ -2,7 +2,7 @@
   "base_url": "https://debugai.asterav8.jp",
   "mode": "readonly",
   "repo": "/workspace/debug-ai",
-  "request": "2026-10-10 P0 post-deployment existing run run_mv24304l_700ed16315 recovery/status/Host evidence only. New bounded retry runtime SHA 3db0acd. No deployment, new run or provider calls.",
+  "request": "P0 DebugAI same-run continued runtime observation after exact 3db0acd reflected; collect causal_scout status and bounded runtime logs; no new Run, provider calls, or GitOps. Follow-up observation #2.",
   "server_command_id": "project.git_head",
   "run_id": "run_mv24304l_700ed16315",
   "gitops_request": {
