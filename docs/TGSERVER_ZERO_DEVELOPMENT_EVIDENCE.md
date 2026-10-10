@@ -216,3 +216,13 @@ RUNTIME_CURRENT_SHA
 ```
 
 No state is promoted from another signal. In particular, GitHub CI PASS and TGserver ZERO search PASS do not prove current-source Runtime parity.
+
+## 7. Adopted on-demand Actions Artifact to ZERO Evidence (2026-10-10)
+
+Master adopts safe GitHub Actions artifact ingestion. Normative contract and acceptance are Unified Improvement Plan section 15. Reuse existing GitHub read, DebugAI Evidence Registry/RuntimeEvidenceStore and TGserver ZERO producer. Never create a second TGserver reader, new persistent daemon, queue product, MCP, workflow or token.
+
+Sequence: authorized repo/run/artifact metadata -> immutable artifact download under size/time limits -> isolated, nonexecuting, adversarial ZIP admission -> redacted bounded test/log excerpts -> registered evidence IDs with run/attempt/head-SHA/artifact-ID/path/digest provenance -> bounded Diagnoser -> existing TGserver ZERO producer/search correlation.
+
+Source artifact generation, GitHub log readback, artifact intake, Evidence registration, ZERO search and production runtime SHA are separate gates. CI PASS and Artifact download do not establish DebugAI model accuracy, host reflection, or Strict Completion. Optional future Webhook/Actions trigger may reuse existing admitted event path only after on-demand E2E qualification.
+
+Current status: DESIGN_ADOPTED; safe ZIP ingestion and actual Artifact -> Evidence -> ZERO E2E NOT_VERIFIED. No new Groq/Gemini requests or billing changes.
