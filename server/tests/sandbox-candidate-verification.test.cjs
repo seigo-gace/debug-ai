@@ -129,6 +129,7 @@ test("preapproval failed candidate receives one evidence-bound retry without tou
  assert.equal(result.state,"WAITING_APPROVAL");assert.equal(verifies,2);
  assert.deepEqual(roles,["patch_engineer","diagnoser","patch_engineer"]);
  assert.equal(result.preapproval_refix.attempt,1);
+ const compact=records.find(x=>x.type==="preapproval_refix_attempt");assert.ok(compact);
  assert.equal(result.candidate_verification.status,"FINAL_VALID");
  assert.notEqual(result.candidate.id,result.preapproval_refix.previous_candidate_id);
  assert.ok(records.some(x=>x.type==="preapproval_refix_attempt"));

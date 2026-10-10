@@ -232,7 +232,7 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
     let finalCandidate=candidate,preapprovalRefix=null;
     if(candidateVerification.status==="FINAL_INVALID"&&candidateVerification.checks?.some(c=>c.status==="FAIL"&&c.executed===true)&&runtimeEvidence?.list&&runtimeEvidence?.write&&patchService?.create&&typeof externalReview?.hypothesis==="function"){
       if(runtimeEvidence.list(runId,{types:["preapproval_refix_attempt"],limit:128}).length===0){
-        const failed=registerEvidenceList("LOCAL_RUNTIME",candidateVerification.checks.filter(c=>c.status==="FAIL"&&c.executed===true));
+        const failed=registerEvidenceList("LOCAL_RUNTIME",candidateVerification.checks.filter(c=>c.status==="FAIL"&&c.executed===true).map(reviewableVerificationCheck));
         const failedIds=evidenceIds(failed),admitted=mergeEvidenceIds(refs,failedIds);
         runtimeEvidence.write(runId,"preapproval_refix_attempt",{original_candidate_id:candidate.id,original_candidate_hash:candidate.candidate_hash,attempt:1,evidence_ids:failedIds});
         const diag=roleOutput(await callReadOnlyRole("diagnoser",{system:"Diagnose fresh failed candidate checks only. Preserve source and requirements. JSON only; never apply.",user:JSON.stringify({patch_packet:patchPacket,failed_checks:evidencePromptView(failed),prior_candidate_id:candidate.id})},makeReadOnlyToolRuntime(targetRepo,runId),{baseEvidenceIds:admitted,strictEvidenceRefs:true}),"diagnoser");
