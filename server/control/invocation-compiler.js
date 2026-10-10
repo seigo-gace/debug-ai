@@ -64,20 +64,20 @@ function normalizeTaskSpecificPolicy(value){
 }
 function keywordScore(skill,task){const q=String(task||"").toLowerCase();let score=0;for(const word of KEYWORDS[skill.id]||[])if(q.includes(word))score+=20;return score;}
 function activeRoleSkills(role){return getRoleSkills(role).filter(s=>ACTIVE_SKILL_STATUS.has(s.status));}
-function pythonSourceTask(task){return /(?:\bpython\b|\.py(?:\b|["\x27\\/])|\bpyproject\.toml\b)/i.test(String(task||""));}
+function pythonSourceTask(task){const text=String(task||"");if(/\.debugai_codegen_benchmark\/|SYNTHETIC_CODEGEN_BENCHMARK/i.test(text))return false;return /(?:\bpython\b|\.py(?:\b|["\x27\\/])|\bpyproject\.toml\b)/i.test(text);}
 function taskEligibleSkills(role,task){return activeRoleSkills(role).filter(s=>s.id!=="python-edge-semantics"||(["patch_engineer","local_reviewer"].includes(role)&&pythonSourceTask(task)));}
 function assertMaxSkills(maxSkills){if(maxSkills===null||maxSkills===undefined)return;if(!Number.isInteger(maxSkills)||maxSkills<1||maxSkills>8)throw new Error("INVOCATION_MAX_SKILLS_INVALID");}
 function rejectedHistoryAvailable(role){if(role!=="diagnoser")return false;try{return currentRejectedHistoryProvider().read({},[]).count>0;}catch{return false;}}
 function ensureRejectedHistorySkill(role,selected,ranked,limit){if(role!=="diagnoser"||!rejectedHistoryAvailable(role))return selected;const rejected=ranked.find(skill=>skill.id==="rejected-hypothesis-avoidance");if(!rejected||selected.some(skill=>skill.id===rejected.id))return selected;if(selected.length<limit)return[...selected,rejected];const out=[...selected],crossIndex=out.findIndex(skill=>skill.id==="cross-refutation"),replaceIndex=crossIndex>=0?crossIndex:out.length-1;if(replaceIndex<0)return[rejected];out[replaceIndex]=rejected;return out;}
 function selectSkills(role,{task="",maxSkills=null}={}){
-  assertMaxSkills(maxSkills);const contract=getRoleContract(role),candidates=taskEligibleSkills(role,task),byId=new Map(candidates.map(s=>[s.id,s])),limit=Math.min(maxSkills??candidates.length,candidates.length),selected=[];
+  assertMaxSkills(maxSkills);const contract=getRoleContract(role),candidates=taskEligibleSkills(role,task),byId=new Map(candidates.map(s=>[s.id,s])),limit=Math.min(8,maxSkills??candidates.length,candidates.length),selected=[];
   for(const id of FOUNDATION_SKILLS[role]||[]){const skill=byId.get(id);if(skill&&!selected.includes(skill)&&selected.length<limit)selected.push(skill);}
   const ranked=candidates.map(skill=>({skill,score:keywordScore(skill,task),preferred:contract.skill_ids.indexOf(skill.id)})).filter(item=>item.score>0).sort((a,b)=>b.score-a.score||a.preferred-b.preferred||a.skill.id.localeCompare(b.skill.id));
   for(const item of ranked){if(selected.length>=limit)break;if(!selected.some(s=>s.id===item.skill.id))selected.push(item.skill);}
   if(!selected.length&&candidates.length)selected.push(candidates[0]);return ensureRejectedHistorySkill(role,selected,candidates,limit);
 }
 function resolveSkills(role,{task="",maxSkills=null,selectedSkillIds=null}={}){
-  assertMaxSkills(maxSkills);const active=taskEligibleSkills(role,task),limit=Math.min(maxSkills??active.length,active.length);
+  assertMaxSkills(maxSkills);const active=taskEligibleSkills(role,task),limit=Math.min(8,maxSkills??active.length,active.length);
   if(selectedSkillIds===null||selectedSkillIds===undefined)return{skills:selectSkills(role,{task,maxSkills:limit}),mode:"TASK_JIT"};
   if(!Array.isArray(selectedSkillIds)||selectedSkillIds.length<1||selectedSkillIds.length>limit)throw new Error(`INVOCATION_FIXED_SKILL_COUNT_INVALID:${role}`);
   const ids=selectedSkillIds.map(String);if(new Set(ids).size!==ids.length)throw new Error(`INVOCATION_FIXED_SKILL_DUPLICATE:${role}`);const allowed=new Map(active.map(s=>[s.id,s]));
