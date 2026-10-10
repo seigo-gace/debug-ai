@@ -3,11 +3,11 @@
   "mode": "readonly",
   "run_id": "run_mv24304l_700ed16315",
   "repo": "/workspace/debug-ai",
-  "request": "Codex same-Run practical qualification: guarded reflection of exact combined owner Source; no new dogfood or provider benchmark.",
+  "request": "Codex same-Run practical qualification; preserves current PR96/TGserver Owner source and pinned combined diagnosis/GC/Artifact Source.",
   "gitops_request": {
     "enabled": true,
     "branch": "fix/scout-observation-reuse-20261010",
-    "sha": "e8f85b1efc11bec3784b2617390772319fab62cd"
+    "sha": "d39ed3e056c7a826563b4d7eb7cd1961a12268fc"
   },
   "source_reflect_request": {
     "enabled": false

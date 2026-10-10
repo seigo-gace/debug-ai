@@ -9,10 +9,10 @@ const REL_PATH_RE=/^[A-Za-z0-9_./-]{1,180}$/;
 const FILE_INSPECT_MAX_PAGES=32;
 function validateTarget(t){
   if(!t||typeof t!=="object")throw Error("INVALID_TARGET");
+  if(t.mode!=="readonly"||t.base_url!==API)throw Error("SERVER_COMMAND_SCOPE_DENIED");
   const command=String(t.server_command_id||"");
   if(!command)return null;
   if(!ALLOWED.has(command))throw Error("SERVER_COMMAND_DENIED");
-  if(t.mode!=="readonly"||t.base_url!==API)throw Error("SERVER_COMMAND_SCOPE_DENIED");
   if(command==="system.projects_inventory" && !/^(?:0|[1-9][0-9]{0,3})$/.test(String(t.inventory_page??0)))throw Error("PROJECT_INVENTORY_PAGE_INVALID");
   if(command==="system.projects_inventory" && t.inventory_all!==undefined && typeof t.inventory_all!=="boolean")throw Error("PROJECT_INVENTORY_MODE_INVALID");
   if(command==="service.debug_ai_logs"){
