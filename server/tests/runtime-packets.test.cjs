@@ -1,7 +1,7 @@
 "use strict";
 const test=require("node:test");
 const assert=require("node:assert/strict");
-const {REVIEW_EXCLUDED_FIELDS,makePatchPacket,makeReviewPacket,publicReviewPacketSummary}=require("../control/runtime-packets.js");
+const {REVIEW_EXCLUDED_FIELDS,makePatchPacket,makeReviewPacket,publicReviewPacketSummary,assertPatchRequirements}=require("../control/runtime-packets.js");
 const {contentHash}=require("../../orchestrator/durable-contracts.js");
 
 function patchInput(){return{runId:"r",diagnosisRef:"diag",repositoryRevision:"git_baseline",paths:["src/a.js"],reproductionSummary:{status:"FAILED_RETEST",checks:[{status:"FAIL",evidence_refs:["E_FAILED"]}]},invariants:[{name:"requirements",preserved_behavior:["input unchanged"],acceptance_conditions:[{test:"boundary",expected:{status:"PASS"}}],unknowns:["external dependency"]}],testInventory:[{name:"unit",args:["--boundary"]}]};}
@@ -81,4 +81,12 @@ test("P1-A packet denies nested paths under protected directories without overbl
   assert.throws(()=>makePatchPacket({...input,paths:["src/../secrets/token.json"]}),/PATCH_PACKET_PROHIBITED_PATH:secrets\/token.json/);
   const allowed=makePatchPacket({...input,paths:["src/private-utils/index.js"]});
   assert.deepEqual(allowed.payload.paths,["src/private-utils/index.js"]);
+});
+
+
+test("P1-A candidate operations cannot bypass packet-level directory exclusions",()=>{
+  const packet=makePatchPacket({runId:"r_denied",diagnosisRef:"diag",repositoryRevision:"git_before",paths:["src/a.js"],prohibitedPaths:["secrets","src/private"]});
+  assert.throws(()=>assertPatchRequirements(packet,{operations:[{type:"write",path:"secrets/nested/token.txt",content:"x"}]}),/REQUIREMENT_FORBIDDEN_PATH:secrets\/nested\/token.txt/);
+  assert.throws(()=>assertPatchRequirements(packet,{operations:[{type:"replace",path:"src/private/../private/key.js",old:"x",new:"y"}]}),/REQUIREMENT_FORBIDDEN_PATH:src\/private\/key.js/);
+  assert.doesNotThrow(()=>assertPatchRequirements(packet,{operations:[{type:"write",path:"src/private-tools/a.js",content:"x"}]}));
 });
