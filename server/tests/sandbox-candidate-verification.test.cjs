@@ -177,8 +177,13 @@ test("real last-element defect candidate remains failing until a repaired candid
  const make=content=>patch.preparePatchCandidate({repo,selectedPaths:["count.js"],task:"Fix last-element count regression without changing boolean semantics",requestHash:"a".repeat(64),stage:"debug",result:{operations:[{type:"replace",path:"count.js",old:broken,new:content}]}});
  const lane=createSandboxVerificationLane({jobRoot:jobs,wait:async({jobId})=>{
    const dir=path.join(jobs,"jobs",jobId),request=JSON.parse(fs.readFileSync(path.join(dir,"request.json"))),staged=path.join(dir,"repo");
-   const script=request.action==="node.check"?"node --check count.js":request.action==="package.test"?"node --test count.test.cjs":"node --check count.js";
-   const proc=cp.spawnSync(process.execPath,script.split(" ").slice(1),{cwd:staged,encoding:"utf8",timeout:15000});
+   const args=request.action==="package.test"?["--test","count.test.cjs"]:["--check","count.js"];
+   const proc=cp.spawnSync(process.execPath,args,{cwd:staged,encoding:"utf8",timeout:15000});
+   if(request.action==="package.test"){
+     const required=fs.readFileSync(path.join(staged,"count.js"),"utf8");
+     assert.match(required,/items\.length-1|items\.length/);
+     assert.equal(fs.existsSync(path.join(staged,"count.test.cjs")),true);
+   }
    return{schema:"debugai.sandbox-result/v1",job_id:jobId,action:request.action,pass:proc.status===0,code:proc.status??1,stdout:proc.stdout||"",stderr:proc.stderr||"",snapshot:request.source_snapshot,candidate_snapshot:request.candidate_snapshot,candidate_construction:"MATERIALIZED_VERIFIED"};
  }});
  const brokenCandidate=make(broken.replace("count=0","count=0 "));
