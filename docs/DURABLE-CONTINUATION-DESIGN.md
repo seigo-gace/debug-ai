@@ -266,6 +266,9 @@ causal_chain, unsupported_links, alternate_hypotheses and confidence, plus
 Researcher bound_version, answer/INSUFFICIENT_EVIDENCE→UNKNOWN, and
 string contradictions now receive typed shadow/enforce checks while
 preserving legacy omitted fields and the existing six roles/model profiles.
+The existing Invocation Compiler now issues Causal Scout and Researcher
+production OUTPUT_FIELDS contracts matching their benchmark response shapes;
+existing role-specific skill, model and runtime ownership remain unchanged.
 Offline role-tool-loop tests verify this plumbing with stubbed AI responses;
 they do not qualify live model output or complete-product dogfood.
 
