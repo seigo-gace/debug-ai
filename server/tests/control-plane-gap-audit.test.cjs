@@ -9,8 +9,8 @@ test("control-plane gap audit distinguishes implemented providers from real unre
   const report=auditControlPlaneGaps();
   assert.equal(report.schema,SCHEMA);
   assert.deepEqual(report.summary,{
-    skill_contracts:25,
-    skill_procedures:25,
+    skill_contracts:26,
+    skill_procedures:26,
     skill_procedures_missing:0,
     declared_tools:19,
     runtime_tools_available:14,

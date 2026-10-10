@@ -160,6 +160,13 @@ const PROCEDURES=Object.freeze({
       "If diagnosis_status is not CONFIRMED, do not guess a change even when candidate files are supplied."
     ])
   }),
+  "python-edge-semantics":Object.freeze({
+    version:SKILL_PROCEDURE_VERSION,
+    steps:Object.freeze([
+      "For a real Python source task, inspect exactly supported bool/int equality and identity, Unicode/ASCII assumptions, hashability/equality, alias/mutation and last-item boundaries in selected source and supplied reproduction.",
+      "Require deterministic tests for behavioral correctness, preserve unknown cases and scope, and never treat this skill or model self-review as proof that a candidate works."
+    ])
+  }),
   "regression-risk-map":Object.freeze({
     version:SKILL_PROCEDURE_VERSION,
     steps:Object.freeze([
