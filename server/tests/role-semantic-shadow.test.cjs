@@ -107,6 +107,11 @@ test("P0-A preserves canonical causal/research benchmark field types",()=>{
     assert.equal(getSemanticShadow(parseAndValidateRoleOutput("causal_scout",value)).status,"WARN");
     assert.throws(()=>parseAndValidateRoleOutput("causal_scout",value,{roleSemantics:"enforce"}),/ROLE_SEMANTIC_INVALID/);
   }
+  for(const invalidFields of [{contradictions:["known",null]},{answer:42},{research_status:"INSUFFICIENT_EVIDENCE",answer:"probably valid"}]){
+    const candidate={...researcher,...invalidFields};
+    assert.equal(evaluateRoleSemantics("researcher",candidate).status,"WARN");
+    assert.throws(()=>parseAndValidateRoleOutput("researcher",candidate,{roleSemantics:"enforce"}),/ROLE_SEMANTIC_INVALID/);
+  }
   const invalid={...researcher,bound_version:42};
   assert.ok(evaluateRoleSemantics("researcher",invalid).violations.includes("ROLE_FIELD_INVALID:bound_version"));
   assert.throws(()=>parseAndValidateRoleOutput("researcher",invalid,{roleSemantics:"enforce"}),/ROLE_SEMANTIC_INVALID/);
