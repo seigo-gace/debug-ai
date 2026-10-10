@@ -17,7 +17,7 @@ class FakeDurableIo{
 }
 
 function initializeRepo(repo){fs.mkdirSync(repo);fs.writeFileSync(path.join(repo,"a.js"),"module.exports=42;\n");}
-function fakeAi(calls,diagnoserInputs){return{call:async(role,payload)=>{calls[role]=(calls[role]||0)+1;if(role==="local_reviewer")return{content:JSON.stringify({verdict:"PENDING",decision:"PENDING",claims:[]})};if(role==="researcher")return{content:JSON.stringify({research_status:"INSUFFICIENT_EVIDENCE",answer:"fixture evidence is insufficient",evidence_refs:[],rejected_source_refs:[],contradictions:[],bound_version:"test/v1"})};if(role==="diagnoser"){diagnoserInputs.push(JSON.parse(payload.user));return{content:JSON.stringify({diagnoses:[{hypothesis:"fixture",status:"unknown"}],public_statement:"fixture diagnosis"})};}return{content:JSON.stringify({authority:"HINT_ONLY"})};}};}
+function fakeAi(calls,diagnoserInputs){return{call:async(role,payload)=>{calls[role]=(calls[role]||0)+1;if(role==="researcher")return{content:JSON.stringify({research_status:"INSUFFICIENT_EVIDENCE",answer:"fixture evidence is insufficient",evidence_refs:[],rejected_source_refs:[],contradictions:[],bound_version:"test/v1"})};if(role==="diagnoser"){diagnoserInputs.push(JSON.parse(payload.user));return{content:JSON.stringify({diagnoses:[{hypothesis:"fixture",status:"unknown"}],public_statement:"fixture diagnosis"})};}return{content:JSON.stringify({authority:"HINT_ONLY"})};}};}
 
 test("startup recovery restores input/cursor and resumes C with same role execution and a new attempt",async t=>{
   const root=fs.mkdtempSync(path.join(os.tmpdir(),"debugai-workflow-restart-")),repo=path.join(root,"repo"),runtimeRoot=path.join(root,"runtime");t.after(()=>fs.rmSync(root,{recursive:true,force:true}));initializeRepo(repo);
@@ -59,14 +59,14 @@ test("duplicate async resume shares one active execution",async t=>{
   const accepted=await workflow.startAnalysis({repo,rawRequest:"duplicate guard",failure:{message:"fixture"}});await new Promise(resolve=>setImmediate(resolve));
   const duplicate=await workflow.resumeAnalysis({runId:accepted.run_id});assert.equal(duplicate.state,"ALREADY_RUNNING");assert.equal(duplicate.duplicate_resume_suppressed,true);release();
   for(let i=0;i<100;i++){if(workflow.status(accepted.run_id).durable.job_status==="DONE")break;await new Promise(resolve=>setTimeout(resolve,10));}
-  const status=workflow.status(accepted.run_id);assert.equal(status.durable.job_status,"DONE");const ref=Object.values(status.durable.role_executions)[0];assert.equal(ref.attempt_no,1);
+  const status=workflow.status(accepted.run_id);assert.equal(status.durable.job_status,"DONE",status.durable.last_execution_error);const ref=Object.values(status.durable.role_executions)[0];assert.equal(ref.attempt_no,1);
 });
 
 test("diagnoser timeout resume preserves redacted evidence identity and completes instead of EVIDENCE_VIEW_ID_MISMATCH",async t=>{
   const root=fs.mkdtempSync(path.join(os.tmpdir(),"debugai-evidence-resume-")),repo=path.join(root,"repo"),runtimeRoot=path.join(root,"runtime");t.after(()=>fs.rmSync(root,{recursive:true,force:true}));initializeRepo(repo);
   const io=new FakeDurableIo(),policy=new RepoPolicy({workspaceRoot:root}),authority=new RunAuthority({runtimeRoot,repoPolicy:policy,durableIo:io});let diagnoserCalls=0,timeoutDiagnoser=true;const diagnoserInputs=[];
   const aiCore={call:async(role,payload)=>{
-    if(role==="local_reviewer")return{content:JSON.stringify({verdict:"PENDING",decision:"PENDING",claims:[]})};if(role==="researcher")return{content:JSON.stringify({research_status:"INSUFFICIENT_EVIDENCE",answer:"fixture evidence is insufficient",evidence_refs:[],rejected_source_refs:[],contradictions:[],bound_version:"test/v1"})};
+    if(role==="researcher")return{content:JSON.stringify({research_status:"INSUFFICIENT_EVIDENCE",answer:"fixture evidence is insufficient",evidence_refs:[],rejected_source_refs:[],contradictions:[],bound_version:"test/v1"})};
     if(role==="diagnoser"){
       diagnoserCalls++;diagnoserInputs.push(JSON.parse(payload.user));
       if(timeoutDiagnoser){const error=new Error("AI_CORE_TIMEOUT");error.code="AI_CORE_TIMEOUT";throw error;}
@@ -80,6 +80,6 @@ test("diagnoser timeout resume preserves redacted evidence identity and complete
   const interruptedStatus=workflow.status(runId);assert.equal(interruptedStatus.durable.job_status,"RETRY_WAIT");assert.match(String(interruptedStatus.durable.last_execution_error||""),/AI_CORE_TIMEOUT/);const callsBeforeResume=diagnoserCalls;assert.ok(callsBeforeResume>=1);timeoutDiagnoser=false;
   const resumed=await workflow.resumeAnalysis({runId});assert.equal(resumed.run_id,runId);
   for(let i=0;i<200;i++){const job=workflow.status(runId).durable.job_status;if(["DONE","BLOCKED","FAILED"].includes(job))break;await new Promise(resolve=>setTimeout(resolve,10));}
-  const status=workflow.status(runId);assert.equal(status.durable.job_status,"DONE");assert.doesNotMatch(String(status.durable.last_execution_error||""),/EVIDENCE_VIEW_ID_MISMATCH/);assert.ok(diagnoserCalls>callsBeforeResume);
+  const status=workflow.status(runId);assert.equal(status.durable.job_status,"DONE",status.durable.last_execution_error);assert.doesNotMatch(String(status.durable.last_execution_error||""),/EVIDENCE_VIEW_ID_MISMATCH/);assert.ok(diagnoserCalls>callsBeforeResume);
   for(const input of diagnoserInputs)assert.equal(input.localEvidence[0].payload.observation,"[REDACTED]");
 });
