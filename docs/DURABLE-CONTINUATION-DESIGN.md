@@ -272,6 +272,10 @@ existing role-specific skill, model and runtime ownership remain unchanged.
 Benchmark-only exact UNKNOWN answer expectations are not imposed on the
 production workflow: an evidence-insufficient explanation remains valid while
 claim/evidence binding and status stay independently enforced.
+The existing Causal Scout/Researcher skill-effect benchmark graders no
+longer coerce non-string array members into strings for scored fields;
+malformed evidence, alternate hypotheses or contradictions cannot earn
+normal typed-array credit. Historical score artifacts are not rewritten.
 Offline role-tool-loop tests verify this plumbing with stubbed AI responses;
 they do not qualify live model output or complete-product dogfood.
 
