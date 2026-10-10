@@ -81,6 +81,7 @@ jobs:
           echo "STATUS_HTTP=$code"
           test "$code" = "200"
           jq -r '"RUN_STATE="+((.state//"UNKNOWN")|tostring), "JOB_STATUS="+((.durable.job_status//"UNKNOWN")|tostring), "CURSOR_STEP="+((.durable.workflow_cursor.step_id//"UNKNOWN")|tostring), "CURSOR_PHASE="+((.durable.workflow_cursor.step_phase//"UNKNOWN")|tostring), "LAST_EXECUTION_ERROR="+((.durable.last_execution_error//"NONE")|tostring)' /tmp/status.json
+          jq -cr '[.durable.role_invocations // {} | to_entries[] | {role:(.value.role // "UNKNOWN"),phase:(.value.phase // "UNKNOWN"),elapsed_ms:(.value.elapsed_ms // null),timeout_class:(.value.timeout_class // null),assessment:(.value.continuation_assessment // null)}] | "BOUNDED_ROLE_INVOCATIONS=" + tojson' /tmp/status.json
 
       - name: Existing run inspect
         if: ${{ steps.target.outputs.run_id != '' }}
