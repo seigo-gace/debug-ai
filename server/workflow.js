@@ -268,7 +268,18 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
       {kind:"failed_candidate",value:{candidate_id:out?.candidate?.id||null,candidate_hash:out?.candidate?.candidate_hash||null,diff_hash:out?.candidate?.diff_hash||null,files:selectedPaths}}
     ]);
     const retestIds=evidenceIds(retestRecords);
-    runtimeEvidence.write(runId,"refix_attempt",{attempt,max_attempts:MAX_AUTOMATIC_REFIX_ATTEMPTS,previous_candidate_id:out?.candidate?.id||null,evidence_ids:retestIds});
+    const currentCandidateId=out?.candidate?.id||null;
+    const replay=runtimeEvidence.list(runId,{types:["refix_attempt"],limit:128}).some(record=>{
+      const priorAttempt=record?.payload;
+      return priorAttempt?.previous_candidate_id===currentCandidateId&&Array.isArray(priorAttempt.evidence_ids)&&priorAttempt.evidence_ids.length===retestIds.length&&priorAttempt.evidence_ids.every(id=>retestIds.includes(id));
+    });
+    if(replay){
+      if(authority)run=authority.transition(run,"ESCALATION_REQUIRED");
+      runtimeEvidence.write(runId,"refix_escalation",{reason:"NO_NEW_FAILURE_EVIDENCE",attempts:prior,previous_candidate_id:currentCandidateId,evidence_ids:retestIds});
+      await logRuntime({run_id:runId,severity:"warn",kind:"automatic_refix",state:"REFIX_NO_NEW_FAILURE_EVIDENCE",attempts:prior});
+      return{run_id:runId,state:"REFIX_NO_NEW_FAILURE_EVIDENCE",reason:"NO_NEW_FAILURE_EVIDENCE",refix_attempts:prior,max_refix_attempts:MAX_AUTOMATIC_REFIX_ATTEMPTS,...out};
+    }
+    runtimeEvidence.write(runId,"refix_attempt",{attempt,max_attempts:MAX_AUTOMATIC_REFIX_ATTEMPTS,previous_candidate_id:currentCandidateId,evidence_ids:retestIds});
     try{
       const previousPatchPacket=out?.candidate?.requirement_binding||null;
       if(previousPatchPacket)assertPatchRequirements(previousPatchPacket,{operations:out.candidate.operations||[]});
