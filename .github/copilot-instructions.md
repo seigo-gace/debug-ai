@@ -1,0 +1,17 @@
+# DebugAI — GitHub Copilot scoped instructions
+
+This is a **Copilot execution adapter**, not a new Project, Rule Plane, agent or DebugAI design. Apply [G-ACE SERVER_AI Rule #16](https://github.com/G-ACE-inc/server-core/issues/16) for work you actually perform. Use the current server-core [Manifest](https://github.com/G-ACE-inc/server-core/blob/main/operations/github-project-rule-plane.json) and `docs/LOAD_SCOPE.md` when available; do **not** load GPT CHAT #17 as an executor. Keep the repository's `AGENTS.md` security/design constraints, but historical Codex-specific task handoffs are not automatically assignments to Copilot.
+
+**Product purpose stays fixed:** [DebugAI Current #41](https://github.com/seigo-gace/debug-ai/issues/41) `PROJECT_PURPOSE_CANONICAL` and README-linked `docs/DURABLE-CONTINUATION-DESIGN.md` govern evidence → diagnosis → candidate → guarded sandbox/test → re-fix → regression → review → Strict Completion plus dogfood/Instruction Sufficiency. A Groq/Gemini FREE reviewer, Host issue or PR is only a current work unit, not a replacement product purpose.
+
+**Use the Copilot mode that is actually exposed:**
+- **Chat/Ask or inline suggestions:** inspect/explain/reuse patterns, suggest focused edits and focused tests. No mutation/CI/Runtime proof merely from a suggestion.
+- **VS Code Edit/Agent when enabled:** implement a specifically owned small CU in specified files, run actually available deterministic/negative tests and fix failures. Do not silently edit other owners' code.
+- **Code review:** identify a reproducible defect or missing test with changed-file/line evidence, minimal fix and impact. Avoid generic reviews, speculative bugs and duplicate comments; do not merge/deploy as part of a review.
+- **Cloud coding agent only upon explicit assignment:** create or update the assigned PR in the authorized repo, without assuming access to local/Host private volumes, credentials or other modes' tools.
+
+Before mutation, fresh-check Project #1, #41/#42, active owner, exact branch/HEAD/PR, affected Design, same-purpose/reverted branches and Source/test reuse. A **new Branch, parent-local Module/test area or nested worktree is allowed if it improves isolation, quality, testing, parallelism or efficiency**; no count cap. Forbid *derived sibling Project directories* next to canonical parent Projects. Record split benefit, CU owner and cleanup owner; after merge/revert confirm no other writer needs a branch before cleanup.
+
+Work continuously within the approved CU: inspect → choose minimal complete change → offline/focused test → diagnose/re-fix → check actual diff/CI → next safe gate. A single step blocked by missing Host admission, Copilot tool capability or Codex quota is **not** a product-wide stop. Master delegates routine technical choices; actual private Host policy, irreversible/Secret/public/commercial effects retain real protection. In `AGENTS.md`, approval before invoking DebugAI's `/v1/approve-apply-verify` is **not** a general prohibition on ordinary authorized Git Source edits.
+
+Prefer cheap deterministic/local tools; no unnecessary new AI agent/MCP/Workflow/Token and **zero real Groq/Gemini API test calls** for this Copilot adapter. Do not touch billing. Report concise owned CU, changed paths, branch/head, actual tests/CI, blocked *step* and exact next executor/action. Do not invent Current access, Host reflection, quota evidence, tool actions or delivered handoffs. Maintain Source/CI/Runtime distinctions.
