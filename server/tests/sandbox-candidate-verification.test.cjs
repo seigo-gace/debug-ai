@@ -18,8 +18,8 @@ test("candidate verification stages actual edited code; baseline success cannot 
   return{schema:"debugai.sandbox-result/v1",job_id:jobId,action:request.action,pass:request.action!=="package.test",code:request.action==="package.test"?1:0,snapshot:request.source_snapshot,candidate_snapshot:request.candidate_snapshot,candidate_construction:"MATERIALIZED_VERIFIED"};
  }});
  const result=await lane.collectCandidate(f.candidate);
- assert.equal(result.status,"FINAL_INVALID");assert.equal(result.checks.length,3);assert.equal(result.checks[1].status,"FAIL");
- assert.ok(result.checks.every(x=>x.patch_candidate_hash===f.candidate.candidate_hash));assert.equal(requests.length,3);
+ assert.equal(result.status,"FINAL_INVALID");assert.equal(result.checks.length,4);assert.equal(result.checks[2].status,"FAIL");
+ assert.ok(result.checks.every(x=>x.patch_candidate_hash===f.candidate.candidate_hash));assert.equal(requests.length,4);
  assert.equal(fs.readFileSync(path.join(f.repo,"value.js"),"utf8"),"module.exports=1;\n");
 });
 test("stale and tampered candidate fail before checks; unqualified dependencies remain NOT_CONFIGURED",async t=>{
@@ -64,7 +64,7 @@ test("holdout preserves source edits beside unchanged configs and ordinary confi
   const request=JSON.parse(fs.readFileSync(path.join(f.root,"jobs","jobs",jobId,"request.json")));
   return{schema:"debugai.sandbox-result/v1",job_id:jobId,action:request.action,pass:true,code:0,snapshot:request.source_snapshot,candidate_snapshot:request.candidate_snapshot,candidate_construction:"MATERIALIZED_VERIFIED"};
  }});
- const result=await lane.collectCandidate(candidate);assert.equal(result.status,"FINAL_VALID");assert.equal(result.checks.length,3);assert.equal(result.semantic_verification,"UNKNOWN");
+ const result=await lane.collectCandidate(candidate);assert.equal(result.status,"FINAL_VALID");assert.equal(result.checks.length,4);assert.equal(result.semantic_verification,"UNKNOWN");
 });
 test("package-manager locks and dependency execution configs cannot bypass candidate oracle admission",async t=>{
  const protectedPaths=[
@@ -96,7 +96,7 @@ test("ordinary application edits beside unchanged package-manager locks are stil
   return{schema:"debugai.sandbox-result/v1",job_id:jobId,action:request.action,pass:true,code:0,snapshot:request.source_snapshot,candidate_snapshot:request.candidate_snapshot,candidate_construction:"MATERIALIZED_VERIFIED"};
  }});
  const result=await lane.collectCandidate(f.candidate);
- assert.equal(result.status,"FINAL_VALID");assert.equal(result.checks.length,3);
+ assert.equal(result.status,"FINAL_VALID");assert.equal(result.checks.length,4);
  assert.equal(result.semantic_verification,"UNKNOWN");
  for(const file of ["pnpm-lock.yaml",".npmrc","bunfig.toml"])assert.equal(fs.readFileSync(path.join(f.repo,file),"utf8"),"untouched\\n");
 });
@@ -129,6 +129,7 @@ test("preapproval failed candidate receives one evidence-bound retry without tou
  assert.equal(result.state,"WAITING_APPROVAL");assert.equal(verifies,2);
  assert.deepEqual(roles,["patch_engineer","diagnoser","patch_engineer"]);
  assert.equal(result.preapproval_refix.attempt,1);
+ const compact=records.find(x=>x.type==="preapproval_refix_attempt");assert.ok(compact);
  assert.equal(result.candidate_verification.status,"FINAL_VALID");
  assert.notEqual(result.candidate.id,result.preapproval_refix.previous_candidate_id);
  assert.ok(records.some(x=>x.type==="preapproval_refix_attempt"));

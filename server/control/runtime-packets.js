@@ -53,7 +53,7 @@ function assertPatchRequirements(packet,{operations=[],repositoryRevision=null,s
   if(repositoryRevision!==null&&packet.payload.repository_revision!==repositoryRevision)throw new Error("REQUIREMENT_SOURCE_MISMATCH");
   if(sourceHashes!==null&&contentHash(sourceHashes)!==contentHash(packet.payload.precondition_hashes))throw new Error("REQUIREMENT_SOURCE_MISMATCH");
   if(availableEvidenceIds!==null)for(const ref of packet.payload.evidence_refs)if(!availableEvidenceIds.includes(ref))throw new Error("REQUIREMENT_EVIDENCE_NOT_ADMITTED:"+ref);
-  const forbidden=packet.payload.requirement_contract?.fields?.forbidden_paths||[];
+  const forbidden=[...(packet.payload.prohibited_paths||[]),...(packet.payload.requirement_contract?.fields?.forbidden_paths||[])].map(p=>path.posix.normalize(String(p).replace(/\\/g,"/")));
   if(forbidden.length)for(const op of operations){const rel=path.posix.normalize(String(op?.path||"").replace(/\\/g,"/"));if(forbidden.some(p=>rel===p||rel.startsWith(p+"/")))throw new Error("REQUIREMENT_FORBIDDEN_PATH:"+rel);}
   return true;
 }
@@ -73,7 +73,10 @@ function makePatchPacket({runId,diagnosisRef,repositoryRevision,paths=[],sourceE
     evidence_refs:Object.freeze(uniqueStrings(evidenceRefs))
   };
   if(payload.paths.length===0)throw new Error("PATCH_PACKET_PATHS_REQUIRED");
-  for(const path of payload.paths)if(payload.prohibited_paths.includes(path))throw new Error(`PATCH_PACKET_PROHIBITED_PATH:${path}`);
+  for(const selectedPath of payload.paths){
+    const rel=path.posix.normalize(selectedPath.replace(/\\/g,"/"));
+    if(payload.prohibited_paths.some(raw=>{const denied=path.posix.normalize(raw.replace(/\\/g,"/"));return rel===denied||rel.startsWith(denied+"/");}))throw new Error(`PATCH_PACKET_PROHIBITED_PATH:${rel}`);
+  }
   if(previousPatchPacket){
     assertPatchPacket(previousPatchPacket);
     if(previousPatchPacket.payload.run_id!==payload.run_id)throw new Error("REQUIREMENT_RUN_MISMATCH");
