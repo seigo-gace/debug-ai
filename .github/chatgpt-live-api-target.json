@@ -2,8 +2,8 @@
   "base_url": "https://debugai.asterav8.jp",
   "mode": "readonly",
   "repo": "/workspace/debug-ai",
-  "request": "Read only after archive receipt exact-SHA reflection: capture retention sweep error classes and existing run status, no new model run",
-  "server_command_id": "service.debug_ai_logs",
+  "request": "Acceptance of DebugAI self-driving existing Run run_mv24304l_700ed16315: inspect actual role, diagnosis, candidate, bounded refix and completion status after deployed SHA; no new Run/provider calls",
+  "server_command_id": "project.git_head",
   "run_id": "run_mv24304l_700ed16315",
   "gitops_request": {
     "enabled": false,
