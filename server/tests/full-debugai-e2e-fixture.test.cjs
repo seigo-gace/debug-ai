@@ -95,9 +95,10 @@ test("HTTP entry points complete the deterministic analyze-to-approved-patch clo
     task:"make the reproduced test pass with the smallest source change"
   });
   assert.equal(patch.state,"WAITING_APPROVAL");
-  assert.equal(patch.patch_packet.schema,"debugai.patch-packet/v1");
+  assert.equal(patch.patch_packet.schema,"debugai.patch-packet/v2");
+  assert.equal(patch.candidate.requirement_binding.payload.requirement_contract.semantic_verification,"UNKNOWN");
   const patchEngineerInput=roleCalls.find(call=>call.role==="patch_engineer").user;
-  assert.equal(patchEngineerInput.patch_packet.schema,"debugai.patch-packet/v1");
+  assert.equal(patchEngineerInput.patch_packet.schema,"debugai.patch-packet/v2");
   assert.deepEqual(patchEngineerInput.patch_packet.payload.paths,["value.js"]);
   assert.equal(authority.load(analysis.run_id).state,"WAITING_APPROVAL");
   assert.equal(fs.readFileSync(path.join(repo,"value.js"),"utf8"),"module.exports=1;\n");

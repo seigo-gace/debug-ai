@@ -3,7 +3,9 @@
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
-const { preparePatchCandidate, applyPatchCandidateTransactional } = require("../orchestrator/patch-core.js");
+const { preparePatchCandidate, applyPatchCandidateTransactional, assertCandidateIntegrity } = require("../orchestrator/patch-core.js");
+const {assertPatchRequirements}=require("./control/runtime-packets.js");
+const {repositorySnapshotId}=require("./control/repository-snapshot.js");
 const { runChecks, passed, verifyPatchInvariants, deterministicGateChecks } = require("../orchestrator/verify-core.js");
 const {
   makeVerificationPlan,
@@ -83,8 +85,9 @@ class PatchService {
     fs.mkdirSync(this.candidates, { recursive: true });
   }
 
-  create({ repo, selectedPaths, task, result, stage = "debug-repair" }) {
+  create({ repo, selectedPaths, task, result, stage = "debug-repair", patchPacket=null }) {
     repo = this.repoPolicy ? this.repoPolicy.assertRepo(repo) : repo;
+    if(patchPacket)assertPatchRequirements(patchPacket,{operations:result?.operations||[],repositoryRevision:repositorySnapshotId(repo,{allowMissingGitMarker:Boolean(this.repoPolicy)})});
     const verificationPlan = makeVerificationPlan({ testInventory: verificationInventory(repo) });
     const baseCandidate = preparePatchCandidate({
       repo,
@@ -93,7 +96,9 @@ class PatchService {
       requestHash: requestHash(task),
       stage,
       result,
+      requirementBinding:patchPacket||undefined,
     });
+    if(patchPacket){const hashes=Object.fromEntries(baseCandidate.preconditions.filter(x=>x.exists).map(x=>[x.path,x.sha256]));for(const [rel,hash] of Object.entries(hashes))if(patchPacket.payload.precondition_hashes[rel]!==hash)throw new Error("REQUIREMENT_SOURCE_MISMATCH");}
     const candidate = bindCandidatePlans(baseCandidate, { verificationPlan });
     const retention = patchCandidateRetention();
     candidate.created_at = retention.created_at;
@@ -108,6 +113,7 @@ class PatchService {
     if (!fs.existsSync(p)) throw new Error("PATCH_CANDIDATE_NOT_FOUND");
     const candidate = JSON.parse(fs.readFileSync(p, "utf8"));
     assertBoundCandidatePlans(candidate);
+    if(candidate.requirement_binding!==undefined){assertCandidateIntegrity(candidate);assertPatchRequirements(candidate.requirement_binding,{operations:candidate.operations});}
     return candidate;
   }
 

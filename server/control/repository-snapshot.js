@@ -81,7 +81,14 @@ function repositorySnapshotId(repoPath,{execFileSyncImpl=execFileSync,fsImpl=fs,
     const head=execFileSyncImpl("git",["-C",repoPath,"rev-parse","HEAD"],{encoding:"utf8",timeout:10000,stdio:["ignore","pipe","pipe"]}).trim();
     const status=execFileSyncImpl("git",["-C",repoPath,"status","--porcelain=v1","--untracked-files=no"],{encoding:"utf8",timeout:10000,stdio:["ignore","pipe","pipe"]});
     if(!/^[a-f0-9]{40}$/i.test(head))throw new Error("INVALID_HEAD");
-    return `git_${contentHash({head,status})}`;
+    // Porcelain status records changed paths, not dirty source bytes.
+    // Preserve clean historical identities and bind dirty content/mode changes.
+    const binding={head,status};
+    if(status.trim()){
+      const diff=execFileSyncImpl("git",["-C",repoPath,"diff","--binary","--no-ext-diff","--no-textconv","--submodule=diff","HEAD","--"],{encoding:"utf8",timeout:10000,maxBuffer:maxTotalBytes,stdio:["ignore","pipe","pipe"]});
+      binding.tracked_diff_sha256=sha256(Buffer.from(diff,"utf8"));
+    }
+    return `git_${contentHash(binding)}`;
   }catch(error){gitError=error;}
   try{return sourceTreeSnapshotId(repoPath,{fsImpl,maxFiles,maxTotalBytes,requireGitMarker:!allowMissingGitMarker});}
   catch(error){const wrapped=new Error("DURABLE_REPO_SNAPSHOT_UNAVAILABLE");wrapped.cause=error;wrapped.git_cause=gitError;throw wrapped;}

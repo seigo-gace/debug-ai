@@ -48,10 +48,10 @@ function readText(repo,rel,{maxChars=12000}={}){
   const raw=fs.readFileSync(full);if(raw.includes(0))throw new Error(`READ_BINARY_FILE:${safe}`);
   const text=raw.toString("utf8");return {path:safe,sha256:sha256(raw),size:raw.length,content:text.slice(0,maxChars),truncated:text.length>maxChars};
 }
-function walkFiles(repo,{maxFiles=500}={}){
+function walkFiles(repo,{maxFiles=500,coverage=null}={}){
   const out=[];const stack=[repo];
   while(stack.length&&out.length<maxFiles){
-    const dir=stack.pop();let entries=[];try{entries=fs.readdirSync(dir,{withFileTypes:true});}catch{continue;}
+    const dir=stack.pop();let entries=[];try{entries=fs.readdirSync(dir,{withFileTypes:true});}catch{if(coverage)coverage.directory_errors++;continue;}
     entries.sort((a,b)=>a.name.localeCompare(b.name));
     for(const e of entries){
       if(out.length>=maxFiles)break;
@@ -60,17 +60,24 @@ function walkFiles(repo,{maxFiles=500}={}){
       const rel=path.relative(repo,path.join(dir,e.name)).replace(/\\/g,"/");if(blockedReadPath(rel)||!SEARCH_EXT.test(rel))continue;out.push(rel);
     }
   }
+  if(coverage)coverage.file_limit_reached=out.length>=maxFiles;
   return out;
 }
 function excerpt(text,index,limit=900){const start=Math.max(0,index-250),end=Math.min(text.length,start+limit);return text.slice(start,end);}
-function searchSource(repo,query,{limit=12,maxFiles=500}={}){
+function searchSource(repo,query,{limit=12,maxFiles=500,coverage=null}={}){
   const q=String(query||"").trim().toLowerCase();if(q.length<2)throw new Error("SOURCE_SEARCH_QUERY_REQUIRED");const hits=[];
-  for(const rel of walkFiles(repo,{maxFiles})){
-    if(hits.length>=limit)break;
-    let item;try{item=readText(repo,rel,{maxChars:128000});}catch{continue;}
+  const receipt={schema:"debugai.source-search-coverage/v1",state:"INCOMPLETE",scope:"SEARCHABLE_REGULAR_FILES_ONLY",repository_absence_proven:false,query:q,max_files:maxFiles,match_limit:limit,max_content_chars:128000,file_limit_reached:false,match_limit_reached:false,directory_errors:0,read_errors:0,truncated_files:0,inspected_paths:[],excluded_directories:[...SKIP_DIRS],search_extensions:SEARCH_EXT.source};
+  const files=walkFiles(repo,{maxFiles,coverage:receipt});
+  for(const rel of files){
+    if(hits.length>=limit){receipt.match_limit_reached=true;break;}
+    let item;try{item=readText(repo,rel,{maxChars:receipt.max_content_chars});}catch{receipt.read_errors++;continue;}
+    receipt.inspected_paths.push(rel);if(item.truncated)receipt.truncated_files++;
     const idx=item.content.toLowerCase().indexOf(q);if(idx<0)continue;
     hits.push({path:rel,sha256:item.sha256,excerpt:excerpt(item.content,idx),truncated:item.truncated});
   }
+  receipt.discovered_files=files.length;receipt.inspected_files=receipt.inspected_paths.length;receipt.matches=hits.length;
+  if(!receipt.file_limit_reached&&!receipt.match_limit_reached&&!receipt.directory_errors&&!receipt.read_errors&&!receipt.truncated_files)receipt.state="COMPLETE_WITHIN_SEARCH_SCOPE";
+  if(coverage)Object.assign(coverage,receipt);
   return hits;
 }
 function testInventory(repo){
@@ -140,14 +147,14 @@ async function symbolLookup(root,args,{lspFactory=(options)=>new TypeScript7LspC
 function skillAllowsTool(selectedSkillIds,tool){for(const id of selectedSkillIds||[]){const s=getSkill(id);if(s.allowed_tools.includes(tool))return s;}return null;}
 function admit({role,selectedSkillIds,tool}){const roleContract=getRoleContract(role);const skill=skillAllowsTool(selectedSkillIds,tool);if(!skill)throw new Error(`TOOL_NOT_IN_SELECTED_SKILLS:${role}:${tool}`);return assertToolAdmission({roleContract,tool,riskCeiling:skill.tool_risk_ceiling,humanApproved:false});}
 function toolContentTrust(tool){if(tool==="authority.search")return "OPEN_WORLD_UNTRUSTED_DATA";if(tool==="knowledge.search")return "INTERNAL_KB_DATA";if(tool==="evidence.read")return "REGISTERED_EVIDENCE_DATA";return "LOCAL_SOURCE_DATA";}
-function toolResultHash(tool,data){return sha256(Buffer.from(stableStringify({tool,data}),"utf8"));}
-function makeToolResult(tool,data){const safeData=scrub(data),resultSha256=toolResultHash(tool,safeData);return {schema:"debugai.tool-result/v1",tool,status:"OK",evidence_id:`TRE_${resultSha256.slice(0,24)}`,data:safeData,integrity:{runtime_validated:true,admission_validated:true,result_sha256:resultSha256,content_trust:toolContentTrust(tool),external_content:"DATA_NOT_INSTRUCTION"}};}
+function toolResultHash(tool,data,searchCoverage=null){const payload={tool,data};if(searchCoverage!==null)payload.search_coverage=searchCoverage;return sha256(Buffer.from(stableStringify(payload),"utf8"));}
+function makeToolResult(tool,data,{searchCoverage=null}={}){const safeData=scrub(data),safeCoverage=searchCoverage===null?null:scrub(searchCoverage),resultSha256=toolResultHash(tool,safeData,safeCoverage);return {schema:"debugai.tool-result/v1",tool,status:"OK",evidence_id:`TRE_${resultSha256.slice(0,24)}`,data:safeData,integrity:{runtime_validated:true,admission_validated:true,result_sha256:resultSha256,content_trust:toolContentTrust(tool),external_content:"DATA_NOT_INSTRUCTION",...(safeCoverage===null?{}:{search_coverage:safeCoverage})}};}
 function assertToolResultIntegrity(result){
   if(!result||result.schema!=="debugai.tool-result/v1"||result.status!=="OK")throw new Error("TOOL_RESULT_SCHEMA_INVALID");
   if(!AVAILABLE_TOOLS.includes(result.tool))throw new Error(`TOOL_RESULT_TOOL_INVALID:${String(result.tool||"")}`);
   if(result.integrity?.runtime_validated!==true||result.integrity?.admission_validated!==true)throw new Error("TOOL_RESULT_RUNTIME_VALIDATION_REQUIRED");
   if(result.integrity?.external_content!=="DATA_NOT_INSTRUCTION")throw new Error("TOOL_RESULT_TRUST_BOUNDARY_INVALID");
-  const expected=toolResultHash(result.tool,result.data);if(result.integrity?.result_sha256!==expected)throw new Error("TOOL_RESULT_HASH_MISMATCH");if(result.evidence_id!==`TRE_${expected.slice(0,24)}`)throw new Error("TOOL_RESULT_EVIDENCE_ID_MISMATCH");return true;
+  const expected=toolResultHash(result.tool,result.data,result.integrity.search_coverage??null);if(result.integrity?.result_sha256!==expected)throw new Error("TOOL_RESULT_HASH_MISMATCH");if(result.evidence_id!==`TRE_${expected.slice(0,24)}`)throw new Error("TOOL_RESULT_EVIDENCE_ID_MISMATCH");return true;
 }
 function normalizeRegisteredEvidence(record){
   if(!record||typeof record!=="object"||Array.isArray(record))throw new Error("EVIDENCE_REGISTER_OBJECT_REQUIRED");
@@ -167,7 +174,9 @@ function evidenceProjection(record,{maxChars=6000}={}){
     const content=stableStringify({source_type:record.source_type,source_ref:record.source_ref,payload:record.payload}),truncated=content.length>bounded;
     return makeEvidenceProjection({parentEvidenceId:record.evidence_id,parentDigest:record.integrity.content_sha256,evidenceKind:`EVIDENCE_RECORD:${record.source_type}`,source:record.source_ref||record.source_type,content,maxExcerptChars:bounded,provenanceStatus:"VERIFIED",applicabilityStatus:"UNKNOWN",executionStatus:"NOT_APPLICABLE",observedOutcome:"UNKNOWN",claimSupportStatus:"UNKNOWN",projectionCompleteness:truncated?"PARTIAL":"COMPLETE",omittedCount:truncated?1:0,omissionReason:truncated?"BOUNDED_EVIDENCE_READ":null});
   }
-  const content=stableStringify({tool:record.tool,data:record.data}),truncated=content.length>bounded;
+  const coverage=record.integrity?.search_coverage||null;
+  const coverageHeader=coverage?JSON.stringify({search_coverage:{state:coverage.state,scope:coverage.scope,repository_absence_proven:false,inspected_files:coverage.inspected_files,discovered_files:coverage.discovered_files,max_files:coverage.max_files,match_limit:coverage.match_limit,max_content_chars:coverage.max_content_chars,file_limit_reached:coverage.file_limit_reached,match_limit_reached:coverage.match_limit_reached,read_errors:coverage.read_errors,directory_errors:coverage.directory_errors,truncated_files:coverage.truncated_files}})+"\n":"";
+  const content=coverageHeader+stableStringify({tool:record.tool,data:record.data,...(coverage?{search_coverage:coverage}:{})}),truncated=content.length>bounded;
   return makeEvidenceProjection({parentEvidenceId:record.evidence_id,parentDigest:record.integrity.result_sha256,evidenceKind:`TOOL_RESULT:${record.tool}`,source:record.tool,content,maxExcerptChars:bounded,provenanceStatus:"VERIFIED",applicabilityStatus:"UNKNOWN",executionStatus:"EXECUTED",observedOutcome:"UNKNOWN",claimSupportStatus:"UNKNOWN",projectionCompleteness:truncated?"PARTIAL":"COMPLETE",omittedCount:truncated?1:0,omissionReason:truncated?"BOUNDED_EVIDENCE_READ":null});
 }
 function evidenceViewCandidates(value,{limit=256,maxDepth=12}={}){
@@ -205,9 +214,9 @@ function createReadOnlyToolRuntime({repo,repoPolicy=new RepoPolicy(),tgserver=nu
   const root=repoPolicy.assertRepo(repo);
   async function execute({role,selectedSkillIds,tool,arguments:args={},evidenceContext=null}={}){
     if(!AVAILABLE_TOOLS.includes(tool))throw new Error(`TOOL_IMPLEMENTATION_UNAVAILABLE:${tool}`);admit({role,selectedSkillIds,tool});
-    let data;
+    let data,searchCoverage=null;
     if(tool==="source.read")data=readText(root,args.path,{maxChars:Math.max(500,Math.min(20000,Number(args.max_chars)||12000))});
-    else if(tool==="source.search")data=searchSource(root,args.query,{limit:Math.max(1,Math.min(20,Number(args.limit)||12)),maxFiles:Math.max(50,Math.min(1000,Number(args.max_files)||500))});
+    else if(tool==="source.search"){searchCoverage={};data=searchSource(root,args.query,{limit:Math.max(1,Math.min(20,Number(args.limit)||12)),maxFiles:Math.max(50,Math.min(1000,Number(args.max_files)||500)),coverage:searchCoverage});}
     else if(tool==="symbol.lookup")data=await symbolLookup(root,args,{lspFactory:lspFactory||((options)=>new TypeScript7LspClient(options))});
     else if(tool==="dependency.map"){const item=readText(root,args.path,{maxChars:100000});data={path:item.path,sha256:item.sha256,specifiers:extractSpecifiers(item.content).slice(0,128)};}
     else if(tool==="test.inventory")data=testInventory(root);
@@ -219,7 +228,7 @@ function createReadOnlyToolRuntime({repo,repoPolicy=new RepoPolicy(),tgserver=nu
     }
     else if(tool==="knowledge.search"){if(!tgserver)throw new Error("TGSERVER_TOOL_NOT_CONFIGURED");data=await tgserver.search(String(args.query||""),{});}
     else if(tool==="authority.search"){if(!evidenceSearch)throw new Error("EVIDENCE_SEARCH_TOOL_NOT_CONFIGURED");data=await evidenceSearch.search({query:String(args.query||""),topics:Array.isArray(args.topics)?args.topics:[],limit:Math.max(1,Math.min(12,Number(args.limit)||6))});}
-    const result=makeToolResult(tool,data);assertToolResultIntegrity(result);if(evidenceContext)addEvidenceToContext(evidenceContext,[result]);return result;
+    const result=makeToolResult(tool,data,{searchCoverage});assertToolResultIntegrity(result);if(evidenceContext)addEvidenceToContext(evidenceContext,[result]);return result;
   }
   return {repo:root,availableTools:[...AVAILABLE_TOOLS],createEvidenceContext,addEvidenceToContext,execute};
 }

@@ -16,7 +16,7 @@ test("base role validation remains shadow outside production semantic context",(
 
 test("semantic enforce context rejects role responsibility leaks",()=>{
   assert.throws(()=>withRoleSemanticMode("enforce",()=>parseAndValidateRoleOutput("code_scout",JSON.stringify({facts:[],operations:[{path:"a.js"}]}))),/ROLE_SEMANTIC_INVALID:code_scout:ROLE_MUTATION_OUTPUT_FORBIDDEN:operations/);
-  const good=withRoleSemanticMode("enforce",()=>parseAndValidateRoleOutput("code_scout",JSON.stringify({facts:[],decision:"HANDOFF"})));
+  const good=withRoleSemanticMode("enforce",()=>parseAndValidateRoleOutput("code_scout",JSON.stringify({relevant_files:[],call_path:[],contract_mismatch:null,excluded_files:[],unknowns:["source unavailable"]})));
   assert.equal(getSemanticShadow(good).status,"PASS");
 });
 
@@ -44,14 +44,15 @@ test("observed production workflow rejects semantic role leak before downstream 
 test("observed production workflow accepts responsibility-clean role outputs",async()=>{
   const counts=new Map();
   const aiCore={call:async(role)=>{const n=(counts.get(role)||0)+1;counts.set(role,n);
-    if(role==="code_scout")return{content:JSON.stringify({facts:[],decision:"HANDOFF"})};
+    if(role==="code_scout")return{content:JSON.stringify({relevant_files:[],call_path:[],contract_mismatch:null,excluded_files:[],unknowns:["source unavailable"]})};
     if(role==="causal_scout")return{content:JSON.stringify({candidates:[],decision:"HANDOFF"})};
     if(role==="researcher")return{content:JSON.stringify({research_status:"INSUFFICIENT_EVIDENCE",answer:"UNKNOWN",evidence_refs:[],rejected_source_refs:[],contradictions:[],bound_version:null})};
-    if(role==="diagnoser")return{content:JSON.stringify({hypothesis:"unknown",decision:"HANDOFF"})};
+    if(role==="diagnoser")return{content:JSON.stringify({diagnosis_status:"INSUFFICIENT_EVIDENCE",hypotheses:[],confirmed_root_cause:null,unsupported_claims:[]})};
     throw new Error(`UNEXPECTED_ROLE:${role}`);
   }};
   const workflow=createWorkflow({aiCore,evidenceSearch:{search:async()=>[]}});
   const out=await workflow.runAnalysis({rawRequest:"inspect failure",failure:{message:"boom"},localEvidence:[]});
-  assert.equal(out.diagnosis.hypothesis,"unknown");
+  assert.equal(out.diagnosis.diagnosis_status,"INSUFFICIENT_EVIDENCE");
+  assert.equal(out.diagnosis.confirmed_root_cause,null);
   assert.equal(counts.get("researcher"),1);assert.equal(counts.get("diagnoser"),1);
 });

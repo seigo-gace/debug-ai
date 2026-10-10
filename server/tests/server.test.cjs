@@ -216,6 +216,24 @@ test('DAP client speaks real Content-Length request/response framing',async()=>{
 });
 
 const {createServer}=require('../http.js');
+test('HTTP analysis rejects malformed production role output before downstream diagnosis',async()=>{
+  const {createWorkflow:observedWorkflow}=require('../workflow-observed.js');
+  const calls=[];
+  const workflow=observedWorkflow({aiCore:{call:async role=>{
+    calls.push(role);
+    if(role==='code_scout')return{content:JSON.stringify({relevant_files:42})};
+    if(role==='causal_scout')return{content:JSON.stringify({candidates:[]})};
+    throw new Error(`UNEXPECTED_DOWNSTREAM_ROLE:${role}`);
+  }}});
+  const server=createServer({workflow});await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  try{
+    const response=await fetch(`http://127.0.0.1:${server.address().port}/v1/analyze`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({failure:{message:'fixture failure'}})});
+    assert.equal(response.status,400);
+    const result=await response.json();assert.match(result.error,/ROLE_SEMANTIC_INVALID:code_scout/);
+    assert.equal(Object.hasOwn(result,'diagnosis'),false);
+    assert.equal(calls.includes('researcher'),false);assert.equal(calls.includes('diagnoser'),false);
+  }finally{await new Promise(resolve=>server.close(resolve));}
+});
 test('HTTP API exposes health and delegates analyze without public backend leakage',async()=>{
   const workflow={runAnalysis:async b=>({state:'OK',got:b}),patchCandidate:async()=>({}),approveAndVerify:async()=>({}),promote:async()=>({})};
   const s=createServer({workflow});

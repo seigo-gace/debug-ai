@@ -61,11 +61,11 @@ test("observed workflow binds generated run before causal runtime observation to
     const repoPolicy=new RepoPolicy({workspaceRoot:f.root}),runtimeRoot=path.join(f.root,"runtime"),authority=new RunAuthority({runtimeRoot,repoPolicy}),runtimeEvidence=new RuntimeEvidenceStore(runtimeRoot,{requirePrivateRoot:false});
     const calls=[];const counts=new Map();
     const aiCore={call:async(role,opts)=>{calls.push({role,opts});const n=(counts.get(role)||0)+1;counts.set(role,n);
-      if(role==="code_scout")return{content:JSON.stringify({facts:[],decision:"HANDOFF"})};
+      if(role==="code_scout")return{content:JSON.stringify({relevant_files:[],call_path:[],contract_mismatch:null,excluded_files:[],unknowns:["source unavailable"]})};
       if(role==="causal_scout"&&n===1){assert.match(opts.system,/runtime\.trace\.read/);assert.match(opts.system,/state\.read/);return{content:JSON.stringify({tool_requests:[{tool:"state.read",arguments:{},reason:"observe current run state"},{tool:"runtime.trace.read",arguments:{types:["failure"],limit:4},reason:"observe current run chronology"}]})};}
       if(role==="causal_scout")return{content:JSON.stringify({candidates:[{kind:"RUNTIME",falsification:"compare current state and trace"}],decision:"HANDOFF"})};
       if(role==="researcher")return{content:JSON.stringify({research_status:"INSUFFICIENT_EVIDENCE",answer:"none",evidence_refs:[],rejected_source_refs:[],contradictions:[],bound_version:"UNKNOWN"})};
-      if(role==="diagnoser")return{content:JSON.stringify({hypothesis:"runtime state mismatch",public_statement:"runtime state mismatch",cause_kind:"RUNTIME",decision:"HANDOFF"})};
+      if(role==="diagnoser")return{content:JSON.stringify({diagnosis_status:"INSUFFICIENT_EVIDENCE",hypotheses:[{id:"H_RUNTIME",status:"UNKNOWN",evidence_refs:[],counter_evidence_refs:[],falsification_condition:"current state agrees with runtime trace"}],confirmed_root_cause:null,unsupported_claims:["runtime state mismatch"],public_statement:"runtime state mismatch",cause_kind:"RUNTIME",decision:"HANDOFF"})};
       throw new Error(`UNEXPECTED_ROLE:${role}`);
     }};
     const workflow=createWorkflow({aiCore,authority,runtimeEvidence,repoPolicy,evidenceSearch:{search:async()=>[]}});

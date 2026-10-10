@@ -71,6 +71,14 @@ Documentation-only commits after `b9203e...` require their own exact-head CI bef
 
 ## Evidence
 
+Role contract regression entry: `server/tests/role-contract-correctness.test.cjs`.
+Normal fixtures for the observed production workflow must use the canonical
+Code Scout/Diagnoser/Patch Engineer shapes from the invocation compiler. Keep
+legacy partial-output fixtures only when explicitly testing shadow compatibility
+or rejection. Preserve negative tests for malformed fields and unadmitted Evidence;
+contract validity alone never establishes task correctness. The HTTP regression
+in `server/tests/server.test.cjs` verifies rejection before downstream diagnosis.
+
 - Model output is not automatically evidence.
 - Missing evidence stays missing; `UNKNOWN` and `INSUFFICIENT_*` are valid.
 - DAP is hint-only until admitted through evidence policy.

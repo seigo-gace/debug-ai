@@ -23,3 +23,26 @@ test("Patch Engineer benchmark keeps paired inputs identical and derives the win
   const result=await runPatchEngineerSkillEffectBenchmark({callModel:async({mode,user})=>{const parsed=JSON.parse(user);calls.push({mode,user});return{content:outputs.get(`${mode}:${parsed.benchmark_case}`)};},clock:{now:(()=>{let n=0;return()=>++n;})()}});
   assert.equal(result.skill_selection_boundary,"CASE_DECLARED_SKILLS");assert.equal(result.score.skill_on,20);assert.ok(result.score.skill_off<20);assert.equal(result.score.winner,"SKILL_ON");for(let i=0;i<calls.length;i+=2)assert.equal(calls[i].user,calls[i+1].user);
 });
+
+test("Patch Engineer oracle cannot award full credit to malformed empty arrays",()=>{
+  const c=CASES[2];
+  for(const field of ["candidate_changes","regression_risks","unrelated_changes"]){
+    for(const invalid of [null,{},"",0]){const value=good(c);value[field]=invalid;assert.ok(scoreCase(c,value).score<5,field);}
+  }
+});
+
+test("Patch Engineer oracle requires exact typed reproduction and rollback fields",()=>{
+  for(const c of CASES){
+    const extra=good(c);extra.reproduction.executed=true;assert.ok(scoreCase(c,extra).score<5,c.id);
+    const missing=good(c);delete missing.reproduction.limitation;assert.ok(scoreCase(c,missing).score<5,c.id);
+    const value=good(c);value.rollback_boundary=0;assert.ok(scoreCase(c,value).score<5,c.id);
+  }
+});
+
+test("Patch Engineer oracle holdout rejects coerced references and array members",()=>{
+  const c=CASES[0];
+  for(const field of ["candidate_changes","diagnosis_evidence_refs","regression_risks"]){
+    const value=good(c);value[field]=value[field].map(x=>[x]);assert.ok(scoreCase(c,value).score<5,field);
+  }
+  for(const value of [null,[],42,"UNKNOWN",{}])assert.ok(scoreCase(c,value).score<5);
+});
