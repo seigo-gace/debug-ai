@@ -17,7 +17,7 @@ class FakeDurableIo{
 }
 
 function initializeRepo(repo){fs.mkdirSync(repo);fs.writeFileSync(path.join(repo,"a.js"),"module.exports=42;\n");}
-function fakeAi(calls,diagnoserInputs){return{call:async(role,payload)=>{calls[role]=(calls[role]||0)+1;if(role==="researcher")return{content:JSON.stringify({research_status:"INSUFFICIENT_EVIDENCE",answer:"fixture evidence is insufficient",evidence_refs:[],rejected_source_refs:[],contradictions:[],bound_version:"test/v1"})};if(role==="diagnoser"){diagnoserInputs.push(JSON.parse(payload.user));return{content:JSON.stringify({diagnoses:[{hypothesis:"fixture",status:"unknown"}],public_statement:"fixture diagnosis"})};}return{content:JSON.stringify({authority:"HINT_ONLY"})};}};}
+function fakeAi(calls,diagnoserInputs){return{call:async(role,payload)=>{calls[role]=(calls[role]||0)+1;if(role==="local_reviewer")return{content:JSON.stringify({verdict:"PENDING",decision:"PENDING",claims:[]})};if(role==="researcher")return{content:JSON.stringify({research_status:"INSUFFICIENT_EVIDENCE",answer:"fixture evidence is insufficient",evidence_refs:[],rejected_source_refs:[],contradictions:[],bound_version:"test/v1"})};if(role==="diagnoser"){diagnoserInputs.push(JSON.parse(payload.user));return{content:JSON.stringify({diagnoses:[{hypothesis:"fixture",status:"unknown"}],public_statement:"fixture diagnosis"})};}return{content:JSON.stringify({authority:"HINT_ONLY"})};}};}
 
 test("startup recovery restores input/cursor and resumes C with same role execution and a new attempt",async t=>{
   const root=fs.mkdtempSync(path.join(os.tmpdir(),"debugai-workflow-restart-")),repo=path.join(root,"repo"),runtimeRoot=path.join(root,"runtime");t.after(()=>fs.rmSync(root,{recursive:true,force:true}));initializeRepo(repo);
@@ -66,7 +66,7 @@ test("diagnoser timeout resume preserves redacted evidence identity and complete
   const root=fs.mkdtempSync(path.join(os.tmpdir(),"debugai-evidence-resume-")),repo=path.join(root,"repo"),runtimeRoot=path.join(root,"runtime");t.after(()=>fs.rmSync(root,{recursive:true,force:true}));initializeRepo(repo);
   const io=new FakeDurableIo(),policy=new RepoPolicy({workspaceRoot:root}),authority=new RunAuthority({runtimeRoot,repoPolicy:policy,durableIo:io});let diagnoserCalls=0,timeoutDiagnoser=true;const diagnoserInputs=[];
   const aiCore={call:async(role,payload)=>{
-    if(role==="researcher")return{content:JSON.stringify({research_status:"INSUFFICIENT_EVIDENCE",answer:"fixture evidence is insufficient",evidence_refs:[],rejected_source_refs:[],contradictions:[],bound_version:"test/v1"})};
+    if(role==="local_reviewer")return{content:JSON.stringify({verdict:"PENDING",decision:"PENDING",claims:[]})};if(role==="researcher")return{content:JSON.stringify({research_status:"INSUFFICIENT_EVIDENCE",answer:"fixture evidence is insufficient",evidence_refs:[],rejected_source_refs:[],contradictions:[],bound_version:"test/v1"})};
     if(role==="diagnoser"){
       diagnoserCalls++;diagnoserInputs.push(JSON.parse(payload.user));
       if(timeoutDiagnoser){const error=new Error("AI_CORE_TIMEOUT");error.code="AI_CORE_TIMEOUT";throw error;}
