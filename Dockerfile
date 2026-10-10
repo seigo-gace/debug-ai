@@ -15,7 +15,8 @@ COPY orchestrator/contracts.js ./orchestrator/contracts.js
 COPY server/native/durable-lock.c ./server/native/durable-lock.c
 COPY scripts/build-durable-native.cjs ./scripts/build-durable-native.cjs
 RUN node scripts/build-durable-native.cjs \
-    && test -s build/native/debugai-durable-lock.node
+    && test -s build/native/debugai-durable-lock.node \
+    && test -s build/native/debugai-durable-lock.provenance.json
 
 FROM node:24.20.0-bookworm-slim AS debugmcp-builder
 RUN apt-get update \
@@ -45,7 +46,9 @@ RUN chmod 0555 /app/bin/debugai.js /app/bin/debugai-mcp.mjs && ln -s /app/bin/de
 COPY orchestrator ./orchestrator
 COPY server ./server
 COPY --from=durable-native-builder /src/build/native/debugai-durable-lock.node ./build/native/debugai-durable-lock.node
-RUN chmod 0555 /app/build/native/debugai-durable-lock.node
+COPY --from=durable-native-builder /src/build/native/debugai-durable-lock.provenance.json ./build/native/debugai-durable-lock.provenance.json
+RUN chmod 0555 /app/build/native/debugai-durable-lock.node \
+    && chmod 0444 /app/build/native/debugai-durable-lock.provenance.json
 ENV DEBUG_AI_SANDBOX_COMMAND=/usr/local/bin/debugai-sandbox-exec
 
 FROM app-base AS sandbox-runner
@@ -54,6 +57,9 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates python3 python3-pip python3-venv \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /opt/debugai-dap
+RUN npm install --include=dev --ignore-scripts --no-audit --no-fund --package-lock=false \
+    && node -e "require('./server/control/sandbox-artifact-provision.js').writeSandboxDependencyProvenance({repositoryRoot:'/app',output:'/app/.debugai-sandbox-deps-provenance.json'})" \
+    && chmod 0444 /app/.debugai-sandbox-deps-provenance.json
 RUN npm install --prefix /opt/debugai-dap --omit=dev --ignore-scripts --no-audit --no-fund \
       @modelcontextprotocol/sdk@1.30.0 zod@3.25.76 \
     && node -e "const fs=require('fs');for(const [p,v] of [['@modelcontextprotocol/sdk','1.30.0'],['zod','3.25.76']]){const j=JSON.parse(fs.readFileSync('/opt/debugai-dap/node_modules/'+p+'/package.json','utf8'));if(j.version!==v)throw new Error(p+':'+j.version)}"
@@ -70,13 +76,15 @@ COPY server/control/dap-supervisor-stdio-bridge.mjs /opt/debugai-dap/dap-supervi
 COPY server/control/dap-sandbox-worker.cjs /opt/debugai-dap/dap-sandbox-worker.cjs
 RUN test -s /opt/debugai-dap/debugmcp.js \
     && chmod 0555 /opt/debugai-dap/debugmcp.js /opt/debugai-dap/js-debug-stdio-bridge.mjs /opt/debugai-dap/dap-supervisor-stdio-bridge.mjs /opt/debugai-dap/dap-sandbox-worker.cjs \
-    && chown -R root:root /opt/debugai-dap \
-    && chmod -R a-w /opt/debugai-dap \
+    && chown -R root:root /opt/debugai-dap /app/node_modules /app/build/native /app/.debugai-sandbox-deps-provenance.json \
+    && chmod -R a-w /opt/debugai-dap /app/node_modules /app/build/native \
     && mkdir -p /sandbox-jobs \
     && chown -R node:node /sandbox-jobs
 USER node
 ENV DEBUG_AI_SANDBOX_JOB_ROOT=/sandbox-jobs \
     DEBUG_AI_SANDBOX_POLL_MS=250 \
+    DEBUG_AI_SANDBOX_RUNTIME_ROOT=/app \
+    DEBUG_AI_SANDBOX_NATIVE_ARTIFACT_ROOT=/app/build/native \
     DEBUG_AI_DAP_ROOT=/opt/debugai-dap
 CMD ["node","server/control/sandbox-sidecar.js"]
 

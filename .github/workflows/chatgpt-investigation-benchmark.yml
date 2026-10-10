@@ -1,0 +1,110 @@
+name: ChatGPT Investigation Benchmark
+
+on:
+  push:
+    branches:
+      - feat/tgserver-async-log-sink-20261003
+    paths:
+      - .github/investigation-benchmark-trigger.json
+      - .github/workflows/chatgpt-investigation-benchmark.yml
+      - server/control/investigation-benchmark-suite.js
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chatgpt-investigation-benchmark
+  cancel-in-progress: true
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+          matrix="$(node -e 'const roles=[["CS1","code_scout"],["CS2","code_scout"],["CA1","causal_scout"],["CA2","causal_scout"],["RS1","researcher"],["RS2","researcher"],["DG1","diagnoser"],["DG2","diagnoser"],["VR1","local_reviewer"],["VR2","local_reviewer"]],include=[];for(let l=1;l<=5;l++)for(const [suffix,role] of roles)include.push({id:"L"+l+"-"+suffix,level:"L"+l,role});process.stdout.write(JSON.stringify({include}))')"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "$matrix" | jq -e '.include|length==50' >/dev/null
+
+  benchmark:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      BASE_URL: https://debugai.asterav8.jp
+      CF_ACCESS_CLIENT_ID: ${{ secrets.DEBUGAI_CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.DEBUGAI_CF_ACCESS_CLIENT_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Require bounded live access
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${CF_ACCESS_CLIENT_ID:-}"
+          test -n "${CF_ACCESS_CLIENT_SECRET:-}"
+          code="$(curl -sS -L --max-time 30 -o /tmp/health.json -w '%{http_code}' -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" "${BASE_URL}/health")"
+          echo "HEALTH_HTTP=$code"
+          test "$code" = "200"
+
+      - name: Start async read-only benchmark case
+        id: run
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -n --arg case_id "${{ matrix.id }}" '{case_id:$case_id}' >/tmp/start.json
+          code="$(curl -sS --max-time 30 -o /tmp/start-out.json -w '%{http_code}' -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" -H 'content-type: application/json' --data-binary @/tmp/start.json "${BASE_URL}/v1/investigation-benchmark/start")"
+          echo "START_HTTP=$code"
+          test "$code" = "202"
+          id="$(jq -r '.benchmark_id // empty' /tmp/start-out.json)"
+          [[ "$id" =~ ^invbench_[A-Za-z0-9]+$ ]]
+          echo "benchmark_id=$id" >>"$GITHUB_OUTPUT"
+          echo "BENCHMARK_ID=$id"
+          echo "CASE=${{ matrix.id }} LEVEL=${{ matrix.level }} ROLE=${{ matrix.role }}"
+
+      - name: Poll benchmark case
+        shell: bash
+        run: |
+          set -euo pipefail
+          id="${{ steps.run.outputs.benchmark_id }}"
+          deadline=$((SECONDS+3300))
+          while true; do
+            code="$(curl -sS --max-time 30 -o /tmp/result.json -w '%{http_code}' -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" "${BASE_URL}/v1/investigation-benchmark/status/$id")"
+            test "$code" = "200"
+            state="$(jq -r '.state // "UNKNOWN"' /tmp/result.json)"
+            echo "STATE=$state"
+            if [ "$state" = "DONE" ]; then break; fi
+            if [ "$state" = "FAILED" ]; then jq -r '"BENCHMARK_ERROR="+(.error//"UNKNOWN")' /tmp/result.json; exit 12; fi
+            (( SECONDS < deadline )) || { echo "BENCHMARK_POLL_TIMEOUT"; exit 13; }
+            sleep 5
+          done
+          jq -c '{case_id:.case_id,duration_ms:.duration_ms,pass:.result.pass,score:.result.score,max_score:.result.max_score,level:.result.level,role:.result.role,elapsed_ms:.result.elapsed_ms,attempts:.result.attempts,tool_calls:.result.tool_calls,telemetry:.result.telemetry}' /tmp/result.json
+          jq -e '.result.case_id=="${{ matrix.id }}"' /tmp/result.json >/dev/null
+
+      - name: Safety assertion
+        if: always()
+        shell: bash
+        run: |
+          echo "READ_ONLY_MEASUREMENT=YES"
+          echo "PATCH_CANDIDATE_CALLED=NO"
+          echo "APPROVE_APPLY_VERIFY_CALLED=NO"
+          echo "PRODUCTION_DEPLOY_CALLED=NO"
+          echo "GITHUB_MUTATION_BY_DEBUGAI=NO"
+
+      - name: Upload benchmark result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: investigation-${{ matrix.level }}-${{ matrix.id }}-${{ github.run_id }}
+          path: /tmp/result.json
+          if-no-files-found: warn
+          retention-days: 3

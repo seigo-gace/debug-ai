@@ -5,7 +5,7 @@ const {ROLES}=require("../roles.js");
 const {compileInvocation}=require("../control/invocation-compiler.js");
 const {OUTPUT_HEADROOM_TOKENS,getModelOutputHardCeilingForRole}=require("../control/model-profiles.js");
 const ROLE_ALIASES=Object.freeze(Object.fromEntries(Object.entries(ROLES).map(([k,v])=>[k,v.alias])));
-const TIMEOUT_CLASS=Object.freeze({DEADLINE_ABORT:"DEADLINE_ABORT",TRANSPORT_TIMEOUT:"TRANSPORT_TIMEOUT",EXTERNAL_ABORT:"EXTERNAL_ABORT"});
+const TIMEOUT_CLASS=Object.freeze({QUEUE_TIMEOUT:"QUEUE_TIMEOUT",DEADLINE_ABORT:"DEADLINE_ABORT",TRANSPORT_TIMEOUT:"TRANSPORT_TIMEOUT",EXTERNAL_ABORT:"EXTERNAL_ABORT"});
 class AiCoreError extends Error{constructor(code,msg,meta={}){super(msg);this.name="AiCoreError";this.code=code;this.meta=meta;}}
 function resolveRoleTimeoutMs(role,defaultTimeoutMs){const cfg=ROLES[role];if(!cfg)throw new AiCoreError("ROLE_INVALID",`Unknown DebugAI role: ${role}`);return Number.isFinite(cfg.timeout_ms)&&cfg.timeout_ms>0?cfg.timeout_ms:defaultTimeoutMs;}
 function resolveEffectiveTimeoutMs(role,defaultTimeoutMs,{timeoutMsOverride=null,deadlineAt=null,now=Date.now()}={}){
@@ -86,16 +86,18 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
   const endpoint=new URL("/v1/chat/completions",baseUrl).toString();
   const transport=dispatcher||new Agent({headersTimeout:timeoutMs+5000,bodyTimeout:timeoutMs+5000});
   let queueTail=Promise.resolve();
-  async function execute(role,{system="",user="",maxTokens=1024,responseFormat="json_object",temperature=0,selectedSkillIds=null,timeoutMsOverride=null,deadlineAt=null,toolBudgetFinalRound=null}={},runtimeMeta={}){
+  async function execute(role,{system="",user="",maxTokens=1024,responseFormat="json_object",temperature=0,topP=null,topK=null,selectedSkillIds=null,timeoutMsOverride=null,deadlineAt=null,toolBudgetFinalRound=null}={},runtimeMeta={}){
     const roleStartedAt=Date.now(),prepareStartedAt=Date.now();
     const cfg=ROLES[role];if(!cfg)throw new AiCoreError("ROLE_INVALID",`Unknown DebugAI role: ${role}`);
     const tokenBudget=resolveEffectiveMaxTokens(role,maxTokens,{runtimeContextTokens:qualifiedRuntimeContext,requireRuntimeContextQualification});
     const effectiveMaxTokens=tokenBudget.effective_max_tokens;
     const effectiveTimeoutMs=resolveEffectiveTimeoutMs(role,timeoutMs,{timeoutMsOverride,deadlineAt,now:Date.now()});
-    const invocation=compileInvocation(role,{task:user,extraSystem:system,selectedSkillIds});
-    const compiledPrefixHash=prefixHash(invocation.system);
+    const preparedSystem=typeof runtimeMeta.preparedSystem==="string"&&runtimeMeta.preparedSystem?runtimeMeta.preparedSystem:null;
+    const invocation=preparedSystem?null:compileInvocation(role,{task:user,extraSystem:system,selectedSkillIds});
+    const effectiveSystem=preparedSystem||invocation.system;
+    const compiledPrefixHash=prefixHash(effectiveSystem);
     const wireUser=runtimeControlWireUser(user,toolBudgetFinalRound);
-    const body={model:cfg.backend_model,messages:[{role:"system",content:invocation.system},{role:"user",content:wireUser}],max_tokens:effectiveMaxTokens,temperature,stream:false,cache_prompt:promptCache,response_format:responseFormat?{type:responseFormat}:undefined};
+    const body={model:cfg.backend_model,messages:[{role:"system",content:effectiveSystem},{role:"user",content:wireUser}],max_tokens:effectiveMaxTokens,temperature,stream:false,cache_prompt:promptCache,response_format:responseFormat?{type:responseFormat}:undefined};if(topP!==null&&topP!==undefined){if(!Number.isFinite(topP)||topP<0||topP>1)throw new AiCoreError("AI_CORE_TOP_P_INVALID","topP must be between 0 and 1",{role,top_p:topP});body.top_p=topP;}if(topK!==null&&topK!==undefined){if(!Number.isInteger(topK)||topK<0)throw new AiCoreError("AI_CORE_TOP_K_INVALID","topK must be a nonnegative integer",{role,top_k:topK});body.top_k=topK;}
     if(typeof cfg.thinking==="boolean")body.chat_template_kwargs={enable_thinking:cfg.thinking};
     const requestBody=JSON.stringify(body),requestBytesPerAttempt=Buffer.byteLength(requestBody,"utf8"),prepareMs=Date.now()-prepareStartedAt;
     let upstreamMs=0,responseBytes=0,parseValidateMs=0;
@@ -114,7 +116,7 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
         const telemetry=makeTelemetry({queueWaitMs:runtimeMeta.queueWaitMs,prepareMs,upstreamMs,parseValidateMs,roleStartedAt,requestBytes:requestBytesPerAttempt*attempt,responseBytes,attempts:attempt,envelope,finishReason,prefix:compiledPrefixHash});
         if(String(finishReason||"").toLowerCase()==="length")throw truncationError(role,cfg,{maxTokens:effectiveMaxTokens,finishReason,content,envelope,telemetry});
         if(typeof content!=="string"||!content.trim())throw new AiCoreError("AI_CORE_EMPTY","AI Core returned empty content",{role,model:cfg.backend_model,finish_reason:finishReason,telemetry});
-        return {provider:"llama-swap",role,alias:cfg.alias,model:cfg.backend_model,thinking:cfg.thinking,content,raw:envelope,attempts:attempt,telemetry,control_plane:{selected_skill_ids:[...invocation.selected_skill_ids],skill_selection_mode:invocation.skill_selection_mode,role_contract_version:invocation.role_contract_version,output_schema:invocation.output_schema,guardrail_profile:invocation.guardrail_profile,effective_timeout_ms:effectiveTimeoutMs,max_tokens:effectiveMaxTokens,requested_max_tokens:tokenBudget.requested_max_tokens,model_output_hard_ceiling_tokens:tokenBudget.model_output_hard_ceiling_tokens,runtime_context_tokens:tokenBudget.runtime_context_tokens,runtime_output_ceiling_tokens:tokenBudget.runtime_output_ceiling_tokens,runtime_context_qualified:tokenBudget.runtime_context_qualified,context_limited:tokenBudget.context_limited,prompt_cache_requested:promptCache,tool_budget_final_round:toolBudgetFinalRound===true,prefix_hash:compiledPrefixHash}};
+        return {provider:"llama-swap",role,alias:cfg.alias,model:cfg.backend_model,thinking:cfg.thinking,content,raw:envelope,attempts:attempt,telemetry,control_plane:{selected_skill_ids:invocation?[...invocation.selected_skill_ids]:[...(selectedSkillIds||[])],skill_selection_mode:invocation?invocation.skill_selection_mode:"PRECOMPILED_MEASUREMENT",role_contract_version:invocation?invocation.role_contract_version:null,output_schema:invocation?invocation.output_schema:null,guardrail_profile:invocation?invocation.guardrail_profile:null,effective_timeout_ms:effectiveTimeoutMs,max_tokens:effectiveMaxTokens,requested_max_tokens:tokenBudget.requested_max_tokens,model_output_hard_ceiling_tokens:tokenBudget.model_output_hard_ceiling_tokens,runtime_context_tokens:tokenBudget.runtime_context_tokens,runtime_output_ceiling_tokens:tokenBudget.runtime_output_ceiling_tokens,runtime_context_qualified:tokenBudget.runtime_context_qualified,context_limited:tokenBudget.context_limited,prompt_cache_requested:promptCache,tool_budget_final_round:toolBudgetFinalRound===true,prefix_hash:compiledPrefixHash}};
       }catch(e){
         const timeoutClass=classifyTimeoutError(e,{deadlineTriggered});
         const telemetry=e?.meta?.telemetry||makeTelemetry({queueWaitMs:runtimeMeta.queueWaitMs,prepareMs,upstreamMs,parseValidateMs,roleStartedAt,requestBytes:requestBytesPerAttempt*attempt,responseBytes,attempts:attempt,envelope,finishReason,prefix:compiledPrefixHash});
@@ -126,7 +128,26 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
     }
     throw new AiCoreError("AI_CORE_TIMEOUT","AI Core transport timeout retry loop exhausted",{role,model:cfg.backend_model,timeout_ms:effectiveTimeoutMs,attempts:maxTransportTimeoutAttempts,timeout_class:TIMEOUT_CLASS.TRANSPORT_TIMEOUT,retryable:false});
   }
-  async function call(role,options={}){let release;const queuedAt=Date.now(),turn=new Promise(resolve=>{release=resolve;}),previous=queueTail;queueTail=turn;await previous;const queueWaitMs=Date.now()-queuedAt;try{return await execute(role,options,{queueWaitMs});}finally{release();}}
-  return{endpoint,runtime_context_tokens:qualifiedRuntimeContext,runtime_context_qualified:qualifiedRuntimeContext!==null,prompt_cache_requested:promptCache,call};
+  async function queuedCall(role,options={},internalMeta={}){
+    let release;const queuedAt=Date.now(),turn=new Promise(resolve=>{release=resolve;}),previous=queueTail;queueTail=turn;
+    const queueTimeoutMs=options.queueTimeoutMs===null||options.queueTimeoutMs===undefined?null:Number(options.queueTimeoutMs);
+    if(queueTimeoutMs!==null&&(!Number.isFinite(queueTimeoutMs)||queueTimeoutMs<=0)){previous.finally(release);throw new AiCoreError("AI_CORE_QUEUE_TIMEOUT_INVALID","queueTimeoutMs must be a positive finite number",{role,queue_timeout_ms:options.queueTimeoutMs});}
+    let queueTimer=null;
+    try{
+      if(queueTimeoutMs===null)await previous;
+      else await Promise.race([previous,new Promise((_,reject)=>{queueTimer=setTimeout(()=>reject(new AiCoreError("AI_CORE_QUEUE_TIMEOUT",`AI Core queue wait exceeded ${Math.floor(queueTimeoutMs)}ms for ${role}`,{role,timeout_ms:Math.floor(queueTimeoutMs),timeout_class:TIMEOUT_CLASS.QUEUE_TIMEOUT,retryable:false,telemetry:makeTelemetry({queueWaitMs:Date.now()-queuedAt})})),Math.floor(queueTimeoutMs));})]);
+    }catch(error){
+      if(queueTimer)clearTimeout(queueTimer);
+      previous.finally(release);
+      throw error;
+    }
+    if(queueTimer)clearTimeout(queueTimer);
+    const queueWaitMs=Date.now()-queuedAt;
+    const executeOptions=options.excludeQueueFromDeadline===true&&Number.isFinite(options.deadlineAt)?{...options,deadlineAt:Number(options.deadlineAt)+queueWaitMs}:options;
+    try{return await execute(role,executeOptions,{queueWaitMs,...internalMeta});}finally{release();}
+  }
+  async function call(role,options={}){return queuedCall(role,options);}
+  async function callPrepared(role,{system,user="",...options}={}){if(typeof system!=="string"||!system.trim())throw new AiCoreError("AI_CORE_PREPARED_SYSTEM_REQUIRED","Prepared benchmark system prompt is required",{role});return queuedCall(role,{...options,user},{preparedSystem:system});}
+  return{endpoint,runtime_context_tokens:qualifiedRuntimeContext,runtime_context_qualified:qualifiedRuntimeContext!==null,prompt_cache_requested:promptCache,call,callPrepared};
 }
 module.exports={ROLE_ALIASES,TIMEOUT_CLASS,AiCoreError,classifyTimeoutError,isTimeoutError,resolveRoleTimeoutMs,resolveEffectiveTimeoutMs,normalizeRuntimeContextTokens,resolveEffectiveMaxTokens,finiteUsage,usageTelemetry,providerTimingTelemetry,prefixHash,truncationError,runtimeControlWireUser,createAiCoreAdapter};

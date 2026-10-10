@@ -8,6 +8,22 @@ const { spawnSync } = require("node:child_process");
 
 const { PINNED_NODE_VERSION } = require("../orchestrator/contracts.js");
 
+const PROVENANCE_SCHEMA = "debugai.durable-native-provenance/v1";
+const PROVENANCE_FILE = "debugai-durable-lock.provenance.json";
+const SOURCE_BINDINGS = Object.freeze([
+  "orchestrator/contracts.js",
+  "scripts/build-durable-native.cjs",
+  "server/native/durable-lock.c",
+]);
+
+function sha256Buffer(value) {
+  return crypto.createHash("sha256").update(value).digest("hex");
+}
+
+function sha256File(file) {
+  return sha256Buffer(fs.readFileSync(file));
+}
+
 function assertBuildRuntime() {
   if (process.platform !== "linux") throw new Error("DURABLE_NATIVE_LINUX_REQUIRED");
   if (process.version !== PINNED_NODE_VERSION) throw new Error("DURABLE_NATIVE_PINNED_NODE_REQUIRED");
@@ -31,6 +47,35 @@ function ensureBuildDirectory(directory) {
   return fs.realpathSync(directory);
 }
 
+function compilerVersionHash(compiler, { cwd, env }) {
+  const result = spawnSync(compiler, ["--version"], {
+    cwd,
+    env,
+    encoding: "utf8",
+    shell: false,
+    timeout: 10000,
+    maxBuffer: 1024 * 1024,
+  });
+  if (result.error || result.status !== 0) throw new Error("DURABLE_NATIVE_COMPILER_IDENTITY_FAILED");
+  return sha256Buffer(Buffer.from(`${result.stdout || ""}${result.stderr || ""}`, "utf8"));
+}
+
+function sourceHashes(root) {
+  return Object.freeze(Object.fromEntries(SOURCE_BINDINGS.map((relative) => {
+    const target = path.join(root, relative);
+    if (!fs.existsSync(target) || !fs.lstatSync(target).isFile() || fs.lstatSync(target).isSymbolicLink()) {
+      throw new Error(`DURABLE_NATIVE_BOUND_SOURCE_INVALID:${relative}`);
+    }
+    return [relative, sha256File(target)];
+  })));
+}
+
+function writeProvenance(file, payload) {
+  fs.writeFileSync(file, `${JSON.stringify(payload, null, 2)}\n`, { mode: 0o444, flag: "wx" });
+  const fd = fs.openSync(file, "r");
+  try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+}
+
 function build({ env = process.env, repositoryRoot = path.resolve(__dirname, "..") } = {}) {
   assertBuildRuntime();
   const root = fs.realpathSync(repositoryRoot);
@@ -40,10 +85,10 @@ function build({ env = process.env, repositoryRoot = path.resolve(__dirname, "..
 
   const outputDirectory = ensureBuildDirectory(path.join(root, "build", "native"));
   const output = path.join(outputDirectory, "debugai-durable-lock.node");
-  const temporary = path.join(
-    outputDirectory,
-    `.debugai-durable-lock-${process.pid}-${crypto.randomBytes(12).toString("hex")}.node`
-  );
+  const provenance = path.join(outputDirectory, PROVENANCE_FILE);
+  const nonce = `${process.pid}-${crypto.randomBytes(12).toString("hex")}`;
+  const temporary = path.join(outputDirectory, `.debugai-durable-lock-${nonce}.node`);
+  const temporaryProvenance = path.join(outputDirectory, `.debugai-durable-lock-${nonce}.provenance.json`);
 
   const compiler = String(env.CC || "cc");
   if (compiler.length === 0 || compiler.includes("\u0000") || /\s/.test(compiler)) {
@@ -57,7 +102,9 @@ function build({ env = process.env, repositoryRoot = path.resolve(__dirname, "..
   ];
 
   let published = false;
+  let outputRenamed = false;
   try {
+    const compilerVersionSha256 = compilerVersionHash(compiler, { cwd: root, env });
     const result = spawnSync(compiler, args, {
       cwd: root,
       env,
@@ -78,9 +125,28 @@ function build({ env = process.env, repositoryRoot = path.resolve(__dirname, "..
     }
 
     fs.chmodSync(temporary, 0o555);
+    const addon = require(temporary);
+    for (const method of ["acquire", "assertHeld", "release"]) {
+      if (typeof addon[method] !== "function") throw new Error("DURABLE_NATIVE_EXPORTS_INVALID");
+    }
+
+    const payload = Object.freeze({
+      schema: PROVENANCE_SCHEMA,
+      node: process.version,
+      platform: process.platform,
+      arch: process.arch,
+      source_sha256: sourceHashes(root),
+      node_api_sha256: sha256File(path.join(headers, "node_api.h")),
+      compiler: Object.freeze({ command: compiler, version_sha256: compilerVersionSha256 }),
+      output: Object.freeze({ file: "debugai-durable-lock.node", sha256: sha256File(temporary) }),
+    });
+    writeProvenance(temporaryProvenance, payload);
+
     const fd = fs.openSync(temporary, "r");
     try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
     fs.renameSync(temporary, output);
+    outputRenamed = true;
+    fs.renameSync(temporaryProvenance, provenance);
     published = true;
 
     const directoryFd = fs.openSync(
@@ -89,24 +155,27 @@ function build({ env = process.env, repositoryRoot = path.resolve(__dirname, "..
     );
     try { fs.fsyncSync(directoryFd); } finally { fs.closeSync(directoryFd); }
 
-    const addon = require(output);
-    for (const method of ["acquire", "assertHeld", "release"]) {
-      if (typeof addon[method] !== "function") throw new Error("DURABLE_NATIVE_EXPORTS_INVALID");
-    }
-
     return {
-      schema: "debugai.native-build-result/v1",
+      schema: "debugai.native-build-result/v2",
       output: path.relative(root, output).split(path.sep).join("/"),
+      provenance: path.relative(root, provenance).split(path.sep).join("/"),
+      output_sha256: payload.output.sha256,
       node: process.version,
       platform: process.platform,
       compiled: true,
+      source_bound: true,
+      toolchain_recorded: true,
       runtime_lock_tests_executed: false,
     };
   } finally {
     if (!published) {
-      try { fs.unlinkSync(temporary); }
-      catch (error) {
-        if (error.code !== "ENOENT") process.stderr.write("DURABLE_NATIVE_TEMP_CLEANUP_FAILED\n");
+      for (const target of [temporary, temporaryProvenance]) {
+        try { fs.unlinkSync(target); }
+        catch (error) { if (error.code !== "ENOENT") process.stderr.write("DURABLE_NATIVE_TEMP_CLEANUP_FAILED\n"); }
+      }
+      if (outputRenamed) {
+        try { fs.unlinkSync(output); }
+        catch (error) { if (error.code !== "ENOENT") process.stderr.write("DURABLE_NATIVE_OUTPUT_CLEANUP_FAILED\n"); }
       }
     }
   }
@@ -123,4 +192,4 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { assertBuildRuntime, resolveHeaders, ensureBuildDirectory, build };
+module.exports = { PROVENANCE_SCHEMA, PROVENANCE_FILE, SOURCE_BINDINGS, sha256Buffer, sha256File, assertBuildRuntime, resolveHeaders, ensureBuildDirectory, compilerVersionHash, sourceHashes, build };

@@ -1,30 +1,83 @@
 # DebugAI
 
+## Master Internal Persistent Delegation — source implementation
+
+Master-only persistent delegation reuses the existing Workspace registry, MCP and
+Host receipt path. Registered Project membership alone never authorizes execution:
+owner/admin identity, exact server/runtime mapping, enabled/unrevoked registry and
+per-operation Repo/branch/SHA/scope/effects are freshly verified. Legacy manual and
+Commercial/customer paths are unchanged. Repository delegation has no expiry;
+execution receipts remain <=5 minutes and single-use.
+Contract/design delta: [Master Internal Persistent Delegation](docs/MASTER_INTERNAL_PERSISTENT_DELEGATION.md).
+Initial mapped entry: `seigo-gace/debug-ai`, `dlg_master_debugai_v1`.
+Source/test qualification and live Runtime completion remain separate. At this
+source checkpoint live remains `cc3462ddb07fb1379d61dc7c2321a776794800c1`; the new
+persistent mode has not yet been reflected or live-qualified.
+
+
+## Standing Delegation for bounded reflection
+
+The existing guarded GitOps lane now supports Host-only standing delegation for
+`deploy` / `debugai.compose.reflect`. Issuer, validity/revocation, exact target,
+changed-path scope and request identity are checked before a bound single-use
+receipt is issued and consumed. Manual receipt compatibility is retained.
+Source/CI qualification and live delegated E2E remain separate gates. The last
+fresh live readback before this Change Unit was `4190f870...`; broader PR #40
+qualification is unchanged. Contract/design delta: [Standing Delegation](docs/GITOPS_STANDING_DELEGATION.md).
+
 DebugAI is a code-first, evidence-driven debugging runtime that operates as a specialized debugging sub-agent under a primary AI. It investigates failures, binds claims to evidence, creates patch candidates, preserves explicit human approval before mutation, verifies applied changes, survives interruption/restart, and refuses to call a run complete when required evidence is missing.
 
 This repository is the canonical source authority. GitHub source/CI, shared AI Core state, live Contabo checkout/container state, and production state are separate facts and must be read back independently before any live claim.
+
+## Current synchronization — 2026-10-06
+
+The current feature work is PR #40 (`feat/tgserver-async-log-sink-20261003`), OPEN / DRAFT / UNMERGED. Implementation source `d1ee3ffd175fc530afe8f38e782859d1d63c8e61` closes the known post-apply deterministic-retest gap at the source/CI boundary.
+
+At `d1ee3ffd...`, a failed deterministic retest no longer terminates immediately as `FAILED_RETEST`. The same run transitions through the existing `FAILED -> RESOLVING -> PATCH_READY -> WAITING_APPROVAL` states, registers fresh retest evidence, re-runs Diagnoser, requires a fresh External Hypothesis Review PASS, and creates a new Patch Candidate inside the previous selected-file scope. Automatic re-fix is bounded to two attempts; non-PASS review, missing required evidence/scope, or budget exhaustion fails closed to `ESCALATION_REQUIRED`. Patch application is never automatic: every new candidate still requires explicit approval bound to the exact candidate identity. In this development workflow the controlling parent/orchestrator is ChatGPT; Master is involved only when a separately defined Master-gated operation is crossed.
+
+Qualification head `71bc123112e07859dce5b7ae24afaff7eec86a4f` adds an end-to-end same-run closure regression on top of implementation `d1ee3ffd...`. Canonical exact-head verification at `71bc123...` passed `464/464` tests with `FAIL=0` and `SKIP=0`, including four dedicated automatic re-fix regressions. The fourth regression proves: first approved candidate fails retest -> DebugAI creates a replacement candidate -> replacement waits for explicit approval -> approved replacement passes retest -> Local Review / External Final Review / Strict Completion -> `COMPLETE`. Development Probe run `37403103008` reported `source_ready=true` and `server_mutation_authorized=false`. Verify `37403103045`, Core Verify `37403103007`, Public Readiness `37403102991`, Runtime Volume Gate `37403103015`, Development Probe `37403103008`, and Targeted TGserver Logging `37403103011` all completed SUCCESS.
+
+Core Verify executed the existing isolated Sandbox full-suite and produced `TESTS=464 / PASS=464 / FAIL=0 / SKIPPED=0` with `BACKEND=sidecar+landlock+seccomp`, `SIGNAL=EXACT_SOURCE_BOUND_CHILD_ONLY`, `SANDBOX_DOCKER_SOCKET=ABSENT`, real isolation PASS, strict socket deny PASS, DAP loopback-only PASS, and unchanged source-repository hash.
+
+The currently reflected live DebugAI Server remains exact source `3997812067fe2a76e7fb6aea246ea8b34aa564c0`, previously verified running/healthy with `guarded_gitops=true`, request/status endpoints live, source parity PASS, and no DebugAI Docker socket. Source `d1ee3ffd...` is **not** live. Production reflection/recreate of a new exact SHA remains a separate Master approval boundary.
+
+Shared Chat->GitHub->Server executor extraction is handled outside DebugAI. DebugAI retains its debugging, evidence, diagnosis, candidate, verification, automatic re-fix, review, and Strict Completion responsibilities.
 
 ## Read this first
 
 Use the documents by responsibility, not as interchangeable status notes:
 
 1. [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md) — current verified repository/runtime boundary and next work.
-2. [`docs/DURABLE-CONTINUATION-DESIGN.md`](docs/DURABLE-CONTINUATION-DESIGN.md) — architecture/design authority and durable-continuation contract.
-3. [`docs/PRE_SERVER_QUALIFICATION.md`](docs/PRE_SERVER_QUALIFICATION.md) — benchmark/source/live qualification order and pass/fail states.
-4. [`docs/MCP_ADAPTER.md`](docs/MCP_ADAPTER.md) — MCP transport contract and nine-tool boundary.
-5. [`docs/CODEX_MCP_LIVE_HANDOFF.md`](docs/CODEX_MCP_LIVE_HANDOFF.md) — live parent-agent/MCP verification handoff.
-6. [`DEBUGAI.md`](DEBUGAI.md) — CLI/MCP usage surface.
-7. [`AGENTS.md`](AGENTS.md) — repository operating constraints for coding agents.
+2. [`docs/CURRENT_SOURCE_QUALIFICATION.md`](docs/CURRENT_SOURCE_QUALIFICATION.md) — latest source/CI qualification and isolated Sandbox closure.
+3. [`docs/PROJECT_TREE.md`](docs/PROJECT_TREE.md) — responsibility/location map for repository work.
+4. [`docs/DURABLE-CONTINUATION-DESIGN.md`](docs/DURABLE-CONTINUATION-DESIGN.md) — architecture/design authority and durable-continuation contract.
+5. [`docs/PRE_SERVER_QUALIFICATION.md`](docs/PRE_SERVER_QUALIFICATION.md) — benchmark/source/live qualification order and pass/fail states.
+6. [`docs/MCP_ADAPTER.md`](docs/MCP_ADAPTER.md) — MCP transport contract and tool boundary.
+7. [`docs/CODEX_MCP_LIVE_HANDOFF.md`](docs/CODEX_MCP_LIVE_HANDOFF.md) — live parent-agent/MCP verification handoff.
+8. [`DEBUGAI.md`](DEBUGAI.md) — CLI/MCP usage surface.
+9. [`AGENTS.md`](AGENTS.md) — repository operating constraints for coding agents.
 
-The design document preserves architecture decisions. `CURRENT_STATE.md` owns current implementation/runtime status. Do not rewrite an old design decision merely to make it look like it was always the current implementation.
+The design document preserves architecture decisions. `CURRENT_STATE.md` owns current implementation/runtime history; `CURRENT_SOURCE_QUALIFICATION.md` owns the latest source/CI qualification checkpoint. Do not rewrite an old design or measurement decision merely to make it look like it was always the current implementation.
 
 ## Current verified boundary
 
-The approved live revision is `83424901502491c6b1dcc8fd223990f91a750d7d`. Its exact-head GitHub CI passed Public Readiness #484, Verify #519, Runtime Volume Gate #115, and Core Verify #520. PR #34 remains OPEN / DRAFT / UNMERGED.
+Live Server and current source are intentionally different states:
 
-The approved live source now propagates the MCP request as task data, specifies canonical Causal Scout final output, and forwards Local Reviewer benchmark telemetry. Fresh runtime evidence confirms the request-backed search query and accepted canonical Causal Scout claims with UNKNOWN; broader semantic quality and Strict Completion remain unqualified. The new source-side candidate repairs sandbox test fixtures and request-only history handling, and narrowly preserves typed canonical telemetry counts during secret scrubbing. Its runtime reflection requires separate exact-SHA authorization.
+```text
+LIVE_SERVER_SHA             = 3997812067fe2a76e7fb6aea246ea8b34aa564c0
+IMPLEMENTATION_SHA           = d1ee3ffd175fc530afe8f38e782859d1d63c8e61
+SOURCE_QUALIFICATION_HEAD    = 71bc123112e07859dce5b7ae24afaff7eec86a4f
+CURRENT_SOURCE_DEPLOYED      = NO
+SOURCE_QUALIFICATION_TESTS   = 464/464 PASS / FAIL=0 / SKIP=0
+SOURCE_QUALIFICATION_CI      = 6/6 SUCCESS
+AUTOMATIC_REFIX_SOURCE       = PASS
+AUTOMATIC_REFIX_CLOSED_LOOP  = PASS_SOURCE_CI
+STRICT_COMPLETION_LIVE       = NOT_VERIFIED_FOR_CURRENT_SOURCE
+```
 
-Approved runtime reflection is healthy with exact parity across 223 shipped files, persistent volumes, historical checkpoints and auxiliary containers preserved, unchanged environment hashes, and context 8192. The old MCP run is correctly BLOCKED on repository revision mismatch. A new real run passes the Causal Scout canonical shape gate and preserves UNKNOWN; semantic quality and full sandbox verification remain unqualified. Source repairs and independent sandbox limitations are tracked in docs/CURRENT_STATE.md and docs/SANDBOX_SUITE_COMPATIBILITY.md.
+The live `399781...` reflection remains the verified Guarded GitOps infrastructure boundary. The newer `d1ee3...` source adds bounded automatic re-fix after a failed deterministic retest and is qualified only at source/CI/Sandbox until separately approved and reflected.
+
+Historical live/source records below remain evidence for their recorded revisions and do not override this block.
 
 ## What DebugAI does
 
@@ -40,37 +93,36 @@ Code Scout + Causal Scout
         +----> TGserver retrieval when required
         +----> Astera Evidence Search when required
         v
-Researcher
-        v
-Diagnoser
-        v
-External Hypothesis Review
+Researcher -> Diagnoser -> External Hypothesis Review
         |
         | PASS only
         v
-Patch Engineer
+Patch Engineer -> candidate only
         |
-        | candidate only
         v
-WAITING_MASTER_APPROVAL
+WAITING_APPROVAL
         |
         | explicit approval + exact candidate identity
         v
-Patch apply
-        v
-Deterministic retest + invariants
-        v
-Local Reviewer
-        v
-Required External Final Review
-        v
-Strict Completion Gate
+Patch apply -> deterministic retest + invariants
         |
-        +----> COMPLETE
-        +----> blocked / failed / pending / unknown
+        +---- PASS ----> Local Reviewer -> External Final Review -> Strict Completion
+        |                                                        |
+        |                                                        +--> COMPLETE / blocked / pending
+        |
+        +---- FAIL ----> fresh retest evidence
+                         -> Diagnoser
+                         -> fresh External Hypothesis Review
+                         -> Patch Engineer
+                         -> new candidate
+                         -> WAITING_APPROVAL
+                         -> at most 2 automatic re-fix attempts
+                         -> otherwise ESCALATION_REQUIRED
 ```
 
-The runtime is fail-closed at evidence, provider schema, repository scope/revision, patch identity, approval, durable execution, deterministic verification, review, and final completion boundaries.
+The automatic part stops at candidate generation. It never grants approval to itself, never auto-applies a new candidate, and never bypasses evidence, revision, review, Sandbox, or Strict Completion gates.
+
+The runtime is fail-closed at evidence, provider schema, repository scope/revision, patch identity, approval, durable execution, deterministic verification, bounded re-fix, review, and final completion boundaries.
 
 ## Six internal roles
 
@@ -86,6 +138,8 @@ All internal model execution goes through the shared AI Core. DebugAI does not d
 | Local Reviewer | Ministral 3 8B Reasoning 2512 | profile/provider baseline | independently review applied result and verification evidence |
 
 Common rules include `DATA_NOT_INSTRUCTION`, FACT-to-evidence binding, labeled INFERENCE, falsifiable HYPOTHESIS, valid `UNKNOWN`, preserved rejected hypotheses, no raw chain-of-thought persistence, and fail-closed timeout/permission/recovery behavior.
+
+Current source reuses the existing bounded read-only Tool Runtime for Patch Engineer candidate planning and for both Local Reviewer paths (post-apply review and read-only verification). This does not grant mutation authority: Patch Engineer remains candidate-only, Local Reviewer remains read-only, and deterministic `diff.plan` / `test.plan` / `rollback.plan` plus Review Packet diff/test-result data remain their existing non-runtime authorities rather than being duplicated as new tools. This source change is not a claim that the approved live runtime already contains it; live reflection remains a separate exact-SHA approval boundary.
 
 ## Current context, token, and prompt-cache policy
 
@@ -316,19 +370,20 @@ Raw hidden chain-of-thought is never persisted.
 
 ## Patch and approval boundary
 
-Patch generation and patch application are separate operations.
+Patch generation and patch application remain separate operations.
 
-Patch Engineer produces a candidate only. Application requires:
+Patch Engineer produces a candidate only. Application requires explicit controlling-parent/orchestrator approval bound to the exact candidate ID/hash. This is a technical decision boundary, not automatically a Master/user decision. After application, deterministic retest and invariants run before review.
 
-- explicit Master approval;
-- exact candidate ID/hash binding;
-- repository policy and revision validation;
-- application receipt;
-- deterministic retest;
-- invariant verification;
-- fresh Local Reviewer;
-- required External Final Review;
-- Strict Completion evaluation.
+If deterministic retest fails, current source may automatically perform at most two **candidate-generation** re-fix attempts using fresh failed-retest evidence. Each attempt:
+
+- stays inside the prior candidate's selected-file scope;
+- re-runs Diagnoser from fresh retest evidence;
+- requires a fresh External Hypothesis Review PASS;
+- permits only bounded replace/write operations inside that scope;
+- creates a new candidate without applying it;
+- returns to `WAITING_APPROVAL`.
+
+Non-PASS external review, missing evidence/scope, unsupported operation/scope drift, or exhausted attempt budget fails closed to `ESCALATION_REQUIRED`.
 
 CLI/MCP intentionally expose no silent approve/apply shortcut.
 
@@ -367,6 +422,10 @@ The service binds to loopback by default at `127.0.0.1:8787`.
 | POST | `/v1/patch-candidate` | create candidate only |
 | POST | `/v1/verify` | read-only verification |
 | POST | `/v1/approve-apply-verify` | explicit approved mutation path |
+| POST | `/v1/server-command/request` | queue an existing bounded Server Command read |
+| POST | `/v1/server-command/status` | existing Server Command status by id |
+| POST | `/v1/gitops/request` | existing guarded GitOps request |
+| POST | `/v1/gitops/status` | existing guarded GitOps status |
 | POST | `/v1/assets/promote` | promote validated reusable knowledge |
 
 ## CLI and MCP
@@ -383,9 +442,11 @@ patch
 verify
 status
 inspect
+server-command <request|status> --input-json <service-contract-json>
+gitops <request|status> --input-json <service-contract-json>
 ```
 
-MCP exposes exactly nine guarded tools:
+MCP exposes thirteen guarded tools (the original nine plus four control tools):
 
 ```text
 debugai_health
@@ -397,6 +458,10 @@ debugai_patch_candidate
 debugai_verify
 debugai_status
 debugai_inspect
+debugai_server_read
+debugai_server_status
+debugai_gitops_request
+debugai_gitops_status
 ```
 
 Continuation is explicit:
@@ -405,7 +470,7 @@ Continuation is explicit:
 debugai_start -> exact run_id -> debugai_status -> debugai_resume when applicable -> debugai_wait -> debugai_inspect
 ```
 
-See [`DEBUGAI.md`](DEBUGAI.md) and [`docs/MCP_ADAPTER.md`](docs/MCP_ADAPTER.md).
+The four control tools reuse the existing Server Command and GitOps services through CLI/HTTP. Their transport extension is source-only; runtime reflection is NOT_RUN. See [`DEBUGAI.md`](DEBUGAI.md) and [`docs/MCP_ADAPTER.md`](docs/MCP_ADAPTER.md).
 
 ## Pre-server and real-model qualification
 
@@ -436,6 +501,19 @@ Each comparison changes exactly one axis, keeps the same backend model/fixed cas
 Production defaults are not modified by benchmark source. Skill OFF wins and ties are valid results.
 
 ## Runtime image contract
+
+The bounded Host Server Command runner validates requests with real Bash/jq.
+Its lifecycle regression is `node --test ops/tests/server-command-host-execution.test.cjs`
+on a test toolchain with jq; it executes the runner against temporary queues and
+checks successful exact readback and fail-closed rejection by the original request ID.
+Production reflection remains separately approved and verified.
+The existing user path/oneshot unit dispatches Server Command and guarded GitOps
+queues to their existing Bash runners. Updating active units requires the same
+separate runtime approval as reflection; GitOps deploy still requires its
+single-use exact-SHA Host approval receipt. The unit refreshes the already-authorized
+docker group with `sg docker` for both runners, so a stale user-manager group list
+does not deny Docker socket access. Its 40-minute timeout covers one bounded deploy
+build/recreate/health cycle without restarting unrelated user services.
 
 The current source explicitly packages the runtime assets required for live qualification:
 
@@ -514,34 +592,20 @@ npm install
 npm run verify
 ```
 
-Current source behavior revision `c9aa6f28...` passed:
+Implementation `d1ee3ffd175fc530afe8f38e782859d1d63c8e61` plus qualification head `71bc123112e07859dce5b7ae24afaff7eec86a4f` passed canonical exact-head verification and the existing isolated Full-suite Sandbox with 464/464 PASS and zero skip. Exact run/evidence identifiers are recorded in `docs/CURRENT_SOURCE_QUALIFICATION.md`.
 
-```text
-Public Readiness Audit #471 = SUCCESS
-Verify #506                = SUCCESS
-Runtime Volume Gate #102   = SUCCESS
-Core Verify #507           = SUCCESS
-```
-
-The current source contains direct regressions for model-profile ceilings, qualified runtime-context clamping, fail-closed truncation, telemetry-driven 85% working-context compaction, explicit prompt-cache request, current cache telemetry parsing, measured cache-hit ratio, prefix stability, and canonical user/evidence payload preservation.
-
-The final documentation head requires its own exact-head CI before it can be used as the Server reflection revision.
+Documentation-only commits after that anchor require their own exact-head CI before the resulting documentation head may be considered a Server reflection candidate.
 
 ## Current next-work order
 
-Current-state owner: [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md).
+Current-state history owner: [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md). Latest source qualification owner: [`docs/CURRENT_SOURCE_QUALIFICATION.md`](docs/CURRENT_SOURCE_QUALIFICATION.md).
 
 ```text
-1. require exact candidate-head GitHub CI PASS for the sandbox fixture/typed telemetry-retention corrections
-2. obtain separate Master approval for that exact new SHA; preserve the approved live 83424901502491c6b1dcc8fd223990f91a750d7d until then
-3. reflect only the approved candidate while preserving both volumes, checkpoints, unmanaged state and existing auxiliary containers
-4. reverify exact parity; retained runs may continue only when source-bound compatibility and resumable status both hold
-5. retain canonical Causal Scout closure evidence; finish semantic quality and sandbox compatibility without relaxing validation or safety
-6. finish serial Local Reviewer/cache qualification and keep contested samples labeled
-7. use a separate compatible source-bound checkpoint for current six-role Skill ON/OFF measurement
-8. retain Skill OFF wins/ties; run Thinking A/B only for explicit boolean roles
-9. perform Sampling A/B one axis at a time and token-cap optimization only from prior evidence
-10. complete real integration, MCP durable continuation, self-debug, read-only Search shadow and Strict Completion
+1. synchronize this automatic re-fix source change through Current docs, PR #40, Issue #41 and exact final-head CI
+2. keep live Server at 3997812067fe2a76e7fb6aea246ea8b34aa564c0 until Master separately approves one exact newer SHA
+3. after an approved reflection, run a real failed-retest dogfood E2E and prove: fresh evidence -> re-diagnosis -> new candidate -> controlling-orchestrator approval wait -> approved apply -> retest
+4. continue remaining real current-runtime integration, MCP durable continuation, semantic-quality/benchmark qualification and Strict Completion from measured evidence
+5. keep shared Deploy Bridge extraction outside DebugAI product logic
 ```
 
 ## Safety boundaries

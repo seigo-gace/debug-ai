@@ -45,7 +45,7 @@ class RunAuthority{
   removeLegacyRunIndex(runId){const id=String(runId||"");if(!/^[A-Za-z0-9_-]{1,200}$/.test(id))throw new Error("RUN_ID_INVALID");const file=path.join(this.store.dirs.run,`${id}.json`);let stat;try{stat=fs.lstatSync(file);}catch(error){if(error?.code==="ENOENT")return false;throw error;}if(!stat.isFile()||stat.isSymbolicLink())throw new Error("LEGACY_RUN_INDEX_UNSAFE");fs.unlinkSync(file);return true;}
   async initializeDurable(runOrId,{repositorySnapshotId=null,requireRepositoryBinding=false}={}){
     const protocol=this._requireDurable();const run=typeof runOrId==="string"?this.load(runOrId):runOrId;if(!run||typeof run!=="object"||typeof run.run_id!=="string")throw new Error("RUN_REQUIRED");
-    const explicitSnapshot=normalizeRepositorySnapshotId(repositorySnapshotId),currentSnapshot=explicitSnapshot||tryRepositorySnapshotId(run.project_dir);if(requireRepositoryBinding&&!currentSnapshot)throw new Error("DURABLE_REPOSITORY_SNAPSHOT_CURRENT_REQUIRED");
+    const approvedProjectDir=this.repoPolicy?this.repoPolicy.assertRepo(run.project_dir):run.project_dir;const explicitSnapshot=normalizeRepositorySnapshotId(repositorySnapshotId),currentSnapshot=explicitSnapshot||tryRepositorySnapshotId(approvedProjectDir,{allowMissingGitMarker:Boolean(this.repoPolicy)});if(requireRepositoryBinding&&!currentSnapshot)throw new Error("DURABLE_REPOSITORY_SNAPSHOT_CURRENT_REQUIRED");
     const existing=protocol.loadRunState(run.run_id,{allowMissing:true});
     if(existing!==null){
       validateRunStateV2(existing);const manifest=protocol.loadManifest(existing.execution_ref.manifest_id);validateExecutionManifest(manifest);

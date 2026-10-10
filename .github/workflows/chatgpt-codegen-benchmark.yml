@@ -1,0 +1,126 @@
+name: ChatGPT Codegen Benchmark
+
+on:
+  push:
+    branches:
+      - feat/tgserver-async-log-sink-20261003
+    paths:
+      - .github/codegen-benchmark-trigger.json
+      - .github/workflows/chatgpt-codegen-benchmark.yml
+      - scripts/codegen-benchmark-suite.js
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chatgpt-codegen-benchmark
+  cancel-in-progress: true
+
+jobs:
+  codegen:
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        include:
+          - {level: small, id: s51, round: r5}
+          - {level: small, id: s52, round: r5}
+          - {level: small, id: s53, round: r5}
+          - {level: small, id: s54, round: r5}
+          - {level: small, id: s55, round: r5}
+          - {level: small, id: s56, round: r5}
+          - {level: small, id: s57, round: r5}
+          - {level: small, id: s58, round: r5}
+          - {level: small, id: s59, round: r5}
+          - {level: small, id: s60, round: r5}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      BASE_URL: https://debugai.asterav8.jp
+      REPO_PATH: /workspace/debug-ai
+      CF_ACCESS_CLIENT_ID: ${{ secrets.DEBUGAI_CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.DEBUGAI_CF_ACCESS_CLIENT_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Require bounded live access
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${CF_ACCESS_CLIENT_ID:-}"
+          test -n "${CF_ACCESS_CLIENT_SECRET:-}"
+          code="$(curl -sS -L --max-time 30 -o /tmp/health.json -w '%{http_code}' -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" "${BASE_URL}/health")"
+          echo "HEALTH_HTTP=$code"
+          test "$code" = "200"
+
+      - name: Build benchmark request
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/codegen-benchmark-suite.js build-case "${{ matrix.level }}" "${{ matrix.id }}" /tmp/bench-config.json
+          jq -e '.selected_paths|length==1' /tmp/bench-config.json >/dev/null
+          echo "BENCHMARK_LEVEL=${{ matrix.level }}"
+          echo "BENCHMARK_CASE=${{ matrix.id }}"
+
+      - name: Start async candidate-only benchmark
+        id: run
+        shell: bash
+        run: |
+          set -euo pipefail
+          task="$(jq -r '.task' /tmp/bench-config.json)"
+          diagnosis="$(jq -c '.diagnosis' /tmp/bench-config.json)"
+          paths="$(jq -c '.selected_paths' /tmp/bench-config.json)"
+          jq -n --arg repo "$REPO_PATH" --arg level "${{ matrix.level }}" --arg case_id "${{ matrix.id }}" --arg task "$task" --argjson diagnosis "$diagnosis" --argjson paths "$paths" '{repo:$repo,level:$level,case_id:$case_id,task:$task,diagnosis:$diagnosis,selected_paths:$paths}' >/tmp/start.json
+          code="$(curl -sS --max-time 30 -o /tmp/start-out.json -w '%{http_code}' -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" -H 'content-type: application/json' --data-binary @/tmp/start.json "${BASE_URL}/v1/codegen-benchmark/start")"
+          echo "RUN_START_HTTP=$code"
+          test "$code" = "202"
+          run_id="$(jq -r '.run_id // empty' /tmp/start-out.json)"
+          [[ "$run_id" =~ ^run_[A-Za-z0-9_]+$ ]]
+          echo "run_id=$run_id" >>"$GITHUB_OUTPUT"
+          echo "BENCHMARK_RUN_ID=$run_id"
+
+      - name: Poll candidate-only benchmark
+        shell: bash
+        run: |
+          set -euo pipefail
+          run_id="${{ steps.run.outputs.run_id }}"
+          deadline=$((SECONDS+420))
+          while true; do
+            code="$(curl -sS --max-time 30 -o /tmp/benchmark-status.json -w '%{http_code}' -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" "${BASE_URL}/v1/codegen-benchmark/status/$run_id")"
+            test "$code" = "200"
+            state="$(jq -r '.state // "UNKNOWN"' /tmp/benchmark-status.json)"
+            echo "CODEGEN_STATE=$state"
+            if [ "$state" = "DONE" ]; then break; fi
+            if [ "$state" = "FAILED" ]; then jq -r '"CODEGEN_ERROR="+(.error//"UNKNOWN")' /tmp/benchmark-status.json; exit 12; fi
+            (( SECONDS < deadline )) || { echo "CODEGEN_POLL_TIMEOUT"; exit 13; }
+            sleep 5
+          done
+          cp /tmp/benchmark-status.json /tmp/patch-response.json
+          duration_ms="$(jq -r '.duration_ms' /tmp/benchmark-status.json)"
+          jq -n --arg level "${{ matrix.level }}" --arg id "${{ matrix.id }}" --arg run_id "$run_id" --argjson duration_ms "$duration_ms" '{level:$level,id:$id,run_id:$run_id,duration_ms:$duration_ms,http:"async"}' >/tmp/timing.json
+          echo "CODEGEN_DURATION_MS=$duration_ms"
+          jq -e '.candidate.id|type=="string"' /tmp/benchmark-status.json >/dev/null
+          node scripts/codegen-benchmark-suite.js validate-case "${{ matrix.level }}" "${{ matrix.id }}" /tmp/benchmark-status.json /tmp/material.json
+          echo "CANDIDATE_ID=$(jq -r '.candidate.id' /tmp/benchmark-status.json)"
+          echo "SCOPE_PASS=$(jq -r '.scope_pass' /tmp/material.json)"
+
+      - name: Safety assertion
+        if: always()
+        shell: bash
+        run: |
+          echo "PATCH_CANDIDATE_ONLY=YES"
+          echo "APPROVE_APPLY_VERIFY_CALLED=NO"
+          echo "PRODUCTION_DEPLOY_CALLED=NO"
+          echo "GITHUB_MUTATION_BY_DEBUGAI=NO"
+
+      - name: Upload benchmark candidate
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: codegen-${{ matrix.level }}-${{ matrix.id }}-${{ matrix.round }}-${{ github.run_id }}
+          path: |
+            /tmp/patch-response.json
+            /tmp/material.json
+            /tmp/timing.json
+          if-no-files-found: warn
+          retention-days: 3

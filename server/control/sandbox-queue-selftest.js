@@ -6,6 +6,38 @@ const {prepareSandboxJob,waitSandboxResult,normalizeJobRoot}=require("./sandbox-
 
 const jobRoot=normalizeJobRoot(process.env.DEBUG_AI_SANDBOX_JOB_ROOT||"/sandbox-jobs");
 const marker=path.join(jobRoot,"queue-selftest-job-id");
+const selfMarker=path.join(jobRoot,"queue-selftest-full-job-id");
+function boundedFailureDiagnostic(result){
+  const lines=`${String(result?.stdout||"")}\n${String(result?.stderr||"")}`.split(/\r?\n/);
+  const selected=lines.filter(line=>/(?:^not ok\b|ERR_|Error:|error:|EPERM|EACCES|SIGKILL|SANDBOX_|DURABLE_)/i.test(line)).slice(-80).join("\n");
+  return selected.replace(/[a-f0-9]{64}/gi,"<HEX64>").slice(-8000);
+}
+function parseNodeTestSummary(output){
+  const lines=String(output||"").split(/\r?\n/);
+  const linePattern=/^\s*(?:#|ℹ)\s+(tests|pass|fail|skipped)\s+(\d+)\s*$/u;
+  let start=-1;
+  for(let i=0;i<lines.length;i++){const match=lines[i].match(linePattern);if(match?.[1]==="tests")start=i;}
+  if(start<0)return null;
+  const summary={};
+  for(let i=start;i<lines.length;i++){
+    const match=lines[i].match(linePattern);if(!match)continue;
+    const key=match[1];if(Object.prototype.hasOwnProperty.call(summary,key))return null;
+    summary[key]=Number(match[2]);
+  }
+  if(!["tests","pass","fail","skipped"].every(key=>Number.isSafeInteger(summary[key])))return null;
+  return Object.freeze(summary);
+}
+function summaryEvidence(summary){return JSON.stringify({tests:summary.tests,pass:summary.pass,fail:summary.fail,skipped:summary.skipped});}
+function requirePassingTestSummary(output){
+  const summary=parseNodeTestSummary(output);
+  if(!summary)throw new Error("SANDBOX_FULL_SUITE_SUMMARY_EVIDENCE_MISSING");
+  const evidence=summaryEvidence(summary);
+  if(summary.tests<=0)throw new Error(`SANDBOX_FULL_SUITE_TEST_COUNT_INVALID:${evidence}`);
+  if(summary.fail!==0)throw new Error(`SANDBOX_FULL_SUITE_ZERO_FAIL_EVIDENCE_MISSING:${evidence}`);
+  if(summary.skipped!==0)throw new Error(`SANDBOX_FULL_SUITE_ZERO_SKIP_EVIDENCE_MISSING:${evidence}`);
+  if(summary.pass!==summary.tests)throw new Error(`SANDBOX_FULL_SUITE_PASS_EVIDENCE_INVALID:${evidence}`);
+  return summary;
+}
 async function enqueue(){
   const source=fs.mkdtempSync(path.join(os.tmpdir(),"debugai-queue-source-"));
   try{
@@ -19,7 +51,15 @@ async function enqueue(){
     process.stdout.write(`SANDBOX_QUEUE_ENQUEUE_PASS|JOB=${job.job_id}\n`);
   }finally{fs.rmSync(source,{recursive:true,force:true});}
 }
-async function verify(){
+async function enqueueSelf(){
+  const source=fs.realpathSync(process.env.DEBUG_AI_SELFTEST_SOURCE_ROOT||"/app");
+  const pkg=JSON.parse(fs.readFileSync(path.join(source,"package.json"),"utf8"));
+  if(pkg?.name!=="debug-ai")throw new Error("SANDBOX_FULL_SUITE_SOURCE_INVALID");
+  const job=prepareSandboxJob({sourceRepo:source,jobRoot,action:"package.test",args:{},timeoutMs:240000});
+  fs.writeFileSync(selfMarker,job.job_id);
+  process.stdout.write(`SANDBOX_FULL_SUITE_ENQUEUE_PASS|JOB=${job.job_id}\n`);
+}
+async function verifyGeneric(){
   if(!fs.existsSync(marker))throw new Error("SANDBOX_QUEUE_MARKER_MISSING");
   const jobId=fs.readFileSync(marker,"utf8").trim();
   const result=await waitSandboxResult({jobRoot,jobId,timeoutMs:45000,pollMs:100});
@@ -28,7 +68,22 @@ async function verify(){
   if(!String(result.stdout||"").includes("QUEUE_TEST_PASS"))throw new Error("SANDBOX_QUEUE_STDOUT_MISSING");
   if(result?.isolation?.backend!=="sidecar+landlock+seccomp")throw new Error("SANDBOX_QUEUE_ISOLATION_BACKEND_INVALID");
   if(result?.isolation?.workspace_mount!=="ABSENT"||result?.isolation?.secret_mounts!=="ABSENT"||result?.isolation?.docker_socket!=="ABSENT")throw new Error("SANDBOX_QUEUE_BOUNDARY_INVALID");
+  if(result?.isolation?.supervised_sigkill!=="DISABLED")throw new Error("SANDBOX_QUEUE_GENERIC_SIGNAL_SUPERVISOR_EXPOSED");
   process.stdout.write(`SANDBOX_QUEUE_ROUNDTRIP_PASS|JOB=${jobId}|BACKEND=${result.isolation.backend}\n`);
 }
-const mode=process.argv[2];
-Promise.resolve(mode==="enqueue"?enqueue():mode==="verify"?verify():Promise.reject(new Error("SANDBOX_QUEUE_MODE_REQUIRED"))).catch(error=>{console.error(error.stack||String(error));process.exit(1);});
+async function verifySelf(){
+  if(!fs.existsSync(selfMarker))throw new Error("SANDBOX_FULL_SUITE_MARKER_MISSING");
+  const jobId=fs.readFileSync(selfMarker,"utf8").trim();
+  const result=await waitSandboxResult({jobRoot,jobId,timeoutMs:260000,pollMs:100});
+  if(result?.schema!=="debugai.sandbox-result/v1")throw new Error("SANDBOX_FULL_SUITE_RESULT_SCHEMA_INVALID");
+  if(result.pass!==true||result.code!==0){const diagnostic=boundedFailureDiagnostic(result);throw new Error(`SANDBOX_FULL_SUITE_RESULT_FAILED:${JSON.stringify({code:result.code,signal_mode:result?.isolation?.supervised_sigkill||"UNKNOWN",diagnostic})}`);}
+  if(result?.isolation?.backend!=="sidecar+landlock+seccomp")throw new Error("SANDBOX_FULL_SUITE_ISOLATION_BACKEND_INVALID");
+  if(result?.isolation?.workspace_mount!=="ABSENT"||result?.isolation?.secret_mounts!=="ABSENT"||result?.isolation?.docker_socket!=="ABSENT")throw new Error("SANDBOX_FULL_SUITE_BOUNDARY_INVALID");
+  if(result?.isolation?.supervised_sigkill!=="EXACT_SOURCE_BOUND_CHILD_ONLY")throw new Error("SANDBOX_FULL_SUITE_SIGNAL_SUPERVISION_INVALID");
+  const summary=requirePassingTestSummary(result.stdout);
+  process.stdout.write(`SANDBOX_FULL_SUITE_PASS|JOB=${jobId}|BACKEND=${result.isolation.backend}|SIGNAL=${result.isolation.supervised_sigkill}|TESTS=${summary.tests}|PASS=${summary.pass}|FAIL=${summary.fail}|SKIPPED=${summary.skipped}\n`);
+}
+async function verify(){await verifyGeneric();}
+function main(){const mode=process.argv[2];return mode==="enqueue"?enqueue():mode==="verify"?verify():mode==="enqueue-self"?enqueueSelf():mode==="verify-self"?verifySelf():Promise.reject(new Error("SANDBOX_QUEUE_MODE_REQUIRED"));}
+if(require.main===module)Promise.resolve(main()).catch(error=>{console.error(error.stack||String(error));process.exit(1);});
+module.exports={boundedFailureDiagnostic,parseNodeTestSummary,requirePassingTestSummary};

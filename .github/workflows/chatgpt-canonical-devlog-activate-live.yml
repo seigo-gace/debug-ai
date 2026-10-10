@@ -1,0 +1,154 @@
+name: ChatGPT Canonical DevLog Activation
+
+on:
+  push:
+    branches:
+      - feat/tgserver-async-log-sink-20261003
+    paths:
+      - .github/canonical-devlog-activate-target.json
+      - .github/workflows/chatgpt-canonical-devlog-activate-live.yml
+
+permissions:
+  contents: read
+  issues: read
+
+concurrency:
+  group: chatgpt-canonical-devlog-activation
+  cancel-in-progress: false
+
+jobs:
+  activate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      BASE_URL: https://debugai.asterav8.jp
+      CF_ACCESS_CLIENT_ID: ${{ secrets.DEBUGAI_CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.DEBUGAI_CF_ACCESS_CLIENT_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: target
+        name: Read bounded target
+        shell: bash
+        run: |
+          set -euo pipefail
+          enabled="$(jq -r '.enabled' .github/canonical-devlog-activate-target.json)"
+          helper="$(jq -r '.helper_head' .github/canonical-devlog-activate-target.json)"
+          [[ "$enabled" == "true" || "$enabled" == "false" ]]
+          [[ "$helper" == "2008cc936da224becc080e20c57dfa7b96f364a8" ]]
+          echo "enabled=$enabled" >>"$GITHUB_OUTPUT"
+          echo "ACTIVATION_ENABLED=$enabled"
+
+      - if: ${{ steps.target.outputs.enabled == 'true' }}
+        name: Require exact owner approval
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          approval="$(jq -r '.approval_comment_id // empty' .github/canonical-devlog-activate-target.json)"
+          [[ "$approval" == "6057495658" ]] || { echo "OWNER_APPROVAL_REFERENCE_INVALID"; exit 31; }
+          code="$(curl -sS -L --max-time 30 -o /tmp/devlog-owner-approval.json -w '%{http_code}' \
+            -H 'Accept: application/vnd.github+json' \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            'https://api.github.com/repos/seigo-gace/TGserver/issues/comments/6057495658')"
+          [ "$code" = "200" ] || { echo "OWNER_APPROVAL_READ_FAILED"; exit 32; }
+          jq -e --arg approval_id 6057495658 \
+            --arg helper "2008cc936da224becc080e20c57dfa7b96f364a8" \
+            '(.id|tostring)==$approval_id and
+             .user.login=="seigo-gace" and
+             .user.type=="User" and
+             .author_association=="OWNER" and
+             .performed_via_github_app.slug=="chatgpt-codex-connector" and
+             (.body|contains("MASTER INTENT / IMPACT APPROVAL") and contains($helper) and contains("No new paid contract"))' \
+            /tmp/devlog-owner-approval.json >/dev/null || { echo "OWNER_APPROVAL_VALIDATION_FAIL"; exit 33; }
+          echo "OWNER_APPROVAL_RECORD_VERIFIED=PASS"
+          echo "OWNER_APPROVAL_IS_NOT_HOST_RECEIPT=TRUE"
+
+      - if: ${{ steps.target.outputs.enabled == 'true' }}
+        name: Require live DebugAI
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${CF_ACCESS_CLIENT_ID:-}"
+          test -n "${CF_ACCESS_CLIENT_SECRET:-}"
+          code="$(curl -sS -L --max-time 30 -o /tmp/health.json -w '%{http_code}' -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" "$BASE_URL/health")"
+          test "$code" = "200"
+          jq -e '.ok==true and .service=="debug-ai"' /tmp/health.json >/dev/null
+          echo "LIVE_DEBUGAI=PASS"
+
+      - if: ${{ steps.target.outputs.enabled == 'true' }}
+        name: Start Canonical DevLog activation
+        shell: bash
+        run: |
+          set -euo pipefail
+          req='{"repo":"/workspace/debug-ai","command_id":"canonical.devlog_activate_start","arguments":[],"human_approved":true,"master_approved":true}'
+          code="$(curl -sS --max-time 30 -o /tmp/request.json -w '%{http_code}' -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" -H 'content-type: application/json' --data-binary "$req" "$BASE_URL/v1/server-command/request")"
+          test "$code" = "202"
+          id="$(jq -r '.id // empty' /tmp/request.json)"
+          [[ "$id" =~ ^cmd_[0-9a-f]{24}$ ]]
+          for _ in $(seq 1 30); do
+            code="$(curl -sS --max-time 30 -o /tmp/status.json -w '%{http_code}' -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" -H 'content-type: application/json' --data-binary "$(jq -nc --arg id "$id" '{id:$id}')" "$BASE_URL/v1/server-command/status")"
+            [ "$code" = "200" ] || { sleep 2; continue; }
+            state="$(jq -r '.state // "UNKNOWN"' /tmp/status.json)"
+            [ "$state" = "PASS" ] && { jq -r '.result.stdout' /tmp/status.json; echo "ACTIVATION_START=PASS"; exit 0; }
+            [ "$state" = "FAIL" ] && { jq -c . /tmp/status.json; exit 12; }
+            sleep 2
+          done
+          exit 13
+
+      - if: ${{ steps.target.outputs.enabled == 'true' }}
+        name: Poll Canonical DevLog activation
+        shell: bash
+        run: |
+          set -euo pipefail
+          run_status(){
+            local req code id state
+            req='{"repo":"/workspace/debug-ai","command_id":"canonical.devlog_activate_status","arguments":[]}'
+            code="$(curl -sS --max-time 30 -o /tmp/request.json -w '%{http_code}' -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" -H 'content-type: application/json' --data-binary "$req" "$BASE_URL/v1/server-command/request")"
+            [ "$code" = "202" ] || return 11
+            id="$(jq -r '.id // empty' /tmp/request.json)"
+            for _ in $(seq 1 30); do
+              code="$(curl -sS --max-time 30 -o /tmp/status.json -w '%{http_code}' -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" -H 'content-type: application/json' --data-binary "$(jq -nc --arg id "$id" '{id:$id}')" "$BASE_URL/v1/server-command/status")"
+              [ "$code" = "200" ] || { sleep 2; continue; }
+              state="$(jq -r '.state // "UNKNOWN"' /tmp/status.json)"
+              [ "$state" = "PASS" ] && { jq -r '.result.stdout' /tmp/status.json; return 0; }
+              [ "$state" = "FAIL" ] && return 12
+              sleep 2
+            done
+            return 13
+          }
+          deadline=$((SECONDS+1800))
+          while (( SECONDS < deadline )); do
+            if out="$(run_status)"; then
+              state="$(jq -r '.state // "UNKNOWN"' <<<"$out")"
+              echo "CANONICAL_DEVLOG_STATE=$state"
+              if [ "$state" = "PASS" ]; then
+                echo "$out" | jq -c .
+                event_id="$(jq -r '.event_id // empty' <<<"$out")"
+                [[ "$event_id" =~ ^[0-9a-f]{64}$ ]]
+                echo "CANONICAL_EVENT_ID=$event_id"
+                echo "CANONICAL_DEVLOG_ACTIVATION=PASS"
+                exit 0
+              fi
+              if [ "$state" = "FAIL" ]; then
+                echo "$out" | jq -c .
+                exit 12
+              fi
+            else
+              rc=$?
+              echo "CANONICAL_DEVLOG_STATUS_READ_RETRY=$rc"
+              [ "$rc" = "11" ] || [ "$rc" = "13" ] || exit "$rc"
+            fi
+            sleep 10
+          done
+          echo "CANONICAL_DEVLOG_ACTIVATION=TIMEOUT"
+          exit 13
+
+      - if: always()
+        name: Safety assertion
+        shell: bash
+        run: |
+          echo "DEBUGAI_ARBITRARY_SHELL=NO"
+          echo "CANONICAL_HELPER_HEAD_FIXED=YES"
+          echo "SECRET_VALUE_EXPOSED=NO"

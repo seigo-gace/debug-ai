@@ -80,7 +80,7 @@ async function runRoleWithReadOnlyTools({aiCore,role,system="",user="",toolRunti
   if(!toolRuntime){
     if(continuationState!==null)throw new Error("ROLE_TOOL_CONTINUATION_REQUIRES_TOOL_RUNTIME");
     const deadlineAt=Date.now()+budget.turn_timeout_ms;
-    const out=await aiCore.call(role,{system:[system,evidencePolicy].filter(Boolean).join("\n"),user,maxTokens:budget.max_tokens,timeoutMsOverride:budget.turn_timeout_ms,deadlineAt});
+    const out=await aiCore.call(role,{system:[system,evidencePolicy].filter(Boolean).join("\n"),user,maxTokens:budget.max_tokens,timeoutMsOverride:budget.turn_timeout_ms,deadlineAt,queueTimeoutMs:budget.turn_timeout_ms,excludeQueueFromDeadline:true});
     const available=mergeEvidenceIds(baseEvidenceIds),telemetry=summarizeAiTelemetry([out.telemetry]);
     return {...out,validated_output:parseAndValidateRoleOutput(role,out.content,{availableEvidenceIds:available,strictEvidenceRefs}),tool_loop:{rounds:0,total_calls:0,observations:[],evidence_ids:available,progress:{max_no_progress_rounds:2,no_progress_rounds:0,total_evidence_ids:available.length,total_work_ids:0,total_effect_ids:0,seen_evidence_ids:[...available],completed_work_ids:[],completed_effect_ids:[],history:[],runtime_telemetry:telemetry},parse_status:"FINAL",selected_skill_ids:[...(out.control_plane?.selected_skill_ids||[])],continuation_state:null,telemetry}};
   }
@@ -94,13 +94,13 @@ async function runRoleWithReadOnlyTools({aiCore,role,system="",user="",toolRunti
   const selected=availableForSelection(role,toolRuntime,user),protocol=toolProtocol(selected.tools),deadlineAt=Date.now()+(budget.tool_loop_wall_ms||budget.turn_timeout_ms),progress=createProgressController({maxNoProgressRounds:2,initialState:resume.progress});
   const baseUser=String(user||"");
   let currentUser=withObservations(baseUser,resume.observations),totalCalls=resume.total_calls;
-  const observations=resume.observations,seenToolCalls=new Set(resume.seen_tool_fingerprints),completedWorkIds=new Set(resume.completed_work_ids),completedEffectIds=new Set(resume.completed_effect_ids),llmTelemetry=[];
+  const observations=resume.observations,seenToolCalls=new Set(resume.seen_tool_fingerprints),completedWorkIds=new Set(resume.completed_work_ids),completedEffectIds=new Set(resume.completed_effect_ids),llmTelemetry=[],inMemoryToolResults=new Map();
   let last=null,toolWallMs=0,toolCallsExecutedCurrent=0,toolCallsReusedCurrent=0;
   for(let round=resume.rounds_completed;round<=rounds;round++){
     if(Date.now()>=deadlineAt)throw new Error(`ROLE_TOOL_WALL_BUDGET_EXHAUSTED:${role}`);
     const finalRound=round===rounds;
     const roundSystem=[system,evidencePolicy,protocol].filter(Boolean).join("\n");
-    last=await aiCore.call(role,{system:roundSystem,user:currentUser,selectedSkillIds:selected.skillIds,maxTokens:budget.max_tokens,timeoutMsOverride:budget.turn_timeout_ms,deadlineAt,toolBudgetFinalRound:finalRound?true:null});
+    last=await aiCore.call(role,{system:roundSystem,user:currentUser,selectedSkillIds:selected.skillIds,maxTokens:budget.max_tokens,timeoutMsOverride:budget.turn_timeout_ms,deadlineAt,queueTimeoutMs:Math.min(budget.turn_timeout_ms,Math.max(1,deadlineAt-Date.now())),excludeQueueFromDeadline:false,toolBudgetFinalRound:finalRound?true:null});
     llmTelemetry.push(last?.telemetry||null);
     const parsed=parseIntermediate(role,last.content),requests=requestList(parsed);
     if(!requests.length){
@@ -115,16 +115,16 @@ async function runRoleWithReadOnlyTools({aiCore,role,system="",user="",toolRunti
       if(!req||typeof req!=="object"||Array.isArray(req))throw new Error(`ROLE_TOOL_REQUEST_INVALID:${role}`);
       const tool=String(req.tool||"");if(!selected.tools.includes(tool))throw new Error(`ROLE_TOOL_REQUEST_NOT_ADMITTED:${role}:${tool||"<empty>"}`);
       const args=req.arguments&&typeof req.arguments==="object"&&!Array.isArray(req.arguments)?req.arguments:{},fingerprint=toolFingerprint(tool,args);
-      const reuse=await callHook(durableHooks,"reuseToolResult",{role,selectedSkillIds:[...selected.skillIds],tool,arguments:args,fingerprint,round,continuationState:continuationSnapshot({roundsCompleted:round,totalCalls,observations,seenToolCalls,progress,completedWorkIds,completedEffectIds})});
+      const cached=inMemoryToolResults.get(fingerprint);if(cached){assertToolResultIntegrity(cached.result);if(evidenceContext&&typeof toolRuntime.addEvidenceToContext==="function")toolRuntime.addEvidenceToContext(evidenceContext,[cached.result]);toolCallsReusedCurrent++;results.push({request:{tool,reason:String(req.reason||"").slice(0,300)},result:cached.result,reused:true,effect_id:cached.effect_id||null,work_unit_id:cached.work_unit_id||null});continue;}const reuse=await callHook(durableHooks,"reuseToolResult",{role,selectedSkillIds:[...selected.skillIds],tool,arguments:args,fingerprint,round,continuationState:continuationSnapshot({roundsCompleted:round,totalCalls,observations,seenToolCalls,progress,completedWorkIds,completedEffectIds})});
       if(reuse?.reused===true){
-        assertToolResultIntegrity(reuse.result);if(evidenceContext&&typeof toolRuntime.addEvidenceToContext==="function")toolRuntime.addEvidenceToContext(evidenceContext,[reuse.result]);toolCallsReusedCurrent++;seenToolCalls.add(fingerprint);if(reuse.completed_work_id)completedWorkIds.add(String(reuse.completed_work_id));if(reuse.effect_id)completedEffectIds.add(String(reuse.effect_id));results.push({request:{tool,reason:String(req.reason||"").slice(0,300)},result:reuse.result,reused:true,effect_id:reuse.effect_id||null,work_unit_id:reuse.completed_work_id||null});continue;
+        assertToolResultIntegrity(reuse.result);if(evidenceContext&&typeof toolRuntime.addEvidenceToContext==="function")toolRuntime.addEvidenceToContext(evidenceContext,[reuse.result]);toolCallsReusedCurrent++;seenToolCalls.add(fingerprint);if(reuse.completed_work_id)completedWorkIds.add(String(reuse.completed_work_id));if(reuse.effect_id)completedEffectIds.add(String(reuse.effect_id));inMemoryToolResults.set(fingerprint,{result:reuse.result,effect_id:reuse.effect_id||null,work_unit_id:reuse.completed_work_id||null});results.push({request:{tool,reason:String(req.reason||"").slice(0,300)},result:reuse.result,reused:true,effect_id:reuse.effect_id||null,work_unit_id:reuse.completed_work_id||null});continue;
       }
       if(seenToolCalls.has(fingerprint))throw new Error(`ROLE_TOOL_REPEAT_NO_PROGRESS:${role}:${tool}`);
       seenToolCalls.add(fingerprint);
       let result;const toolStartedAt=Date.now();
       try{result=await toolRuntime.execute({role,selectedSkillIds:selected.skillIds,tool,arguments:args,evidenceContext});assertToolResultIntegrity(result);}catch(error){result=safeToolError(error);}finally{toolWallMs+=Date.now()-toolStartedAt;toolCallsExecutedCurrent++;}
       const persisted=await callHook(durableHooks,"onToolResult",{role,selectedSkillIds:[...selected.skillIds],tool,arguments:args,fingerprint,round,result});
-      if(persisted?.completed_work_id)completedWorkIds.add(String(persisted.completed_work_id));if(persisted?.effect_id)completedEffectIds.add(String(persisted.effect_id));
+      if(persisted?.completed_work_id)completedWorkIds.add(String(persisted.completed_work_id));if(persisted?.effect_id)completedEffectIds.add(String(persisted.effect_id));if(result?.status==="OK")inMemoryToolResults.set(fingerprint,{result,effect_id:persisted?.effect_id||null,work_unit_id:persisted?.completed_work_id||null});
       results.push({request:{tool,reason:String(req.reason||"").slice(0,300)},result,reused:false,effect_id:persisted?.effect_id||null,work_unit_id:persisted?.completed_work_id||null});totalCalls++;
     }
     observations.push({round:round+1,results});

@@ -1,0 +1,112 @@
+name: Development Probe
+
+on:
+  issues:
+    types: [opened, reopened]
+  pull_request:
+    paths:
+      - ".github/workflows/dev-probe.yml"
+      - "docs/TGSERVER_ZERO_DEVELOPMENT_EVIDENCE.md"
+      - "AGENTS.md"
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: dev-probe-${{ github.event_name }}-${{ github.event.issue.number || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: >-
+      (github.event_name == 'issues' &&
+       github.event.issue.user.login == github.repository_owner &&
+       startsWith(github.event.issue.title, '[DEV-PROBE]')) ||
+      (github.event_name == 'pull_request' &&
+       github.actor == github.repository_owner &&
+       github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SOURCE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_SHA }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.20.0"
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node-24.20.0-npm-${{ hashFiles('package.json') }}
+          restore-keys: ${{ runner.os }}-node-24.20.0-npm-
+
+      - name: Install repository dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+
+      - name: Project canonical verify
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p dev-probe-evidence
+          DEBUG_AI_REQUIRE_TS7_REAL=1 npm run verify 2>&1 | tee dev-probe-evidence/verify.log
+
+      - name: Write bounded probe metadata
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p dev-probe-evidence
+          {
+            printf 'repository=%s\n' "$GITHUB_REPOSITORY"
+            printf 'sha=%s\n' "$SOURCE_SHA"
+            printf 'event=%s\n' "$GITHUB_EVENT_NAME"
+            printf 'run_id=%s\n' "$GITHUB_RUN_ID"
+            printf 'canonical_verify=%s\n' 'DEBUG_AI_REQUIRE_TS7_REAL=1 npm run verify'
+          } > dev-probe-evidence/metadata.txt
+
+      - name: Upload project verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dev-probe-${{ github.run_id }}
+          path: dev-probe-evidence/**
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Comment success and close request
+        if: success() && github.event_name == 'issues'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `Development Probe passed.\n\nWorkflow run: ${runUrl}\nArtifact: dev-probe-${context.runId}`,
+            });
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              state: 'closed',
+              state_reason: 'completed',
+            });
+
+      - name: Comment failure without closing request
+        if: failure() && github.event_name == 'issues'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `Development Probe failed. The request remains open.\n\nWorkflow run: ${runUrl}\nArtifact: dev-probe-${context.runId}`,
+            });

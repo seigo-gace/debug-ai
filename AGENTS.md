@@ -1,5 +1,9 @@
 # DebugAI Authority
 
+## Active Cursor practical-completion handoff (2026-10-08)
+When the active task is Master's unified DebugAI investigation/codegen reliability completion, after the **required server-core bootstrap → SERVER_AI Rule Plane → GitHub Project Current** reads, follow `docs/CURSOR_DEBUGAI_COMPLETION_HANDOFF_20261008.md` and the adopted, revised `docs/DEBUGAI_UNIFIED_IMPROVEMENT_PLAN_20261008.md`. The handoff supplements, but never overrides, safety/authorization/current-state rules below. Do not load the GPT CHAT Rule Plane into server-side Cursor agents. Preserve the user's existing Cursor model and subagent setup; do not invent or modify provider/model selection.
+
+
 ## Required reading order
 
 For repository work:
@@ -7,7 +11,10 @@ For repository work:
 ```text
 README.md
 -> docs/CURRENT_STATE.md
+-> docs/CURRENT_SOURCE_QUALIFICATION.md for the latest source/CI qualification boundary
+-> docs/PROJECT_TREE.md for responsibility/location lookup
 -> docs/DURABLE-CONTINUATION-DESIGN.md when architecture/behavior is relevant
+-> docs/TGSERVER_ZERO_DEVELOPMENT_EVIDENCE.md when GitHub/TGserver development evidence is relevant
 -> task-specific source/tests/docs
 ```
 
@@ -21,20 +28,35 @@ For live Server work, read current `G-ACE-inc/server-core` authority first, then
 - GitHub source and live Server runtime are separate states.
 - Never convert an unexecuted/unknown state into PASS.
 
+## GitHub / TGserver ZERO development evidence
+
+For future CHAT-side development evidence retrieval, use [`docs/TGSERVER_ZERO_DEVELOPMENT_EVIDENCE.md`](docs/TGSERVER_ZERO_DEVELOPMENT_EVIDENCE.md).
+
+- Source/Test/Build/Verify evidence is produced by this repository's owner-only `.github/workflows/dev-probe.yml` using the existing canonical `npm run verify` path.
+- `[DEV-PROBE]` Issues are execution requests only. Their body never supplies a shell command, script path, URL, Secret, deploy target, or Server operation.
+- Runtime/Server Log search is not implemented in this repository's GitHub Actions. Use the central TGserver ZERO Reader in `seigo-gace/TGserver`.
+- TGserver ZERO mapping is `stream=runtime -> P004` and `stream=kb -> P005`; stream is mandatory for `debug-ai` searches.
+- Do not copy TGserver ZERO Cloudflare Access Secrets into this repository.
+- Development Probe and TGserver ZERO Reader never authorize deploy, restart, recreate, Secret change, Provider change, or arbitrary Server command execution.
+- TGserver vNext is not part of this evidence path.
+
 ## Current source/runtime boundary
 
-See `docs/CURRENT_STATE.md` for exact current state.
+See `docs/CURRENT_STATE.md` for the complete repository/runtime history and `docs/CURRENT_SOURCE_QUALIFICATION.md` for the latest source/CI qualification checkpoint.
 
 At the current documentation synchronization boundary:
 
 ```text
-implementation anchor       = c2355f8dd7628e717db1bba83725b33360796828
-PR                          = #34 OPEN / DRAFT / UNMERGED
-source/CI                   = PASS
-running old Server runtime  = healthy on df261bdae...
-Current source deployed     = NO
-live Current-source state   = RUNTIME_SOURCE_BEHIND_OR_UNKNOWN
+qualified implementation anchor before docs sync = b9203e587781daa9c1869dffa6317764642e2742
+PR                                                = #40 OPEN / DRAFT / UNMERGED
+source canonical verify                           = PASS / 454 tests / 454 pass / 0 fail / 0 skipped
+source isolated full-suite Sandbox                = PASS / sidecar+landlock+seccomp
+approved live Server revision                     = 83424901502491c6b1dcc8fd223990f91a750d7d
+Current source deployed                           = NO
+live Current-source state                         = NOT_REFLECTED
 ```
+
+Documentation-only commits after `b9203e...` require their own exact-head CI before becoming a reflection candidate. No documentation statement upgrades the live runtime.
 
 ## Server
 
@@ -45,8 +67,7 @@ live Current-source state   = RUNTIME_SOURCE_BEHIND_OR_UNKNOWN
 - Do not discard `.debugai-input/` or other local-only Server material merely to make a deploy/measurement pass.
 - Container start, HTTP 200, image build, or green CI alone is not Current Runtime PASS.
 - Server source reflection/rebuild/recreate remains governed by current server-core and explicit Master authorization.
-
-Master has authorized the Current DebugAI source-reflection phase after the current README/document synchronization. This does not authorize main merge, Secret changes, Search Gate activation, production profile promotion, new model download, or unrelated mutations.
+- The current feature-branch source has no implied deploy/recreate/restart authorization. Before reflection, bind approval to one exact post-documentation SHA and re-read the current server-core deployment authority.
 
 ## Evidence
 
@@ -79,9 +100,11 @@ Mutation-capable effects are never replayed automatically after restart.
 - CLI usage: `DEBUGAI.md`
 - MCP contract: `docs/MCP_ADAPTER.md`
 - qualification: `docs/PRE_SERVER_QUALIFICATION.md`
+- current source qualification: `docs/CURRENT_SOURCE_QUALIFICATION.md`
+- responsibility tree: `docs/PROJECT_TREE.md`
 - live MCP handoff: `docs/CODEX_MCP_LIVE_HANDOFF.md`
 
-MCP exposes exactly nine guarded tools and intentionally no approve/apply shortcut.
+MCP exposes thirteen guarded tools (the original nine plus four control tools) and intentionally no approve/apply shortcut.
 
 Durable continuation uses explicit `run_id`; do not replace a multi-call continuation path with fabricated one-shot completion.
 
@@ -120,4 +143,4 @@ Rules:
 
 ## Completion
 
-Do not call DebugAI complete from source tests, CI, fixture PASS, health PASS, or external-review PASS alone. Project-level completion still requires the real current-runtime closed loop and Strict Completion evidence described in README/current state/design authority.
+Do not call DebugAI complete from source tests, CI, fixture PASS, health PASS, isolated Sandbox PASS, or external-review PASS alone. Project-level completion still requires the real current-runtime closed loop and Strict Completion evidence described in README/current state/design authority.

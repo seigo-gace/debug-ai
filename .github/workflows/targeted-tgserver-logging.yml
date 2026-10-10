@@ -1,0 +1,31 @@
+name: Targeted TGserver Logging
+
+on:
+  push:
+    branches:
+      - feat/tgserver-async-log-sink-20261003
+  pull_request:
+    paths:
+      - "server/adapters/tgserver.js"
+      - "server/main.js"
+      - "server/tests/tgserver-async-log-sink.test.cjs"
+      - "server/tests/server.test.cjs"
+      - ".env.example"
+      - ".github/workflows/targeted-tgserver-logging.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  tgserver-log-sink:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.20.0"
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - name: TGserver log-sink contract
+        run: node --test server/tests/tgserver-async-log-sink.test.cjs server/tests/server.test.cjs
+      - name: Syntax guard
+        run: node --check server/adapters/tgserver.js && node --check server/main.js

@@ -24,6 +24,11 @@ jobs:
           key: ${{ runner.os }}-node-24.20.0-npm-${{ hashFiles('package.json') }}
           restore-keys: ${{ runner.os }}-node-24.20.0-npm-
       - run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Real Host runner bash and jq lifecycle regression
+        run: |
+          bash -n scripts/host-server-command-runner.sh
+          python3 -m py_compile scripts/host-workspace-inventory.py
+          node --test ops/tests/server-command-host-execution.test.cjs ops/tests/gitops-standing-delegation.test.cjs ops/tests/gitops-master-internal.test.cjs ops/tests/host-workspace-inventory.test.cjs
       - name: Verify with captured output
         shell: bash
         run: |

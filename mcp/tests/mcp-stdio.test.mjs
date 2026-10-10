@@ -46,6 +46,22 @@ test('real stdio MCP handshake lists guarded tools and calls health', { timeout:
     assert.deepEqual(names, [...EXPOSED_TOOLS].sort());
     assert.equal(names.some((name) => /approve|apply/i.test(name)), false);
 
+    const serverRead = listed.tools.find(tool => tool.name === 'debugai_server_read');
+    assert.deepEqual(Object.keys(serverRead.inputSchema.properties).sort(), ['arguments', 'command_id', 'repo']);
+    assert.equal(serverRead.inputSchema.additionalProperties, false);
+    const shell = await client.callTool({ name: 'debugai_server_read', arguments: { command_id: 'project.pwd', shell: 'echo unsafe' } });
+    assert.equal(shell.isError, true);
+    for (const [name, args] of [
+      ['debugai_server_read', { command_id: 'project.pwd' }],
+      ['debugai_server_status', { id: 'cmd_x' }],
+      ['debugai_gitops_request', { action: 'publish', human_approved: false }],
+      ['debugai_gitops_status', { repo: '/workspace/debug-ai', id: 'gitops_x' }],
+    ]) {
+      const failure = await client.callTool({ name, arguments: args });
+      assert.equal(failure.isError, true);
+      assert.equal(JSON.parse(failure.content[0].text).error, 'NOT_FOUND');
+    }
+
     const health = await client.callTool({ name: 'debugai_health', arguments: {} });
     assert.notEqual(health.isError, true);
     const text = health.content.find((block) => block.type === 'text')?.text;

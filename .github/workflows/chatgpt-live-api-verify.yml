@@ -1,0 +1,215 @@
+name: ChatGPT Live Dogfood
+
+on:
+  push:
+    branches:
+      - feat/tgserver-async-log-sink-20261003
+      - feat/chat-gitops-request-20261009
+    paths:
+      - .github/chatgpt-live-api-target.json
+      - .github/workflows/chatgpt-live-api-verify.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chatgpt-live-dogfood
+  cancel-in-progress: false
+
+jobs:
+  live-dogfood:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      CF_ACCESS_CLIENT_ID: ${{ secrets.DEBUGAI_CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.DEBUGAI_CF_ACCESS_CLIENT_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read bounded target
+        id: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="$(jq -r '.base_url' .github/chatgpt-live-api-target.json)"
+          mode="$(jq -r '.mode' .github/chatgpt-live-api-target.json)"
+          repo="$(jq -r '.repo' .github/chatgpt-live-api-target.json)"
+          request="$(jq -r '.request // ""' .github/chatgpt-live-api-target.json)"
+          run_id="$(jq -r '.run_id // ""' .github/chatgpt-live-api-target.json)"
+          [[ "$base" == "https://debugai.asterav8.jp" ]]
+          [[ "$mode" =~ ^(readonly|dogfood)$ ]]
+          gitops_enabled="$(jq -r '.gitops_request.enabled // false' .github/chatgpt-live-api-target.json)"
+          [[ "$gitops_enabled" == "true" || "$gitops_enabled" == "false" ]]
+          echo "gitops_enabled=$gitops_enabled" >> "$GITHUB_OUTPUT"
+          [[ "$repo" == "/workspace/debug-ai" || "$repo" =~ ^/workspace/debug-ai/\.debugai-input/test-repos/[A-Za-z0-9._-]+$ ]]
+          [[ ${#request} -le 2000 ]]
+          [[ -z "$run_id" || "$run_id" =~ ^run_[A-Za-z0-9_]+$ ]]
+          {
+            echo "base=$base"
+            echo "mode=$mode"
+            echo "repo=$repo"
+            echo "run_id=$run_id"
+            echo "request<<EOF_REQUEST"
+            echo "$request"
+            echo "EOF_REQUEST"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Require Cloudflare Access credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${CF_ACCESS_CLIENT_ID:-}"
+          test -n "${CF_ACCESS_CLIENT_SECRET:-}"
+          echo "LIVE_API_AUTH=CONFIGURED"
+
+      - name: Live health
+        shell: bash
+        run: |
+          set -euo pipefail
+          code="$(curl -sS -L --max-time 30 -o /tmp/health.json -w '%{http_code}'             -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}"             -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}"             "${{ steps.target.outputs.base }}/health")"
+          echo "HEALTH_HTTP=$code"
+          test "$code" = "200"
+          jq -e '.ok==true and .service=="debug-ai" and .read_only_verify==true' /tmp/health.json >/dev/null
+          echo "HEALTH_CONTRACT=PASS"
+
+      - name: Existing run status
+        if: ${{ steps.target.outputs.run_id != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          code="$(curl -sS --max-time 30 -o /tmp/status.json -w '%{http_code}'             -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}"             -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}"             "${{ steps.target.outputs.base }}/v1/status/${{ steps.target.outputs.run_id }}")"
+          echo "STATUS_HTTP=$code"
+          test "$code" = "200"
+          jq -r '"RUN_STATE="+((.state//"UNKNOWN")|tostring), "JOB_STATUS="+((.durable.job_status//"UNKNOWN")|tostring), "CURSOR_STEP="+((.durable.workflow_cursor.step_id//"UNKNOWN")|tostring), "CURSOR_PHASE="+((.durable.workflow_cursor.step_phase//"UNKNOWN")|tostring), "LAST_EXECUTION_ERROR="+((.durable.last_execution_error//"NONE")|tostring)' /tmp/status.json
+
+      - name: Existing run inspect
+        if: ${{ steps.target.outputs.run_id != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          code="$(curl -sS --max-time 30 -o /tmp/inspect.json -w '%{http_code}'             -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}"             -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}"             "${{ steps.target.outputs.base }}/v1/inspect/${{ steps.target.outputs.run_id }}")"
+          echo "INSPECT_HTTP=$code"
+          test "$code" = "200"
+          jq -r '"ANALYSIS_PRESENT="+((.artifacts.analysis!=null)|tostring), "PATCH_CANDIDATE_PRESENT="+((.artifacts.patch_candidate!=null)|tostring), "DIAGNOSIS_PRESENT="+((.artifacts.analysis.payload.diagnosis!=null)|tostring)' /tmp/inspect.json
+
+      - name: Bounded existing Server Command readback
+        shell: bash
+        run: node scripts/chatgpt-bounded-server-read.cjs
+
+      - name: Start bounded dogfood
+        id: dogfood
+        if: ${{ steps.target.outputs.mode == 'dogfood' }}
+        shell: bash
+        env:
+          LIVE_REQUEST: ${{ steps.target.outputs.request }}
+        run: |
+          set -euo pipefail
+          test -n "$LIVE_REQUEST"
+          jq -n --arg repo "${{ steps.target.outputs.repo }}" --arg request "$LIVE_REQUEST"             '{repo:$repo,projectId:"debug-ai",failure:{message:$request},localEvidence:[]}' >/tmp/start-body.json
+          code="$(curl -sS --max-time 60 -o /tmp/start.json -w '%{http_code}'             -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}"             -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}"             -H 'content-type: application/json' --data-binary @/tmp/start-body.json             "${{ steps.target.outputs.base }}/v1/runs/start")"
+          echo "DOGFOOD_START_HTTP=$code"
+          test "$code" = "202"
+          run_id="$(jq -r '.run_id // empty' /tmp/start.json)"
+          [[ "$run_id" =~ ^run_[A-Za-z0-9_]+$ ]]
+          echo "run_id=$run_id" >>"$GITHUB_OUTPUT"
+          echo "DOGFOOD_RUN_ID=$run_id"
+
+      - name: Bounded wait
+        if: ${{ steps.target.outputs.mode == 'dogfood' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          run_id="${{ steps.dogfood.outputs.run_id }}"
+          deadline=$((SECONDS+900))
+          while true; do
+            code="$(curl -sS --max-time 30 -o /tmp/dogfood-status.json -w '%{http_code}'               -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}"               -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}"               "${{ steps.target.outputs.base }}/v1/status/$run_id")"
+            test "$code" = "200"
+            job="$(jq -r '.durable.job_status // "UNKNOWN"' /tmp/dogfood-status.json)"
+            state="$(jq -r '.state // "UNKNOWN"' /tmp/dogfood-status.json)"
+            step="$(jq -r '.durable.workflow_cursor.step_id // "UNKNOWN"' /tmp/dogfood-status.json)"
+            phase="$(jq -r '.durable.workflow_cursor.step_phase // "UNKNOWN"' /tmp/dogfood-status.json)"
+            echo "DOGFOOD_STATE=$state|JOB_STATUS=$job|STEP=$step|PHASE=$phase"
+            if [[ "$job" =~ ^(DONE|CANCELLED|BLOCKED|FAILED|RETRY_WAIT)$ || "$state" =~ ^(COMPLETE|BLOCKED)$ ]]; then break; fi
+            (( SECONDS < deadline )) || { echo "DOGFOOD_BOUNDED_WAIT=TIMEOUT"; exit 13; }
+            sleep 10
+          done
+          echo "DOGFOOD_BOUNDED_WAIT=TERMINAL"
+
+      - name: Final inspect
+        if: ${{ success() && steps.target.outputs.mode == 'dogfood' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          run_id="${{ steps.dogfood.outputs.run_id }}"
+          code="$(curl -sS --max-time 30 -o /tmp/final-inspect.json -w '%{http_code}'             -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}"             -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}"             "${{ steps.target.outputs.base }}/v1/inspect/$run_id")"
+          test "$code" = "200"
+          jq -r '"FINAL_ANALYSIS_PRESENT="+((.artifacts.analysis!=null)|tostring), "FINAL_PATCH_CANDIDATE_PRESENT="+((.artifacts.patch_candidate!=null)|tostring), "FINAL_DIAGNOSIS_PRESENT="+((.artifacts.analysis.payload.diagnosis!=null)|tostring), "FINAL_EVIDENCE_STATUS="+((.artifacts.analysis.payload.evidence_status//"UNKNOWN")|tostring)' /tmp/final-inspect.json
+
+      - name: Admitted GitOps deployment via existing DebugAI API
+        if: ${{ steps.target.outputs.gitops_enabled == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF_NAME" == "feat/chat-gitops-request-20261009" ]] || { echo "CHAT_GITOPS_TRIGGER_BRANCH_DENIED"; exit 31; }
+          file=".github/chatgpt-live-api-target.json"
+          jq -e '.gitops_request | type=="object" and (.enabled==true) and ((keys|sort)==(["branch","enabled","sha"]|sort))' "$file" >/dev/null
+          branch="$(jq -r '.gitops_request.branch' "$file")"
+          sha="$(jq -r '.gitops_request.sha' "$file")"
+          [[ "$branch" == "feat/tgserver-async-log-sink-20261003" ]] || { echo "CHAT_GITOPS_DEPLOY_BRANCH_DENIED"; exit 32; }
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "CHAT_GITOPS_SHA_INVALID"; exit 33; }
+          remote="$(git ls-remote origin "refs/heads/$branch" | awk 'NR==1{print $1}')"
+          [[ "$remote" == "$sha" ]] || { echo "CHAT_GITOPS_REMOTE_SHA_MISMATCH"; exit 34; }
+          [[ -n "${CF_ACCESS_CLIENT_ID:-}" && -n "${CF_ACCESS_CLIENT_SECRET:-}" ]]
+          jq -nc --arg branch "$branch" --arg sha "$sha" '
+            {action:"deploy",repo:"/workspace/debug-ai",branch:$branch,sha:$sha,
+             expected_head:$sha,human_approved:true,
+             delegation:{id:"dlg_debugai_reflect_v1",scope:"debugai.compose.reflect"}}
+          ' >/tmp/chat-gitops-body.json
+          http="$(curl -sS --max-time 35 -o /tmp/chat-gitops-response.json -w '%{http_code}' -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" -H "content-type: application/json" --data-binary @/tmp/chat-gitops-body.json "https://debugai.asterav8.jp/v1/gitops/request")"
+          echo "CHAT_GITOPS_REQUEST_HTTP=$http"
+          [[ "$http" == "202" ]] || { echo "CHAT_GITOPS_REQUEST_REJECTED"; exit 35; }
+          touch /tmp/chat-gitops-request-sent
+          id="$(jq -r '.id // empty' /tmp/chat-gitops-response.json)"
+          [[ "$id" =~ ^gitops_[0-9a-f]{24}$ ]] || { echo "CHAT_GITOPS_ID_INVALID"; exit 36; }
+          echo "CHAT_GITOPS_REQUEST_ID=$id"
+          deadline=$((SECONDS+1500))
+          while ((SECONDS < deadline)); do
+            body="$(jq -nc --arg id "$id" '{repo:"/workspace/debug-ai",id:$id}')"
+            http="$(curl -sS --max-time 35 -o /tmp/chat-gitops-status.json -w '%{http_code}' -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" -H "content-type: application/json" --data-binary "$body" "https://debugai.asterav8.jp/v1/gitops/status")"
+            [[ "$http" == "200" ]] || { sleep 10; continue; }
+            [[ "$(jq -r '.id // empty' /tmp/chat-gitops-status.json)" == "$id" ]] || exit 37
+            state="$(jq -r '.state // "UNKNOWN"' /tmp/chat-gitops-status.json)"
+            if [[ "$state" == "PASS" ]]; then
+              deployed="$(jq -r '.result.deployed_sha // empty' /tmp/chat-gitops-status.json)"
+              [[ "$deployed" == "$sha" ]] || { echo "CHAT_GITOPS_DEPLOYED_SHA_MISMATCH"; exit 38; }
+              echo "CHAT_GITOPS_TERMINAL=PASS"
+              echo "CHAT_GITOPS_DEPLOYED_SHA=$deployed"
+              break
+            fi
+            if [[ "$state" == "FAIL" ]]; then
+              cause="$(jq -r '.error // "UNKNOWN"' /tmp/chat-gitops-status.json)"
+              [[ "$cause" =~ ^[A-Z][A-Z0-9_]{0,79}$ ]] || cause="REDACTED_OR_UNKNOWN"
+              echo "CHAT_GITOPS_TERMINAL=FAIL"
+              echo "CHAT_GITOPS_FAILURE_CLASS=$cause"
+              exit 39
+            fi
+            [[ "$state" == "RUNNING" || "$state" == "QUEUED" ]] || exit 40
+            sleep 10
+          done
+          [[ "${state:-}" == "PASS" ]] || { echo "CHAT_GITOPS_TERMINAL=TIMEOUT"; exit 41; }
+          code="$(curl -sS --max-time 30 -o /tmp/chat-post-health.json -w '%{http_code}' -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" "https://debugai.asterav8.jp/health")"
+          [[ "$code" == "200" ]] || { echo "CHAT_GITOPS_POST_HEALTH_HTTP=$code"; exit 42; }
+          jq -e '.ok==true and .service=="debug-ai"' /tmp/chat-post-health.json >/dev/null
+          echo "CHAT_GITOPS_POST_HEALTH=PASS"
+          echo "CHAT_GITOPS_POST_HEAD_READBACK_BEGIN"
+          node scripts/chatgpt-bounded-server-read.cjs | tee /tmp/chat-gitops-post-host-head.log
+          grep -Fx "SERVER_GIT_HEAD=$sha" /tmp/chat-gitops-post-host-head.log >/dev/null || { echo "CHAT_GITOPS_POST_HEAD_MISMATCH"; exit 43; }
+          echo "CHAT_GITOPS_POST_HOST_SHA_MATCH=TRUE"
+      - name: Safety assertion
+        if: always()
+        shell: bash
+        run: |
+          echo "APPROVE_APPLY_VERIFY_CALLED=NO"
+          echo "PATCH_CANDIDATE_ENDPOINT_CALLED=NO"
+          echo "ASSET_PROMOTE_CALLED=NO"
+          if [[ -f /tmp/chat-gitops-request-sent ]]; then echo "PRODUCTION_DEPLOY_REQUEST_SENT=YES"; else echo "PRODUCTION_DEPLOY_REQUEST_SENT=NO"; fi

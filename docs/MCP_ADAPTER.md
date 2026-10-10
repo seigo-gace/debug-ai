@@ -1,6 +1,6 @@
 # DebugAI MCP Adapter
 
-Status: **SOURCE + CI + REAL STDIO PROTOCOL + RUNTIME-IMAGE ASSET CONTRACT VERIFIED; LIVE CURRENT-RUNTIME CALLS NOT YET VERIFIED**
+Status: **SOURCE + CI + REAL STDIO PROTOCOL + SOURCE DURABLE-CONTINUATION CONTRACT + RUNTIME-IMAGE ASSET CONTRACT VERIFIED; LIVE CURRENT-RUNTIME CALLS NOT YET VERIFIED**
 
 Read [`CURRENT_STATE.md`](CURRENT_STATE.md) for the exact current repository/runtime boundary.
 
@@ -24,14 +24,15 @@ MCP is transport/integration only.
 - factory: `mcp/server.mjs`
 - stdio entry: `bin/debugai-mcp.mjs`
 - delegated client: `bin/debugai.js`
-- contract tests: `mcp/tests/mcp-adapter.test.mjs`
+- adapter contract tests: `mcp/tests/mcp-adapter.test.mjs`
+- durable-continuation source contract: `mcp/tests/mcp-durable-continuation.test.mjs`
 - real stdio protocol regression: `mcp/tests/mcp-stdio.test.mjs`
 
 The MCP entry is ESM because the MCP SDK is ESM; the existing runtime/CLI remains CommonJS where already designed.
 
 ## Exact tool surface
 
-Exactly nine tools:
+Thirteen tools; the original nine remain available:
 
 ```text
 debugai_health
@@ -43,6 +44,10 @@ debugai_patch_candidate
 debugai_verify
 debugai_status
 debugai_inspect
+debugai_server_read
+debugai_server_status
+debugai_gitops_request
+debugai_gitops_status
 ```
 
 No approve/apply shortcut is allowed.
@@ -60,7 +65,7 @@ debugai_start
 -> debugai_inspect
 ```
 
-The adapter does not own continuation state; it delegates to the existing runtime.
+The adapter does not own continuation state; it delegates to the existing runtime. The source regression now locks this as one explicit-run chain: the same caller-supplied/returned `run_id` must be forwarded through status/resume/wait/inspect, execution errors stay fail-closed, and the MCP adapter does not synthesize replacement run identity.
 
 ## Mutation boundary
 
@@ -69,7 +74,7 @@ The adapter does not own continuation state; it delegates to the existing runtim
 Patch application remains behind the established approval boundary:
 
 ```text
-explicit Master approval
+explicit controlling-parent/orchestrator approval
 + exact candidate identity
 + repository revision validation
 + apply receipt
@@ -78,7 +83,7 @@ explicit Master approval
 + Strict Completion
 ```
 
-MCP must not weaken or bypass this contract.
+MCP must not weaken or bypass this contract. In the current development workflow ChatGPT is the technical approval authority for ordinary candidate decisions; Master is asked only at separately defined Master-gated operations such as Production deploy/recreate, main merge, Secret/Provider/Model changes, or destructive state changes.
 
 ## Output
 
@@ -95,30 +100,32 @@ Node 24.20.0
 
 ## Current verified source/protocol boundary
 
-Implementation anchor before the current documentation synchronization:
+Behavior/test anchor before this documentation synchronization:
 
 ```text
-source anchor                    = c2355f8dd7628e717db1bba83725b33360796828
-Public Readiness Audit #359      = SUCCESS
-Verify #394                      = SUCCESS
-repository tests                 = 373/373 PASS
-Core Verify #395                 = SUCCESS
+source anchor                    = 0cee91391fd86075b1bf8b9a0412946c3c562b5b
+Verify #562 / run 37258254053  = SUCCESS
+repository tests                 = 436/436 PASS / 0 FAIL / 0 SKIP
+pre-server source_ready          = true
 MCP factory                      = PASS
 MCP stdio initialize/handshake   = PASS
 tools/list                       = PASS
 exact exposed tools              = 9
 health fixture call              = PASS
+durable continuation mapping     = PASS
+durable explicit run-id chain    = PASS
+durable error fail-closed        = PASS
 approve/apply MCP tool           = ABSENT
 runtime-image MCP assets         = PASS
 ```
 
-The stdio regression uses an official MCP client against the real MCP entry with a controlled loopback HTTP fixture. This proves the transport -> adapter -> delegated client boundary, not live Contabo Current-runtime operation.
+The stdio regression uses an official MCP client against the real MCP entry with a controlled loopback HTTP fixture. The durable-continuation regression delegates through the same existing `execute` contract and proves explicit source-level start/status/resume/wait/inspect routing. These prove source/protocol behavior, not live Contabo Current-runtime operation.
 
 ## Runtime-image contract
 
-The Current Docker runtime now explicitly contains `bin/`, `mcp/`, `scripts/`, and `docs/` needed for live MCP/qualification. A regression test protects that packaging contract.
+The Current Docker runtime source explicitly packages `bin/`, `mcp/`, `scripts/`, and `docs/` needed for live MCP/qualification. A regression test protects that packaging contract.
 
-The preceding deployed old image did not contain Current MCP/qualification source assets despite being healthy. Source packaging was corrected at `c2355f8...`; live Current deployment remained unexecuted at this documentation boundary.
+A healthy older image does not prove the current source MCP contract is live. Current exact-source deployment/readback remains a separate state and approval boundary.
 
 ## Current state separation
 
@@ -126,8 +133,8 @@ The preceding deployed old image did not contain Current MCP/qualification sourc
 MCP_SOURCE=PASS
 MCP_UNIT_CONTRACT=PASS
 MCP_STDIO_PROTOCOL=PASS
-MCP_TOOLS_9_OF_9=PASS
-MCP_DURABLE_CONTINUATION_SURFACE=PASS
+MCP_ORIGINAL_TOOLS_9_OF_9=PASS
+MCP_DURABLE_CONTINUATION_SOURCE_CHAIN=PASS
 MCP_RUNTIME_IMAGE_ASSETS=PASS
 MCP_LIVE_DEBUGAI_RUNTIME=NOT_VERIFIED
 VS_CODEX_MCP_REGISTRATION=NOT_VERIFIED
@@ -169,7 +176,7 @@ Do not invent an SSH alias, Windows wrapper, or Codex config. Read the actual ex
 After Current source/runtime parity is proven:
 
 ```text
-1. discover exactly nine tools
+1. discover all thirteen tools
 2. debugai_health
 3. debugai_start on an explicitly allowed repository
 4. capture exact run_id
@@ -190,3 +197,24 @@ Do not mark Workspace MCP `AVAILABLE_VERIFIED` before representative real-runtim
 - `PRE_SERVER_QUALIFICATION.md`
 - `CODEX_MCP_LIVE_HANDOFF.md`
 - `../DEBUGAI.md`
+
+## Control surface extension — 2026-10-07
+
+The original ordered nine-tool surface is preserved and four tools are appended:
+
+| MCP tool | CLI command | HTTP POST route |
+| --- | --- | --- |
+| `debugai_server_read` | `server-command request --input-json <json>` | `/v1/server-command/request` |
+| `debugai_server_status` | `server-command status --input-json <json>` | `/v1/server-command/status` |
+| `debugai_gitops_request` | `gitops request --input-json <json>` | `/v1/gitops/request` |
+| `debugai_gitops_status` | `gitops status --input-json <json>` | `/v1/gitops/status` |
+
+`debugai_server_read` takes `command_id`, optional `repo`, and optional string-array `arguments`; it accepts no shell field. `debugai_server_status` takes `id`. GitOps request forwards the existing service object unchanged, including approval, expected SHA and action-specific candidate/files or deploy SHA fields. GitOps status takes `repo` and `id`. These control tools use server-visible paths exactly as supplied, without CLI path remapping or run/session identity inference.
+
+Server Command request/status delegate to the same `ServerCommandRequestService` instance already passed to workflow and GitHub gateway by `server/main.js`; request returns HTTP 202 and status returns HTTP 200. GitOps reuses its existing routes and `GitOpsRequestService`. The request result means queued, not executed or verified; follow the returned id with status. No executor, queue, workflow, MCP server, allowlist or approval engine is added. No registration, Production reflection or live qualification was performed for this extension.
+
+Allowlist/argument/RepoPolicy decisions remain service-owned. GitOps approval, exact SHA, candidate identity, file scope and remote readback remain service/Host-runner-owned. No approve/apply MCP shortcut exists. Thrown CLI/HTTP errors and nonzero delegated control-command exits return MCP `isError=true` while retaining structured result evidence.
+
+GitOps deploy optionally accepts `delegation:{id,scope}` under the existing tool.
+It references a Host-only policy; caller text and `human_approved` are not delegation
+proof. No approve/apply tool is added. See [Standing Delegation](GITOPS_STANDING_DELEGATION.md).

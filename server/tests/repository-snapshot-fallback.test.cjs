@@ -35,6 +35,17 @@ test("runtime and build artifacts are excluded from tree snapshot",()=>{
   }finally{fixture.cleanup();}
 });
 
+test("runtime input queues are excluded from tree snapshot",()=>{
+  const fixture=makeTree();
+  try{
+    fs.mkdirSync(path.join(fixture.root,".debugai-input"));
+    fs.writeFileSync(path.join(fixture.root,".debugai-input","queue.json"),"one\n");
+    const first=treeSnapshot(fixture.root);
+    fs.writeFileSync(path.join(fixture.root,".debugai-input","queue.json"),"two\n");
+    assert.equal(treeSnapshot(fixture.root),first);
+  }finally{fixture.cleanup();}
+});
+
 test("symlink target text changes snapshot without following the link",()=>{
   const fixture=makeTree();
   try{fs.writeFileSync(path.join(fixture.root,"src","b.js"),"same\n");fs.symlinkSync("a.js",path.join(fixture.root,"src","link.js"));const first=treeSnapshot(fixture.root);fs.unlinkSync(path.join(fixture.root,"src","link.js"));fs.symlinkSync("b.js",path.join(fixture.root,"src","link.js"));assert.notEqual(treeSnapshot(fixture.root),first);}
@@ -51,6 +62,19 @@ test("missing git marker fails closed",()=>{
   const fixture=makeTree();
   try{fs.rmSync(path.join(fixture.root,".git"),{recursive:true,force:true});assert.throws(()=>treeSnapshot(fixture.root),error=>error.message==="DURABLE_REPO_SNAPSHOT_UNAVAILABLE"&&error.cause?.code==="ENOENT");}
   finally{fixture.cleanup();}
+});
+
+
+
+test("explicit allowMissingGitMarker permits deterministic policy-bound tree snapshot",()=>{
+  const fixture=makeTree();
+  try{
+    fs.rmSync(path.join(fixture.root,".git"),{recursive:true,force:true});
+    const first=treeSnapshot(fixture.root,{allowMissingGitMarker:true});
+    assert.match(first,/^tree_[a-f0-9]{64}$/);
+    fs.writeFileSync(path.join(fixture.root,"src","a.js"),"two\n");
+    assert.notEqual(treeSnapshot(fixture.root,{allowMissingGitMarker:true}),first);
+  }finally{fixture.cleanup();}
 });
 
 test("unsupported special file fails closed",()=>{

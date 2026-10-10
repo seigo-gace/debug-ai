@@ -1,0 +1,8 @@
+[Unit]
+Description=Watch DebugAI bounded Server Command and guarded GitOps queues
+[Path]
+PathExistsGlob=/home/admin1/projects/debug-ai/.debugai-input/server-command/requests/cmd_*.json
+PathExistsGlob=/home/admin1/projects/debug-ai/.debugai-input/gitops/requests/gitops_*.json
+Unit=debugai-server-command.service
+[Install]
+WantedBy=default.target

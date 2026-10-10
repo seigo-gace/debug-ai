@@ -7,7 +7,8 @@ const path=require("node:path");
 const {makeToolResult,assertToolResultIntegrity}=require("../control/read-only-tool-runtime.js");
 const {parseAndValidateRoleOutput}=require("../control/role-output-validator.js");
 const {runRoleWithReadOnlyTools}=require("../control/tool-loop.js");
-const {createWorkflow}=require("../workflow.js");
+const {createWorkflow,pickDiagnosisStatement}=require("../workflow.js");
+const {compileInvocation}=require("../control/invocation-compiler.js");
 
 test("tool results receive deterministic runtime evidence ids and fail integrity on tamper",()=>{
   const result=makeToolResult("source.read",{path:"a.js",sha256:"a".repeat(64),content:"const x=1;"});
@@ -54,6 +55,21 @@ test("bounded tool loop rejects a final claim that cites an unissued TRE evidenc
     return{content:JSON.stringify({claims:[{type:"FACT",text:"invented",evidence_refs:["TRE_111111111111111111111111"]}],decision:"HANDOFF"})};
   }};
   await assert.rejects(()=>runRoleWithReadOnlyTools({aiCore,role:"code_scout",user:"x",toolRuntime,maxToolRounds:2,maxToolCalls:2}),/ROLE_CLAIM_BINDING_INVALID/);
+});
+
+
+
+test("investigation role prompts, validators, and diagnosis handoff share canonical shapes",()=>{
+  const scoutPrompt=compileInvocation("code_scout",{task:"trace source path"}).system;
+  assert.match(scoutPrompt,/OUTPUT_FIELDS=relevant_files,call_path,contract_mismatch,excluded_files,unknowns/);
+  const scout=parseAndValidateRoleOutput("code_scout",JSON.stringify({relevant_files:["src/a.js"],call_path:["src/a.js:run"],contract_mismatch:null,excluded_files:[],unknowns:[]}),{roleSemantics:"enforce"});
+  assert.deepEqual(scout.relevant_files,["src/a.js"]);
+
+  const diagnosisPrompt=compileInvocation("diagnoser",{task:"falsify root cause"}).system;
+  assert.match(diagnosisPrompt,/OUTPUT_FIELDS=diagnosis_status,hypotheses,confirmed_root_cause,unsupported_claims/);
+  const diagnosis=parseAndValidateRoleOutput("diagnoser",JSON.stringify({diagnosis_status:"HYPOTHESES_RETAINED",hypotheses:[{id:"H_QUEUE",evidence_refs:[],falsification_condition:"queue wait absent",counter_evidence_refs:[],status:"HYPOTHESIS"}],confirmed_root_cause:null,unsupported_claims:[]}),{roleSemantics:"enforce"});
+  assert.equal(diagnosis.hypotheses[0].id,"H_QUEUE");
+  assert.equal(pickDiagnosisStatement(diagnosis),"H_QUEUE");
 });
 
 test("patch engineer output is semantic-gated before patch candidate construction",async()=>{

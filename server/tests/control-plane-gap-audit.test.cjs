@@ -12,14 +12,14 @@ test("control-plane gap audit distinguishes implemented providers from real unre
     skill_contracts:25,
     skill_procedures:25,
     skill_procedures_missing:0,
-    declared_tools:18,
-    runtime_tools_available:13,
+    declared_tools:19,
+    runtime_tools_available:14,
     runtime_tools_missing:5,
-    capability_requirements:18,
+    capability_requirements:19,
     capability_requirements_unresolved:0
   });
   assert.deepEqual(report.missing_skill_procedures,[]);
-  for(const tool of ["test.inventory","evidence.read","runtime.trace.read","state.read","history.read","invariant.read","source.verify"])assert.ok(report.runtime_tools.available.includes(tool),tool);
+  for(const tool of ["test.inventory","evidence.read","runtime.trace.read","state.read","history.read","invariant.read","source.verify","server.command.read"])assert.ok(report.runtime_tools.available.includes(tool),tool);
 
   const byRequirement=new Map(report.capabilities.all.map(item=>[item.requirement,item]));
   assert.deepEqual(byRequirement.get("source.read"),{requirement:"source.read",type:CAPABILITY_TYPE.MODEL_TOOL,provider:"runtime-tool:source.read",status:"IMPLEMENTED"});
@@ -29,6 +29,7 @@ test("control-plane gap audit distinguishes implemented providers from real unre
   assert.deepEqual(byRequirement.get("history.read"),{requirement:"history.read",type:CAPABILITY_TYPE.MODEL_TOOL,provider:"runtime-tool:history.read",status:"IMPLEMENTED"});
   assert.deepEqual(byRequirement.get("invariant.read"),{requirement:"invariant.read",type:CAPABILITY_TYPE.MODEL_TOOL,provider:"runtime-tool:invariant.read",status:"IMPLEMENTED"});
   assert.deepEqual(byRequirement.get("source.verify"),{requirement:"source.verify",type:CAPABILITY_TYPE.MODEL_TOOL,provider:"runtime-tool:source.verify",status:"IMPLEMENTED"});
+  assert.deepEqual(byRequirement.get("server.command.read"),{requirement:"server.command.read",type:CAPABILITY_TYPE.MODEL_TOOL,provider:"runtime-tool:server.command.read",status:"IMPLEMENTED"});
 
   assert.equal(nonRuntimeCapabilityImplemented("diff.plan"),true);
   assert.equal(nonRuntimeCapabilityImplemented("test.plan"),true);

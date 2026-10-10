@@ -739,3 +739,7 @@ A final completion claim requires all of the following to be closed with evidenc
 13. any required production rollout verification after explicit Master approval.
 
 Until those conditions are satisfied, the correct project-level state remains **not fully complete**, even when individual subsystems are verified.
+
+## Design history — 2026-10-07 bounded control transport extension
+
+The HTTP/CLI/MCP transport surface now connects the existing Bounded Server Command and Guarded GitOps paths directly. Added HTTP POST routes are `/v1/server-command/request` and `/v1/server-command/status`; existing GitOps request/status routes are reused. Four MCP tools are appended after the original nine: `debugai_server_read`, `debugai_server_status`, `debugai_gitops_request`, `debugai_gitops_status`. MCP delegates to the existing CLI; CLI forwards structured JSON to HTTP. Request/status delegate to existing service contracts without a second service, executor, queue, workflow, allowlist or approval owner. This is an additive transport extension; removing the new registrations/routes/CLI commands reverses the extension while preserving the original paths. All existing repository, approval, exact SHA, candidate identity, file scope and remote readback boundaries remain authoritative. Source tests/CI do not authorize or establish Production reflection.

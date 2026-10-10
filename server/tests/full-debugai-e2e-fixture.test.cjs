@@ -94,7 +94,7 @@ test("HTTP entry points complete the deterministic analyze-to-approved-patch clo
     context:"value.test.cjs is the reproducer",
     task:"make the reproduced test pass with the smallest source change"
   });
-  assert.equal(patch.state,"WAITING_MASTER_APPROVAL");
+  assert.equal(patch.state,"WAITING_APPROVAL");
   assert.equal(patch.patch_packet.schema,"debugai.patch-packet/v1");
   const patchEngineerInput=roleCalls.find(call=>call.role==="patch_engineer").user;
   assert.equal(patchEngineerInput.patch_packet.schema,"debugai.patch-packet/v1");

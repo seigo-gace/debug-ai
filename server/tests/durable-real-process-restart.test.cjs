@@ -5,6 +5,7 @@ const fs=require("node:fs");
 const os=require("node:os");
 const path=require("node:path");
 const {spawn}=require("node:child_process");
+const {requestSupervisedSigkill}=require("./helpers/sandbox-signal-client.cjs");
 
 const CHILD=path.join(__dirname,"fixtures","durable-process-recovery-child.cjs");
 
@@ -43,7 +44,7 @@ async function waitFor(handle,predicate,{timeoutMs=20000,label="event",diagnosti
   const details=typeof diagnostic==="function"?diagnostic():null;
   throw new Error(`TIMEOUT_WAITING_FOR_${label}:${JSON.stringify({events:handle.events,diagnostic:details})}`);
 }
-function killIfRunning(handle){if(handle&&!childExited(handle))handle.child.kill("SIGKILL");}
+async function killIfRunning(handle){if(handle&&!childExited(handle))await requestSupervisedSigkill(handle.child);}
 
 test("real SIGKILL restart restores A/B and resumes C with same role execution and new attempt",{timeout:90000},async t=>{
   if(process.platform!=="linux")return t.skip("native durable writer acceptance is Linux-only");
@@ -51,7 +52,7 @@ test("real SIGKILL restart restores A/B and resumes C with same role execution a
   const runtimeRoot=path.join(root,"runtime"),repo=path.join(root,"repo");
   fs.mkdirSync(repo,{mode:0o700});fs.writeFileSync(path.join(repo,"fixture.js"),"module.exports=42;\n");
   let first=null,second=null;
-  t.after(()=>{killIfRunning(first);killIfRunning(second);fs.rmSync(root,{recursive:true,force:true});});
+  t.after(async()=>{await killIfRunning(first);await killIfRunning(second);fs.rmSync(root,{recursive:true,force:true});});
 
   first=startChild(["initial",runtimeRoot,root,repo]);
   const started=await waitFor(first,event=>event.type==="STARTED",{label:"STARTED"});
@@ -60,7 +61,7 @@ test("real SIGKILL restart restores A/B and resumes C with same role execution a
   const firstB=first.events.filter(event=>event.type==="WORK"&&event.unit==="researcher.B");
   assert.equal(firstA.length,1);assert.equal(firstB.length,1);assert.equal(interrupt.unit,"researcher.C");assert.equal(interrupt.attempt_no,1);
 
-  assert.equal(first.child.kill("SIGKILL"),true);
+  assert.equal(await requestSupervisedSigkill(first.child),true);
   const killed=await first.exited;
   assert.equal(killed.signal,"SIGKILL");
 

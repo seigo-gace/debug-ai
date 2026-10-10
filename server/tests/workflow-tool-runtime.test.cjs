@@ -107,3 +107,61 @@ test("workflow compacts deterministic command output before analysis roles",asyn
     assert.equal(check.stdout.bytes,Buffer.byteLength(fullOutput));assert.match(check.stdout.sha256,/^[a-f0-9]{64}$/);assert.equal(check.stdout.excerpt,null);assert.equal(evidence[0].integrity,undefined);assert.match(evidence[0].evidence_id,/^EVI_/);
   }finally{f.cleanup();}
 });
+
+test("workflow binds server command events to run evidence and TGserver runtime log",async()=>{
+  const f=makeRepo();try{
+    const calls=[],events=[],evidence=[];let codeScoutCalls=0;
+    const aiCore={call:async(role,opts)=>{
+      calls.push({role,opts});
+      if(role==="code_scout"){
+        codeScoutCalls+=1;
+        if(codeScoutCalls===1)return{content:JSON.stringify({tool_requests:[{tool:"server.command.read",arguments:{command_id:"project.pwd"},reason:"inspect server working directory"}]})};
+        return{content:JSON.stringify({facts:[{path:"server",observation:"pwd collected"}],decision:"HANDOFF"})};
+      }
+      if(role==="causal_scout")return{content:JSON.stringify({candidates:[{kind:"RUNTIME",falsification:"compare server path"}],decision:"HANDOFF"})};
+      if(role==="researcher")return{content:JSON.stringify({selected_evidence:[],decision:"HANDOFF"})};
+      if(role==="diagnoser")return{content:JSON.stringify({hypothesis:"runtime path observed",public_statement:"runtime path observed",cause_kind:"RUNTIME",decision:"HANDOFF"})};
+      throw new Error(`UNEXPECTED_ROLE:${role}`);
+    }};
+    const tgserver={log:async event=>{events.push(event);return{status:"queued"};},search:async()=>[]};
+    const runtimeEvidence={write:(runId,type,payload)=>{evidence.push({runId,type,payload});return{id:"x",path:"x"};}};
+    const serverCommand={execute:async()=>({request_id:"cmd_aaaaaaaaaaaaaaaaaaaaaaaa",command_id:"project.pwd",stdout:"/home/admin1/projects/debug-ai",exit_code:0,read_only:true})};
+    const workflow=createWorkflow({aiCore,tgserver,runtimeEvidence,serverCommand,evidenceSearch:{search:async()=>[]},repoPolicy:new RepoPolicy({workspaceRoot:f.workspace})});
+    const out=await workflow.runAnalysis({failure:{message:"alpha failure"},localEvidence:[],repo:f.repo});
+    assert.equal(out.diagnosis.cause_kind,"RUNTIME");
+    const commandLogs=events.filter(x=>x.kind==="server_command");
+    assert.equal(commandLogs.length,2);assert.equal(commandLogs[0].status,"REQUESTED");assert.equal(commandLogs[1].status,"PASS");
+    assert.equal(commandLogs[0].run_id,commandLogs[1].run_id);assert.ok(commandLogs[0].run_id);
+    assert.equal(commandLogs[1].stdout,"/home/admin1/projects/debug-ai");
+    const local=evidence.filter(x=>x.type==="server_command");assert.equal(local.length,2);assert.equal(local[0].runId,commandLogs[0].run_id);assert.equal(local[1].runId,commandLogs[0].run_id);
+  }finally{f.cleanup();}
+});
+
+test("analysis emits bounded workflow progress events to TGserver and RuntimeEvidence",async()=>{
+  const f=makeRepo();try{
+    const events=[],evidence=[];
+    const aiCore={call:async(role)=>{
+      if(role==="code_scout")return{content:JSON.stringify({facts:[],decision:"HANDOFF"})};
+      if(role==="causal_scout")return{content:JSON.stringify({candidates:[],decision:"HANDOFF"})};
+      if(role==="researcher")return{content:JSON.stringify({selected_evidence:[],decision:"HANDOFF"})};
+      if(role==="diagnoser")return{content:JSON.stringify({hypothesis:"bounded",public_statement:"bounded",cause_kind:"RUNTIME",decision:"HANDOFF"})};
+      throw new Error("UNEXPECTED_ROLE:"+role);
+    }};
+    const workflow=createWorkflow({
+      aiCore,
+      tgserver:{log:async e=>{events.push(e);return{status:"queued"};},search:async()=>[]},
+      runtimeEvidence:{write:(runId,type,payload)=>{evidence.push({runId,type,payload});return{id:"x",path:"x"};}},
+      evidenceSearch:{search:async()=>[]},
+      repoPolicy:new RepoPolicy({workspaceRoot:f.workspace})
+    });
+    const out=await workflow.runAnalysis({failure:{message:"progress test"},localEvidence:[],repo:f.repo});
+    const p=events.filter(e=>e.kind==="workflow_progress");
+    assert.ok(p.length>=6);
+    assert.ok(p.some(e=>e.step==="SCOUTS"&&e.phase==="RUNNING"));
+    assert.ok(p.some(e=>e.step==="SCOUTS"&&e.phase==="DONE"));
+    assert.ok(p.some(e=>e.step==="FINAL_ANALYSIS"&&e.phase==="DONE"));
+    assert.ok(evidence.some(e=>e.type==="workflow_progress"));
+    for(const e of p){assert.equal(Object.hasOwn(e,"failure"),false);assert.equal(Object.hasOwn(e,"stdout"),false);}
+    assert.equal(out.diagnosis.cause_kind,"RUNTIME");
+  }finally{f.cleanup();}
+});

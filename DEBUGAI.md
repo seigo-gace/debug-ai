@@ -49,6 +49,8 @@ patch
 verify
 status
 inspect
+server-command <request|status> --input-json <service-contract-json>
+gitops <request|status> --input-json <service-contract-json>
 ```
 
 Examples:
@@ -94,7 +96,7 @@ debugai-mcp
 
 The MCP server uses stdio. stdout is protocol traffic; operational startup text belongs on stderr.
 
-Exactly nine tools are exposed:
+Thirteen tools are exposed; the original nine remain available:
 
 ```text
 debugai_health
@@ -106,6 +108,10 @@ debugai_patch_candidate
 debugai_verify
 debugai_status
 debugai_inspect
+debugai_server_read
+debugai_server_status
+debugai_gitops_request
+debugai_gitops_status
 ```
 
 There is intentionally no MCP approve/apply tool.
@@ -194,3 +200,15 @@ npm run audit:live-runtime
 ```
 
 Both preserve source/runtime separation; neither silently authorizes mutation.
+
+## Bounded control commands
+
+Use structured service-contract JSON and the exact server-visible repo path:
+
+```bash
+debugai server-command request --input-json '{"command_id":"project.pwd","repo":"/workspace/debug-ai","arguments":[]}'
+debugai server-command status --input-json '{"id":"<returned-command-id>"}'
+debugai gitops status --input-json '{"repo":"/workspace/debug-ai","id":"<returned-gitops-id>"}'
+```
+
+`gitops request --input-json <json>` passes the existing `GitOpsRequestService.request()` contract unchanged. Publish requires explicit approval, expected HEAD, branch, candidate identity, selected files and commit message; deploy retains the exact SHA and separate Host approval gate. The CLI does not infer or grant approval. These commands do not write continuation session state. See [`docs/MCP_ADAPTER.md`](docs/MCP_ADAPTER.md) for exact MCP/CLI/HTTP mappings and source/runtime boundaries.

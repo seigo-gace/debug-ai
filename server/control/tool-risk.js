@@ -9,7 +9,7 @@ const TOOL_RISK=Object.freeze({
 
 const TOOL_RULES=Object.freeze({
   "source.read":0,"source.search":0,"symbol.lookup":0,"dependency.map":0,"history.read":0,"test.inventory":0,
-  "evidence.read":0,"runtime.trace.read":0,"state.read":0,"invariant.read":0,"diff.read":0,"test.result.read":0,
+  "evidence.read":0,"runtime.trace.read":0,"state.read":0,"invariant.read":0,"diff.read":0,"test.result.read":0,"server.command.read":0,
   "knowledge.search":0,"source.verify":2,"authority.search":2,
   "static.analysis":1,"test.run.sandbox":1,"build.sandbox":1,"dap.observe.sandbox":1,
   "diff.plan":0,"test.plan":0,"rollback.plan":0,

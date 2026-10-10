@@ -69,7 +69,7 @@ jobs:
                 try{
                   const r=await fetch("http://127.0.0.1:8787/health");
                   const j=await r.json();
-                  if(r.ok&&j.ok===true&&j.service==="debug-ai"&&j.patch_apply_requires_master_approval===true&&j.read_only_verify===true&&j.durable_async_runs===true&&j.startup_recovery===true){console.log("DEBUG_AI_HEALTH_SMOKE=PASS");return;}
+                  if(r.ok&&j.ok===true&&j.service==="debug-ai"&&j.patch_apply_requires_explicit_approval===true&&j.patch_apply_approval_authority==="controlling_parent_orchestrator"&&j.patch_apply_requires_master_approval===false&&j.read_only_verify===true&&j.durable_async_runs===true&&j.startup_recovery===true){console.log("DEBUG_AI_HEALTH_SMOKE=PASS");return;}
                 }catch{}
                 await sleep(250);
               }
@@ -203,6 +203,8 @@ jobs:
             -v "$volume:/sandbox-jobs" debug-ai-sandbox-ci >/dev/null
           docker run --rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 --security-opt no-new-privileges:true --cap-drop ALL -v "$volume:/sandbox-jobs" debug-ai-app-ci node server/control/sandbox-queue-selftest.js enqueue
           docker run --rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 --security-opt no-new-privileges:true --cap-drop ALL -v "$volume:/sandbox-jobs" debug-ai-app-ci node server/control/sandbox-queue-selftest.js verify
+          docker run --rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 --security-opt no-new-privileges:true --cap-drop ALL -e DEBUG_AI_SELFTEST_SOURCE_ROOT=/debugai-source -v "$PWD:/debugai-source:ro" -v "$volume:/sandbox-jobs" debug-ai-app-ci node server/control/sandbox-queue-selftest.js enqueue-self
+          docker run --rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 --security-opt no-new-privileges:true --cap-drop ALL -v "$volume:/sandbox-jobs" debug-ai-app-ci node server/control/sandbox-queue-selftest.js verify-self
           docker logs "$name"
       - name: Compose sandbox boundary render gate
         env:
