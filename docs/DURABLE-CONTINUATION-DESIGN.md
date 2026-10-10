@@ -263,7 +263,8 @@ mode, and all unknown IDs fail in explicit strict mode. The independent
 rejected_source_refs field retains semantic string-array checks, not evidence
 admission checks. Optional Causal Scout benchmark fields failure_family,
 causal_chain, unsupported_links, alternate_hypotheses and confidence, plus
-Researcher bound_version, now receive typed shadow/enforce checks while
+Researcher bound_version, answer/INSUFFICIENT_EVIDENCE→UNKNOWN, and
+string contradictions now receive typed shadow/enforce checks while
 preserving legacy omitted fields and the existing six roles/model profiles.
 Offline role-tool-loop tests verify this plumbing with stubbed AI responses;
 they do not qualify live model output or complete-product dogfood.
