@@ -3,16 +3,14 @@
   "mode": "readonly",
   "run_id": "",
   "repo": "/workspace/debug-ai",
-  "request": "2026-10-11 Tool B live source_reflect E2E for seigo-gace/TGserver main; readonly verify only.",
+  "request": "2026-10-11 Tool B registered_container_logs E2E tgserver-tgs log_lines=5.",
   "gitops_request": {
     "enabled": false
   },
   "source_reflect_request": {
-    "enabled": true,
-    "repository": "seigo-gace/TGserver",
-    "branch": "main",
-    "sha": "0ecbdd7d9036ec254fe6be5a2257f03761672634",
-    "delegation_id": "dlg_master_tgserver_reflect_v1",
-    "runtime_target": "tgserver.source"
-  }
+    "enabled": false
+  },
+  "server_command_id": "service.registered_container_logs",
+  "registered_container_entry": "tgserver-tgs",
+  "log_lines": 5
 }
