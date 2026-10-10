@@ -2,7 +2,7 @@
   "base_url": "https://debugai.asterav8.jp",
   "mode": "readonly",
   "repo": "/workspace/debug-ai",
-  "request": "P0 DebugAI same-run continued runtime observation after exact 3db0acd reflected; collect causal_scout status and bounded runtime logs; no new Run, provider calls, or GitOps. Follow-up observation #2.",
+  "request": "Dogfood original run live acceptance after deployed 3db0acd: read-only status/inspect causal scout, diagnosis/analysis evidence and bounded host log; no new run or provider invocation, deploy disabled.",
   "server_command_id": "project.git_head",
   "run_id": "run_mv24304l_700ed16315",
   "gitops_request": {
