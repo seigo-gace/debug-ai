@@ -7,7 +7,7 @@
       "owners": ["seigo-gace", "G-ACE-inc"]
     },
     "server-core": {
-      "root_key": "projects",
+      "root_key": "worktrees",
       "repository": "G-ACE-inc/server-core",
       "owners": ["G-ACE-inc", "seigo-gace"]
     },
