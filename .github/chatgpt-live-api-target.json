@@ -2,13 +2,13 @@
   "base_url": "https://debugai.asterav8.jp",
   "mode": "readonly",
   "repo": "/workspace/debug-ai",
-  "request": "Observe existing DebugAI run diagnosis BLOCKED without model/provider calls; bounded service logs and live status, inspect. No start/deploy.",
+  "request": "Exact-qualified GC receipt manifest transition repair reflect; status original run only. No new model work or free provider tests.",
   "server_command_id": "service.debug_ai_logs",
   "run_id": "run_mv24304l_700ed16315",
   "gitops_request": {
-    "enabled": false,
+    "enabled": true,
     "branch": "fix/p1c-refix-no-new-evidence-20261010",
-    "sha": "3db0acdbf285a3866ac480d23cc5f44a6b1bf2f8"
+    "sha": "ba1b76df4dd48037151cf8a91fd3c03dedbe13dc"
   },
   "log_service": "debug-ai",
   "log_lines": 20
