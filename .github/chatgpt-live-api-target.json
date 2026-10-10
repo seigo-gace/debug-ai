@@ -3,14 +3,7 @@
   "mode": "readonly",
   "run_id": "",
   "repo": "/workspace/debug-ai",
-  "request": "2026-10-11 Tool B registered_container_logs deny E2E unknown-entry-deny.",
-  "gitops_request": {
-    "enabled": false
-  },
-  "source_reflect_request": {
-    "enabled": false
-  },
-  "server_command_id": "service.registered_container_logs",
-  "registered_container_entry": "unknown-entry-deny",
-  "log_lines": 5
+  "request": "2026-10-11 Tool B: CHAT route idle after registered_container_logs E2E; bounded read skipped.",
+  "gitops_request": { "enabled": false },
+  "source_reflect_request": { "enabled": false }
 }
