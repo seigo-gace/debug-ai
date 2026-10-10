@@ -2,7 +2,12 @@
   "base_url": "https://debugai.asterav8.jp",
   "mode": "readonly",
   "repo": "/workspace/debug-ai",
-  "request": "2026-10-10 GPT CHAT existing dogfood run status/inspect only, no new run, model call or gitops deployment",
+  "request": "Exact PR92 source-qualified GitOps admission probe via existing signed Master Internal route. No new model inference.",
   "server_command_id": "project.git_head",
-  "run_id": "run_mv24304l_700ed16315"
+  "run_id": "run_mv24304l_700ed16315",
+  "gitops_request": {
+    "enabled": true,
+    "branch": "fix/p1c-refix-no-new-evidence-20261010",
+    "sha": "79221e300dcff7c66b744a7404331fad0efc9bbc"
+  }
 }
