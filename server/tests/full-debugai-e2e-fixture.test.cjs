@@ -44,7 +44,7 @@ async function post(base,route,body){
   return json;
 }
 
-for(const finalMode of ["PASS","PENDING","UNVERIFIED"])test(`HTTP closed loop with real mock adapter: final ${finalMode}`,async t=>{
+for(const finalMode of ["PASS","PENDING","UNVERIFIED","BOTH_UNAVAILABLE","LOCAL_FAIL","EXTERNAL_FAIL","HYPOTHESIS_LOCAL_FAIL"])test(`HTTP closed loop with real mock adapter: final ${finalMode}`,async t=>{
   const {root,repo,runtimeRoot}=fixture();
   t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
 
@@ -60,15 +60,15 @@ for(const finalMode of ["PASS","PENDING","UNVERIFIED"])test(`HTTP closed loop wi
         summary:"Update the reproduced stale value only",
         operations:[{type:"replace",path:"value.js",old:"module.exports=1;",new:"module.exports=2;"}]
       },
-      local_reviewer:{verdict:"PASS",decision:"DONE",claims:[]}
+      local_reviewer:{verdict:["LOCAL_FAIL","HYPOTHESIS_LOCAL_FAIL"].includes(finalMode)?"FAIL":"PASS",decision:"DONE",claims:[]}
     };
     return {content:JSON.stringify(outputs[role])};
   }};
   const externalCalls=[];
   let now=Date.now(),inFinal=false,httpDispatches=0;
   const adapter=createMockAdapter({groqKey:"g",geminiKey:"",nowFn:()=>now,
-    qualificationReader:()=>{const q=qualification(now,{groq:"g",gemini:""});if(inFinal&&finalMode==="UNVERIFIED")q.providers.groq.plan="UNKNOWN";return q;},
-    fetchImpl:async()=>{httpDispatches++;const verdict=inFinal?finalMode:"PASS";now+=3_660_000;return new Response(JSON.stringify({choices:[{finish_reason:"stop",message:{content:JSON.stringify({verdict})}}]}));}
+    qualificationReader:()=>{const q=qualification(now,{groq:"g",gemini:""});if((inFinal&&["UNVERIFIED","LOCAL_FAIL"].includes(finalMode))||["BOTH_UNAVAILABLE","HYPOTHESIS_LOCAL_FAIL"].includes(finalMode))q.providers.groq.plan="UNKNOWN";return q;},
+    fetchImpl:async()=>{httpDispatches++;const verdict=inFinal?(finalMode==="EXTERNAL_FAIL"?"FAIL":finalMode):"PASS";now+=3_660_000;return new Response(JSON.stringify({choices:[{finish_reason:"stop",message:{content:JSON.stringify({verdict})}}]}));}
   });
   const externalReview={
     hypothesis:async payload=>{externalCalls.push({stage:"hypothesis",payload});return adapter.hypothesis(payload);},
@@ -89,6 +89,12 @@ for(const finalMode of ["PASS","PENDING","UNVERIFIED"])test(`HTTP closed loop wi
     failure:{message:"value.test.cjs expects 2 but value.js exports 1"},
     localEvidence:[{id:"test-failure",kind:"unit-test",observation:"actual 1 !== expected 2"}]
   });
+  if(finalMode==="HYPOTHESIS_LOCAL_FAIL"){
+    assert.equal(analysis.state,"AWAITING_EXTERNAL_HYPOTHESIS_REVIEW");
+    assert.equal(analysis.local_hypothesis_review.json.verdict,"FAIL");
+    const response=await fetch(`${base}/v1/patch-candidate`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({runId:analysis.run_id,analysis,repo,selectedPaths:["value.js"]})});
+    assert.equal(response.ok,false);assert.equal(httpDispatches,0);assert.equal(roleCalls.some(x=>x.role==="patch_engineer"),false);return;
+  }
   assert.equal(analysis.state,"HYPOTHESIS_APPROVED");
   assert.equal(authority.load(analysis.run_id).state,"RESOLVING");
 
@@ -116,28 +122,27 @@ for(const finalMode of ["PASS","PENDING","UNVERIFIED"])test(`HTTP closed loop wi
     decision:"approve",
     repo
   };
-  if(finalMode==="UNVERIFIED"){
-    const response=await fetch(`${base}/v1/approve-apply-verify`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(applyRequest)});
-    assert.equal(response.ok,false);
-    assert.match(JSON.stringify(await response.json()),/LIVE_BLOCKED_FREE_TIER_UNVERIFIED/);
-    assert.notEqual(authority.load(analysis.run_id).state,"COMPLETE");
-    assert.equal(httpDispatches,1);
-    assert.equal(roleCalls.at(-1).role,"local_reviewer");
-    assert.deepEqual(externalCalls.map(c=>c.stage),["hypothesis","final"]);
-    return;
-  }
+  const fallback=["UNVERIFIED","BOTH_UNAVAILABLE","LOCAL_FAIL"].includes(finalMode);
+  const expectedComplete=["PASS","UNVERIFIED","BOTH_UNAVAILABLE"].includes(finalMode);
   const completed=await post(base,"/v1/approve-apply-verify",applyRequest);
-  assert.equal(completed.state,finalMode==="PASS"?"COMPLETE":"AWAITING_EXTERNAL_FINAL_REVIEW",JSON.stringify(completed.completion_gate));
+  assert.equal(completed.state,expectedComplete?"COMPLETE":"AWAITING_EXTERNAL_FINAL_REVIEW",JSON.stringify(completed.completion_gate));
   assert.equal(completed.pass,true);
-  assert.equal(completed.local_review.verdict,"PASS");
+  assert.equal(completed.local_review.verdict,finalMode==="LOCAL_FAIL"?"FAIL":"PASS");
   assert.equal(completed.review_packet.schema,"debugai.review-packet/v1");
-  assert.equal(completed.external_final_review.json.verdict,finalMode);
-  assert.equal(completed.completion_gate.complete,finalMode==="PASS");
+  if(fallback){
+    assert.equal(completed.external_final_review,null);
+    assert.equal(completed.local_final_review.provider,"local_reviewer");
+    assert.equal(completed.local_final_review.unavailable_code,"LIVE_BLOCKED_FREE_TIER_UNVERIFIED");
+    assert.equal(completed.completion_gate.checks.required_final_review_pass,expectedComplete);
+    assert.equal(httpDispatches,finalMode==="BOTH_UNAVAILABLE"?0:1);
+  }else assert.equal(completed.external_final_review.json.verdict,finalMode==="EXTERNAL_FAIL"?"FAIL":finalMode);
+  assert.equal(completed.completion_gate.complete,expectedComplete);
   assert.equal(completed.post_apply_repository_revision,completed.current_repository_revision);
-  assert.equal(authority.load(analysis.run_id).state,finalMode==="PASS"?"COMPLETE":"RETESTING");
+  assert.equal(authority.load(analysis.run_id).state,expectedComplete?"COMPLETE":"RETESTING");
   assert.equal(fs.readFileSync(path.join(repo,"value.js"),"utf8"),"module.exports=2;\n");
-  assert.deepEqual(roleCalls.map(call=>call.role),["code_scout","causal_scout","researcher","diagnoser","patch_engineer","local_reviewer"]);
-  const localReviewInput=roleCalls.find(call=>call.role==="local_reviewer").user;
+  assert.deepEqual(roleCalls.map(call=>call.role),["code_scout","causal_scout","researcher","diagnoser",...(finalMode==="BOTH_UNAVAILABLE"?["local_reviewer"]:[]),"patch_engineer","local_reviewer"]);
+  if(finalMode==="BOTH_UNAVAILABLE"){assert.equal(analysis.external_hypothesis_review,null);assert.equal(analysis.local_hypothesis_review.provider,"local_reviewer");}
+  const localReviewInput=roleCalls.filter(call=>call.role==="local_reviewer").at(-1).user;
   assert.equal(localReviewInput.review_packet.schema,"debugai.review-packet/v1");
   assert.match(localReviewInput.review_packet.payload.diff,/module\.exports=2/);
   assert.deepEqual(externalCalls.map(call=>call.stage),["hypothesis","final"]);
@@ -146,7 +151,7 @@ for(const finalMode of ["PASS","PENDING","UNVERIFIED"])test(`HTTP closed loop wi
   assert.equal(externalSummary.packet_digest,completed.review_packet.packet_digest);
   assert.equal(externalSummary.executed_test_count,1);
   assert.equal(externalSummary.invariants_pass,true);
-  assert.equal(externalSummary.local_verdict,"PASS");
+  assert.equal(externalSummary.local_verdict,finalMode==="LOCAL_FAIL"?"FAIL":"PASS");
   assert.equal(JSON.stringify(externalSummary).includes("value.js"),false);
   assert.equal(JSON.stringify(externalSummary).includes("module.exports=2"),false);
 });

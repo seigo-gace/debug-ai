@@ -59,7 +59,7 @@ test("duplicate async resume shares one active execution",async t=>{
   const accepted=await workflow.startAnalysis({repo,rawRequest:"duplicate guard",failure:{message:"fixture"}});await new Promise(resolve=>setImmediate(resolve));
   const duplicate=await workflow.resumeAnalysis({runId:accepted.run_id});assert.equal(duplicate.state,"ALREADY_RUNNING");assert.equal(duplicate.duplicate_resume_suppressed,true);release();
   for(let i=0;i<100;i++){if(workflow.status(accepted.run_id).durable.job_status==="DONE")break;await new Promise(resolve=>setTimeout(resolve,10));}
-  const status=workflow.status(accepted.run_id);assert.equal(status.durable.job_status,"DONE");const ref=Object.values(status.durable.role_executions)[0];assert.equal(ref.attempt_no,1);
+  const status=workflow.status(accepted.run_id);assert.equal(status.durable.job_status,"DONE",status.durable.last_execution_error);const ref=Object.values(status.durable.role_executions)[0];assert.equal(ref.attempt_no,1);
 });
 
 test("diagnoser timeout resume preserves redacted evidence identity and completes instead of EVIDENCE_VIEW_ID_MISMATCH",async t=>{
@@ -80,6 +80,20 @@ test("diagnoser timeout resume preserves redacted evidence identity and complete
   const interruptedStatus=workflow.status(runId);assert.equal(interruptedStatus.durable.job_status,"RETRY_WAIT");assert.match(String(interruptedStatus.durable.last_execution_error||""),/AI_CORE_TIMEOUT/);const callsBeforeResume=diagnoserCalls;assert.ok(callsBeforeResume>=1);timeoutDiagnoser=false;
   const resumed=await workflow.resumeAnalysis({runId});assert.equal(resumed.run_id,runId);
   for(let i=0;i<200;i++){const job=workflow.status(runId).durable.job_status;if(["DONE","BLOCKED","FAILED"].includes(job))break;await new Promise(resolve=>setTimeout(resolve,10));}
-  const status=workflow.status(runId);assert.equal(status.durable.job_status,"DONE");assert.doesNotMatch(String(status.durable.last_execution_error||""),/EVIDENCE_VIEW_ID_MISMATCH/);assert.ok(diagnoserCalls>callsBeforeResume);
+  const status=workflow.status(runId);assert.equal(status.durable.job_status,"DONE",status.durable.last_execution_error);assert.doesNotMatch(String(status.durable.last_execution_error||""),/EVIDENCE_VIEW_ID_MISMATCH/);assert.ok(diagnoserCalls>callsBeforeResume);
   for(const input of diagnoserInputs)assert.equal(input.localEvidence[0].payload.observation,"[REDACTED]");
+});
+
+test('durable hypothesis fallback restores existing Local Reviewer result without repeating it',async t=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'debugai-local-review-resume-')),repo=path.join(root,'repo'),runtimeRoot=path.join(root,'runtime');t.after(()=>fs.rmSync(root,{recursive:true,force:true}));initializeRepo(repo);
+  const io=new FakeDurableIo(),policy=new RepoPolicy({workspaceRoot:root}),calls={},inputs=[];let localCalls=0,externalCalls=0;
+  const base=fakeAi(calls,inputs),aiCore={call:async(role,payload)=>role==='local_reviewer'?(localCalls++,{content:JSON.stringify({verdict:'PASS',decision:'DONE',claims:[]})}):base.call(role,payload)};
+  const externalReview={hypothesis:async()=>{externalCalls++;throw Object.assign(new Error('LIVE_BLOCKED_FREE_TIER_UNVERIFIED'),{code:'LIVE_BLOCKED_FREE_TIER_UNVERIFIED'});}};
+  const authority1=new RunAuthority({runtimeRoot,repoPolicy:policy,durableIo:io}),workflow1=createWorkflow({aiCore,externalReview,authority:authority1,repoPolicy:policy,repositorySnapshot:()=> 'git_fixture',tgserver:{search:async()=>[],log:async event=>{if(event.step==='EXTERNAL_REVIEW'&&event.phase==='DONE')throw new Error('TIMEOUT:after saved local review');}}});
+  await assert.rejects(workflow1.runAnalysis({repo,rawRequest:'review diagnosed hypothesis without paid API',failure:{message:'fixture'}}),/TIMEOUT/);
+  const runId=authority1.inspectDurableRuns().recoverable[0].run_id;
+  const authority2=new RunAuthority({runtimeRoot,repoPolicy:policy,durableIo:io}),workflow2=createWorkflow({aiCore,externalReview,authority:authority2,repoPolicy:policy,repositorySnapshot:()=> 'git_fixture'});
+  const resumed=await workflow2.runAnalysis({runId});
+  assert.equal(resumed.state,'HYPOTHESIS_APPROVED');assert.equal(resumed.external_hypothesis_review,null);
+  assert.equal(resumed.local_hypothesis_review.provider,'local_reviewer');assert.equal(resumed.local_hypothesis_review.json.verdict,'PASS');assert.equal(localCalls,1);assert.equal(externalCalls,1);
 });

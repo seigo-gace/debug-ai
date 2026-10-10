@@ -9,7 +9,7 @@ const REQUIRED_TRUE=Object.freeze([
   "deterministic_verification_pass",
   "invariants_pass",
   "local_review_pass",
-  "required_external_final_pass",
+  "required_final_review_pass",
   "no_blocking_evidence_gap",
   "run_final_contract_valid"
 ]);
@@ -39,6 +39,7 @@ function buildCompletionGateInput({
   currentRepositoryRevision=null,
   localReview=null,
   externalFinal=null,
+  localFinalFallback=null,
   analysisEvidenceRecord=null
 }={}){
   const candidate=patchResult?.candidate||null,receipt=patchResult?.applied?.receipt||null;
@@ -63,6 +64,7 @@ function buildCompletionGateInput({
     invariants_pass:patchResult?.invariants?.pass===true,
     local_review_pass:reviewVerdict(localReview)==="PASS",
     required_external_final_pass:reviewVerdict(externalFinal)==="PASS",
+    required_final_review_pass:reviewVerdict(externalFinal)==="PASS"||(!externalFinal&&localFinalFallback?.provider==="local_reviewer"&&localFinalFallback?.review_kind==="final"&&localFinalFallback?.external_status==="UNAVAILABLE"&&nonEmptyString(localFinalFallback?.unavailable_code)&&reviewVerdict(localFinalFallback)==="PASS"&&reviewVerdict(localReview)==="PASS"),
     no_blocking_evidence_gap:evidenceGapKnown&&analysisPayload.evidence_gap===false,
     run_final_contract_valid:nonEmptyString(runId)&&runState==="RETESTING",
     mandatory_unknowns:Object.freeze(mandatoryUnknowns)

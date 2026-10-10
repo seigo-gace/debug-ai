@@ -94,3 +94,24 @@ test("repository revision drift after apply blocks COMPLETE even with both revie
   assert.ok(result.completion_gate.failed_requirements.includes("current_revision_bound"));
   assert.equal(authority.run.state,"BLOCKED");
 });
+
+for(const reason of ['LIVE_BLOCKED_FREE_TIER_UNVERIFIED','EXTERNAL_REVIEW_QUOTA_MONTH_EXHAUSTED','EXTERNAL_FREE_PROVIDERS_UNAVAILABLE','GROQ_NETWORK',null])test(`existing Local Reviewer takes over final unavailable: ${reason}`,async()=>{
+  const authority=authorityFixture(),runtimeEvidence=evidenceFixture(false);
+  const workflow=createWorkflow({aiCore:aiFixture('PASS'),externalReview:reason?{final:async()=>{throw Object.assign(new Error(reason),{code:reason});}}:null,runtimeEvidence,patchService:patchFixture(),authority,repositorySnapshot:()=> 'git_after'});
+  const result=await workflow.approveAndVerify({runId:'run_1',candidateId:'cand_1',candidateHash:'hash_1',decision:'approve',repo:'/repo'});
+  assert.equal(result.state,'COMPLETE');assert.equal(result.external_final_review,null);
+  assert.equal(result.local_final_review.provider,'local_reviewer');
+  assert.equal(result.local_final_review.unavailable_code,reason||'EXTERNAL_REVIEW_NOT_CONFIGURED');
+  assert.ok(runtimeEvidence.writes.some(x=>x.type==='final_review_route'&&x.payload.external===null));
+});
+for(const error of ['EXTERNAL_PRIVACY_BLOCK','EXTERNAL_REVIEW_ENDPOINT_INVALID','unexpected-programming-error'])test(`local fallback does not swallow ${error}`,async()=>{
+  const authority=authorityFixture();
+  const workflow=createWorkflow({aiCore:aiFixture('PASS'),externalReview:{final:async()=>{throw Object.assign(new Error(error),{code:error});}},runtimeEvidence:evidenceFixture(false),patchService:patchFixture(),authority,repositorySnapshot:()=> 'git_after'});
+  await assert.rejects(workflow.approveAndVerify({runId:'run_1',candidateId:'cand_1',candidateHash:'hash_1',decision:'approve',repo:'/repo'}),new RegExp(error));assert.notEqual(authority.run.state,'COMPLETE');
+});
+test('local fallback cannot bypass missing analysis evidence or revision binding',async()=>{
+  const authority=authorityFixture();let n=0;
+  const workflow=createWorkflow({aiCore:aiFixture('PASS'),externalReview:null,runtimeEvidence:evidenceFixture(true),patchService:patchFixture(),authority,repositorySnapshot:()=> ++n===1?'before':'after'});
+  const result=await workflow.approveAndVerify({runId:'run_1',candidateId:'cand_1',candidateHash:'hash_1',decision:'approve',repo:'/repo'});
+  assert.equal(result.state,'BLOCKED_COMPLETION_GATE');assert.equal(result.completion_gate.checks.no_blocking_evidence_gap,false);assert.equal(result.completion_gate.checks.current_revision_bound,false);
+});

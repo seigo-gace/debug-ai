@@ -1,5 +1,5 @@
 "use strict";
-const {ExternalReviewError,createExternalReviewQuotaLedger,readTrustedQualification,validateQualification,defaultQuotaRoot,PROVIDERS}=require("./external-review-quota.js");
+const {ExternalReviewError,createExternalReviewQuotaLedger,validateQualification,defaultQuotaRoot,PROVIDERS}=require("./external-review-quota.js");
 const FORBIDDEN=/(?:[A-Za-z]:\\|\/(?:home|Users|mnt|etc|var|tmp|opt|srv)\/|Bearer\s+\S+|(?:api[_-]?key|secret|password|cookie|private[_-]?key|access[_-]?token|refresh[_-]?token)\s*[:=])/i;
 function assertPublicOpaque(payload){const p=payload?.privacy||payload;if(String(p?.privacy_class)!=="PUBLIC"||p?.sanitized!==true||p?.opaque_evidence!==true)throw new Error("EXTERNAL_PRIVACY_METADATA_REQUIRED");if(FORBIDDEN.test(JSON.stringify(payload)))throw new Error("EXTERNAL_PRIVACY_BLOCK");return true;}
 
@@ -38,8 +38,9 @@ function createExternalReviewAdapter({groqKey=process.env.GROQ_API_KEY,geminiKey
     if(cfg.url!==PROVIDERS[provider].url||cfg.model!==PROVIDERS[provider].model)throw new ExternalReviewError("EXTERNAL_REVIEW_ENDPOINT_INVALID",{provider});
     const now=nowFn();
     if(transport==="live"&&Math.abs(now-wallStart-Number(process.hrtime.bigint()-monotonicStart)/1e6)>60_000)throw new ExternalReviewError("EXTERNAL_REVIEW_QUOTA_CLOCK_INVALID");
-    const document=transport==="mock"?qualificationReader():readTrustedQualification();
-    const qualification=validateQualification(document,provider,{...cfg,now});
+    // Master confirmed existing keys are FREE-only/billing-disabled. Runtime enforces
+    // local budgets; it does not fabricate an account audit or require a new certificate.
+    const qualification=transport==="mock"?validateQualification(qualificationReader(),provider,{...cfg,now}):null;
     const body=JSON.stringify({model:cfg.model,messages:[
       {role:"system",content:`Independent ${kind} reviewer. Return exactly one JSON object. Required decision field: verdict, and verdict must be exactly PASS, FAIL, or PENDING.${correction?" The previous response violated this contract. Correct the format; include no commentary, code fence, or extra JSON object.":""}`},
       {role:"user",content:JSON.stringify(payload)}
@@ -47,10 +48,13 @@ function createExternalReviewAdapter({groqKey=process.env.GROQ_API_KEY,geminiKey
     // UTF-8 byte upper bound + conservative framing overhead + full output budget; no refunds.
     const tokens=Buffer.byteLength(body,"utf8")+1024+(kind==="final"?900:650);
     charge();
-    quota.reserveDispatch(provider,tokens,qualification);
+    if(transport==="live")quota.reserveLocalDispatch(provider,tokens,cfg.key);
+    else quota.reserveDispatch(provider,tokens,qualification);
     // Recheck expiry/revocation immediately before HTTP; a rejected reserved slot stays consumed.
-    const currentQualification=validateQualification(transport==="mock"?qualificationReader():readTrustedQualification(),provider,{...cfg,now:nowFn()});
-    if(JSON.stringify(currentQualification)!==JSON.stringify(qualification))throw new ExternalReviewError("LIVE_BLOCKED_FREE_TIER_UNVERIFIED",{provider});
+    if(transport==="mock"){
+      const currentQualification=validateQualification(qualificationReader(),provider,{...cfg,now:nowFn()});
+      if(JSON.stringify(currentQualification)!==JSON.stringify(qualification))throw new ExternalReviewError("LIVE_BLOCKED_FREE_TIER_UNVERIFIED",{provider});
+    }
     let response;
     try{
       response=await fetchImpl(cfg.url,{
@@ -62,10 +66,12 @@ function createExternalReviewAdapter({groqKey=process.env.GROQ_API_KEY,geminiKey
       // Never embed transport exception text: URL/key fragments must not enter logs.
       throw new ExternalReviewError(`${provider.toUpperCase()}_NETWORK`,{provider});
     }
-    if(response.status===429||response.status===401||response.status===403)quota.blockProvider(provider,`HTTP_${response.status}`);
+    const cooldown=()=>{const raw=response.headers?.get?.("retry-after");const seconds=typeof raw==="string"&&/^\d+$/.test(raw)?Number(raw):null;return {until:nowFn()+Math.max(60_000,Number.isSafeInteger(seconds)?seconds*1000:86_400_000)};};
+    if(response.status===429)quota.blockProvider(provider,"HTTP_429",transport==="live"?cooldown():{});
+    if(response.status===401||response.status===403)quota.blockProvider(provider,`HTTP_${response.status}`);
     for(const header of ["x-ratelimit-remaining-requests","x-ratelimit-remaining-tokens"]){
       const raw=response.headers?.get?.(header);
-      if(raw!==null&&raw!==undefined&&(raw===""||!/^\d+$/.test(raw)||Number(raw)===0))quota.blockProvider(provider,"UPSTREAM_REMAINING_UNSAFE");
+      if(raw!==null&&raw!==undefined&&(raw===""||!/^\d+$/.test(raw)||Number(raw)===0))quota.blockProvider(provider,"UPSTREAM_REMAINING_UNSAFE",transport==="live"?cooldown():{});
     }
     if(!response.ok)throw new ExternalReviewError(`${provider.toUpperCase()}_HTTP_${response.status}`,{provider,status:response.status});
     let envelope;
