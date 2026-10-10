@@ -120,5 +120,5 @@ test("durable archive admission waits for direct TGserver receipt and rejects qu
   assert.equal((await promise).status,"accepted");
   assert.deepEqual(a.getLogStats(),{enqueued:0,sent:0,batches:0,failed:0,dropped:0,queued:0,worker_running:false});
   const rejected=adapter(async()=>response({status:"queued"}));
-  await assert.rejects(()=>rejected.archiveLog({kind:"durable_archive_complete"}),/TGSERVER_INGEST_REJECTED/);
+  await assert.rejects(()=>rejected.archiveLog({kind:"durable_archive_complete"}),error=>error.code==="TGSERVER_INGEST_REJECTED");
 });
