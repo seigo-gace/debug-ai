@@ -2,7 +2,7 @@
   "base_url": "https://debugai.asterav8.jp",
   "mode": "readonly",
   "repo": "/workspace/debug-ai",
-  "request": "Acceptance of DebugAI self-driving existing Run run_mv24304l_700ed16315: inspect actual role, diagnosis, candidate, bounded refix and completion status after deployed SHA; no new Run/provider calls",
+  "request": "2026-10-10 22:38 JST: P0 DebugAI no-stop dogfood diagnosis; read-only inspect existing run run_mv24304l_700ed16315, cursor/error/artifacts and bounded Host logs; no new Run, model calls or deploy.",
   "server_command_id": "project.git_head",
   "run_id": "run_mv24304l_700ed16315",
   "gitops_request": {
