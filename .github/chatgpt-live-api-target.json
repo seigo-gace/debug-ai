@@ -2,7 +2,7 @@
   "base_url": "https://debugai.asterav8.jp",
   "mode": "readonly",
   "repo": "/workspace/debug-ai",
-  "request": "Dogfood original run live acceptance after deployed 3db0acd: read-only status/inspect causal scout, diagnosis/analysis evidence and bounded host log; no new run or provider invocation, deploy disabled.",
+  "request": "Read-only existing DebugAI run continued 2026-10-10: inspect terminal status, role evidence, diagnosis/candidate, deployed sha. No new run, no provider review, no GitOps.",
   "server_command_id": "project.git_head",
   "run_id": "run_mv24304l_700ed16315",
   "gitops_request": {
