@@ -47,7 +47,7 @@ function buildCompletionGateInput({
   const approvalReceiptValid=decision==="approve"&&candidateIdentityValid;
   const applyReceiptValid=Boolean(receipt&&receipt.schema==="patch-application/v2"&&receipt.candidate_id===candidateId&&receipt.candidate_hash===candidateHash);
   const revisionKnown=nonEmptyString(postApplyRepositoryRevision)&&nonEmptyString(currentRepositoryRevision);
-  const requiredVerificationExecuted=Array.isArray(patchResult?.checks)&&patchResult.checks.length>0;
+  const requiredVerificationExecuted=Array.isArray(patchResult?.checks)&&patchResult.checks.length>0&&patchResult.checks.every(check=>check?.executed===true);
   const deterministicVerificationPass=requiredVerificationExecuted&&completionChecksPass(patchResult.checks)&&completionGatesPass(patchResult?.gates)&&patchResult?.pass===true;
   const analysisPayload=analysisEvidenceRecord?.type==="analysis"&&analysisEvidenceRecord?.payload&&typeof analysisEvidenceRecord.payload==="object"?analysisEvidenceRecord.payload:null;
   const evidenceGapKnown=typeof analysisPayload?.evidence_gap==="boolean";

@@ -13,7 +13,7 @@ function passFixture(){
     patchResult:{
       candidate:{id:"cand_1",candidate_hash:"hash_1"},
       applied:{receipt:{schema:"patch-application/v2",candidate_id:"cand_1",candidate_hash:"hash_1"}},
-      checks:[{name:"test",status:"PASS"}],
+      checks:[{name:"test",status:"PASS",configured:true,executed:true}],
       invariants:{pass:true},
       gates:{source:{status:"PASS"}},
       pass:true
@@ -62,4 +62,12 @@ test("candidate or apply receipt mismatch blocks completion",()=>{
   const input=buildCompletionGateInput(fixture);
   assert.equal(input.apply_receipt_valid,false);
   assert.equal(evaluateCompletionGate(input).complete,false);
+});
+
+test("all PASS labels without executed test evidence do not satisfy Strict Completion",()=>{
+ const fixture=passFixture();fixture.patchResult.checks=[{name:"test",status:"PASS",configured:true,executed:false}];
+ const input=buildCompletionGateInput(fixture);
+ assert.equal(input.required_verification_executed,false);
+ assert.equal(evaluateCompletionGate(input).complete,false);
+ assert.ok(evaluateCompletionGate(input).failed_requirements.includes("required_verification_executed"));
 });
