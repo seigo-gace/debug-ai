@@ -5,6 +5,7 @@ on:
     branches:
       - feat/tgserver-async-log-sink-20261003
       - feat/chat-gitops-request-20261009
+      - fix/gace-registered-repo-source-reflect-20261010
     paths:
       - .github/chatgpt-live-api-target.json
       - .github/workflows/chatgpt-live-api-verify.yml
@@ -218,7 +219,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$GITHUB_REF_NAME" == "feat/chat-gitops-request-20261009" ]] || { echo "CHAT_SOURCE_REFLECT_TRIGGER_BRANCH_DENIED"; exit 46; }
+          case "$GITHUB_REF_NAME" in
+            feat/tgserver-async-log-sink-20261003|feat/chat-gitops-request-20261009|fix/gace-registered-repo-source-reflect-20261010) ;;
+            *) echo "CHAT_SOURCE_REFLECT_TRIGGER_BRANCH_DENIED"; exit 46 ;;
+          esac
           file=".github/chatgpt-live-api-target.json"
           jq -e '.source_reflect_request | type=="object" and .enabled==true and
             ((keys|sort)==(["enabled","repository","branch","sha","delegation_id","runtime_target"]|sort))' "$file" >/dev/null
