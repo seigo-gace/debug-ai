@@ -2,11 +2,11 @@
   "base_url": "https://debugai.asterav8.jp",
   "mode": "readonly",
   "repo": "/workspace/debug-ai",
-  "request": "2026-10-10 dogfood bounded retry Source+CI qualified; existing admitted GitOps exact SHA reflection; read only existing run and Host after reflection. No new provider calls.",
+  "request": "2026-10-10 P0 post-deployment existing run run_mv24304l_700ed16315 recovery/status/Host evidence only. New bounded retry runtime SHA 3db0acd. No deployment, new run or provider calls.",
   "server_command_id": "project.git_head",
   "run_id": "run_mv24304l_700ed16315",
   "gitops_request": {
-    "enabled": true,
+    "enabled": false,
     "branch": "fix/p1c-refix-no-new-evidence-20261010",
     "sha": "3db0acdbf285a3866ac480d23cc5f44a6b1bf2f8"
   },
