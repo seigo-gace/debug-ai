@@ -999,3 +999,119 @@ Until those conditions are satisfied, the correct project-level state remains **
 ## Design history — 2026-10-07 bounded control transport extension
 
 The HTTP/CLI/MCP transport surface now connects the existing Bounded Server Command and Guarded GitOps paths directly. Added HTTP POST routes are `/v1/server-command/request` and `/v1/server-command/status`; existing GitOps request/status routes are reused. Four MCP tools are appended after the original nine: `debugai_server_read`, `debugai_server_status`, `debugai_gitops_request`, `debugai_gitops_status`. MCP delegates to the existing CLI; CLI forwards structured JSON to HTTP. Request/status delegate to existing service contracts without a second service, executor, queue, workflow, allowlist or approval owner. This is an additive transport extension; removing the new registrations/routes/CLI commands reverses the extension while preserving the original paths. All existing repository, approval, exact SHA, candidate identity, file scope and remote readback boundaries remain authoritative. Source tests/CI do not authorize or establish Production reflection.
+
+## 25. Scout observation, scoped intake and local Stage reuse — Codex 2026-10-10
+
+Purpose remains the complete evidence-grounded debugging loop. This delta addresses
+P0-B and accepted §13 queue/evidence rules, using the real dogfood
+`run_mv24304l_700ed16315` at `0a459cd857f3aafb44c5561f0ebb516f633fbf51`:
+Sandbox reproduced four failures in five tests in 656 ms; the Run entered RETRY_WAIT
+with AI_CORE_TIMEOUT after 1092.277 seconds. Historical evidence lacks failing
+Scout identity and queue/prefill/decode timings. Serialization is a source fact,
+not an established cause of that latency.
+
+### Observation and continuation decision
+
+Reuse `ai-core.js` measured telemetry and Tool Loop's existing v2 projection.
+Per-Scout AI calls emit invocation/model/role, dispatch attempt, queue/prepare/
+upstream/response/terminal phase, actual timestamps and failure classification.
+Existing RuntimeEvidence, TGserver log sink, inspect/status and bound current-run
+trace expose the same observations. Persist sanitized execution failure through
+existing immutable WorkflowData/manifest refs so restart retains it; never retain
+raw backend body, prompts, Secrets or hidden reasoning in this diagnostic record.
+Provider prompt-eval/decode/token data absent from the response remains null
+(UNKNOWN). Upstream wait cannot identify model loading, prefill or generation.
+
+A 60-second heartbeat is observation, not productive progress. The last progress
+clock changes only on a phase transition. At 120 seconds without a phase change,
+`REVIEW_CONTINUATION` makes the wait visible to the controlling parent; it neither
+asserts NO_PROGRESS nor automatically cancels healthy generation, changes deadline,
+selects another model, dispatches another inference or spends external quota.
+Existing Deadline/Retry and Tool Loop ProgressController remain authoritative.
+Tool evidence/work/effect deltas, not heartbeats, establish productive progress.
+
+### Scoped initial investigation
+
+Reuse RepoPolicy, blocked-read paths, `readText`, test inventory, Evidence Registry
+and existing tools. Supply up to four bounded explicit/mentioned source/test
+excerpts, file hashes, configured test inventory, executed failing test output,
+repository revision and registered evidence IDs. A dependency-free scope with
+implementation source and a reproducible failed configured test starts locally;
+upfront knowledge/official broad queries are deferred. Test-only/missing scope,
+nonexecuted checks or declared dependencies retain normal discovery. Scope is
+PARTIAL, never exhaustive. Additional read/search, counter-evidence and Researcher
+authority tools remain available for actual missing facts. No six-role contract,
+model, Work Unit definition, Evidence binding or final gate is replaced.
+
+### Independent completed Stage reuse
+
+PR82 generalized six-role continuation was reverted at `1856c95…`; do not resurrect
+it. Keep specialized Researcher A/B/C/D/E/checkpoints. Save each complete Scout
+through existing immutable Stage records independently. Preserve parallel Scout
+orchestration and globally serialized adapter dispatch. Only durable commit
+read/evolve/write operations are ordered within the owned Scout execution; no
+second persistent queue or state authority is introduced. Settle both Scouts
+before marking failure, preserving a healthy peer's result and preventing late
+Stage commits from overwriting RETRY_WAIT. Failure cursor identifies the rejected
+Scout. This does not claim measured concurrency or latency improvement.
+
+Reuse requires the existing revision plus full existing source-tree hashing
+(including untracked test/package bytes), persisted input digest, current role/tool
+contracts, model/skill/invocation/validator/runtime implementation hashes and
+qualified context/Node platform identity. Each Scout additionally binds exact
+system/user/evidence input. A Stage is valid for at most 30 minutes, with future
+timestamps/clock rollback rejected. Snapshot failure, missing legacy binding,
+expired/incomplete output or unstable tools disables reuse. Revalidate role output,
+registered references and tool integrity on restoration. Only source/test tools
+are eligible for whole-Scout reuse; knowledge/authority/history/state/runtime reads
+remain nonreusable. Corruption fails closed. The existing repository-revision gate
+still blocks changed-source continuation before inference.
+
+Save and reuse successfully collected, network-isolated local **failing** reproduction
+observations as historical evidence under the same binding/age checks. Passing or
+timed-out checks are not promoted to present verification; fresh post-apply retests
+remain mandatory. Reuse receipts explicitly say `new_execution=false`. A previously
+complete research context receives the same binding/age admission; existing
+Researcher input-binding checks remain active. This is Stage reuse within the
+existing owner, not a new state/cache/workflow engine.
+
+### Acceptance, ownership and rollback
+
+Codex owns Scout/AI adapter/observation and initial evidence intake. Branch stacks
+on fresh PR92 `500e5d944e98d0d31cdac7e7c46a206bc1b16f41`; its automaticRefixCandidate diff remains untouched. PR88
+Role Output/Prompt, PR90 Patch Packet and PR91 Sandbox boundaries remain their
+owners' work. FREE review, quotas, Ledger and Strict Completion contracts are
+unchanged. No new MCP/workflow/Token/Provider or top-level project.
+
+Focused offline regressions require identity-bearing timeout/queue failure,
+UNKNOWN provider timings, periodic observation without normal cancellation,
+current-run trace isolation, exact restart reuse, stale/input/context/source/test/
+clock/corruption rejection and preserved discovery for evidence gaps. Fixture/model
+mocks prove routing and invariants only. Source/CI, Host admission/reflection and
+real model latency/accuracy are separate gates. The 18-minute real case is a
+baseline failure, not an improved real performance result. No 50/60/100 suite or
+Groq/Gemini call is part of this CU. Next gate after Source/CI is admitted runtime
+reflection and one real scoped Dogfood with timing and correctness readback.
+
+Rollback is an ordinary forward revert of this delta; preserve immutable evidence,
+existing role/checkpoint state and FREE Ledger. Old Stage schemas remain readable;
+missing reuse binding simply declines reuse. No retention, writer fencing, approval
+or quota bypass is introduced.
+
+Scout tool waits use the same Run Evidence/status/trace lane (`tool_invocation`):
+60-second observations distinguish TOOL_WAIT from AI queue/upstream wait, retain
+the original last-progress time, and offer the same advisory continuation assessment.
+Only role/tool identity and elapsed time are retained; tool arguments/results are
+not copied into telemetry. Existing Tool Runtime deadlines and retry decisions stay
+in force. PR92 integration baseline is now `54c13a9f32a74758681476e6c5a4bf4166359978` (includes the owner's P1-D CI reconciliation; no independent Patch Engineer edits).
+
+Live recovery readback on42918b7 exposed a parallel cursor residual: saving the
+completed Code Scout marked CODE_SCOUT/PENDING while Causal Scout was still
+UPSTREAM_WAIT. The bounded correction preserves the immutable successful Stage
+but projects the still-running peer's step/input/RUNNING status to the existing
+single cursor and workflow_progress. No additional Work Unit is introduced.
+
+Invocation records carry a local event_sequence for deterministic readback when
+multiple observations share a millisecond. Scout inspection chooses an actually
+recorded progress event matching the authoritative durable cursor; UUID filename
+ordering is not execution ordering. This creates no additional durable owner.

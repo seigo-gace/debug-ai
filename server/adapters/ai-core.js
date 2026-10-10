@@ -74,10 +74,11 @@ function runtimeControlWireUser(user,toolBudgetFinalRound){
   if(typeof toolBudgetFinalRound!=="boolean")throw new AiCoreError("AI_CORE_TOOL_BUDGET_CONTROL_INVALID","toolBudgetFinalRound must be boolean or null");
   return `${String(user||"")}\n\nRUNTIME_CONTROL_DATA_ONLY=${JSON.stringify({tool_budget_final_round:toolBudgetFinalRound})}`;
 }
-function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=process.env.AI_CORE_API_KEY,fetchImpl=undiciFetch,timeoutMs=600000,maxTransportTimeoutAttempts=2,maxTimeoutRetries,dispatcher,runtimeContextTokens=process.env.DEBUG_AI_CORE_CONTEXT_TOKENS??null,requireRuntimeContextQualification=false,promptCache=true}={}){
+function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=process.env.AI_CORE_API_KEY,fetchImpl=undiciFetch,timeoutMs=600000,maxTransportTimeoutAttempts=2,maxTimeoutRetries,dispatcher,runtimeContextTokens=process.env.DEBUG_AI_CORE_CONTEXT_TOKENS??null,requireRuntimeContextQualification=false,promptCache=true,observationIntervalMs=60000}={}){
   if(!baseUrl)throw new AiCoreError("AI_CORE_URL_REQUIRED","DEBUG_AI_CORE_URL is required");
   if(!apiKey)throw new AiCoreError("AI_CORE_API_KEY_REQUIRED","AI_CORE_API_KEY is required");
   if(typeof fetchImpl!=="function")throw new AiCoreError("FETCH_REQUIRED","fetch implementation is required");
+  if(!Number.isSafeInteger(observationIntervalMs)||observationIntervalMs<1||observationIntervalMs>60000)throw new AiCoreError("AI_CORE_OBSERVATION_INTERVAL_INVALID","Observation interval must be 1..60000ms");
   if(typeof promptCache!=="boolean")throw new AiCoreError("AI_CORE_PROMPT_CACHE_INVALID","promptCache must be boolean");
   const qualifiedRuntimeContext=normalizeRuntimeContextTokens(runtimeContextTokens);
   if(requireRuntimeContextQualification&&qualifiedRuntimeContext===null)throw new AiCoreError("AI_CORE_RUNTIME_CONTEXT_UNQUALIFIED","DEBUG_AI_CORE_CONTEXT_TOKENS is required for qualified production execution");
@@ -89,6 +90,7 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
   async function execute(role,{system="",user="",maxTokens=1024,responseFormat="json_object",temperature=0,topP=null,topK=null,selectedSkillIds=null,timeoutMsOverride=null,deadlineAt=null,toolBudgetFinalRound=null}={},runtimeMeta={}){
     const roleStartedAt=Date.now(),prepareStartedAt=Date.now();
     const cfg=ROLES[role];if(!cfg)throw new AiCoreError("ROLE_INVALID",`Unknown DebugAI role: ${role}`);
+    runtimeMeta.observe?.({phase:"PREPARE",queue_wait_ms:runtimeMeta.queueWaitMs??0});
     const tokenBudget=resolveEffectiveMaxTokens(role,maxTokens,{runtimeContextTokens:qualifiedRuntimeContext,requireRuntimeContextQualification});
     const effectiveMaxTokens=tokenBudget.effective_max_tokens;
     let effectiveTimeoutMs=resolveEffectiveTimeoutMs(role,timeoutMs,{timeoutMsOverride,deadlineAt,now:Date.now()});
@@ -112,9 +114,11 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
         effectiveTimeoutMs=resolveEffectiveTimeoutMs(role,timeoutMs,{timeoutMsOverride,deadlineAt,now:Date.now()});
         timer=setTimeout(()=>{deadlineTriggered=true;ctl.abort();},effectiveTimeoutMs);
         requestDispatched=true;
+        runtimeMeta.observe?.({phase:"UPSTREAM_WAIT",dispatch_attempt:attempt,prepare_ms:prepareMs});
         const upstreamStartedAt=Date.now();let r,text;
         try{r=await fetchImpl(endpoint,{method:"POST",headers:{authorization:`Bearer ${apiKey}`,"content-type":"application/json"},body:requestBody,signal:ctl.signal,dispatcher:transport});text=await r.text();}finally{upstreamMs+=Date.now()-upstreamStartedAt;}
         if(typeof text==="string")responseBytes+=Buffer.byteLength(text,"utf8");
+        runtimeMeta.observe?.({phase:"RESPONSE",dispatch_attempt:attempt});
         if(!r.ok)throw new AiCoreError("AI_CORE_HTTP",`AI Core HTTP ${r.status}`,{status:r.status,body:String(text||"").slice(0,500)});
         const parseStartedAt=Date.now();
         try{envelope=JSON.parse(text);}catch{parseValidateMs+=Date.now()-parseStartedAt;throw new AiCoreError("AI_CORE_ENVELOPE","AI Core returned non-JSON envelope");}
@@ -140,6 +144,31 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
     throw new AiCoreError("AI_CORE_TIMEOUT","AI Core transport timeout retry loop exhausted",{role,model:cfg.backend_model,timeout_ms:effectiveTimeoutMs,attempts:maxTransportTimeoutAttempts,timeout_class:TIMEOUT_CLASS.TRANSPORT_TIMEOUT,retryable:false});
   }
   async function queuedCall(role,options={},internalMeta={}){
+    const invocationId=`inv_${crypto.randomBytes(12).toString("hex")}`;
+    const invocationStartedAt=Date.now();let progress={phase:"QUEUE",dispatch_attempt:0},lastProgressAt=invocationStartedAt;
+    const observe=(change={})=>{
+      if(change.phase&&change.phase!==progress.phase)lastProgressAt=Date.now();
+      progress={...progress,...change};
+      const now=Date.now();
+      if(typeof options.onProgress==="function")options.onProgress({schema:"debugai.ai-invocation/v1",invocation_id:invocationId,role,model:ROLES[role]?.backend_model||null,...progress,queue_wait_ms:progress.phase==="QUEUE"?now-invocationStartedAt:progress.queue_wait_ms??null,event_kind:change.event_kind||"PROGRESS",started_at:invocationStartedAt,last_progress_at:lastProgressAt,last_observed_at:now,elapsed_ms:now-invocationStartedAt,phase_elapsed_ms:now-lastProgressAt,backend_phase:null,continuation_assessment:["SUCCEEDED","FAILED"].includes(progress.phase)?"TERMINAL":now-lastProgressAt>=120000?"REVIEW_CONTINUATION":now-lastProgressAt>=60000?"OBSERVE_WAIT":"CONTINUE",backend_progress:"UNKNOWN"});
+    };
+    // Observation is not a new deadline or proof that generation made progress.
+    // Keep the existing queue/model deadlines and dispatch serialization intact.
+    observe();
+    const heartbeat=typeof options.onProgress==="function"?setInterval(()=>{
+      try{observe({event_kind:"HEARTBEAT"});}catch{console.error("DebugAI AI observation write failed");}
+    },observationIntervalMs):null;
+    heartbeat?.unref?.();
+    try{
+      const out=await queuedExecution(role,options,{...internalMeta,observe});
+      observe({phase:"SUCCEEDED",telemetry:out.telemetry,dispatch_attempt:out.attempts});
+      return out;
+    }catch(error){
+      observe({phase:"FAILED",failure_code:String(error?.code||"AI_CORE_ERROR"),timeout_class:error?.meta?.timeout_class||null,telemetry:error?.meta?.telemetry||null,dispatch_attempt:error?.meta?.attempts??progress.dispatch_attempt});
+      throw error;
+    }finally{if(heartbeat)clearInterval(heartbeat);}
+  }
+  async function queuedExecution(role,options={},internalMeta={}){
     let release;const queuedAt=Date.now(),turn=new Promise(resolve=>{release=resolve;}),previous=queueTail;queueTail=turn;
     const queueTimeoutMs=options.queueTimeoutMs===null||options.queueTimeoutMs===undefined?null:Number(options.queueTimeoutMs);
     if(queueTimeoutMs!==null&&(!Number.isFinite(queueTimeoutMs)||queueTimeoutMs<=0)){previous.finally(release);throw new AiCoreError("AI_CORE_QUEUE_TIMEOUT_INVALID","queueTimeoutMs must be a positive finite number",{role,queue_timeout_ms:options.queueTimeoutMs});}
