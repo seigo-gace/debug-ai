@@ -41,7 +41,7 @@ function validateEvidenceBindings(value,{availableEvidenceIds=[],strictEvidenceR
     for(const ref of array(value.hypotheses[i]?.counter_evidence_refs))inspect(ref,i,"HYPOTHESIS_COUNTER_EVIDENCE_REF");
   }
   for(const ref of array(value?.confirmed_root_cause?.evidence_refs))inspect(ref,0,"ROOT_CAUSE_EVIDENCE_REF");
-  if(strictEvidenceRefs&&Array.isArray(value?.evidence_refs)){
+  if(Array.isArray(value?.evidence_refs)){
     for(const [index,ref] of value.evidence_refs.entries())inspect(ref,index,"TOP_LEVEL_EVIDENCE_REF");
   }
   return errors;
