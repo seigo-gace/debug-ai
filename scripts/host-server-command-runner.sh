@@ -10,7 +10,7 @@ TIMEOUT_BIN="${DEBUG_AI_SERVER_COMMAND_TIMEOUT_BIN:-timeout}"
 DOCKER_BIN="${DEBUG_AI_SERVER_COMMAND_DOCKER_BIN:-docker}"
 CURL_BIN="${DEBUG_AI_SERVER_COMMAND_CURL_BIN:-curl}"
 DF_BIN="${DEBUG_AI_SERVER_COMMAND_DF_BIN:-df}"
-GH_BIN="${DEBUG_AI_SERVER_COMMAND_GH_BIN:-gh}"
+GH_BIN="${DEBUG_AI_SERVER_COMMAND_GH_BIN:-/home/admin1/bin/gh}"
 PYTHON_BIN="${DEBUG_AI_SERVER_COMMAND_PYTHON_BIN:-python3}"
 err_code=""; request_id=""; command_id=""; action=""; request_repo=""; ACTIVE_REPO="$REPO"; command_exit_code=0; result_json="{}"
 fail(){ err_code="${1:-ERROR}"; return 1; }
