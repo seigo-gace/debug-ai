@@ -101,3 +101,24 @@ test("legacy search contract remains query/project/severity/time compatible",asy
   assert.deepEqual(request.body,{query:"failure",project_id:"P004",severity:"error",from:"2026-10-03T00:00:00Z",to:"2026-10-04T00:00:00Z"});
   assert.deepEqual(hits,[{id:"1"}]);
 });
+
+test("durable archive admission waits for direct TGserver receipt and rejects queued result",async()=>{
+  let release;const pending=new Promise(resolve=>{release=resolve;});let observed=null;
+  const a=adapter(async(url,opts)=>{
+    observed={url,body:JSON.parse(opts.body)};
+    await pending;
+    return response({status:"accepted"});
+  });
+  let settled=false;
+  const promise=a.archiveLog({severity:"info",run_id:"run-archive",kind:"durable_archive_record"}).then(value=>{settled=true;return value;});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(new URL(observed.url).pathname,"/ingest");
+  assert.equal(observed.body.project_id,"P004");
+  assert.equal(JSON.parse(observed.body.message).kind,"durable_archive_record");
+  assert.equal(settled,false);
+  release();
+  assert.equal((await promise).status,"accepted");
+  assert.deepEqual(a.getLogStats(),{enqueued:0,sent:0,batches:0,failed:0,dropped:0,queued:0,worker_running:false});
+  const rejected=adapter(async()=>response({status:"queued"}));
+  await assert.rejects(()=>rejected.archiveLog({kind:"durable_archive_complete"}),/TGSERVER_INGEST_REJECTED/);
+});
