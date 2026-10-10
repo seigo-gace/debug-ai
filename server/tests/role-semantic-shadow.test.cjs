@@ -94,3 +94,21 @@ test("P0-A actual role tool-loop binds researcher evidence references without ca
   assert.deepEqual(valid.validated_output.evidence_refs,["EVI_role_live"]);
   assert.deepEqual(valid.tool_loop.evidence_ids,["EVI_role_live"]);
 });
+
+
+test("P0-A preserves canonical causal/research benchmark field types",()=>{
+  const causal={failure_family:"RUNTIME",causal_chain:["observed edge"],unsupported_links:[],alternate_hypotheses:[],confidence:"LOW"};
+  const researcher={research_status:"INSUFFICIENT_EVIDENCE",answer:"UNKNOWN",evidence_refs:[],rejected_source_refs:[],contradictions:[],bound_version:null};
+  assert.equal(evaluateRoleSemantics("causal_scout",causal).status,"PASS");
+  assert.equal(evaluateRoleSemantics("researcher",researcher).status,"PASS");
+  for(const [field,invalid] of [["failure_family",[]],["causal_chain",["edge",42]],["unsupported_links",null],["alternate_hypotheses",{}],["confidence","CERTAIN"]]){
+    const value={...causal,[field]:invalid};
+    assert.ok(evaluateRoleSemantics("causal_scout",value).violations.includes(`ROLE_FIELD_INVALID:${field}`));
+    assert.equal(getSemanticShadow(parseAndValidateRoleOutput("causal_scout",value)).status,"WARN");
+    assert.throws(()=>parseAndValidateRoleOutput("causal_scout",value,{roleSemantics:"enforce"}),/ROLE_SEMANTIC_INVALID/);
+  }
+  const invalid={...researcher,bound_version:42};
+  assert.ok(evaluateRoleSemantics("researcher",invalid).violations.includes("ROLE_FIELD_INVALID:bound_version"));
+  assert.throws(()=>parseAndValidateRoleOutput("researcher",invalid,{roleSemantics:"enforce"}),/ROLE_SEMANTIC_INVALID/);
+  assert.equal(evaluateRoleSemantics("researcher",{...researcher,bound_version:"4.2"}).status,"PASS");
+});
