@@ -66,3 +66,13 @@ test("P0-A role semantics flags invalid causal and researcher collection types w
   }
   assert.equal(evaluateRoleSemantics("researcher",{selected_evidence:[],evidence_refs:["EVI_1"],rejected_source_refs:["EVI_2"],contradictions:[]}).status,"PASS");
 });
+
+
+test("P0-A strict evidence binding checks top-level researcher refs without changing default",()=>{
+  const value={selected_evidence:[],evidence_refs:["EVI_known"],rejected_source_refs:[],contradictions:[]};
+  assert.doesNotThrow(()=>parseAndValidateRoleOutput("researcher",JSON.stringify(value),{availableEvidenceIds:["EVI_known"],strictEvidenceRefs:true}));
+  assert.throws(()=>parseAndValidateRoleOutput("researcher",JSON.stringify(value),{availableEvidenceIds:[],strictEvidenceRefs:true}),/TOP_LEVEL_EVIDENCE_REF_UNKNOWN:0:EVI_known/);
+  assert.doesNotThrow(()=>parseAndValidateRoleOutput("researcher",JSON.stringify(value),{roleSemantics:"shadow"}));
+  const invalid={...value,evidence_refs:["EVI_known",null]};
+  assert.throws(()=>parseAndValidateRoleOutput("researcher",JSON.stringify(invalid),{availableEvidenceIds:["EVI_known"],strictEvidenceRefs:true}),/TOP_LEVEL_EVIDENCE_REF_INVALID:1/);
+});
