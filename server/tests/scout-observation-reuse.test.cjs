@@ -122,3 +122,20 @@ test("completed parallel Scout checkpoint keeps cursor on its still-running peer
  try{await new Promise(resolve=>setTimeout(resolve,30));const id=authority.listRunIds()[0],state=authority.loadDurable(id);assert.ok(state.manifest.workflow_input_refs.code_scout);assert.equal(state.manifest.workflow_cursor.step_id,"CAUSAL_SCOUT");assert.equal(state.manifest.workflow_cursor.step_phase,"RUNNING");assert.equal(state.manifest.workflow_cursor.step_input_ref,state.manifest.workflow_input_refs.analysis_input);assert.equal(workflow.inspect(id).artifacts.workflow_progress.payload.step,"CAUSAL_SCOUT");}
  finally{rejectPeer(Object.assign(new Error("deadline"),{code:"AI_CORE_TIMEOUT"}));await failed;}
 });
+
+
+test("durable Scout timeout retries are bounded and remain recorded across workflow instances",async t=>{
+  const f=fixture(t),first=await interrupt(f);
+  assert.equal(first.workflow.status(first.runId).durable.job_status,"RETRY_WAIT");
+  assert.equal(first.workflow.status(first.runId).durable.last_execution_failure.autonomous_retry_attempt,1);
+  const second=f.make();
+  await assert.rejects(second.workflow.runAnalysis({runId:first.runId}),error=>error.code==="AI_CORE_TIMEOUT");
+  assert.equal(second.workflow.status(first.runId).durable.job_status,"RETRY_WAIT");
+  assert.equal(second.workflow.status(first.runId).durable.last_execution_failure.autonomous_retry_attempt,2);
+  const third=f.make();
+  await assert.rejects(third.workflow.runAnalysis({runId:first.runId}),error=>error.code==="AI_CORE_TIMEOUT");
+  assert.equal(third.workflow.status(first.runId).durable.job_status,"BLOCKED");
+  assert.equal(third.workflow.status(first.runId).durable.last_execution_failure.autonomous_retry_attempt,3);
+  assert.equal(f.calls.code_scout,1);
+  assert.equal(f.calls.causal_scout,3);
+});
