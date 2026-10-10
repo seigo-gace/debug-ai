@@ -28,7 +28,7 @@ function fixture(t){
     const output=role==="code_scout"?codeOutput:role==="causal_scout"?{claims:[]}:role==="researcher"?{research_status:"INSUFFICIENT_EVIDENCE",answer:"fixture",evidence_refs:[],rejected_source_refs:[],contradictions:[],bound_version:"test/v1"}:{diagnoses:[{hypothesis:"fixture",status:"unknown"}],public_statement:"fixture"};return{content:JSON.stringify(output)};}};
   const sandboxVerification={collect:async()=>{reproductions++;return{status:"FINAL_INVALID",checks:[{name:"sandbox:test",check_type:"UNIT",executed:true,status:"FAIL",timed_out:false,exit_code:1,stdout:"last active item: 0 != 1",sandbox:{backend:"sidecar+landlock+seccomp",network:"CONTAINER_NETWORK_NONE"}}]};}};
   const make=()=>{const authority=new RunAuthority({runtimeRoot,repoPolicy:policy,durableIo:io});const workflow=createWorkflow({authority,repoPolicy:policy,aiCore,runtimeEvidence:store,sandboxVerification,repositorySnapshot:()=>"git_fixture",tgserver:{log:async()=>{},search:async()=>{searches.knowledge++;return[];}},evidenceSearch:{search:async()=>{searches.official++;return[];}}});return{authority,workflow};};
-  return{repo,io,store,calls,prompts,searches,make,fix:()=>{broken=false;},reproductions:()=>reproductions};
+  return{repo,io,store,calls,prompts,searches,make,aiCore,fix:()=>{broken=false;},reproductions:()=>reproductions};
 }
 async function interrupt(f){const {workflow,authority}=f.make();await assert.rejects(workflow.runAnalysis({repo:f.repo,rawRequest:"Investigate count-active.cjs; preserve tests",failure:{message:"last active item omitted"}}),error=>error.code==="AI_CORE_TIMEOUT");return{runId:authority.inspectDurableRuns().recoverable[0].run_id,authority,workflow};}
 
@@ -114,3 +114,11 @@ test("existing current-run trace exposes bounded failure and invocation records"
   const result={status:"OK",data:{secret:"private-secret"}};finish(result);assert.equal(await pending,result);
   assert.equal(store.list("run_tool_wait",{types:["tool_invocation"],limit:1})[0].payload.phase,"SUCCEEDED");
  });
+
+test("completed parallel Scout checkpoint keeps cursor on its still-running peer",async t=>{
+ const f=fixture(t),original=f.aiCore.call;let rejectPeer;
+ f.aiCore.call=(role,input)=>role==="causal_scout"?new Promise((resolve,reject)=>{rejectPeer=reject;}):original(role,input);
+ const {workflow,authority}=f.make();const pending=workflow.runAnalysis({repo:f.repo,rawRequest:"Investigate count-active.cjs",failure:{message:"last item omitted"}});const failed=assert.rejects(pending,e=>e.code==="AI_CORE_TIMEOUT");
+ try{await new Promise(resolve=>setTimeout(resolve,30));const id=authority.listRunIds()[0],state=authority.loadDurable(id);assert.ok(state.manifest.workflow_input_refs.code_scout);assert.equal(state.manifest.workflow_cursor.step_id,"CAUSAL_SCOUT");assert.equal(state.manifest.workflow_cursor.step_phase,"RUNNING");assert.equal(state.manifest.workflow_cursor.step_input_ref,state.manifest.workflow_input_refs.analysis_input);assert.equal(workflow.inspect(id).artifacts.workflow_progress.payload.step,"CAUSAL_SCOUT");}
+ finally{rejectPeer(Object.assign(new Error("deadline"),{code:"AI_CORE_TIMEOUT"}));await failed;}
+});

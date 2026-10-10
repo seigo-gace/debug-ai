@@ -1104,3 +1104,9 @@ the original last-progress time, and offer the same advisory continuation assess
 Only role/tool identity and elapsed time are retained; tool arguments/results are
 not copied into telemetry. Existing Tool Runtime deadlines and retry decisions stay
 in force. PR92 integration baseline is now `54c13a9f32a74758681476e6c5a4bf4166359978` (includes the owner's P1-D CI reconciliation; no independent Patch Engineer edits).
+
+Live recovery readback on42918b7 exposed a parallel cursor residual: saving the
+completed Code Scout marked CODE_SCOUT/PENDING while Causal Scout was still
+UPSTREAM_WAIT. The bounded correction preserves the immutable successful Stage
+but projects the still-running peer's step/input/RUNNING status to the existing
+single cursor and workflow_progress. No additional Work Unit is introduced.

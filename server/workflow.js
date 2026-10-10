@@ -141,9 +141,9 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
     if(!authority?.durableEnabled?.())return null;
     return authority.commitDurable({runId,manifestPatch:{job:{status:jobStatus},workflow_cursor:{step_id:stepId,step_phase:stepPhase,step_input_ref:stepInputRef,step_result_ref:stepResultRef,active_role_execution_id:activeRoleExecutionId}},runStatePatch:{job_status:jobStatus}});
   }
-  async function saveStage(runId,key,payload,nextStep,{activeRoleExecutionId=null}={}){
+  async function saveStage(runId,key,payload,nextStep,{activeRoleExecutionId=null,stepPhase=StepPhase.PENDING,stepInputRef=null}={}){
     const made=makeDurableWorkflowStage({runId,key,payload});
-    await authority.commitDurable({runId,manifestPatch:{job:{status:"RUNNING"},workflow_input_refs:{[key]:made.path},workflow_cursor:{step_id:nextStep,step_phase:StepPhase.PENDING,step_input_ref:made.path,step_result_ref:null,active_role_execution_id:activeRoleExecutionId}},runStatePatch:{job_status:"RUNNING"},immutableRecords:[{path:made.path,record:made.record}]});
+    await authority.commitDurable({runId,manifestPatch:{job:{status:"RUNNING"},workflow_input_refs:{[key]:made.path},workflow_cursor:{step_id:nextStep,step_phase:stepPhase,step_input_ref:stepInputRef||made.path,step_result_ref:null,active_role_execution_id:activeRoleExecutionId}},runStatePatch:{job_status:"RUNNING"},immutableRecords:[{path:made.path,record:made.record}]});
     return made;
   }
   function loadStageRef(runId,key){const {manifest}=authority.loadDurable(runId),ref=manifest.workflow_input_refs?.[key];return typeof ref==="string"&&ref?loadDurableWorkflowStage({authority,recordPath:ref,expectedKey:key}):null;}
@@ -186,15 +186,16 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
       runtimeEvidence?.write(runId,"failure",failure);await logRuntime({run_id:runId,severity:"error",kind:"failure",failure});if(deterministicChecks.length)await logRuntime({run_id:runId,severity:deterministicChecks.some(x=>x.status==="FAIL")?"warn":"info",kind:"deterministic_verification",status:deterministicVerification.status,check_count:deterministicChecks.length,failed:deterministicChecks.filter(x=>x.status==="FAIL").length});
       const query=String(failure?.message||failure?.summary||rawRequest||"debug failure");
       await logProgress(runId,"SCOUTS",StepPhase.RUNNING);
-      let scoutCommitTail=Promise.resolve();
+      let scoutCommitTail=Promise.resolve();const scoutStates=new Map();
       function commitScout(operation){const next=scoutCommitTail.then(operation);scoutCommitTail=next.catch(()=>{});return next;}
       async function scout(role,system){
+        scoutStates.set(role,StepPhase.RUNNING);
         const step=role==="code_scout"?WorkflowStepId.CODE_SCOUT:WorkflowStepId.CAUSAL_SCOUT;
         const user=JSON.stringify({task:rawRequest,failure,evidence:evidencePromptView(localRecords),initial_scope:initialScope,dap_hint:dapHint});
         const scoutBinding=binding?contentHash({binding,role,system,user}):null,saved=durable?loadStageRef(runId,role):null;
         if(reusableLocalStage(saved,scoutBinding)&&saved.payload.reusable===true){
           const out=saved.payload.result;parseAndValidateRoleOutput(role,JSON.stringify(out.validated_output),{availableEvidenceIds:mergeEvidenceIds(localIds,out.tool_loop?.evidence_ids||[]),strictEvidenceRefs:true});toolEvidenceRecords(out);
-          runtimeEvidence?.write(runId,"stage_reuse",{stage:role,saved_at:saved.payload.saved_at,new_execution:false});return out;
+          scoutStates.set(role,StepPhase.DONE);runtimeEvidence?.write(runId,"stage_reuse",{stage:role,saved_at:saved.payload.saved_at,new_execution:false});return out;
         }
         if(durable)await commitScout(()=>setCursor(runId,step,StepPhase.RUNNING,{stepInputRef:inputManifestRef}));
         await logProgress(runId,step,StepPhase.RUNNING);
@@ -203,9 +204,11 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
           const out=await callReadOnlyRole(role,{system:[system,hintProtocol,"Use initial scoped source and reproduction evidence first. Request additional search only to resolve an explicit missing fact or obtain counter-evidence. PARTIAL source scope is not exhaustive coverage; retain UNKNOWNs and falsification checks."].filter(Boolean).join("\n"),user},toolRuntime,{baseEvidenceIds:localIds,runId});
           const output=roleOutput(out,role);toolEvidenceRecords(out);
           const reusable=(out.tool_loop?.observations||[]).every(observation=>(observation.results||[]).every(item=>["source.read","source.search","symbol.lookup","dependency.map","test.inventory"].includes(item.request?.tool)&&item.result?.status==="OK"));
-          if(durable)await commitScout(()=>saveStage(runId,role,{reuse_binding:scoutBinding,saved_at:Date.now(),reusable,result:{validated_output:output,tool_loop:out.tool_loop||null}},step));
-          await logProgress(runId,step,StepPhase.DONE);return out;
-        }catch(error){const invocation=invocationStatus(runId).find(item=>item.role===role&&item.started_at>=scoutStartedAt);error.meta={...error.meta,role,model:error.meta?.model||invocation?.model||null,invocation_id:error.meta?.invocation_id||invocation?.invocation_id||null};throw error;}
+          const peerRole=role==="code_scout"?"causal_scout":"code_scout",peerStep=peerRole==="code_scout"?WorkflowStepId.CODE_SCOUT:WorkflowStepId.CAUSAL_SCOUT;
+          scoutStates.set(role,StepPhase.DONE);let peerRunning=false;
+          if(durable)await commitScout(()=>{peerRunning=scoutStates.get(peerRole)===StepPhase.RUNNING;return saveStage(runId,role,{reuse_binding:scoutBinding,saved_at:Date.now(),reusable,result:{validated_output:output,tool_loop:out.tool_loop||null}},peerRunning?peerStep:step,{stepPhase:peerRunning?StepPhase.RUNNING:StepPhase.DONE,stepInputRef:peerRunning?inputManifestRef:null});});
+          await logProgress(runId,step,StepPhase.DONE);if(peerRunning)await logProgress(runId,peerStep,StepPhase.RUNNING);return out;
+        }catch(error){scoutStates.set(role,StepPhase.BLOCKED);const invocation=invocationStatus(runId).find(item=>item.role===role&&item.started_at>=scoutStartedAt);error.meta={...error.meta,role,model:error.meta?.model||invocation?.model||null,invocation_id:error.meta?.invocation_id||invocation?.invocation_id||null};throw error;}
       }
       // Preserve parallel Scout orchestration and the adapter's global single
       // dispatch slot. Serialize only existing durable commits; settle both
