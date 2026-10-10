@@ -2,6 +2,7 @@
   "base_url": "https://debugai.asterav8.jp",
   "mode": "readonly",
   "repo": "/workspace/debug-ai",
-  "request": "2026-10-10 GPT CHAT read-only actual DebugAI server repository HEAD attribution for durable recovery and retention incidents; no mutation or model calls.",
-  "server_command_id": "project.git_head"
+  "request": "2026-10-10 GPT CHAT existing dogfood run status/inspect only, no new run, model call or gitops deployment",
+  "server_command_id": "project.git_head",
+  "run_id": "run_mv24304l_700ed16315"
 }
