@@ -27,32 +27,49 @@ test("classifyRetentionError fails closed to OTHER for unstructured messages",()
   assert.equal(classifyRetentionError(""),"OTHER");
 });
 
+test("classifyRetentionError fails closed to OTHER for unknown uppercase secret-like prefixes",()=>{
+  assert.equal(classifyRetentionError("INTERNAL_TOKEN_VALUE:xxx"),"OTHER");
+  assert.equal(classifyRetentionError("INJECTED_HISTOGRAM_LABEL:run_x"),"OTHER");
+});
+
 test("summarizeRetentionErrorClasses counts distinct classes and caps overflow into OTHER",()=>{
   const items=[];
-  for(let i=0;i<40;i++)items.push({error:`CLASS_${String(i).padStart(2,"0")}_SIGNAL:run_${i}`});
+  for(let i=0;i<40;i++)items.push({error:`ARCHIVE_RECEIPT_OVERFLOW_${String(i).padStart(2,"0")}_INVALID:run_${i}`});
   const summary=summarizeRetentionErrorClasses(items,{maxClasses:32});
   const keys=Object.keys(summary.counts);
   assert.ok(keys.length<=32);
   assert.ok(summary.counts.OTHER>=9);
-  assert.equal(keys.filter(k=>k.startsWith("CLASS_")).length,31);
+  assert.equal(keys.filter(k=>k.startsWith("ARCHIVE_RECEIPT_OVERFLOW_")).length,31);
+});
+
+test("summarizeRetentionErrorClasses does not double-count OTHER when capping",()=>{
+  const items=[{error:"OTHER:ignored"}];
+  for(let i=0;i<35;i++)items.push({error:`DURABLE_GC_CAP_${String(i).padStart(2,"0")}_INVALID:run_${i}`});
+  const summary=summarizeRetentionErrorClasses(items,{maxClasses:32});
+  const keys=Object.keys(summary.counts);
+  assert.ok(keys.length<=32);
+  const inputCount=items.length;
+  const outputSum=Object.values(summary.counts).reduce((n,v)=>n+v,0);
+  assert.equal(outputSum,inputCount);
+  assert.equal(summary.counts.OTHER,5);
 });
 
 test("summarizeRetentionErrorClasses uses error field only",()=>{
   const summary=summarizeRetentionErrorClasses([
-    {run_id:"run_leak",error:"TG_DOWN:run_leak"},
-    {run_id:"run_other",error:"TG_DOWN:ignored"},
+    {run_id:"run_leak",error:"TGSERVER_TIMEOUT:run_leak"},
+    {run_id:"run_other",error:"TGSERVER_TIMEOUT:ignored"},
   ]);
-  assert.equal(summary.counts.TG_DOWN,2);
+  assert.equal(summary.counts.TGSERVER_TIMEOUT,2);
 });
 
 test("formatRetentionErrorHistogram is alphabetically stable and excludes paths and run ids",()=>{
   const summary=summarizeRetentionErrorClasses([
-    {error:"Z_LAST:run_a"},
-    {error:"A_FIRST:run_b"},
-    {error:"A_FIRST:run_c"},
+    {error:"DURABLE_GC_UNARCHIVED_RECORD_PRESENT:run_a"},
+    {error:"ARCHIVE_RECEIPT_MISSING:run_b"},
+    {error:"ARCHIVE_RECEIPT_MISSING:run_c"},
   ]);
   const line=formatRetentionErrorHistogram("archive_error",summary);
-  assert.match(line,/^archive_error_classes=A_FIRST:2,Z_LAST:1$/);
+  assert.match(line,/^archive_error_classes=ARCHIVE_RECEIPT_MISSING:2,DURABLE_GC_UNARCHIVED_RECORD_PRESENT:1$/);
   assert.doesNotMatch(line,/run_/);
   assert.doesNotMatch(line,/[/\\@]/);
 });
@@ -73,7 +90,7 @@ test("archiveTerminalRuns report still includes run_id while histogram formatter
   assert.equal(report.errors[0].run_id,"run_blocked");
   assert.match(report.errors[0].error,/TG_DOWN/);
   const hist=formatRetentionErrorHistogram("archive_error",summarizeRetentionErrorClasses(report.errors));
-  assert.match(hist,/TG_DOWN:1/);
+  assert.match(hist,/OTHER:1/);
   assert.doesNotMatch(hist,/run_blocked/);
 });
 
