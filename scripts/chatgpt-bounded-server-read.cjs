@@ -3,7 +3,7 @@ const fs=require("node:fs");
 const {setTimeout:delay}=require("node:timers/promises");
 const API="https://debugai.asterav8.jp";
 const DEFAULT_REPO="/workspace/debug-ai";
-const ALLOWED=new Set(["project.git_head","service.debug_ai_state","service.sandbox_state","service.debug_ai_health","canonical.devlog_activate_status","system.projects_inventory","system.project_file_inspect"]);
+const ALLOWED=new Set(["project.git_head","project.git_recent_commits","github.actions_recent","service.debug_ai_logs","service.debug_ai_state","service.sandbox_state","service.debug_ai_health","canonical.devlog_activate_status","system.projects_inventory","system.project_file_inspect"]);
 const ENTRY_NAME_RE=/^[A-Za-z0-9._-]{1,120}$/;
 const REL_PATH_RE=/^[A-Za-z0-9_./-]{1,180}$/;
 const FILE_INSPECT_MAX_PAGES=32;
@@ -15,6 +15,10 @@ function validateTarget(t){
   if(t.mode!=="readonly"||t.base_url!==API)throw Error("SERVER_COMMAND_SCOPE_DENIED");
   if(command==="system.projects_inventory" && !/^(?:0|[1-9][0-9]{0,3})$/.test(String(t.inventory_page??0)))throw Error("PROJECT_INVENTORY_PAGE_INVALID");
   if(command==="system.projects_inventory" && t.inventory_all!==undefined && typeof t.inventory_all!=="boolean")throw Error("PROJECT_INVENTORY_MODE_INVALID");
+  if(command==="service.debug_ai_logs"){
+    if(!["debug-ai","sandbox-runner"].includes(t.log_service??"debug-ai"))throw Error("SERVER_LOG_SERVICE_DENIED");
+    if(!/^(?:[1-9]|1[0-9]|20)$/.test(String(t.log_lines??10)))throw Error("SERVER_LOG_LINES_INVALID");
+  }
   if(command==="system.project_file_inspect"){
     const entry=String(t.file_inspect_entry||"");
     const rel=String(t.file_inspect_path||"");
@@ -37,6 +41,41 @@ function safeResult(command,raw){
     let d;try{d=JSON.parse(stdout);}catch{throw Error("PROJECT_INVENTORY_RESULT_INVALID");}
     if(d?.schema!=="debugai.host-workspace-inventory/v1"||!Number.isInteger(d.page)||!Number.isInteger(d.total)||!Array.isArray(d.entries)||!Array.isArray(d.missing_roots)||stdout.length>4096)throw Error("PROJECT_INVENTORY_RESULT_INVALID");
     return["SERVER_PROJECTS_PAGE="+d.page,"SERVER_PROJECTS_TOTAL="+d.total,"SERVER_PROJECTS_NEXT="+(d.next_page??"NONE"),"SERVER_PROJECTS_DATA="+JSON.stringify(d)];
+  }
+  if(command==="project.git_recent_commits"){
+    const rows=stdout.split("\n").filter(Boolean);
+    if(!rows.length||rows.length>8||stdout.length>4096)throw Error("SERVER_GIT_LOG_INVALID");
+    const parsed=rows.map(row=>{
+      const match=/^([0-9a-f]{7,40}) (.{1,200})$/u.exec(row);
+      if(!match)throw Error("SERVER_GIT_LOG_INVALID");
+      const subject=match[2];
+      const ok=subject.length<=120&&!/[\r\n\x00-\x1f\x7f<>]/.test(subject)&&!/token|secret|password|credential|bearer|authorization|api[_.-]?key/i.test(subject);
+      return{sha:match[1],subject:ok?subject:"REDACTED"};
+    });
+    return["SERVER_GIT_LOG="+JSON.stringify(parsed)];
+  }
+  if(command==="github.actions_recent"){
+    let data;try{data=JSON.parse(stdout);}catch{throw Error("SERVER_ACTIONS_LOG_INVALID");}
+    if(!Array.isArray(data)||data.length>8||stdout.length>4096)throw Error("SERVER_ACTIONS_LOG_INVALID");
+    const items=data.map(x=>{
+      if(!Number.isSafeInteger(x?.databaseId)||x.databaseId<=0||!/^([a-f0-9]{40})$/.test(x.headSha||"")||
+        !["queued","in_progress","completed","requested","waiting","pending"].includes(x.status)||
+        ![null,"success","failure","cancelled","skipped","timed_out","action_required","neutral","stale","startup_failure"].includes(x.conclusion??null)||
+        typeof x.name!=="string"||x.name.length>120||/[\r\n\x00-\x1f\x7f<>]/.test(x.name)||/token|secret|password|bearer|credential/i.test(x.name)||
+        !/^https:\/\/github[.]com\/seigo-gace\/debug-ai\/actions\/runs\/[0-9]+$/.test(x.url||""))
+        throw Error("SERVER_ACTIONS_LOG_INVALID");
+      return{id:x.databaseId,name:x.name,status:x.status,conclusion:x.conclusion??null,sha:x.headSha,url:x.url};
+    });
+    return["SERVER_ACTIONS_LOG="+JSON.stringify(items)];
+  }
+  if(command==="service.debug_ai_logs"){
+    if(stdout.length>3400)throw Error("SERVER_RUNTIME_LOG_INVALID");
+    const lines=stdout.split("\n").filter(Boolean).slice(-20).map(s=>{
+      const plain=s.replace(/\x1b\[[0-9;]*[A-Za-z]/g,"");
+      if(/token|secret|bearer|password|credential|authorization|cookie|private.key|api.key/i.test(plain))return "[REDACTED_SENSITIVE_LINE]";
+      return plain.slice(0,400);
+    });
+    return["SERVER_RUNTIME_LOG_LINES="+JSON.stringify(lines)];
   }
   if(command==="project.git_head"){
     if(!/^[a-f0-9]{40}$/.test(stdout))throw Error("SERVER_HEAD_INVALID");
@@ -98,7 +137,7 @@ async function run({request=fetch,sleep=delay,log=console.log,env=process.env,ta
       if(seenFileOffsets.has(fileOffset)||seenFileOffsets.size>=FILE_INSPECT_MAX_PAGES)throw Error("PROJECT_FILE_INSPECT_PAGINATION_INVALID");
       seenFileOffsets.add(fileOffset);
     }
-    const args=command==="system.projects_inventory"?[String(page)]:command==="system.project_file_inspect"?fileInspectArguments(target,fileOffset):[];
+    const args=command==="system.projects_inventory"?[String(page)]:command==="system.project_file_inspect"?fileInspectArguments(target,fileOffset):command==="service.debug_ai_logs"?[String(target.log_service??"debug-ai"),String(target.log_lines??10)]:[];
     const q=await post("/v1/server-command/request",{repo:DEFAULT_REPO,command_id:command,arguments:args},headers,request);
     if(!/^cmd_[0-9a-f]{24}$/.test(q.id||""))throw Error("SERVER_COMMAND_ID_INVALID");
     log("SERVER_COMMAND_REQUEST_ID="+q.id);
@@ -128,7 +167,7 @@ async function run({request=fetch,sleep=delay,log=console.log,env=process.env,ta
         finished=true;
         break;
       }
-      if(state.state==="FAIL")throw Error("SERVER_COMMAND_STATE_FAIL");
+      if(state.state==="FAIL"){const failureClass=String(state.error||"UNKNOWN").split(":")[0];log("SERVER_COMMAND_FAILURE_CLASS="+(/^[A-Z0-9_]{3,80}$/.test(failureClass)?failureClass:"UNKNOWN"));throw Error("SERVER_COMMAND_STATE_FAIL");}
       if(state.state!=="QUEUED"&&state.state!=="RUNNING")throw Error("SERVER_COMMAND_UNEXPECTED_STATE");
       await sleep(2000);
     }

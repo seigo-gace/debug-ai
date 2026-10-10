@@ -174,3 +174,46 @@ test("bounded project file inspect can collect all pages in one invocation",asyn
   assert.ok(logs.includes("HOST_FILE_SHA256_MATCH="+sha));
   assert.ok(logs.includes("HOST_FILE_SCAN_COMPLETE=TRUE"));
 });
+
+test("bounded CHAT log routing accepts only existing Host git history and GitHub Actions metadata",()=>{
+  assert.equal(m.validateTarget({...target,server_command_id:"project.git_recent_commits"}),"project.git_recent_commits");
+  assert.equal(m.validateTarget({...target,server_command_id:"github.actions_recent"}),"github.actions_recent");
+  assert.deepEqual(m.safeResult("project.git_recent_commits","a1b2c3d fix: stable Git log\n0123abcd feat: existing command"),[
+    "SERVER_GIT_LOG="+JSON.stringify([{sha:"a1b2c3d",subject:"fix: stable Git log"},{sha:"0123abcd",subject:"feat: existing command"}])
+  ]);
+  const action=JSON.stringify([{databaseId:37919545339,name:"Verify",status:"completed",conclusion:"success",headSha:"a".repeat(40),event:"pull_request",url:"https://github.com/seigo-gace/debug-ai/actions/runs/37919545339"}]);
+  assert.equal(m.safeResult("github.actions_recent",action)[0],"SERVER_ACTIONS_LOG="+JSON.stringify([{id:37919545339,name:"Verify",status:"completed",conclusion:"success",sha:"a".repeat(40),url:"https://github.com/seigo-gace/debug-ai/actions/runs/37919545339"}]));
+  assert.throws(()=>m.safeResult("project.git_recent_commits","private raw text"),/SERVER_GIT_LOG_INVALID/);
+  assert.throws(()=>m.safeResult("github.actions_recent",JSON.stringify([{databaseId:1,name:"Bearer PRIVATE_TOKEN",status:"completed"}])),/SERVER_ACTIONS_LOG_INVALID/);
+});
+test("bounded CHAT server Git log read returns exact Host command and sanitized history",async t=>{
+  const targetFile=targetFixture(t,{server_command_id:"project.git_recent_commits"}),requests=[],events=[],id="cmd_"+"d".repeat(24);
+  const request=async(url,args)=>{
+    requests.push(JSON.parse(args.body));
+    return{status:url.endsWith("/request")?202:200,json:async()=>url.endsWith("/request")?{id}:{id,state:"PASS",result:{read_only:true,command_id:"project.git_recent_commits",exit_code:0,stdout:"a1b2c3d fix: stable log"}}};
+  };
+  await m.run({request,sleep:async()=>{},log:v=>events.push(v),env:{CF_ACCESS_CLIENT_ID:"id",CF_ACCESS_CLIENT_SECRET:"secret"},targetFile});
+  assert.deepEqual(requests[0],{repo:"/workspace/debug-ai",command_id:"project.git_recent_commits",arguments:[]});
+  assert.ok(events.includes("SERVER_COMMAND_STATE=PASS"));
+  assert.ok(events.includes('SERVER_GIT_LOG=[{"sha":"a1b2c3d","subject":"fix: stable log"}]'));
+});
+
+test("CHAT Docker development logs stay scoped, short, sanitized and read-only",async t=>{
+  const targetFile=targetFixture(t,{server_command_id:"service.debug_ai_logs",log_service:"debug-ai",log_lines:12});
+  const logs=[],requests=[],id="cmd_"+"f".repeat(24);
+  const request=async(url,args)=>{
+    requests.push(JSON.parse(args.body));
+    return{status:url.endsWith("/request")?202:200,json:async()=>url.endsWith("/request")?{id}:{id,state:"PASS",result:{
+      read_only:true,command_id:"service.debug_ai_logs",exit_code:0,
+      stdout:"2026-10-09 ERROR CODE_CONNECTION_FAILED\n[REDACTED_SENSITIVE_LINE]\n2026-10-09 WARN RETRY_POSSIBLE"
+    }}};
+  };
+  await m.run({request,sleep:async()=>{},log:v=>logs.push(v),env:{CF_ACCESS_CLIENT_ID:"id",CF_ACCESS_CLIENT_SECRET:"secret"},targetFile});
+  assert.deepEqual(requests[0],{repo:"/workspace/debug-ai",command_id:"service.debug_ai_logs",arguments:["debug-ai","12"]});
+  assert.ok(logs.includes("SERVER_COMMAND_STATE=PASS"));
+  assert.ok(logs.join(" ").includes("CODE_CONNECTION_FAILED"));
+  assert.ok(logs.join(" ").includes("[REDACTED_SENSITIVE_LINE]"));
+  for(const service of ["server-core","/tmp","debug-ai;rm"])assert.throws(()=>m.validateTarget({...target,server_command_id:"service.debug_ai_logs",log_service:service}),/SERVER_LOG_SERVICE_DENIED/);
+  for(const count of [0,21,100,"1;whoami"])assert.throws(()=>m.validateTarget({...target,server_command_id:"service.debug_ai_logs",log_lines:count}),/SERVER_LOG_LINES_INVALID/);
+  assert.deepEqual(m.safeResult("service.debug_ai_logs","Authorization Bearer SUPER_SECRET"),["SERVER_RUNTIME_LOG_LINES="+JSON.stringify(["[REDACTED_SENSITIVE_LINE]"])]);
+});

@@ -81,6 +81,7 @@ jobs:
           echo "STATUS_HTTP=$code"
           test "$code" = "200"
           jq -r '"RUN_STATE="+((.state//"UNKNOWN")|tostring), "JOB_STATUS="+((.durable.job_status//"UNKNOWN")|tostring), "CURSOR_STEP="+((.durable.workflow_cursor.step_id//"UNKNOWN")|tostring), "CURSOR_PHASE="+((.durable.workflow_cursor.step_phase//"UNKNOWN")|tostring), "LAST_EXECUTION_ERROR="+((.durable.last_execution_error//"NONE")|tostring)' /tmp/status.json
+          jq -cr '[.durable.role_invocations // {} | to_entries[] | {role:(.value.role // "UNKNOWN"),phase:(.value.phase // "UNKNOWN"),elapsed_ms:(.value.elapsed_ms // null),timeout_class:(.value.timeout_class // null),assessment:(.value.continuation_assessment // null)}] | "BOUNDED_ROLE_INVOCATIONS=" + tojson' /tmp/status.json
 
       - name: Existing run inspect
         if: ${{ steps.target.outputs.run_id != '' }}
@@ -91,6 +92,9 @@ jobs:
           echo "INSPECT_HTTP=$code"
           test "$code" = "200"
           jq -r '"ANALYSIS_PRESENT="+((.artifacts.analysis!=null)|tostring), "PATCH_CANDIDATE_PRESENT="+((.artifacts.patch_candidate!=null)|tostring), "DIAGNOSIS_PRESENT="+((.artifacts.analysis.payload.diagnosis!=null)|tostring)' /tmp/inspect.json
+          jq -cr '(.artifacts.execution_failure.payload // {}) | {code:(.code // "NONE"),role:(.role // "UNKNOWN"),timeout_class:(.timeout_class // "NONE"),autonomous_retry_attempt:(.autonomous_retry_attempt // null),attempts:(.attempts // null)} | "LAST_FAILURE_META="+tojson' /tmp/inspect.json
+          jq -cr '(.artifacts.execution_failure.payload.telemetry // {}) | {llm_calls:(.llm_calls // null),queue_wait_ms:(.queue_wait_ms_known_sum // null),prepare_ms:(.prepare_ms_known_sum // null),upstream_request_wall_ms:(.upstream_request_wall_ms_known_sum // null),role_wall_ms:(.role_wall_ms_known_sum // null),prompt_eval_ms:(.prompt_eval_ms_known_sum // null),decode_ms:(.decode_ms_known_sum // null),completion_tokens:(.completion_tokens_known_sum // null),upstream_measured_calls:(.upstream_request_wall_ms_measured_calls // 0),prompt_eval_measured_calls:(.prompt_eval_ms_measured_calls // 0),request_bytes:(.request_bytes_known_sum // null),request_bytes_measured_calls:(.request_bytes_measured_calls // 0),response_bytes:(.response_bytes_known_sum // null),response_bytes_measured_calls:(.response_bytes_measured_calls // 0)} | "LAST_FAILURE_TIMING="+tojson' /tmp/inspect.json
+          jq -cr '(.artifacts.ai_invocation.payload // {}) | {role:(.role // "UNKNOWN"),phase:(.phase // "UNKNOWN"),elapsed_ms:(.elapsed_ms // null),queue_wait_ms:(.queue_wait_ms // null),timeout_class:(.timeout_class // null),failure_code:(.failure_code // null)} | "LATEST_INVOCATION_META="+tojson' /tmp/inspect.json
 
       - name: Bounded existing Server Command readback
         shell: bash
@@ -155,7 +159,7 @@ jobs:
           jq -e '.gitops_request | type=="object" and (.enabled==true) and ((keys|sort)==(["branch","enabled","sha"]|sort))' "$file" >/dev/null
           branch="$(jq -r '.gitops_request.branch' "$file")"
           sha="$(jq -r '.gitops_request.sha' "$file")"
-          [[ "$branch" == "feat/tgserver-async-log-sink-20261003" ]] || { echo "CHAT_GITOPS_DEPLOY_BRANCH_DENIED"; exit 32; }
+          [[ "$branch" == "feat/tgserver-async-log-sink-20261003" || "$branch" == "fix/p1c-refix-no-new-evidence-20261010" ]] || { echo "CHAT_GITOPS_DEPLOY_BRANCH_DENIED"; exit 32; }
           [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "CHAT_GITOPS_SHA_INVALID"; exit 33; }
           remote="$(git ls-remote origin "refs/heads/$branch" | awk 'NR==1{print $1}')"
           [[ "$remote" == "$sha" ]] || { echo "CHAT_GITOPS_REMOTE_SHA_MISMATCH"; exit 34; }
@@ -163,7 +167,7 @@ jobs:
           jq -nc --arg branch "$branch" --arg sha "$sha" '
             {action:"deploy",repo:"/workspace/debug-ai",branch:$branch,sha:$sha,
              expected_head:$sha,human_approved:true,
-             delegation:{id:"dlg_debugai_reflect_v1",scope:"debugai.compose.reflect"}}
+             delegation:(if $branch=="fix/p1c-refix-no-new-evidence-20261010" then {id:"dlg_master_debugai_v1",mode:"MASTER_INTERNAL_PERSISTENT",repository:"seigo-gace/debug-ai",scope:"debugai.compose.reflect",runtime_target:"debugai.compose"} else {id:"dlg_debugai_reflect_v1",scope:"debugai.compose.reflect"} end)}
           ' >/tmp/chat-gitops-body.json
           http="$(curl -sS --max-time 35 -o /tmp/chat-gitops-response.json -w '%{http_code}' -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" -H "content-type: application/json" --data-binary @/tmp/chat-gitops-body.json "https://debugai.asterav8.jp/v1/gitops/request")"
           echo "CHAT_GITOPS_REQUEST_HTTP=$http"
