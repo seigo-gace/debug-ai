@@ -12,7 +12,7 @@ function localStageBinding({repo,repoSnapshotId,inputDigest,runtimeContextTokens
   // The existing Git identity omits untracked files. Bind the existing source
   // tree hash as well, including test/package bytes; UNKNOWN disables reuse.
   let tree;try{tree=sourceTreeSnapshotId(repo,{requireGitMarker:false});}catch{return null;}
-  const implementations=["../adapters/ai-core.js","../roles.js","../workflow.js","role-contracts.js","role-output-validator.js","invocation-compiler.js","skill-registry.js","skill-procedures.js","tool-loop.js","role-runtime-budgets.js","read-only-tool-runtime.js","read-only-tool-runtime-base.js","sandbox-verification.js","durable-workflow-stage.js"];
+  const implementations=["../adapters/ai-core.js","../roles.js","../workflow.js","role-contracts.js","role-output-validator.js","invocation-compiler.js","skill-registry.js","skill-procedures.js","production-skill-procedures.js","run-observation-context.js","tool-loop.js","role-runtime-budgets.js","read-only-tool-runtime.js","read-only-tool-runtime-base.js","sandbox-verification.js","durable-workflow-stage.js"];
   return contentHash({repo_snapshot_id:repoSnapshotId,source_tree_id:tree,input_digest:inputDigest,role_contract:ROLE_CONTRACT_VERSION,tool_contract:TOOL_CONTRACT_VERSION,runtime_context_tokens:runtimeContextTokens,node:process.version,platform:process.platform,arch:process.arch,implementations:implementations.map(file=>contentHash(fs.readFileSync(path.join(__dirname,file),"utf8")))});
 }
 function reusableLocalStage(stage,binding,{now=Date.now()}={}){

@@ -1103,4 +1103,4 @@ Scout tool waits use the same Run Evidence/status/trace lane (`tool_invocation`)
 the original last-progress time, and offer the same advisory continuation assessment.
 Only role/tool identity and elapsed time are retained; tool arguments/results are
 not copied into telemetry. Existing Tool Runtime deadlines and retry decisions stay
-in force. PR92 integration baseline is now `e8ee5c5a775177d9f9638d382ada21272fa252a4`.
+in force. PR92 integration baseline is now `54c13a9f32a74758681476e6c5a4bf4166359978` (includes the owner's P1-D CI reconciliation; no independent Patch Engineer edits).
