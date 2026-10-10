@@ -53,7 +53,7 @@ function assertPatchRequirements(packet,{operations=[],repositoryRevision=null,s
   if(repositoryRevision!==null&&packet.payload.repository_revision!==repositoryRevision)throw new Error("REQUIREMENT_SOURCE_MISMATCH");
   if(sourceHashes!==null&&contentHash(sourceHashes)!==contentHash(packet.payload.precondition_hashes))throw new Error("REQUIREMENT_SOURCE_MISMATCH");
   if(availableEvidenceIds!==null)for(const ref of packet.payload.evidence_refs)if(!availableEvidenceIds.includes(ref))throw new Error("REQUIREMENT_EVIDENCE_NOT_ADMITTED:"+ref);
-  const forbidden=packet.payload.requirement_contract?.fields?.forbidden_paths||[];
+  const forbidden=[...(packet.payload.prohibited_paths||[]),...(packet.payload.requirement_contract?.fields?.forbidden_paths||[])].map(p=>path.posix.normalize(String(p).replace(/\\/g,"/")));
   if(forbidden.length)for(const op of operations){const rel=path.posix.normalize(String(op?.path||"").replace(/\\/g,"/"));if(forbidden.some(p=>rel===p||rel.startsWith(p+"/")))throw new Error("REQUIREMENT_FORBIDDEN_PATH:"+rel);}
   return true;
 }
