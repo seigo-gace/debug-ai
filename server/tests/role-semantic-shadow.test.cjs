@@ -55,4 +55,14 @@ test("P0-A role semantics flags invalid causal and researcher collection types w
   }
   assert.equal(evaluateRoleSemantics("causal_scout",{candidates:[]}).status,"PASS");
   assert.equal(evaluateRoleSemantics("researcher",{selected_evidence:[],evidence_refs:[],rejected_source_refs:[],contradictions:[]}).status,"PASS");
+  for(const field of ["evidence_refs","rejected_source_refs"]){
+    const bad={selected_evidence:[],evidence_refs:[],rejected_source_refs:[],contradictions:[]};
+    bad[field]=["EVI_valid",null];
+    const semantic=evaluateRoleSemantics("researcher",bad);
+    assert.equal(semantic.status,"WARN");
+    assert.ok(semantic.violations.includes(`ROLE_FIELD_INVALID:${field}`));
+    assert.equal(getSemanticShadow(parseAndValidateRoleOutput("researcher",JSON.stringify(bad))).status,"WARN");
+    assert.throws(()=>parseAndValidateRoleOutput("researcher",JSON.stringify(bad),{roleSemantics:"enforce"}),/ROLE_SEMANTIC_INVALID/);
+  }
+  assert.equal(evaluateRoleSemantics("researcher",{selected_evidence:[],evidence_refs:["EVI_1"],rejected_source_refs:["EVI_2"],contradictions:[]}).status,"PASS");
 });
