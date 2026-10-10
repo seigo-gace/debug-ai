@@ -2,11 +2,6 @@
   "base_url": "https://debugai.asterav8.jp",
   "mode": "readonly",
   "repo": "/workspace/debug-ai",
-  "request": "GPT CHAT P0 read-only registered debug-ai README positive control for Host workspace file-inspect. No deploy, Model or GitOps.",
-  "server_command_id": "system.project_file_inspect",
-  "file_inspect_entry": "debug-ai",
-  "file_inspect_path": "README.md",
-  "file_inspect_offset": 0,
-  "file_inspect_root_key": "projects",
-  "file_inspect_all_pages": false
+  "request": "2026-10-10 GPT CHAT read-only actual DebugAI server repository HEAD attribution for durable recovery and retention incidents; no mutation or model calls.",
+  "server_command_id": "project.git_head"
 }
