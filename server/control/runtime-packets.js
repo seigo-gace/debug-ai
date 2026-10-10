@@ -73,7 +73,10 @@ function makePatchPacket({runId,diagnosisRef,repositoryRevision,paths=[],sourceE
     evidence_refs:Object.freeze(uniqueStrings(evidenceRefs))
   };
   if(payload.paths.length===0)throw new Error("PATCH_PACKET_PATHS_REQUIRED");
-  for(const path of payload.paths)if(payload.prohibited_paths.includes(path))throw new Error(`PATCH_PACKET_PROHIBITED_PATH:${path}`);
+  for(const selectedPath of payload.paths){
+    const rel=path.posix.normalize(selectedPath.replace(/\\/g,"/"));
+    if(payload.prohibited_paths.some(raw=>{const denied=path.posix.normalize(raw.replace(/\\/g,"/"));return rel===denied||rel.startsWith(denied+"/");}))throw new Error(`PATCH_PACKET_PROHIBITED_PATH:${rel}`);
+  }
   if(previousPatchPacket){
     assertPatchPacket(previousPatchPacket);
     if(previousPatchPacket.payload.run_id!==payload.run_id)throw new Error("REQUIREMENT_RUN_MISMATCH");
