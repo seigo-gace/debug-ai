@@ -3,16 +3,16 @@
   "mode": "readonly",
   "run_id": "",
   "repo": "/workspace/debug-ai",
-  "request": "2026-10-10 Tool B live source_reflect E2E for G-ACE-inc/server-core main; readonly verify only.",
+  "request": "2026-10-11 Tool B live source_reflect E2E for seigo-gace/TGserver main; readonly verify only.",
   "gitops_request": {
     "enabled": false
   },
   "source_reflect_request": {
     "enabled": true,
-    "repository": "G-ACE-inc/server-core",
+    "repository": "seigo-gace/TGserver",
     "branch": "main",
-    "sha": "77acd9f59e236b6d9d98d550bc0aa15923308a52",
-    "delegation_id": "dlg_master_servercore_reflect_v1",
-    "runtime_target": "servercore.source"
+    "sha": "0ecbdd7d9036ec254fe6be5a2257f03761672634",
+    "delegation_id": "dlg_master_tgserver_reflect_v1",
+    "runtime_target": "tgserver.source"
   }
 }
