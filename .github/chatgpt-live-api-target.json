@@ -2,11 +2,11 @@
   "base_url": "https://debugai.asterav8.jp",
   "mode": "readonly",
   "repo": "/workspace/debug-ai",
-  "request": "Retry exact PR92 GitOps reflection after Host confirmed WORKTREE_CHECK=PASS, then read back health and existing run only; no new model run",
+  "request": "Read existing DebugAI run status and inspect after verified production reflection, no new run or deploy",
   "server_command_id": "project.git_head",
   "run_id": "run_mv24304l_700ed16315",
   "gitops_request": {
-    "enabled": true,
+    "enabled": false,
     "branch": "fix/p1c-refix-no-new-evidence-20261010",
     "sha": "79221e300dcff7c66b744a7404331fad0efc9bbc"
   }
