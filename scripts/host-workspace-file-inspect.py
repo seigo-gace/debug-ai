@@ -11,7 +11,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-DEFAULT_ROOTS = (Path("/home/admin1/projects"), Path("/home/admin1/worktrees"))
+DEFAULT_ROOTS = (Path("/home/admin1/projects"), Path("/home/admin1/worktrees"), Path("/home/admin1/server-core"))
 MAX_JSON_BYTES = 4096
 CHUNK_MAX_BYTES = 512
 SHA256_MAX_BYTES = 2 * 1024 * 1024
@@ -19,7 +19,7 @@ READ_BLOCK = 256 * 1024
 ENTRY_NAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,120}$")
 REL_PATH_RE = re.compile(r"^[A-Za-z0-9_./-]{1,180}$")
 OFFSET_RE = re.compile(r"^(0|[1-9][0-9]{0,5})$")
-ROOT_KEY_RE = re.compile(r"^(projects|worktrees)$")
+ROOT_KEY_RE = re.compile(r"^(projects|worktrees|server-core)$")
 SECRET_LINE_PATTERNS = (
     re.compile(
         r"(?i)(api[_-]?key|secret|token|password|authorization|bearer)\s*[:=]\s*\S+"
@@ -130,12 +130,16 @@ def resolve_registered_entry(
     reg_key = str(meta.get("root_key") or "")
     if not ROOT_KEY_RE.fullmatch(reg_key):
         raise ValueError("ENTRY_REGISTRY_INVALID")
+    if reg_key == "server-core" and (entry_name != "server-core" or meta.get("repository") != "G-ACE-inc/server-core"):
+        raise ValueError("ENTRY_REGISTRY_INVALID")
     if root_key_hint is not None and root_key_hint != reg_key:
         raise ValueError("ENTRY_ROOT_KEY_MISMATCH")
     root = root_for_key(reg_key, roots)
+    if root.is_symlink():
+        raise ValueError("ENTRY_IS_SYMLINK")
     if not root.is_dir():
         raise ValueError("ENTRY_ROOT_MISSING")
-    candidate = root / entry_name
+    candidate = root if reg_key == "server-core" else root / entry_name
     try:
         if candidate.is_symlink():
             raise ValueError("ENTRY_IS_SYMLINK")
