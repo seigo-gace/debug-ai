@@ -75,7 +75,7 @@ function canonicalRoleViolations(role,value){
   }
   if(role==="researcher"){
     for(const key of ["selected_evidence","evidence_refs","rejected_source_refs","contradictions"]){
-      if(Object.prototype.hasOwnProperty.call(value,key)&&!Array.isArray(value[key]))violations.push(`ROLE_FIELD_INVALID:${key}`);
+      if(Object.prototype.hasOwnProperty.call(value,key)&&!(["evidence_refs","rejected_source_refs"].includes(key)?stringArray(value[key]):Array.isArray(value[key])))violations.push(`ROLE_FIELD_INVALID:${key}`);
     }
   }
   if(role==="diagnoser"){
