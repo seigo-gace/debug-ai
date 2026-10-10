@@ -2,7 +2,7 @@
   "base_url": "https://debugai.asterav8.jp",
   "mode": "readonly",
   "repo": "/workspace/debug-ai",
-  "request": "Exact PR92 source-qualified GitOps admission probe via existing signed Master Internal route. No new model inference.",
+  "request": "2026-10-10 post Host READBACK_VERIFIED reissue exact DebugAI PR92 guarded deployment and existing Run readback; no new model Run",
   "server_command_id": "project.git_head",
   "run_id": "run_mv24304l_700ed16315",
   "gitops_request": {
