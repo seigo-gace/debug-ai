@@ -2,13 +2,13 @@
   "base_url": "https://debugai.asterav8.jp",
   "mode": "readonly",
   "repo": "/workspace/debug-ai",
-  "request": "Read-only runtime log for original run Causal Scout timeout after production SHA reflection; no new run or deploy",
-  "server_command_id": "service.debug_ai_logs",
+  "request": "Reflect verified archive receipt fix exact SHA through admitted existing GitOps and inspect original Run; no new model execution",
+  "server_command_id": "project.git_head",
   "run_id": "run_mv24304l_700ed16315",
   "gitops_request": {
-    "enabled": false,
+    "enabled": true,
     "branch": "fix/p1c-refix-no-new-evidence-20261010",
-    "sha": "79221e300dcff7c66b744a7404331fad0efc9bbc"
+    "sha": "26b4221669c91147becafdbbf9951dfff38533d5"
   },
   "log_service": "debug-ai",
   "log_lines": 20
