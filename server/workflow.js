@@ -207,7 +207,7 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
           const peerRole=role==="code_scout"?"causal_scout":"code_scout",peerStep=peerRole==="code_scout"?WorkflowStepId.CODE_SCOUT:WorkflowStepId.CAUSAL_SCOUT;
           scoutStates.set(role,StepPhase.DONE);let peerRunning=false;
           if(durable)await commitScout(()=>{peerRunning=scoutStates.get(peerRole)===StepPhase.RUNNING;return saveStage(runId,role,{reuse_binding:scoutBinding,saved_at:Date.now(),reusable,result:{validated_output:output,tool_loop:out.tool_loop||null}},peerRunning?peerStep:step,{stepPhase:peerRunning?StepPhase.RUNNING:StepPhase.DONE,stepInputRef:peerRunning?inputManifestRef:null});});
-          await logProgress(runId,step,StepPhase.DONE);if(peerRunning)await logProgress(runId,peerStep,StepPhase.RUNNING);return out;
+          await logProgress(runId,peerRunning?peerStep:step,peerRunning?StepPhase.RUNNING:StepPhase.DONE);return out;
         }catch(error){scoutStates.set(role,StepPhase.BLOCKED);const invocation=invocationStatus(runId).find(item=>item.role===role&&item.started_at>=scoutStartedAt);error.meta={...error.meta,role,model:error.meta?.model||invocation?.model||null,invocation_id:error.meta?.invocation_id||invocation?.invocation_id||null};throw error;}
       }
       // Preserve parallel Scout orchestration and the adapter's global single
