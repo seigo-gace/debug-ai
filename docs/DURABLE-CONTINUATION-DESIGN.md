@@ -1052,7 +1052,7 @@ existing owner, not a new state/cache/workflow engine.
 ### Acceptance, ownership and rollback
 
 Codex owns Scout/AI adapter/observation and initial evidence intake. Branch stacks
-on exact PR92 `3a65248…`; its automaticRefixCandidate diff remains untouched. PR88
+on fresh PR92 `500e5d944e98d0d31cdac7e7c46a206bc1b16f41`; its automaticRefixCandidate diff remains untouched. PR88
 Role Output/Prompt, PR90 Patch Packet and PR91 Sandbox boundaries remain their
 owners' work. FREE review, quotas, Ledger and Strict Completion contracts are
 unchanged. No new MCP/workflow/Token/Provider or top-level project.
