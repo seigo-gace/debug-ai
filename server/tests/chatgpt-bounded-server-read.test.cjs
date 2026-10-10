@@ -24,8 +24,8 @@ test("No mutating, arbitrary, paid AI, or unscoped command is permitted",()=>{
     assert.ok(!m.ALLOWED.has(id));
     assert.throws(()=>m.validateTarget({...target,server_command_id:id}),/SERVER_COMMAND_DENIED/);
   }
-  assert.throws(()=>m.validateTarget({...target,mode:"dogfood"}),/SERVER_COMMAND_SCOPE_DENIED/);
-  assert.throws(()=>m.validateTarget({...target,base_url:"https://example.org"}),/SERVER_COMMAND_SCOPE_DENIED/);
+  assert.throws(()=>m.validateTarget({...target,server_command_id:"project.git_head",mode:"dogfood"}),/SERVER_COMMAND_SCOPE_DENIED/);
+  assert.throws(()=>m.validateTarget({...target,server_command_id:"project.git_head",base_url:"https://example.org"}),/SERVER_COMMAND_SCOPE_DENIED/);
   assert.equal(m.validateTarget({...target,server_command_id:""}),null);
 });
 test("Sanitized output rejects free text and secrets",()=>{
