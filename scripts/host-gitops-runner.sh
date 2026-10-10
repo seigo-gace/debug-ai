@@ -85,7 +85,7 @@ common_validate() {
   "$JQ_BIN" -e --argjson internal "$(if is_master_internal "$file"; then echo true; else echo false; fi)" '
     .schema=="debugai.gitops-request/v1" and
     (.id|type=="string" and test("^gitops_[0-9a-f]{24}$")) and
-    (.action=="publish" or .action=="deploy") and
+    (.action=="publish" or .action=="deploy" or ($internal and .action=="reflect")) and
     (.expected_head|type=="string" and test("^[0-9a-f]{40}$")) and
     .repo=="/workspace/debug-ai" and
     (.branch=="feat/tgserver-async-log-sink-20261003" or $internal) and
@@ -234,6 +234,46 @@ deploy_request() {
   result_json="$("$JQ_BIN" -n --arg before "$before_head" --arg sha "$request_sha" --arg health "$health_http" --arg state "$state" '{before_head:$before,deployed_sha:$sha,health_http:$health,container_state:$state}')"
 }
 
+# Reflect only the exact registered Git revision into a clean Host checkout.
+# Runtime services are intentionally untouched: the owning Project must
+# verify/restart its own consumer via a separately admitted runtime contract.
+reflect_request() {
+  local file="$1" before_head fetched changed approval_file active_head
+  is_master_internal "$file" || fail SOURCE_REFLECT_MASTER_ONLY || return 1
+  common_validate "$file" || return 1
+  "$JQ_BIN" -e '.action=="reflect" and .sha==.expected_head and .delegation.scope=="gace.source.reflect"' "$file" >/dev/null || fail SOURCE_REFLECT_SCOPE_INVALID || return 1
+  request_sha="$("$JQ_BIN" -r '.sha' "$file")"
+  [[ "$request_sha" =~ ^[0-9a-f]{40}$ ]] || fail SOURCE_REFLECT_SHA_INVALID || return 1
+  before_head="$(git_cmd rev-parse HEAD 2>/dev/null)" || fail SOURCE_REFLECT_HEAD_READ_FAILED || return 1
+  [[ "$before_head" =~ ^[0-9a-f]{40}$ ]] || fail SOURCE_REFLECT_HEAD_INVALID || return 1
+  changed="$(changed_paths)" || fail SOURCE_REFLECT_CHANGED_PATHS_READ_FAILED || return 1
+  [ -z "$changed" ] || fail SOURCE_REFLECT_WORKTREE_DIRTY || return 1
+  [ "$before_head" != "$request_sha" ] || fail SOURCE_REFLECT_NO_DIFF || return 1
+  (cd "$REPO" && run_timed 120s "$GIT_BIN" fetch --no-tags origin "refs/heads/$BRANCH") >/dev/null 2>&1 || fail SOURCE_REFLECT_FETCH_FAILED || return 1
+  fetched="$(git_cmd rev-parse FETCH_HEAD 2>/dev/null)" || fail SOURCE_REFLECT_FETCH_READ_FAILED || return 1
+  [ "$fetched" = "$request_sha" ] || fail SOURCE_REFLECT_REMOTE_SHA_MISMATCH || return 1
+  git_cmd merge-base --is-ancestor "$before_head" "$request_sha" >/dev/null 2>&1 || fail SOURCE_REFLECT_NON_FAST_FORWARD || return 1
+  changed="$(git_cmd diff --name-only "$before_head" "$request_sha")" || fail SOURCE_REFLECT_DIFF_FAILED || return 1
+  [ -n "$changed" ] || fail SOURCE_REFLECT_NO_DIFF || return 1
+  validate_standing_delegation "$file" || return 1
+  validate_delegation_paths "$changed" || return 1
+  approval_file="$APPROVAL_ROOT/${request_id}.approve"
+  issue_delegated_receipt "$file" "$before_head" "$approval_file" || return 1
+  consume_delegated_receipt "$file" "$approval_file" || return 1
+  # The consumed receipt is bound to the current clean pre-HEAD. An explicit
+  # revalidation precedes checkout; the post-checkout gate runs at target SHA.
+  validate_standing_delegation "$file" || return 1
+  git_cmd checkout --detach "$request_sha" >/dev/null 2>&1 || fail SOURCE_REFLECT_CHECKOUT_FAILED || return 1
+  if ! delegated_execution_gate "$file"; then
+    # Only the exact pre-verified commit is eligible for rollback.
+    git_cmd checkout --detach "$before_head" >/dev/null 2>&1 || fail SOURCE_REFLECT_ROLLBACK_FAILED || return 1
+    return 1
+  fi
+  active_head="$(git_cmd rev-parse HEAD 2>/dev/null)" || fail SOURCE_REFLECT_POST_HEAD_READ_FAILED || return 1
+  [ "$active_head" = "$request_sha" ] || fail SOURCE_REFLECT_POST_HEAD_MISMATCH || return 1
+  result_json="$("$JQ_BIN" -n --arg before "$before_head" --arg reflected "$active_head" --arg paths "$changed" '{before_head:$before,reflected_sha:$reflected,changed_paths:($paths|split("\n")|map(select(length>0))),runtime_restarted:false,active_checkout_verified:true}')"
+}
+
 process_file() {
   local source="$1" processing done_dir failed_dir started finished status id_for_status
   started="$(date +%s%3N)"
@@ -277,6 +317,8 @@ process_file() {
       publish_request "$processing" || true
     elif [ "$request_action" = "deploy" ]; then
       deploy_request "$processing" || true
+    elif [ "$request_action" = "reflect" ]; then
+      reflect_request "$processing" || true
     else
       err_code="REQUEST_ACTION_INVALID"
     fi

@@ -66,3 +66,51 @@ test('legacy invalid SHA manual receipt still rejects after persistent extension
 test('another registered Master repo uses explicit server mapping and its own branch/runtime identity',t=>{const f=master(t);f.policy.repository='seigo-gace/another-master';f.policy.repository_id=456;f.policy.repository_node_id='R_another';f.policy.remote='https://github.com/seigo-gace/another-master.git';f.policy.server_project_id='AnotherProject';f.policy.allowed_branches=['main'];f.policy.project.control_url='https://github.com/seigo-gace/another-master/issues/1';f.policy.runtime_target.id='another.compose';f.request.branch='main';f.request.delegation.repository=f.policy.repository;f.request.delegation.runtime_target=f.policy.runtime_target.id;Object.assign(f.github.metadata,{full_name:f.policy.repository,id:456,node_id:'R_another'});f.github.items.items[0].content={repository:f.policy.repository,url:f.policy.project.control_url};const git=path.join(f.root,'git');fs.writeFileSync(git,fs.readFileSync(git,'utf8').replaceAll('https://github.com/seigo-gace/debug-ai.git',f.policy.remote));f.sync();const s=f.run();assert.equal(s.state,'PASS',s.error);assert.equal(s.authorization.repository,f.policy.repository);assert.equal(s.authorization.server_project_id,'AnotherProject');assert.equal(s.authorization.server_project_path,f.repo);assert.equal(s.authorization.branch,'main');assert.equal(s.authorization.runtime_target,'another.compose');});
 
 test('existing MCP simple reference selects persistent mode only from installed Master registry',t=>{const f=master(t);delete f.request.delegation.mode;delete f.request.delegation.repository;delete f.request.delegation.runtime_target;f.request.branch='main';f.policy.allowed_branches=['main'];f.sync();const s=f.run();assert.equal(s.state,'PASS',s.error);assert.equal(s.authorization.delegation_mode,'MASTER_INTERNAL_PERSISTENT');assert.equal(s.authorization.repository,f.policy.repository);assert.equal(s.authorization.runtime_target,f.policy.runtime_target.id);});
+
+
+function sourceOnlyMaster(t){
+  const f=master(t);
+  const before='c'.repeat(40), git=path.join(f.root,'git');
+  f.policy.allowed_operations=['reflect'];
+  f.policy.allowed_scopes=['gace.source.reflect'];
+  f.policy.runtime_target={id:'tgserver.source',kind:'source_only'};
+  f.request.action='reflect';
+  f.request.delegation.scope='gace.source.reflect';
+  f.request.delegation.runtime_target='tgserver.source';
+  // Existing Fixture is a deterministic Git mock. Its initial checkout is
+  // behind target; fetching proves exact SHA and detached switch changes HEAD.
+  let script=fs.readFileSync(git,'utf8');
+  const old=`rev-parse) if [ -f '${f.root}/changed-head' ]; then cat '${f.root}/changed-head'; else echo '${f.sha}'; fi;;`;
+  const next=`rev-parse) if [ "$2" = FETCH_HEAD ]; then echo '${f.sha}'; elif [ -f '${f.root}/changed-head' ]; then cat '${f.root}/changed-head'; else echo '${before}'; fi;;`;
+  assert.ok(script.includes(old));script=script.replace(old,next);
+  script=script.replace("checkout) echo checkout >> '"+f.calls+"';;", "checkout) echo '"+f.sha+"' > '"+f.root+"/changed-head'; echo checkout >> '"+f.calls+"';;");
+  fs.writeFileSync(git,script,{mode:0o700});
+  f.sync();
+  return f;
+}
+test('registered Project source-only policy reflects exact commit without Docker Compose',t=>{
+  const f=sourceOnlyMaster(t);
+  const s=f.run();
+  assert.equal(s.state,'PASS',s.error);
+  assert.equal(s.action,'reflect');
+  assert.equal(s.result.reflected_sha,f.sha);
+  assert.equal(s.result.active_checkout_verified,true);
+  assert.equal(s.result.runtime_restarted,false);
+  assert.ok(s.result.changed_paths.includes('scripts/host-gitops-runner.sh'));
+  assert.equal(s.authorization.runtime_target,'tgserver.source');
+  assert.match(fs.readFileSync(f.calls,'utf8'),/checkout/);
+  assert.doesNotMatch(fs.readFileSync(f.calls,'utf8'),/docker/);
+});
+for(const [label,mutate,error] of [
+  ['unregistered project',f=>{f.github.items.items=[]},'MASTER_PROJECT_REPOSITORY_UNREGISTERED'],
+  ['wrong runtime target',f=>{f.request.delegation.runtime_target='debugai.compose'},'MASTER_RUNTIME_TARGET_FORBIDDEN'],
+  ['revoked registration',f=>{f.policy.revoked=true},'MASTER_DELEGATION_DISABLED_OR_REVOKED'],
+  ['scope mismatch',f=>{f.request.delegation.scope='debugai.compose.reflect'},'MASTER_SCOPE_FORBIDDEN'],
+  ['unexpected Compose settings',f=>{f.policy.runtime_target.compose_file='compose.yaml'},'MASTER_RUNTIME_POLICY_INVALID'],
+  ['branch forbidden',f=>{f.request.branch='main'},'MASTER_BRANCH_FORBIDDEN'],
+  ['forbidden changed path',f=>{fs.writeFileSync(path.join(f.root,'forbidden-path'),'1')},'MASTER_PROTECTED_PATH_FORBIDDEN'],
+])test('source-only reflection fails closed: '+label,t=>{
+  const f=sourceOnlyMaster(t);mutate(f);f.sync();
+  const s=f.run();assert.equal(s.state,'FAIL',JSON.stringify(s));assert.equal(s.error,error);
+  assert.equal(fs.existsSync(f.calls),false);
+});
