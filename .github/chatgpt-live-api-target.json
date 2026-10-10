@@ -2,8 +2,8 @@
   "base_url": "https://debugai.asterav8.jp",
   "mode": "readonly",
   "repo": "/workspace/debug-ai",
-  "request": "Read-only existing DebugAI run continued 2026-10-10: inspect terminal status, role evidence, diagnosis/candidate, deployed sha. No new run, no provider review, no GitOps.",
-  "server_command_id": "project.git_head",
+  "request": "Observe existing DebugAI run diagnosis BLOCKED without model/provider calls; bounded service logs and live status, inspect. No start/deploy.",
+  "server_command_id": "service.debug_ai_logs",
   "run_id": "run_mv24304l_700ed16315",
   "gitops_request": {
     "enabled": false,
