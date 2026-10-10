@@ -78,6 +78,7 @@ function reviewPacketInvariants(result){
 function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeEvidence=null,tgserver=null,patchService=null,authority=null,repoPolicy=null,sandboxVerification=null,dapEvidence=null,serverCommand=null,recoveryHooks=null,repositorySnapshot=repositorySnapshotId}={}){
   if(!aiCore)throw new Error("AI_CORE_ADAPTER_REQUIRED");
   const activeRuns=new Map(),backgroundErrors=new Map(),activeCodegenBenchmarks=new Map(),activeInvestigationBenchmarks=new Map(),activeModelAbBenchmarks=new Map();
+  const retryTimers=new Map(),MAX_AUTONOMOUS_RETRIES=2,RETRY_DELAY_MS=30000;
   async function logRuntime(event){if(tgserver)await tgserver.log(event);}
   function snapshotRepo(repoPath){const approved=repoPolicy?repoPolicy.assertRepo(repoPath):repoPath;return repositorySnapshot(approved,{allowMissingGitMarker:Boolean(repoPolicy)});}
   async function logProgress(runId,step,phase){
@@ -150,13 +151,24 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
   function durableResearchEvidence(roleResult){const out=[];for(const effectId of roleResult?.effect_refs||[]){const result=authority.readDurableRecord(toolResultPath(effectId),{expectedSchema:"debugai.tool-result/v1",allowMissing:true});if(!result)throw new Error(`DURABLE_EFFECT_RESULT_MISSING:${effectId}`);assertToolResultIntegrity(result);out.push({evidence_id:result.evidence_id,tool:result.tool,data:result.data,integrity:result.integrity});}return out;}
   function failClosedRecoveryError(error){return /(?:INCOMPATIBLE|MISMATCH|DIGEST|CORRUPT|SECURITY|FORBIDDEN|CANCELLED|EPOCH_FENCED|GENERATION_CONFLICT|INPUT_REF_MISSING)/i.test(String(error?.code||error?.message||error));}
   async function recordExecutionFailure(runId,error){
-    const meta=error?.meta||{},failure={code:String(error?.code||error?.message||"EXECUTION_ERROR").split(":")[0].slice(0,80),role:meta.role||null,model:meta.model||null,invocation_id:meta.invocation_id||null,timeout_class:meta.timeout_class||null,attempts:Number.isInteger(meta.attempts)?meta.attempts:null,failed_at:Date.now(),telemetry:meta.telemetry?require("./control/tool-loop.js").summarizeAiTelemetry([meta.telemetry]):null};
+    const meta=error?.meta||{},prior=authority?.durableEnabled?.()?loadStageRef(runId,"last_execution_failure")?.payload:null,priorRetries=Number.isInteger(prior?.autonomous_retry_attempt)?prior.autonomous_retry_attempt:0;
+    const failure={code:String(error?.code||error?.message||"EXECUTION_ERROR").split(":")[0].slice(0,80),role:meta.role||null,model:meta.model||null,invocation_id:meta.invocation_id||null,timeout_class:meta.timeout_class||null,attempts:Number.isInteger(meta.attempts)?meta.attempts:null,failed_at:Date.now(),autonomous_retry_attempt:priorRetries+1,telemetry:meta.telemetry?require("./control/tool-loop.js").summarizeAiTelemetry([meta.telemetry]):null};
     runtimeEvidence?.write(runId,"execution_failure",failure);
     Promise.resolve(logRuntime({run_id:runId,severity:"error",kind:"execution_failure",...failure})).catch(()=>console.error("DebugAI failure log delivery failed"));
     if(!authority?.durableEnabled?.())return;
-    const closed=failClosedRecoveryError(error),loaded=authority.loadDurable(runId),cursor=loaded.manifest.workflow_cursor,failureStep=meta.role==="code_scout"?WorkflowStepId.CODE_SCOUT:meta.role==="causal_scout"?WorkflowStepId.CAUSAL_SCOUT:cursor.step_id,durable=error?.durable||null,made=makeDurableWorkflowStage({runId,key:"last_execution_failure",payload:failure});
+    const closed=failClosedRecoveryError(error)||failure.autonomous_retry_attempt>MAX_AUTONOMOUS_RETRIES,loaded=authority.loadDurable(runId),cursor=loaded.manifest.workflow_cursor,failureStep=meta.role==="code_scout"?WorkflowStepId.CODE_SCOUT:meta.role==="causal_scout"?WorkflowStepId.CAUSAL_SCOUT:cursor.step_id,durable=error?.durable||null,made=makeDurableWorkflowStage({runId,key:"last_execution_failure",payload:failure});
     runtimeEvidence?.write(runId,"workflow_progress",{step:failureStep,phase:closed?StepPhase.BLOCKED:StepPhase.PENDING});
     await authority.commitDurable({runId,manifestPatch:{job:{status:closed?"BLOCKED":"RETRY_WAIT"},workflow_input_refs:{last_execution_failure:made.path},workflow_cursor:{...cursor,step_id:failureStep,...(["code_scout","causal_scout"].includes(meta.role)?{step_input_ref:loaded.manifest.workflow_input_refs?.analysis_input||cursor.step_input_ref,step_result_ref:null}:{}),step_phase:closed?StepPhase.BLOCKED:StepPhase.PENDING,active_role_execution_id:durable?.role_execution_id||cursor.active_role_execution_id}},runStatePatch:{job_status:closed?"BLOCKED":"RETRY_WAIT"},immutableRecords:[{path:made.path,record:made.record}]});
+    if(!closed&&!retryTimers.has(runId)){
+      const timer=setTimeout(()=>{
+        retryTimers.delete(runId);
+        void resumeAnalysis({runId}).catch(retryError=>{
+          backgroundErrors.set(runId,String(retryError?.code||retryError?.message||retryError));
+        });
+      },RETRY_DELAY_MS);
+      retryTimers.set(runId,timer);
+      timer.unref?.();
+    }
   }
   async function executeAnalysis(prepared){
     const {runId,resuming,targetRepo,input,inputRecord,inputManifestRef}=prepared,{rawRequest,failure,localEvidence}=input;
