@@ -1,12 +1,20 @@
 # DebugAI Authority
 
+## Codex Rule #16 application / branch choice (Master 2026-10-10)
+
+For this Codex repository, use current server-core Manifest → **SERVER_AI Rule #16**, DebugAI Current #41 literal `PROJECT_PURPOSE_CANONICAL`, and README-linked active Design/Strict Completion. The complete DebugAI product is the project purpose; Groq/Gemini FREE reviewers are only a current task. Newer Master corrections take precedence over stale dated handoffs.
+
+**Branch is not forbidden or numerically capped.** Check current/reverted/abandoned same-purpose CU, PR, branch, worktree and owner first. Reuse when useful; create a justified new branch, in-parent module/test area or nested worktree for independent tests, parallel work, clean isolation or efficiency. Forbid derivative sibling Projects in the top-level server Project list, not useful branches. Keep branch/HEAD, owner, split reason and cleanup owner; verify dependencies after merge/rejection before pruning. Never delete other owners' work.
+
+When one Host/Codex/Provider/branch operation is denied, block only that operation. Replan and **execute** other authorized Source/offline tests or give an exact owner handoff. Never treat CI as deploy, an unsent instruction as handoff, or a rejected Master instruction as pending.
+
 ## CURRENT Master instruction — DebugAI PRODUCT Codex (2026-10-09)
 
 For **DebugAI product investigation/codegen/reliability development owned by VS Code Codex**, use this section before the historical Cursor-specific handoff below. Codex cannot use Notion; **all design and adoption/decision background required to execute this product MUST live in the owning Repository**, not in an inaccessible Notion page or CHAT context. Never ask Master to decide an internal technical option or paste Notion data.
 
 **Required first reads per fresh resume and each materially new CU:**
 1. `G-ACE-inc/server-core` README → `docs/LOAD_SCOPE.md` → `operations/github-project-rule-plane.json` → full latest SERVER_AI Rule #16 (not GPT CHAT #17). Follow rule for Project Current, Host/Registry and owner/worktree containment.
-2. Fresh GitHub Project #1 Current, canonical DebugAI Issues #41/#42, relevant actual Source/PR/branch/HEAD/CI and Host ownership. Project v2 field values that cannot be read are UNKNOWN, not PASS.
+2. Fresh GitHub Project #1 Current, DebugAI Issues #41/#42 **including exact full product purpose**, README-linked Design/Definition of Complete and relevant Source/PR/branch/HEAD/CI/Host ownership. Project v2 field values that cannot be read are UNKNOWN, not PASS.
 3. **Design:** `docs/DEBUGAI_UNIFIED_IMPROVEMENT_PLAN_20261008.md` particularly §13/§14; **Repository decision rationale and rejected alternatives:** `docs/DEBUGAI_PRODUCT_DECISION_CONTEXT_20261009.md`; **Codex execution/gates:** `docs/CODEX_UNIFIED_PRODUCT_EXECUTION_DESIGN_20261009.md` especially §5–§9. Read only relevant additional investigation/codegen/5V/Sandbox design deltas and direct Source/tests after these mandatory anchors.
 
 **Persistent product design contract:** before coding, read affected adopted design and existing Source. For any meaningful technical design addition/deviation, write rationale, accepted/rejected alternatives, traceability to product requirements, interface/ownership impacts, safety, measurable before/after evidence, holdout/rollback and unknowns into the **relevant existing Repo Design/Delta in the SAME owned branch/PR**. Do not create duplicate architecture or a second authority. After implementation, check design against actual code/tests, commit/push, verify remote Repo design readback and report exact SHA/CI/Source/Runtime separately to #41/#42. If no deviation, report `DESIGN_DELTA=NOT_REQUIRED` with reason. Missing design/readback is not COMPLETE. Never require Notion availability; `NOTION_ACCESS=UNAVAILABLE` for Codex, optional external historical archiving is separate.
@@ -80,8 +88,8 @@ Documentation-only commits after `b9203e...` require their own exact-head CI bef
 - Canonical live checkout currently recorded is `/home/admin1/projects/debug-ai`; read it back before use.
 - Do not discard `.debugai-input/` or other local-only Server material merely to make a deploy/measurement pass.
 - Container start, HTTP 200, image build, or green CI alone is not Current Runtime PASS.
-- Server source reflection/rebuild/recreate remains governed by current server-core and explicit Master authorization.
-- The current feature-branch source has no implied deploy/recreate/restart authorization. Before reflection, bind approval to one exact post-documentation SHA and re-read the current server-core deployment authority.
+- Server reflection/rebuild follows current server-core delegated technical decisions **and independently verified Host admission**. Routine in-scope reversible branch/path/deploy decisions do not demand fresh Master technical approval; protected gates still apply.
+- A Source/CI PASS never grants deploy/restart authorization. Before reflection verify exact repository/branch/SHA/paths/effects and installed Host policy/authorized receipt.
 
 ## Evidence
 
