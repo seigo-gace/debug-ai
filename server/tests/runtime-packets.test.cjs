@@ -72,3 +72,13 @@ test("public review summary exposes only opaque review metadata and never diff c
   assert.equal(serialized.includes("do-not-export"),false);
   assert.equal(serialized.includes(secretDiff),false);
 });
+
+
+test("P1-A packet denies nested paths under protected directories without overblocking siblings",()=>{
+  const input={runId:"r_scoped",diagnosisRef:"diag",repositoryRevision:"git_before",prohibitedPaths:["secrets","src/private"],paths:["secrets/token.json"]};
+  assert.throws(()=>makePatchPacket(input),/PATCH_PACKET_PROHIBITED_PATH:secrets\/token.json/);
+  assert.throws(()=>makePatchPacket({...input,paths:["src/private/nested/config.json"]}),/PATCH_PACKET_PROHIBITED_PATH:src\/private\/nested\/config.json/);
+  assert.throws(()=>makePatchPacket({...input,paths:["src/../secrets/token.json"]}),/PATCH_PACKET_PROHIBITED_PATH:secrets\/token.json/);
+  const allowed=makePatchPacket({...input,paths:["src/private-utils/index.js"]});
+  assert.deepEqual(allowed.payload.paths,["src/private-utils/index.js"]);
+});
