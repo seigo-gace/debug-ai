@@ -1,18 +1,16 @@
 {
   "base_url": "https://debugai.asterav8.jp",
   "mode": "readonly",
-  "run_id": "",
+  "run_id": "run_mv24304l_700ed16315",
   "repo": "/workspace/debug-ai",
-  "request": "2026-10-10 Tool B live source_reflect E2E for G-ACE-inc/server-core main; readonly verify only.",
+  "request": "Codex same-Run practical qualification: guarded reflection of exact combined owner Source; no new dogfood or provider benchmark.",
   "gitops_request": {
-    "enabled": false
+    "enabled": true,
+    "branch": "fix/scout-observation-reuse-20261010",
+    "sha": "e8f85b1efc11bec3784b2617390772319fab62cd"
   },
   "source_reflect_request": {
-    "enabled": true,
-    "repository": "G-ACE-inc/server-core",
-    "branch": "main",
-    "sha": "77acd9f59e236b6d9d98d550bc0aa15923308a52",
-    "delegation_id": "dlg_master_servercore_reflect_v1",
-    "runtime_target": "servercore.source"
-  }
+    "enabled": false
+  },
+  "server_command_id": "project.git_head"
 }
