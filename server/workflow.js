@@ -228,11 +228,28 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
     assertPatchRequirements(patchPacket,{operations:candidateResult.operations||[],repositoryRevision:snapshotRepo(targetRepo),sourceHashes:patchPacketSource(targetRepo,selectedPaths).preconditionHashes,availableEvidenceIds:patchPacketEvidenceRefs(analysis)});
     const patchEngineerRuntime={telemetry:out?.tool_loop?.telemetry||out?.tool_loop?.progress?.runtime_telemetry||null,selected_skill_ids:[...(out?.tool_loop?.selected_skill_ids||out?.control_plane?.selected_skill_ids||[])]};
     const candidate=patchService?patchService.create({repo:targetRepo,selectedPaths,task,result:candidateResult,patchPacket}):{...candidateResult,requirement_binding:patchPacket};
-    const candidateVerification=await verifyCandidateBeforeApproval(runId,candidate);
+    let candidateVerification=await verifyCandidateBeforeApproval(runId,candidate);
+    let finalCandidate=candidate,preapprovalRefix=null;
+    if(candidateVerification.status==="FINAL_INVALID"&&candidateVerification.checks?.some(c=>c.status==="FAIL"&&c.executed===true)&&runtimeEvidence?.list&&runtimeEvidence?.write&&patchService?.create){
+      if(runtimeEvidence.list(runId,{types:["preapproval_refix_attempt"],limit:128}).length===0){
+        const failed=registerEvidenceList("LOCAL_RUNTIME",candidateVerification.checks.filter(c=>c.status==="FAIL"&&c.executed===true));
+        const failedIds=evidenceIds(failed),admitted=mergeEvidenceIds(refs,failedIds);
+        runtimeEvidence.write(runId,"preapproval_refix_attempt",{original_candidate_id:candidate.id,original_candidate_hash:candidate.candidate_hash,attempt:1,evidence_ids:failedIds});
+        const diag=roleOutput(await callReadOnlyRole("diagnoser",{system:"Diagnose fresh failed candidate checks only. Preserve source and requirements. JSON only; never apply.",user:JSON.stringify({patch_packet:patchPacket,failed_checks:evidencePromptView(failed),prior_candidate_id:candidate.id})},makeReadOnlyToolRuntime(targetRepo,runId),{baseEvidenceIds:admitted,strictEvidenceRefs:true}),"diagnoser");
+        const patch=roleOutput(await callReadOnlyRole("patch_engineer",{system:"Repair failed preapproval candidate; one different candidate only, exact same paths, no apply. JSON only.",user:JSON.stringify({patch_packet:patchPacket,diagnosis:diag,failed_checks:evidencePromptView(failed),prior_candidate_id:candidate.id})},makeReadOnlyToolRuntime(targetRepo,runId),{baseEvidenceIds:admitted,strictEvidenceRefs:true}),"patch_engineer");
+        assertPatchRequirements(patchPacket,{operations:patch.operations||[],repositoryRevision:snapshotRepo(targetRepo),sourceHashes:patchPacketSource(targetRepo,selectedPaths).preconditionHashes,availableEvidenceIds:admitted});
+        const next=patchService.create({repo:targetRepo,selectedPaths,task,result:patch,patchPacket,stage:"debug-preapproval-refix"});
+        if(next.candidate_hash===candidate.candidate_hash)throw new Error("PREAPPROVAL_REFIX_NO_CANDIDATE_DELTA");
+        const recheck=await verifyCandidateBeforeApproval(runId,next);
+        preapprovalRefix={attempt:1,previous_candidate_id:candidate.id,failed_evidence_ids:failedIds,result_status:recheck.status};
+        runtimeEvidence.write(runId,"preapproval_refix_result",preapprovalRefix);
+        finalCandidate=next;candidateVerification=recheck;
+      }
+    }
     if(authority){let run=authority.load(runId);run=authority.transition(run,"PATCH_READY");authority.transition(run,"WAITING_APPROVAL");}
-    runtimeEvidence?.write(runId,"patch_candidate",{id:candidate.id,diff_hash:candidate.diff_hash,summary:candidate.summary,patch_packet_digest:patchPacket.packet_digest,patch_engineer_runtime:patchEngineerRuntime});
-    await logRuntime({run_id:runId,severity:"info",kind:"patch_candidate",candidate_id:candidate.id,diff_hash:candidate.diff_hash,patch_packet_digest:patchPacket.packet_digest,summary:candidate.summary,state:"WAITING_APPROVAL"});
-    return{run_id:runId,state:"WAITING_APPROVAL",candidate,patch_packet:{schema:patchPacket.schema,packet_digest:patchPacket.packet_digest},patch_engineer_runtime:patchEngineerRuntime,candidate_verification:candidateVerification};
+    runtimeEvidence?.write(runId,"patch_candidate",{id:finalCandidate.id,diff_hash:finalCandidate.diff_hash,summary:finalCandidate.summary,patch_packet_digest:patchPacket.packet_digest,patch_engineer_runtime:patchEngineerRuntime,preapproval_refix:preapprovalRefix});
+    await logRuntime({run_id:runId,severity:"info",kind:"patch_candidate",candidate_id:finalCandidate.id,diff_hash:finalCandidate.diff_hash,patch_packet_digest:patchPacket.packet_digest,summary:finalCandidate.summary,state:"WAITING_APPROVAL"});
+    return{run_id:runId,state:"WAITING_APPROVAL",candidate:finalCandidate,patch_packet:{schema:patchPacket.schema,packet_digest:patchPacket.packet_digest},patch_engineer_runtime:patchEngineerRuntime,candidate_verification:candidateVerification,preapproval_refix:preapprovalRefix};
   }
 
   function automaticRefixAttemptCount(runId){
