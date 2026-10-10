@@ -2,14 +2,15 @@
   "base_url": "https://debugai.asterav8.jp",
   "mode": "readonly",
   "repo": "/workspace/debug-ai",
-  "request": "Exact-qualified GC receipt manifest transition repair reflect; status original run only. No new model work or free provider tests.",
-  "server_command_id": "service.debug_ai_logs",
+  "request": "Read-only live state after blocked GC reflection. Host admission not verified; do not rerun deployment, no AI/provider calls.",
+  "server_command_id": "system.projects_inventory",
   "run_id": "run_mv24304l_700ed16315",
   "gitops_request": {
-    "enabled": true,
+    "enabled": false,
     "branch": "fix/p1c-refix-no-new-evidence-20261010",
     "sha": "ba1b76df4dd48037151cf8a91fd3c03dedbe13dc"
   },
   "log_service": "debug-ai",
-  "log_lines": 20
+  "log_lines": 20,
+  "inventory_page": 0
 }
