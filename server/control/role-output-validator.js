@@ -75,8 +75,14 @@ function canonicalRoleViolations(role,value){
     for(const key of ["candidates","hypotheses"]){
       if(Object.prototype.hasOwnProperty.call(value,key)&&!Array.isArray(value[key]))violations.push(`ROLE_FIELD_INVALID:${key}`);
     }
+    for(const key of ["causal_chain","unsupported_links","alternate_hypotheses"]){
+      if(Object.prototype.hasOwnProperty.call(value,key)&&!stringArray(value[key]))violations.push(`ROLE_FIELD_INVALID:${key}`);
+    }
+    if(value.failure_family!==undefined&&!nonBlankString(value.failure_family))violations.push("ROLE_FIELD_INVALID:failure_family");
+    if(value.confidence!==undefined&&!["LOW","MEDIUM","HIGH"].includes(value.confidence))violations.push("ROLE_FIELD_INVALID:confidence");
   }
   if(role==="researcher"){
+    if(value.bound_version!==undefined&&value.bound_version!==null&&typeof value.bound_version!=="string")violations.push("ROLE_FIELD_INVALID:bound_version");
     for(const key of ["selected_evidence","evidence_refs","rejected_source_refs","contradictions"]){
       if(Object.prototype.hasOwnProperty.call(value,key)&&!(["evidence_refs","rejected_source_refs"].includes(key)?stringArray(value[key]):Array.isArray(value[key])))violations.push(`ROLE_FIELD_INVALID:${key}`);
     }
