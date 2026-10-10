@@ -72,7 +72,9 @@ test("P0-A strict evidence binding checks top-level researcher refs without chan
   const value={selected_evidence:[],evidence_refs:["EVI_known"],rejected_source_refs:[],contradictions:[]};
   assert.doesNotThrow(()=>parseAndValidateRoleOutput("researcher",JSON.stringify(value),{availableEvidenceIds:["EVI_known"],strictEvidenceRefs:true}));
   assert.throws(()=>parseAndValidateRoleOutput("researcher",JSON.stringify(value),{availableEvidenceIds:[],strictEvidenceRefs:true}),/TOP_LEVEL_EVIDENCE_REF_UNKNOWN:0:EVI_known/);
-  assert.doesNotThrow(()=>parseAndValidateRoleOutput("researcher",JSON.stringify(value),{roleSemantics:"shadow"}));
+  assert.throws(()=>parseAndValidateRoleOutput("researcher",JSON.stringify(value),{roleSemantics:"shadow"}),/TOP_LEVEL_EVIDENCE_REF_UNKNOWN:0:EVI_known/);
+  assert.doesNotThrow(()=>parseAndValidateRoleOutput("researcher",JSON.stringify(value),{roleSemantics:"shadow",availableEvidenceIds:["EVI_known"]}));
+  assert.doesNotThrow(()=>parseAndValidateRoleOutput("researcher",JSON.stringify({...value,evidence_refs:["doc-local"]}),{roleSemantics:"shadow"}));
   const invalid={...value,evidence_refs:["EVI_known",null]};
   assert.throws(()=>parseAndValidateRoleOutput("researcher",JSON.stringify(invalid),{availableEvidenceIds:["EVI_known"],strictEvidenceRefs:true}),/TOP_LEVEL_EVIDENCE_REF_INVALID:1/);
 });
