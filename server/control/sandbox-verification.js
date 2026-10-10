@@ -64,6 +64,10 @@ function toEvidence(result,check){
     sandbox:{backend:result?.isolation?.backend||null,job_id:result.job_id,network:result?.isolation?.network||null,workspace_mount:result?.isolation?.workspace_mount||null,secret_mounts:result?.isolation?.secret_mounts||null,docker_socket:result?.isolation?.docker_socket||null},
   };
 }
+function candidateSyntaxChecks(operations){
+  const paths=[...new Set(operations.filter(op=>op.type!=="delete"&&/\.[cm]?js$/i.test(op.path)).map(op=>op.path))];
+  return paths.map(rel=>({action:"node.check",script:`node --check ${rel}`,check_type:"SYNTAX",timeout_ms:120000,args:{path:rel}}));
+}
 function createSandboxVerificationLane({jobRoot=process.env.DEBUG_AI_SANDBOX_JOB_ROOT||"/sandbox-jobs",prepare=prepareSandboxJob,wait=waitSandboxResult}={}){
   async function collect(repo){
     if(!repo)return {status:"NOT_CONFIGURED",checks:[]};
@@ -86,11 +90,12 @@ function createSandboxVerificationLane({jobRoot=process.env.DEBUG_AI_SANDBOX_JOB
     const pkg=readPackage(patchCandidate.repo);
     if(!pkg)return unavailable("CANDIDATE_PACKAGE_NOT_CONFIGURED");
     if(["dependencies","devDependencies","optionalDependencies","peerDependencies"].some(key=>Object.keys(pkg[key]||{}).length))return unavailable("CANDIDATE_DEPENDENCIES_NOT_QUALIFIED");
-    const checks=configuredChecks(patchCandidate.repo);
-    if(!checks.length)return unavailable("CANDIDATE_CHECKS_NOT_CONFIGURED");
+    const packageChecks=configuredChecks(patchCandidate.repo);
+    if(!packageChecks.length)return unavailable("CANDIDATE_CHECKS_NOT_CONFIGURED");
+    const checks=[...candidateSyntaxChecks(operations),...packageChecks];
     const out=[];let baselineDigest=null,candidateDigest=null;
     for(const check of checks){
-      const {job}=preparePatchCandidateSandboxJob({patchCandidate,jobRoot,action:check.action,timeoutMs:check.timeout_ms,requiredPaths:["package.json"]});
+      const {job}=preparePatchCandidateSandboxJob({patchCandidate,jobRoot,action:check.action,args:check.args||{},timeoutMs:check.timeout_ms,requiredPaths:["package.json"]});
       const expected=job.request;
       if(baselineDigest&& (baselineDigest!==expected.source_snapshot.manifest.digest||candidateDigest!==expected.candidate_snapshot.manifest.digest))throw new Error("SANDBOX_CANDIDATE_SOURCE_CHANGED_BETWEEN_CHECKS");
       baselineDigest=expected.source_snapshot.manifest.digest;candidateDigest=expected.candidate_snapshot.manifest.digest;
@@ -105,4 +110,4 @@ function createSandboxVerificationLane({jobRoot=process.env.DEBUG_AI_SANDBOX_JOB
   }
   return {collect,collectCandidate};
 }
-module.exports={CHECKS,configuredChecks,toEvidence,createSandboxVerificationLane};
+module.exports={CHECKS,configuredChecks,candidateSyntaxChecks,toEvidence,createSandboxVerificationLane};

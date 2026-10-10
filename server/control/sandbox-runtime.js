@@ -189,11 +189,15 @@ function prepareSandboxJob({sourceRepo,jobRoot,action,args={},timeoutMs=120000,r
   // Candidate operations remain strictly within the copied, isolated job directory.
   if(!sourceRepo||!jobRoot)throw new Error("SANDBOX_JOB_INPUT_REQUIRED");if(!ACTIONS.has(action))throw new Error(`SANDBOX_ACTION_INVALID:${action}`);if(!Number.isInteger(timeoutMs)||timeoutMs<1000||timeoutMs>300000)throw new Error("SANDBOX_TIMEOUT_INVALID");
   if(!Array.isArray(requiredPaths))throw new Error("SANDBOX_SNAPSHOT_POLICY_INVALID");
-  const required=[...requiredPaths,action==="node.check"?snapshotPath(path.posix.normalize(safeRel(args.path))):"package.json"];
+  const checkPath=action==="node.check"?snapshotPath(path.posix.normalize(safeRel(args.path))):null;
+  // Candidate node.check uses the same BASELINE required-path contract as package checks.
+  // The requested syntax path is validated in the isolated CANDIDATE after staging.
+  const required=[...requiredPaths,...(checkPath?(candidate===undefined?[checkPath]:[]):["package.json"])];
   const source=fs.realpathSync(sourceRepo),root=normalizeJobRoot(jobRoot),jobs=path.join(root,"jobs");fs.mkdirSync(jobs,{recursive:true});
   const jobId=`JOB_${crypto.randomBytes(12).toString("hex")}`,pending=path.join(jobs,`.pending-${jobId}`),finalDir=path.join(jobs,jobId),snapshot=path.join(pending,"repo"),tmpDir=path.join(pending,"tmp");fs.mkdirSync(pending,{recursive:false});fs.mkdirSync(tmpDir,{recursive:true});
   try{
     const copied=copySnapshot(source,snapshot,{requiredPaths:required}),staged=candidate===undefined?null:stageSandboxCandidate(snapshot,copied.manifest,candidate),request={schema:"debugai.sandbox-job/v1",job_id:jobId,action,args,timeout_ms:timeoutMs,source_snapshot:{files:copied.files,bytes:copied.bytes,skipped_symlinks:copied.skipped_symlinks,manifest:copied.manifest},...(staged?{candidate_snapshot:staged,...(staged.patch_candidate_ref?{patch_candidate_origin:staged.patch_candidate_ref}:{})}:{})};
+    if(checkPath&&staged){const file=path.join(snapshot,checkPath);if(!fs.existsSync(file)||!fs.statSync(file).isFile())throw new Error("SANDBOX_NODE_CHECK_CANDIDATE_PATH_MISSING");}
     fs.writeFileSync(path.join(pending,"request.json"),JSON.stringify(request));fs.renameSync(pending,finalDir);return{job_id:jobId,job_dir:finalDir,request};
   }catch(error){fs.rmSync(pending,{recursive:true,force:true});throw error;}
 }
