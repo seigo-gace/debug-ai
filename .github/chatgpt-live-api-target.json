@@ -2,13 +2,13 @@
   "base_url": "https://debugai.asterav8.jp",
   "mode": "readonly",
   "repo": "/workspace/debug-ai",
-  "request": "2026-10-10 22:38 JST: P0 DebugAI no-stop dogfood diagnosis; read-only inspect existing run run_mv24304l_700ed16315, cursor/error/artifacts and bounded Host logs; no new Run, model calls or deploy.",
+  "request": "2026-10-10 dogfood bounded retry Source+CI qualified; existing admitted GitOps exact SHA reflection; read only existing run and Host after reflection. No new provider calls.",
   "server_command_id": "project.git_head",
   "run_id": "run_mv24304l_700ed16315",
   "gitops_request": {
-    "enabled": false,
+    "enabled": true,
     "branch": "fix/p1c-refix-no-new-evidence-20261010",
-    "sha": "26b4221669c91147becafdbbf9951dfff38533d5"
+    "sha": "3db0acdbf285a3866ac480d23cc5f44a6b1bf2f8"
   },
   "log_service": "debug-ai",
   "log_lines": 20
