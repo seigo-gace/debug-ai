@@ -78,3 +78,14 @@ test("P0-A strict evidence binding checks top-level researcher refs without chan
   const invalid={...value,evidence_refs:["EVI_known",null]};
   assert.throws(()=>parseAndValidateRoleOutput("researcher",JSON.stringify(invalid),{availableEvidenceIds:["EVI_known"],strictEvidenceRefs:true}),/TOP_LEVEL_EVIDENCE_REF_INVALID:1/);
 });
+
+
+test("P0-A actual role tool-loop binds researcher evidence references without calling provider",async()=>{
+  const {runRoleWithReadOnlyTools}=require("../control/tool-loop.js");
+  const content=JSON.stringify({selected_evidence:[],evidence_refs:["EVI_role_live"],rejected_source_refs:[],contradictions:[]});
+  const aiCore={call:async()=>({content})};
+  await assert.rejects(()=>runRoleWithReadOnlyTools({aiCore,role:"researcher",baseEvidenceIds:[],strictEvidenceRefs:true}),/TOP_LEVEL_EVIDENCE_REF_UNKNOWN:0:EVI_role_live/);
+  const valid=await runRoleWithReadOnlyTools({aiCore,role:"researcher",baseEvidenceIds:["EVI_role_live"],strictEvidenceRefs:true});
+  assert.deepEqual(valid.validated_output.evidence_refs,["EVI_role_live"]);
+  assert.deepEqual(valid.tool_loop.evidence_ids,["EVI_role_live"]);
+});
