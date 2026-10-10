@@ -230,12 +230,18 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
     const candidate=patchService?patchService.create({repo:targetRepo,selectedPaths,task,result:candidateResult,patchPacket}):{...candidateResult,requirement_binding:patchPacket};
     let candidateVerification=await verifyCandidateBeforeApproval(runId,candidate);
     let finalCandidate=candidate,preapprovalRefix=null;
-    if(candidateVerification.status==="FINAL_INVALID"&&candidateVerification.checks?.some(c=>c.status==="FAIL"&&c.executed===true)&&runtimeEvidence?.list&&runtimeEvidence?.write&&patchService?.create){
+    if(candidateVerification.status==="FINAL_INVALID"&&candidateVerification.checks?.some(c=>c.status==="FAIL"&&c.executed===true)&&runtimeEvidence?.list&&runtimeEvidence?.write&&patchService?.create&&typeof externalReview?.hypothesis==="function"){
       if(runtimeEvidence.list(runId,{types:["preapproval_refix_attempt"],limit:128}).length===0){
         const failed=registerEvidenceList("LOCAL_RUNTIME",candidateVerification.checks.filter(c=>c.status==="FAIL"&&c.executed===true));
         const failedIds=evidenceIds(failed),admitted=mergeEvidenceIds(refs,failedIds);
         runtimeEvidence.write(runId,"preapproval_refix_attempt",{original_candidate_id:candidate.id,original_candidate_hash:candidate.candidate_hash,attempt:1,evidence_ids:failedIds});
         const diag=roleOutput(await callReadOnlyRole("diagnoser",{system:"Diagnose fresh failed candidate checks only. Preserve source and requirements. JSON only; never apply.",user:JSON.stringify({patch_packet:patchPacket,failed_checks:evidencePromptView(failed),prior_candidate_id:candidate.id})},makeReadOnlyToolRuntime(targetRepo,runId),{baseEvidenceIds:admitted,strictEvidenceRefs:true}),"diagnoser");
+        // Re-diagnosis cannot bypass the existing hypothesis review boundary.
+        const hypothesis={privacy_class:"PUBLIC",sanitized:true,opaque_evidence:true,statement:pickDiagnosisStatement(diag),cause_class:String(diag?.cause_kind||"UNKNOWN"),evidence_count:admitted.length,local_evidence_count:failedIds.length,local_evidence:[],evidence_gap:false,evidence_status:"FINAL_VALID",evidence_gap_scope:null};
+        const freshReview=await reviewWithLocalFallback("hypothesis",{privacy:{privacy_class:"PUBLIC",sanitized:true,opaque_evidence:true},hypothesis},async()=>roleOutput(await callReadOnlyRole("local_reviewer",{system:"Review fresh failed preapproval candidate diagnosis; PASS, FAIL or INSUFFICIENT_EVIDENCE. JSON only. Never apply.",user:JSON.stringify({hypothesis,diagnosis:diag,failed_checks:evidencePromptView(failed)})},makeReadOnlyToolRuntime(targetRepo,runId),{baseEvidenceIds:admitted}),"local_reviewer"));
+        const reviewVerdict=String((freshReview.external||freshReview.local)?.json?.verdict||"").toUpperCase();
+        runtimeEvidence.write(runId,"preapproval_refix_review",{attempt:1,verdict:reviewVerdict||"MISSING",provider:freshReview.external?.provider||freshReview.local?.provider||"NONE"});
+        if(reviewVerdict!=="PASS")throw new Error("PREAPPROVAL_REFIX_HYPOTHESIS_NOT_APPROVED");
         const patch=roleOutput(await callReadOnlyRole("patch_engineer",{system:"Repair failed preapproval candidate; one different candidate only, exact same paths, no apply. JSON only.",user:JSON.stringify({patch_packet:patchPacket,diagnosis:diag,failed_checks:evidencePromptView(failed),prior_candidate_id:candidate.id})},makeReadOnlyToolRuntime(targetRepo,runId),{baseEvidenceIds:admitted,strictEvidenceRefs:true}),"patch_engineer");
         assertPatchRequirements(patchPacket,{operations:patch.operations||[],repositoryRevision:snapshotRepo(targetRepo),sourceHashes:patchPacketSource(targetRepo,selectedPaths).preconditionHashes,availableEvidenceIds:admitted});
         const next=patchService.create({repo:targetRepo,selectedPaths,task,result:patch,patchPacket,stage:"debug-preapproval-refix"});

@@ -274,7 +274,7 @@ CU; this change does not automatically consume new model calls or approve a fix.
 
 ### 2026-10-10 P1-C bounded preapproval refix wiring — current source delta
 
-After the original candidate is checked in the unchanged isolated Sandbox,
+The preapproval regeneration path is additionally gated on the existing\nconfigured hypothesis reviewer; it invokes the same external FREE-bounded\nreview with existing Local Reviewer fallback and proceeds to Patch Engineer\nonly on a fresh PASS. No reviewer configured, FAIL, PENDING or INSUFFICIENT\nmeans no regenerated candidate; negative verdict is persisted and the run\nremains incomplete. Offline regression uses a stub reviewer with zero HTTP.\n\nAfter the original candidate is checked in the unchanged isolated Sandbox,
 an actual FINAL_INVALID with at least one executed failing check may trigger
 **one** local-model preapproval re-diagnosis and Patch Engineer candidate
 regeneration, but only where existing persistent RuntimeEvidence read/write and

@@ -124,7 +124,7 @@ test("preapproval failed candidate receives one evidence-bound retry without tou
  const service=new PatchService({runtimeRoot:path.join(f.root,"runtime")});
  let verifies=0;const roles=[];
  const runtimeEvidence={write(run,type,payload){records.push({type,payload});},list(_run,{types}={}){return records.filter(x=>!types||types.includes(x.type)).map(x=>({payload:x.payload,type:x.type}));}};
- const workflow=createWorkflow({patchService:service,runtimeEvidence,sandboxVerification:{async collectCandidate(c){verifies++;return{status:verifies===1?"FINAL_INVALID":"FINAL_VALID",checks:[{kind:"deterministic_sandbox_check",name:"sandbox:test",status:verifies===1?"FAIL":"PASS",executed:true,configured:true,patch_candidate_id:c.id,patch_candidate_hash:c.candidate_hash}]};}},aiCore:{async call(role){roles.push(role);if(role==="diagnoser")return{content:JSON.stringify({hypothesis:"incorrect increment branch",claims:[]})};return{content:JSON.stringify({operations:[{type:"replace",path:"value.js",old:"module.exports=1;",new:roles.length===1?"module.exports=2;":"module.exports=1; // repaired"}]})};}}});
+ const workflow=createWorkflow({patchService:service,runtimeEvidence,externalReview:{hypothesis:async()=>({provider:"fixture",json:{verdict:"PASS"}})},sandboxVerification:{async collectCandidate(c){verifies++;return{status:verifies===1?"FINAL_INVALID":"FINAL_VALID",checks:[{kind:"deterministic_sandbox_check",name:"sandbox:test",status:verifies===1?"FAIL":"PASS",executed:true,configured:true,patch_candidate_id:c.id,patch_candidate_hash:c.candidate_hash}]};}},aiCore:{async call(role){roles.push(role);if(role==="diagnoser")return{content:JSON.stringify({hypothesis:"incorrect increment branch",claims:[]})};return{content:JSON.stringify({operations:[{type:"replace",path:"value.js",old:"module.exports=1;",new:roles.length===1?"module.exports=2;":"module.exports=1; // repaired"}]})};}}});
  const result=await workflow.patchCandidate({runId:"run_preapproval",analysis:{diagnosis:{public_statement:"value"},external_hypothesis_review:{json:{verdict:"PASS"}},evidence_registry:{evidence_ids:[]}},repo:f.repo,selectedPaths:["value.js"],task:"fix value"});
  assert.equal(result.state,"WAITING_APPROVAL");assert.equal(verifies,2);
  assert.deepEqual(roles,["patch_engineer","diagnoser","patch_engineer"]);
@@ -140,12 +140,24 @@ test("preapproval bounded retry with another failed check never reports verified
  const f=fixture(t),{createWorkflow}=require("../workflow.js"),{PatchService}=require("../patch-service.js"),written=[];
  const service=new PatchService({runtimeRoot:path.join(f.root,"runtime")});let checks=0,roleCalls=[];
  const evidence={write(_r,type,payload){written.push({type,payload});},list(_r,{types}={}){return written.filter(x=>!types||types.includes(x.type)).map(x=>({type:x.type,payload:x.payload}));}};
- const workflow=createWorkflow({patchService:service,runtimeEvidence:evidence,sandboxVerification:{async collectCandidate(c){checks++;return{status:"FINAL_INVALID",checks:[{kind:"deterministic_sandbox_check",name:"sandbox:test",status:"FAIL",executed:true,configured:true,patch_candidate_id:c.id,patch_candidate_hash:c.candidate_hash}]};}},aiCore:{async call(role){roleCalls.push(role);if(role==="diagnoser")return{content:JSON.stringify({hypothesis:"another test failure",claims:[]})};return{content:JSON.stringify({operations:[{type:"replace",path:"value.js",old:"module.exports=1;",new:roleCalls.length===1?"module.exports=2;":"module.exports=3;"}]})};}}});
+ const workflow=createWorkflow({patchService:service,runtimeEvidence:evidence,externalReview:{hypothesis:async()=>({provider:"fixture",json:{verdict:"PASS"}})},sandboxVerification:{async collectCandidate(c){checks++;return{status:"FINAL_INVALID",checks:[{kind:"deterministic_sandbox_check",name:"sandbox:test",status:"FAIL",executed:true,configured:true,patch_candidate_id:c.id,patch_candidate_hash:c.candidate_hash}]};}},aiCore:{async call(role){roleCalls.push(role);if(role==="diagnoser")return{content:JSON.stringify({hypothesis:"another test failure",claims:[]})};return{content:JSON.stringify({operations:[{type:"replace",path:"value.js",old:"module.exports=1;",new:roleCalls.length===1?"module.exports=2;":"module.exports=3;"}]})};}}});
  const out=await workflow.patchCandidate({runId:"run_no_false_pass",analysis:{diagnosis:{public_statement:"value"},external_hypothesis_review:{json:{verdict:"PASS"}},evidence_registry:{evidence_ids:[]}},repo:f.repo,selectedPaths:["value.js"],task:"fix value"});
  assert.equal(checks,2);assert.deepEqual(roleCalls,["patch_engineer","diagnoser","patch_engineer"]);
  assert.equal(out.candidate_verification.status,"FINAL_INVALID");
  assert.equal(out.preapproval_refix.result_status,"FINAL_INVALID");
  assert.ok(written.some(x=>x.type==="preapproval_refix_attempt"));
  assert.equal(written.filter(x=>x.type==="preapproval_refix_attempt").length,1);
+ assert.equal(fs.readFileSync(path.join(f.repo,"value.js"),"utf8"),"module.exports=1;\n");
+});
+
+test("preapproval retry rejects fresh failed hypothesis review without generating another candidate",async t=>{
+ const f=fixture(t),{createWorkflow}=require("../workflow.js"),{PatchService}=require("../patch-service.js"),entries=[];
+ const service=new PatchService({runtimeRoot:path.join(f.root,"runtime")});let sandboxCalls=0,roleCalls=[];
+ const store={write(_run,type,payload){entries.push({type,payload});},list(_run,{types}={}){return entries.filter(e=>!types||types.includes(e.type)).map(e=>({type:e.type,payload:e.payload}));}};
+ const workflow=createWorkflow({patchService:service,runtimeEvidence:store,externalReview:{hypothesis:async()=>({provider:"fixture",json:{verdict:"FAIL"}})},sandboxVerification:{async collectCandidate(candidate){sandboxCalls++;return{status:"FINAL_INVALID",checks:[{kind:"deterministic_sandbox_check",name:"sandbox:test",status:"FAIL",executed:true,configured:true,patch_candidate_id:candidate.id,patch_candidate_hash:candidate.candidate_hash}]};}},aiCore:{async call(role){roleCalls.push(role);if(role==="diagnoser")return{content:JSON.stringify({hypothesis:"unconfirmed",claims:[]})};return{content:JSON.stringify({operations:[{type:"replace",path:"value.js",old:"module.exports=1;",new:"module.exports=2;"}]})};}}});
+ await assert.rejects(()=>workflow.patchCandidate({runId:"run_review_fail",analysis:{diagnosis:{public_statement:"value"},external_hypothesis_review:{json:{verdict:"PASS"}},evidence_registry:{evidence_ids:[]}},repo:f.repo,selectedPaths:["value.js"],task:"fix value"}),/PREAPPROVAL_REFIX_HYPOTHESIS_NOT_APPROVED/);
+ assert.deepEqual(roleCalls,["patch_engineer","diagnoser"]);
+ assert.equal(sandboxCalls,1);
+ assert.ok(entries.some(e=>e.type==="preapproval_refix_review"&&e.payload.verdict==="FAIL"));
  assert.equal(fs.readFileSync(path.join(f.repo,"value.js"),"utf8"),"module.exports=1;\n");
 });
