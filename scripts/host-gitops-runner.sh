@@ -260,7 +260,9 @@ reflect_request() {
   approval_file="$APPROVAL_ROOT/${request_id}.approve"
   issue_delegated_receipt "$file" "$before_head" "$approval_file" || return 1
   consume_delegated_receipt "$file" "$approval_file" || return 1
-  delegated_execution_gate "$file" || return 1
+  # The consumed receipt is bound to the current clean pre-HEAD. An explicit
+  # revalidation precedes checkout; the post-checkout gate runs at target SHA.
+  validate_standing_delegation "$file" || return 1
   git_cmd checkout --detach "$request_sha" >/dev/null 2>&1 || fail SOURCE_REFLECT_CHECKOUT_FAILED || return 1
   if ! delegated_execution_gate "$file"; then
     # Only the exact pre-verified commit is eligible for rollback.
