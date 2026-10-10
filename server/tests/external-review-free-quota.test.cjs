@@ -6,10 +6,10 @@ const os=require('node:os');
 const path=require('node:path');
 const {createExternalReviewAdapter}=require('../adapters/external-review');
 const payload={privacy:{privacy_class:'PUBLIC',sanitized:true,opaque_evidence:true},hypothesis:{statement:'opaque'}};
-test('P0: configured keys and injected HTTP alone cannot prove FREE eligibility',async()=>{
+test('live dispatch cannot initialize an absent ledger, and CI forbids egress',async(t)=>{
  let calls=0;
- const a=createExternalReviewAdapter({groqKey:'test-key',geminiKey:'',fetchImpl:async()=>{calls++;return new Response(JSON.stringify({choices:[{message:{content:'{"verdict":"PASS"}'},finish_reason:'stop'}]}));}});
- await assert.rejects(()=>a.hypothesis(payload),e=>e.code===(process.env.CI?'EXTERNAL_REVIEW_CI_EGRESS_BLOCKED':'LIVE_BLOCKED_FREE_TIER_UNVERIFIED'));
+ const a=createExternalReviewAdapter({groqKey:'test-key',geminiKey:'',ledgerRoot:fixture(t),fetchImpl:async()=>{calls++;return new Response(JSON.stringify({choices:[{message:{content:'{"verdict":"PASS"}'},finish_reason:'stop'}]}));}});
+ await assert.rejects(()=>a.hypothesis(payload),e=>e.code===(process.env.CI?'EXTERNAL_REVIEW_CI_EGRESS_BLOCKED':'EXTERNAL_REVIEW_QUOTA_LEDGER_CORRUPT'));
  assert.equal(calls,0);
 });
 test('P0: Composer legacy UTC ledger must not reset or silently recover quota',async(t)=>{
@@ -172,4 +172,30 @@ test('live ledger cannot silently initialize/recover a missing volume root',t=>{
  const root=fixture(t),now=Date.now();
  assert.throws(()=>createExternalReviewQuotaLedger({root,nowFn:()=>now,allowInitialize:false}).reserveDispatch('groq',1,qualification(now).providers.groq),/LEDGER_CORRUPT/);
  assert.equal(fs.existsSync(root),false);
+});
+
+
+for(const provider of ['groq','gemini'])for(const window of Object.keys(WINDOWS))test(`${provider}: Master FREE-only local ${window} cap persists without account certificate`,t=>{
+ const root=fixture(t);let now=Date.now();const ledger=createExternalReviewQuotaLedger({root,nowFn:()=>now});ledger.provisionEmptyLedger();
+ const spacing={minute:0,hour:60_001,day:3_600_001,month:86_400_001}[window];
+ for(let i=0;i<CAPS[window];i++){ledger.reserveLocalDispatch(provider,1,'offline-free-key');now+=spacing;}
+ const restart=createExternalReviewQuotaLedger({root,nowFn:()=>now,allowInitialize:false});assert.throws(()=>restart.reserveLocalDispatch(provider,1,'offline-free-key'),new RegExp(`QUOTA_${window.toUpperCase()}_EXHAUSTED`));
+});
+test('local token caps and key rotation cannot recover allowance',t=>{
+ const root=fixture(t);let now=Date.now();const ledger=createExternalReviewQuotaLedger({root,nowFn:()=>now});ledger.provisionEmptyLedger();
+ assert.throws(()=>ledger.reserveLocalDispatch('groq',4097,'offline-key'),/TOKENS_EXHAUSTED/);ledger.reserveLocalDispatch('groq',4096,'offline-key');now+=60_001;
+ assert.throws(()=>ledger.reserveLocalDispatch('groq',1,'different-offline-key'),/IDENTITY_CHANGED/);
+ for(let i=0;i<3;i++){now+=3_600_001;ledger.reserveLocalDispatch('groq',4096,'offline-key');}
+ now+=3_600_001;assert.throws(()=>ledger.reserveLocalDispatch('groq',1,'offline-key'),/DAY_EXHAUSTED|TOKENS_EXHAUSTED/);
+});
+test('local 429 cooldown expires naturally without deleting or refunding requests',t=>{
+ const root=fixture(t);let now=Date.now();const ledger=createExternalReviewQuotaLedger({root,nowFn:()=>now});ledger.provisionEmptyLedger();ledger.reserveLocalDispatch('groq',100,'offline-key');
+ ledger.blockProvider('groq','HTTP_429',{until:now+60_001});now+=60_000;assert.throws(()=>ledger.reserveLocalDispatch('groq',100,'offline-key'),/ACCOUNT_BLOCKED/);
+ now++;createExternalReviewQuotaLedger({root,nowFn:()=>now,allowInitialize:false}).reserveLocalDispatch('groq',100,'offline-key');assert.equal(ledger.readStateSync().providers.groq.events.length,2);
+});
+test('live budget reserves before injected HTTP without qualification file; minute retry sends nothing',async t=>{
+ const previous=process.env.CI;delete process.env.CI;t.after(()=>{if(previous===undefined)delete process.env.CI;else process.env.CI=previous;});
+ const root=fixture(t),ledger=createExternalReviewQuotaLedger({root});ledger.provisionEmptyLedger();let calls=0;
+ const a=createExternalReviewAdapter({groqKey:'offline-free-key',geminiKey:'',ledgerRoot:root,fetchImpl:async()=>{calls++;assert.equal(ledger.readStateSync().providers.groq.events.length,1);return reply();}});
+ assert.equal((await a.hypothesis(payload)).json.verdict,'PASS');await assert.rejects(a.final(payload),/MINUTE_EXHAUSTED/);assert.equal(calls,1);
 });

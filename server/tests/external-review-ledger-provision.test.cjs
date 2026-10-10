@@ -40,7 +40,8 @@ for(const fault of ['empty-existing','missing-ledger','missing-anchor','corrupt'
  const snapshot=()=>fs.readdirSync(root).sort().map(name=>{const p=path.join(root,name);return[name,fs.statSync(p).isFile()?fs.readFileSync(p).toString('hex'):null];});
  const before=snapshot();assert.throws(()=>ledger.provisionEmptyLedger(),/QUOTA_(LEDGER_CORRUPT|LEGACY_RECONCILIATION_REQUIRED|LOCKED|PATH_INVALID)/);assert.deepEqual(snapshot(),before);
 });
-test('provisioned empty ledger grants no FREE account qualification or outbound request',async t=>{
+test('provisioned empty ledger does not waive CI egress refusal',async t=>{
+ const previous=process.env.CI;process.env.CI='true';t.after(()=>{if(previous===undefined)delete process.env.CI;else process.env.CI=previous;});
  const {root}=fixture(t);createExternalReviewQuotaLedger({root}).provisionEmptyLedger();const before=files(root);let calls=0;
  const adapter=createExternalReviewAdapter({groqKey:'offline-key',geminiKey:'',ledgerRoot:root,fetchImpl:async()=>{calls++;throw Error('unexpected HTTP');}});
  await assert.rejects(()=>adapter.hypothesis({privacy:{privacy_class:'PUBLIC',sanitized:true,opaque_evidence:true},hypothesis:{statement:'opaque'}}),/LIVE_BLOCKED_FREE_TIER_UNVERIFIED|CI_EGRESS_BLOCKED/);
