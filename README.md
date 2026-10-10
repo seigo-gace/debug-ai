@@ -1,5 +1,7 @@
 # DebugAI
 
+On-demand GitHub Actions Artifact intake uses existing Host gh authentication, strict nonexecuting ZIP validation, RuntimeEvidence registration and TGserver ZERO correlation. CLI entry and exact real-slice/production boundary: [Artifact evidence §7](docs/TGSERVER_ZERO_DEVELOPMENT_EVIDENCE.md#7-adopted-on-demand-actions-artifact-to-zero-evidence-2026-10-10).
+
 FREE Groq/Gemini reviews use the existing hypothesis/final gates with durable rolling quota reservations. Live HTTP stays blocked until Host-owned account and remaining-budget evidence is qualified; Source/CI does not prove runtime reflection. Contract and protected activation gate: [Product decision context §12](docs/DEBUGAI_PRODUCT_DECISION_CONTEXT_20261009.md#12-codex-p0-free-reviewer-protection--2026-10-09).
 
 ## Master Internal Persistent Delegation — source implementation
