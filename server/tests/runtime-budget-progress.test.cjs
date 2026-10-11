@@ -41,7 +41,7 @@ test("G3 counterexample: distinct evidence IDs alone currently reset no-progress
 });
 
 test("G3 qualified progress mode rejects fresh unrelated evidence without task-bound proof",()=>{
-  const progress=createProgressController({maxNoProgressRounds:1,requireQualifiedProgress:true});
+  const progress=createProgressController({maxNoProgressRounds:1,requireQualifiedProgress:true,verifyQualifiedProgress:()=>false});
   assert.equal(progress.observe({evidenceIds:["EVI_UNRELATED_1"]}).progress_delta,0);
   const stopped=progress.observe({evidenceIds:["EVI_UNRELATED_2"],completedWorkIds:["WORK_NEW"]});
   assert.equal(stopped.stop,true);
@@ -51,11 +51,19 @@ test("G3 qualified progress mode rejects fresh unrelated evidence without task-b
 });
 
 test("G3 qualified progress mode accepts one verified objective and preserves restart state",()=>{
-  const progress=createProgressController({maxNoProgressRounds:1,requireQualifiedProgress:true});
+  const progress=createProgressController({maxNoProgressRounds:1,requireQualifiedProgress:true,verifyQualifiedProgress:({id,roleEvidenceIds})=>id==="OBJECTIVE_VERIFIED_1"&&roleEvidenceIds.includes("EVI_1")});
   const first=progress.observe({evidenceIds:["EVI_1"],qualifiedProgressIds:["OBJECTIVE_VERIFIED_1"]});
   assert.equal(first.progress_delta,1);
-  const restored=createProgressController({maxNoProgressRounds:1,requireQualifiedProgress:true,initialState:progress.snapshot()});
+  const restored=createProgressController({maxNoProgressRounds:1,requireQualifiedProgress:true,verifyQualifiedProgress:({id,roleEvidenceIds})=>id==="OBJECTIVE_VERIFIED_1"&&roleEvidenceIds.includes("EVI_1"),initialState:progress.snapshot()});
   assert.equal(restored.observe({evidenceIds:["EVI_2"],qualifiedProgressIds:["OBJECTIVE_VERIFIED_1"]}).progress_delta,0);
   assert.equal(restored.observe({evidenceIds:["EVI_3"],qualifiedProgressIds:["OBJECTIVE_VERIFIED_1"]}).stop,true);
   assert.throws(()=>createProgressController({maxNoProgressRounds:1,requireQualifiedProgress:false,initialState:progress.snapshot()}),/PROGRESS_QUALIFICATION_POLICY_MISMATCH/);
+});
+
+test("G3 qualified mode never admits unverified IDs or an absent verifier",()=>{
+  assert.throws(()=>createProgressController({requireQualifiedProgress:true}),/PROGRESS_QUALIFICATION_VERIFIER_REQUIRED/);
+  const progress=createProgressController({maxNoProgressRounds:1,requireQualifiedProgress:true,verifyQualifiedProgress:({id,roleEvidenceIds})=>id==="OBJECTIVE_A"&&roleEvidenceIds.includes("EVI_A")});
+  assert.equal(progress.observe({evidenceIds:["EVI_OTHER"],qualifiedProgressIds:["OBJECTIVE_A"]}).progress_delta,0);
+  assert.equal(progress.observe({evidenceIds:["EVI_A"],qualifiedProgressIds:["OBJECTIVE_A"]}).progress_delta,1);
+  assert.equal(progress.observe({evidenceIds:["EVI_A"],qualifiedProgressIds:["OBJECTIVE_A"]}).progress_delta,0);
 });
