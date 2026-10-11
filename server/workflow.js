@@ -135,7 +135,8 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
       throw new Error("DIAGNOSER_EVIDENCE_IDS_INVALID");
     authority.loadDurable(runId); // No implicit new run, no approval bypass.
     const evidence=mergeEvidenceIds(baseEvidenceIds);
-    return continueDiagnoserWorkItem({authority,runId,workItemId,inputBinding,
+    const boundInput=contentHash({role:"diagnoser",task,evidence,input_binding:inputBinding});
+    return continueDiagnoserWorkItem({authority,runId,workItemId,inputBinding:boundInput,
       maxStepsPerCall,maxTotalSteps,
       buildStepPrompt:async({step,previousProgress})=>({
         system:"Diagnoser. Investigate only the SAME diagnosis task. Each response must be a compact JSON object with status CONTINUE, COMPLETE, or BLOCKED. For CONTINUE return progress with verified evidence_refs and explicit remaining_work. For COMPLETE return result matching the existing Diagnoser canonical role contract. No unsupported evidence or hidden reasoning. No tools or mutations in this opt-in path.",
