@@ -140,3 +140,34 @@ jobs:
           done
           [[ "$head_verified" == "true" ]] || exit 43
           echo "CHAT_GITOPS_POST_HOST_SHA_MATCH=TRUE"
+
+      - name: Bounded local-model Diagnoser runtime probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          # One existing benchmark case; no external review providers.
+          body='{"case_id":"L1-DG1"}'
+          code="$(curl -sS --max-time 30 -o /tmp/diag-live-start.json -w '%{http_code}' -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" -H "content-type: application/json" --data-binary "$body" "https://debugai.asterav8.jp/v1/investigation-benchmark/start")"
+          echo "DIAG_LIVE_START_HTTP=$code"
+          [[ "$code" == "202" ]] || exit 60
+          id="$(jq -r '.benchmark_id // empty' /tmp/diag-live-start.json)"
+          [[ "$id" =~ ^invbench_[A-Za-z0-9]+$ ]] || exit 61
+          echo "DIAG_LIVE_BENCHMARK_ID=$id"
+          deadline=$((SECONDS+900))
+          while ((SECONDS < deadline)); do
+            http="$(curl -sS --max-time 30 -o /tmp/diag-live-result.json -w '%{http_code}' -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" "https://debugai.asterav8.jp/v1/investigation-benchmark/status/$id")"
+            [[ "$http" == "200" ]] || exit 62
+            state="$(jq -r '.state // "UNKNOWN"' /tmp/diag-live-result.json)"
+            if [[ "$state" == "DONE" ]]; then
+              jq -c '{case_id:.case_id,state:.state,pass:.result.pass,role:.result.role,duration_ms:.duration_ms}' /tmp/diag-live-result.json
+              jq -e '.case_id=="L1-DG1" and .result.role=="diagnoser" and .result.pass==true' /tmp/diag-live-result.json >/dev/null || exit 63
+              echo "DIAG_LIVE_MODEL=PASS"
+              break
+            fi
+            if [[ "$state" == "FAILED" ]]; then
+              jq -r '"DIAG_LIVE_ERROR="+(.error//"UNKNOWN")' /tmp/diag-live-result.json
+              exit 64
+            fi
+            sleep 10
+          done
+          [[ "$state" == "DONE" ]] || { echo "DIAG_LIVE_TIMEOUT"; exit 65; }
