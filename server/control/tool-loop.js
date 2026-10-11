@@ -74,7 +74,8 @@ function summarizeAiTelemetry(items,{toolWallMs=0,toolCallsExecutedCurrent=0,too
   return out;
 }
 
-async function runRoleWithReadOnlyTools({aiCore,role,system="",user="",toolRuntime=null,maxToolRounds=null,maxToolCalls=null,baseEvidenceIds=[],strictEvidenceRefs=false,continuationState=null,durableHooks=null}={}){
+async function runRoleWithReadOnlyTools({aiCore,role,system="",user="",toolRuntime=null,maxToolRounds=null,maxToolCalls=null,baseEvidenceIds=[],strictEvidenceRefs=false,continuationState=null,durableHooks=null,progressQualification=null}={}){
+  if(progressQualification!==null&&(typeof progressQualification!=="object"||typeof progressQualification.verify!=="function"))throw new Error("ROLE_PROGRESS_QUALIFICATION_INVALID");
   if(!aiCore||typeof aiCore.call!=="function")throw new Error("AI_CORE_CALL_REQUIRED");
   const budget=getRoleRuntimeBudget(role),evidencePolicy=evidenceProtocol(baseEvidenceIds,strictEvidenceRefs);
   if(!toolRuntime){
@@ -91,10 +92,10 @@ async function runRoleWithReadOnlyTools({aiCore,role,system="",user="",toolRunti
   if(resume.rounds_completed>rounds)throw new Error("ROLE_TOOL_CONTINUATION_EXCEEDS_ROUND_BUDGET");
   if(resume.total_calls>calls)throw new Error("ROLE_TOOL_CONTINUATION_EXCEEDS_CALL_BUDGET");
   const evidenceContext=typeof toolRuntime.createEvidenceContext==="function"?toolRuntime.createEvidenceContext({user,baseEvidenceIds,observations:resume.observations}):null;
-  const selected=availableForSelection(role,toolRuntime,user),protocol=toolProtocol(selected.tools),deadlineAt=Date.now()+(budget.tool_loop_wall_ms||budget.turn_timeout_ms),progress=createProgressController({maxNoProgressRounds:2,initialState:resume.progress});
+  const selected=availableForSelection(role,toolRuntime,user),protocol=toolProtocol(selected.tools),deadlineAt=Date.now()+(budget.tool_loop_wall_ms||budget.turn_timeout_ms),progress=createProgressController({maxNoProgressRounds:2,initialState:resume.progress,requireQualifiedProgress:progressQualification!==null,verifyQualifiedProgress:progressQualification?.verify||null});
   const baseUser=String(user||"");
   let currentUser=withObservations(baseUser,resume.observations),totalCalls=resume.total_calls;
-  const observations=resume.observations,seenToolCalls=new Set(resume.seen_tool_fingerprints),completedWorkIds=new Set(resume.completed_work_ids),completedEffectIds=new Set(resume.completed_effect_ids),llmTelemetry=[],inMemoryToolResults=new Map();
+  const observations=resume.observations,seenToolCalls=new Set(resume.seen_tool_fingerprints),completedWorkIds=new Set(resume.completed_work_ids),completedEffectIds=new Set(resume.completed_effect_ids),llmTelemetry=[],inMemoryToolResults=new Map(),qualifiedProgressIds=new Set();
   let last=null,toolWallMs=0,toolCallsExecutedCurrent=0,toolCallsReusedCurrent=0;
   for(let round=resume.rounds_completed;round<=rounds;round++){
     if(Date.now()>=deadlineAt)throw new Error(`ROLE_TOOL_WALL_BUDGET_EXHAUSTED:${role}`);
@@ -124,11 +125,11 @@ async function runRoleWithReadOnlyTools({aiCore,role,system="",user="",toolRunti
       let result;const toolStartedAt=Date.now();
       try{result=await toolRuntime.execute({role,selectedSkillIds:selected.skillIds,tool,arguments:args,evidenceContext});assertToolResultIntegrity(result);}catch(error){result=safeToolError(error);}finally{toolWallMs+=Date.now()-toolStartedAt;toolCallsExecutedCurrent++;}
       const persisted=await callHook(durableHooks,"onToolResult",{role,selectedSkillIds:[...selected.skillIds],tool,arguments:args,fingerprint,round,result});
-      if(persisted?.completed_work_id)completedWorkIds.add(String(persisted.completed_work_id));if(persisted?.effect_id)completedEffectIds.add(String(persisted.effect_id));if(result?.status==="OK")inMemoryToolResults.set(fingerprint,{result,effect_id:persisted?.effect_id||null,work_unit_id:persisted?.completed_work_id||null});
+      if(persisted?.completed_work_id)completedWorkIds.add(String(persisted.completed_work_id));if(persisted?.effect_id)completedEffectIds.add(String(persisted.effect_id));if(progressQualification!==null&&persisted?.qualified_progress_id)qualifiedProgressIds.add(String(persisted.qualified_progress_id));if(result?.status==="OK")inMemoryToolResults.set(fingerprint,{result,effect_id:persisted?.effect_id||null,work_unit_id:persisted?.completed_work_id||null});
       results.push({request:{tool,reason:String(req.reason||"").slice(0,300)},result,reused:false,effect_id:persisted?.effect_id||null,work_unit_id:persisted?.completed_work_id||null});totalCalls++;
     }
     observations.push({round:round+1,results});
-    const toolEvidenceIds=collectEvidenceIds(observations),progressState=progress.observe({evidenceIds:toolEvidenceIds,completedWorkIds:[...completedWorkIds],completedEffectIds:[...completedEffectIds]});
+    const toolEvidenceIds=collectEvidenceIds(observations),progressState=progress.observe({evidenceIds:toolEvidenceIds,completedWorkIds:[...completedWorkIds],completedEffectIds:[...completedEffectIds],qualifiedProgressIds:[...qualifiedProgressIds]});
     const committed=continuationSnapshot({roundsCompleted:round+1,totalCalls,observations,seenToolCalls,progress,completedWorkIds,completedEffectIds});
     await callHook(durableHooks,"onRoundCommitted",{role,round:round+1,progress:progressState,continuationState:committed});
     if(progressState.stop)throw new Error(`ROLE_TOOL_NO_PROGRESS:${role}:PROGRESS_DELTA_0`);
