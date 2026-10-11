@@ -2,7 +2,7 @@
   "base_url": "https://debugai.asterav8.jp",
   "mode": "readonly",
   "repo": "/workspace/debug-ai",
-  "request": "Verify the exact DebugAI product Source after admitted runtime reflection.",
+  "request": "Retry approved exact-head DebugAI reflection after preserved untracked package-lock stash.",
   "gitops_request": {
     "enabled": true,
     "branch": "fix/scout-observation-reuse-20261010",
