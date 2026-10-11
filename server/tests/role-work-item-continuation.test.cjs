@@ -53,7 +53,7 @@ test("reject unverified completion and preserve unfinished state",async()=>{
 });
 test("fail closed on no progress and bounded budget",async()=>{
   const s=store();const a=base(s,async({previousProgress})=>({status:STATUS.CONTINUE,progress:{completed:previousProgress.completed??0}}));
-  await assert.rejects(continueWorkItem(a),{code:"NO_SEMANTIC_PROGRESS"});
+  await continueWorkItem(a);\n  await assert.rejects(continueWorkItem(a),{code:"NO_SEMANTIC_PROGRESS"});
   const b=base(store(),async({step})=>({status:STATUS.CONTINUE,progress:{completed:step}}));
   const first=await continueWorkItem({...b,maxTotalSteps:1});
   assert.equal(first.status,STATUS.CONTINUE);
