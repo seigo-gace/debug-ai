@@ -6,6 +6,7 @@ const {getModelOutputHardCeilingForRole}=require("../control/model-profiles.js")
 const {createProgressController}=require("../control/progress-controller.js");
 const {resolveEffectiveTimeoutMs}=require("../adapters/ai-core.js");
 const {runRoleWithReadOnlyTools}=require("../control/tool-loop.js");
+const {makeToolResult}=require("../control/read-only-tool-runtime.js");
 
 test("role runtime budgets preserve model generation/context ceilings instead of legacy low caps",()=>{
   assert.equal(assertRoleRuntimeBudgets(),true);
@@ -66,4 +67,34 @@ test("G3 qualified mode never admits unverified IDs or an absent verifier",()=>{
   assert.equal(progress.observe({evidenceIds:["EVI_OTHER"],qualifiedProgressIds:["OBJECTIVE_A"]}).progress_delta,0);
   assert.equal(progress.observe({evidenceIds:["EVI_A"],qualifiedProgressIds:["OBJECTIVE_A"]}).progress_delta,1);
   assert.equal(progress.observe({evidenceIds:["EVI_A"],qualifiedProgressIds:["OBJECTIVE_A"]}).progress_delta,0);
+});
+
+test("G3 tool-loop opt-in only accepts a durable-hook objective verified against issued evidence",async()=>{
+  const issued=makeToolResult("source.read",{path:"a.js",sha256:"a".repeat(64),content:"source fact"});
+  let calls=0;
+  const aiCore={call:async()=>{
+    calls++;
+    return{content:JSON.stringify(calls===1?{tool_requests:[{tool:"source.read",arguments:{path:"a.js"}}]}:{decision:"HANDOFF"})};
+  }};
+  const toolRuntime={availableTools:["source.read"],execute:async()=>issued};
+  const out=await runRoleWithReadOnlyTools({
+    aiCore,role:"code_scout",user:"inspect",toolRuntime,maxToolRounds:2,maxToolCalls:2,
+    durableHooks:{onToolResult:async()=>({qualified_progress_id:"OBJECTIVE_SOURCE_FACT_VERIFIED"})},
+    progressQualification:{verify:({id,roleEvidenceIds})=>id==="OBJECTIVE_SOURCE_FACT_VERIFIED"&&roleEvidenceIds.includes(issued.evidence_id)},
+  });
+  assert.equal(out.tool_loop.progress.total_qualified_progress_ids,1);
+  assert.equal(out.tool_loop.progress.history[0].progress_delta,1);
+  assert.equal(out.tool_loop.continuation_state.progress.require_qualified_progress,true);
+});
+
+test("G3 tool-loop opt-in rejects unsupported qualified ID without resetting no-progress",async()=>{
+  const issued=makeToolResult("source.read",{path:"a.js",sha256:"b".repeat(64),content:"no task advancement"});
+  let calls=0;
+  const aiCore={call:async()=>{calls++;return{content:JSON.stringify({tool_requests:[{tool:"source.read",arguments:{path:`file_${calls}.js`}}]})};}};
+  const toolRuntime={availableTools:["source.read"],execute:async()=>issued};
+  await assert.rejects(()=>runRoleWithReadOnlyTools({
+    aiCore,role:"code_scout",user:"inspect",toolRuntime,maxToolRounds:3,maxToolCalls:6,
+    durableHooks:{onToolResult:async()=>({qualified_progress_id:"UNSUPPORTED_OBJECTIVE"})},
+    progressQualification:{verify:()=>false},
+  }),/ROLE_TOOL_NO_PROGRESS:code_scout:PROGRESS_DELTA_0/);
 });
