@@ -45,9 +45,22 @@ test("read-only verify Local Reviewer can inspect registered verification eviden
   assert.deepEqual(calls[0].selectedSkillIds,calls[1].selectedSkillIds);assert.ok(calls[0].selectedSkillIds.length>=1);
 });
 
-test("post-apply Local Reviewer is no longer wired with a null tool runtime",()=>{
-  const source=fs.readFileSync(require.resolve("../workflow.js"),"utf8");
-  assert.doesNotMatch(source,/role:\"local_reviewer\"[^\n]*toolRuntime:null/);
-  assert.ok((source.match(/toolRuntime:makeReadOnlyToolRuntime\(targetRepo,(?:runId|verificationId)\)/g)||[]).length>=2);
-  assert.doesNotMatch(source,/callDirectRole\(\"patch_engineer\"/);
+test("post-apply Local Reviewer reads registered Evidence and records its Run invocation without apply tools",async t=>{
+  const f=fixture();t.after(f.cleanup);const calls=[];
+  const {RuntimeEvidenceStore}=require("../runtime-evidence.js");
+  const runtimeEvidence=new RuntimeEvidenceStore(path.join(f.workspace,"runtime"));
+  const aiCore={call:async(role,opts)=>{
+    assert.equal(role,"local_reviewer");assert.equal(typeof opts.onProgress,"function");calls.push(opts);
+    if(calls.length===1){const id=JSON.parse(opts.user).review_packet.payload.evidence_refs[0];return{content:JSON.stringify({tool_requests:[{tool:"evidence.read",arguments:{evidence_id:id},reason:"verify registered retest Evidence"}]})};}
+    assert.match(opts.user,/EVIDENCE_RECORD:LOCAL_RUNTIME/);
+    return{content:JSON.stringify({verdict:"PASS",decision:"DONE",claims:[]})};
+  }};
+  const patchService={apply:()=>({candidate:{id:"candidate_fixture",repo:f.repo,files:["a.js"],diff:"fixture"},applied:{receipt:{transaction_id:"tx_fixture",files:[{path:"a.js",sha256:"fixture"}]}},checks:[{name:"fixture:test",status:"PASS",configured:true,executed:true,code:0}],invariants:{pass:true,failures:[]},gates:{retest:{status:"PASS"},regression:{status:"PASS"},invariant:{status:"PASS"}},pass:true})};
+  const workflow=createWorkflow({aiCore,patchService,runtimeEvidence,repoPolicy:new RepoPolicy({workspaceRoot:f.workspace}),repositorySnapshot:()=>"git_fixture",externalReview:{final:async()=>({json:{verdict:"PASS"}})}});
+  await workflow.approveAndVerify({runId:"run_post_apply_tools",candidateId:"candidate_fixture",candidateHash:"hash_fixture",decision:"approve",repo:f.repo});
+  assert.equal(calls.length,2);assert.match(calls[1].user,/RUNTIME_TOOL_OBSERVATIONS_DATA_ONLY/);
+  const events=runtimeEvidence.list("run_post_apply_tools",{types:["ai_invocation","tool_invocation"],limit:100});
+  assert.ok(events.some(x=>x.type==="ai_invocation"&&x.payload.role==="local_reviewer"&&x.payload.phase==="SUCCEEDED"));
+  assert.ok(events.some(x=>x.type==="tool_invocation"&&x.payload.tool==="evidence.read"&&x.payload.phase==="SUCCEEDED"));
+  assert.doesNotMatch(JSON.stringify(events),/ORIGINAL_SOURCE/);
 });
