@@ -11,6 +11,7 @@ const {getRoleRuntimeBudget}=require("./control/role-runtime-budgets.js");
 const {registerEvidenceList,evidenceIds,registrySummary}=require("./control/evidence-registry.js");
 const {runResearcherContinuation}=require("./control/researcher-continuation.js");
 const {continueDiagnoserWorkItem}=require("./control/diagnoser-work-item-adapter.js");
+const {continueRoleWorkItem,ROLES:CONTINUABLE_ROLES}=require("./control/role-work-item-adapter.js");
 const {createDurableToolEffectHooks,toolResultPath,TOOL_CONTRACT_VERSION}=require("./control/durable-tool-effects.js");
 const {ROLE_CONTRACT_VERSION}=require("./control/role-contracts.js");
 const {makeDurableAnalysisInput,loadDurableAnalysisInput}=require("./control/durable-workflow-input.js");
@@ -99,6 +100,32 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
   async function callReadOnlyRole(role,{system,user},toolRuntime,{baseEvidenceIds=[],strictEvidenceRefs=true,continuationState=null,durableHooks=null,runId=null}={}){const adapter=runId?observeAiCalls({aiCore,runId,runtimeEvidence,onEvent:logRuntime}):aiCore;return runRoleWithReadOnlyTools({aiCore:adapter,role,system,user,toolRuntime:runId?observeToolCalls({toolRuntime,runId,runtimeEvidence,onEvent:logRuntime}):toolRuntime,baseEvidenceIds,strictEvidenceRefs,continuationState,durableHooks});}
   // Opt-in bounded same-item continuation through the EXISTING Diagnoser model.
   // Kept separate from legacy analysis until live E2E acceptance is proven.
+  // Six independent role consumers, all using the ONE continuation module.
+  // Explicit opt-in until the legacy full workflow passes live semantic acceptance.
+  async function continueRoleTask({runId,role,workItemId,inputBinding,task,baseEvidenceIds=[],
+    maxStepsPerCall=1,maxTotalSteps=12}={}){
+    if(!CONTINUABLE_ROLES.includes(role))throw new Error("ROLE_NOT_ALLOWED");
+    if(!authority?.durableEnabled?.())throw new Error("ROLE_DURABLE_AUTHORITY_REQUIRED");
+    if(typeof task!=="string"||!task.trim())throw new Error("ROLE_TASK_REQUIRED");
+    if(!Array.isArray(baseEvidenceIds)||!baseEvidenceIds.every(x=>typeof x==="string"))
+      throw new Error("ROLE_EVIDENCE_IDS_INVALID");
+    authority.loadDurable(runId);
+    const evidence=mergeEvidenceIds(baseEvidenceIds);
+    return continueRoleWorkItem({authority,runId,role,workItemId,inputBinding,maxStepsPerCall,maxTotalSteps,
+      buildStepPrompt:async({step,previousProgress})=>({
+        system:`Role: ${role}. Continue ONLY the same assigned work item using a bounded JSON response. status=CONTINUE requires progress.evidence_refs and progress.remaining_work. status=COMPLETE requires the original role's full canonical output under result. status=BLOCKED requires reason. Do not invent evidence; preserve role-specific permissions. No tool execution or mutation in this opt-in interface.`,
+        user:JSON.stringify({task,step,previous_progress:previousProgress,registered_evidence_ids:evidence})
+      }),
+      invokeRole:async prompt=>parseJson((await callDirectRole(role,prompt)).content),
+      validateIntermediate:async({progress})=>Boolean(progress&&typeof progress==="object"&&!Array.isArray(progress)&&
+        Array.isArray(progress.evidence_refs)&&progress.evidence_refs.every(id=>typeof id==="string"&&evidence.includes(id))&&
+        typeof progress.remaining_work==="string"&&progress.remaining_work.trim()),
+      validateRoleResult:async({result})=>{
+        try{parseAndValidateRoleOutput(role,result,{availableEvidenceIds:evidence,strictEvidenceRefs:true});return true;}
+        catch{return false;}
+      }
+    });
+  }
   async function continueDiagnoserTask({runId,workItemId,inputBinding,task,
     baseEvidenceIds=[],maxStepsPerCall=1,maxTotalSteps=12}={}){
     if(!authority?.durableEnabled?.())throw new Error("DIAGNOSER_DURABLE_AUTHORITY_REQUIRED");
@@ -626,6 +653,6 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
   }
   async function promote(asset){assertPromotable(asset);if(!tgserver)throw new Error("TGSERVER_ADAPTER_REQUIRED");return tgserver.promote(asset);}
   async function searchKnowledge(query,opts={}){if(!tgserver)throw new Error("TGSERVER_ADAPTER_REQUIRED");return tgserver.search(query,opts);}
-  return{continueDiagnoserTask,runAnalysis,startAnalysis,resumeAnalysis,recoverStartup,patchCandidate,startCodegenBenchmark,codegenBenchmarkStatus,startInvestigationBenchmark,investigationBenchmarkStatus,startModelAbBenchmark,modelAbBenchmarkStatus,approveAndVerify,verifyReadOnly,status,inspect,promote,searchKnowledge};
+  return{continueRoleTask,continueDiagnoserTask,runAnalysis,startAnalysis,resumeAnalysis,recoverStartup,patchCandidate,startCodegenBenchmark,codegenBenchmarkStatus,startInvestigationBenchmark,investigationBenchmarkStatus,startModelAbBenchmark,modelAbBenchmarkStatus,approveAndVerify,verifyReadOnly,status,inspect,promote,searchKnowledge};
 }
 module.exports={createWorkflow,parseJson,roleOutput,toolEvidenceRecords,toolAudit,pickDiagnosisStatement,publicLocalEvidence,dapFailureChecks,activeDapHint,dapHintProtocol,reviewStreamEvidence,reviewableVerificationCheck,evidencePromptView,repositorySnapshotId};
