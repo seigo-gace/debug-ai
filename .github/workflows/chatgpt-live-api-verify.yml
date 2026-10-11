@@ -37,6 +37,23 @@ jobs:
             jq -e '.gitops_request|keys==["enabled"]' "$file" >/dev/null
           fi
           echo "gitops_enabled=$enabled" >> "$GITHUB_OUTPUT"
+      - name: Check out exact deployed DebugAI module source
+        uses: actions/checkout@v4
+        with:
+          ref: 0124bc4b44d58a1e2b0d563428965e739ab47b60
+          path: module-source
+
+      - name: Verify bounded continuation and durable restoration
+        shell: bash
+        working-directory: module-source
+        run: |
+          set -euo pipefail
+          node --test \
+            server/tests/role-work-item-continuation.test.cjs \
+            server/tests/role-work-item-durable-store.test.cjs \
+            server/tests/role-work-item-model-step.test.cjs \
+            server/tests/role-work-item-evidence.test.cjs
+
       - name: Read-only Host worktree preflight
         shell: bash
         run: |
@@ -141,39 +158,3 @@ jobs:
           [[ "$head_verified" == "true" ]] || exit 43
           echo "CHAT_GITOPS_POST_HOST_SHA_MATCH=TRUE"
 
-      - name: Parallel five-role local-model diagnostics
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p /tmp/debugai-five
-          cases=(L1-CS1 L1-CA1 L1-RS1 L1-DG1 L1-VR1)
-          ids=()
-          for case_id in "${cases[@]}"; do
-            body="$(jq -nc --arg case_id "$case_id" '{case_id:$case_id}')"
-            code="$(curl -sS --max-time 30 -o "/tmp/debugai-five/$case_id.start" -w '%{http_code}' -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" -H "content-type: application/json" --data-binary "$body" "https://debugai.asterav8.jp/v1/investigation-benchmark/start")"
-            [[ "$code" == "202" ]] || { echo "START_FAILED:$case_id:$code"; exit 70; }
-            id="$(jq -r '.benchmark_id // empty' "/tmp/debugai-five/$case_id.start")"
-            [[ "$id" =~ ^invbench_[A-Za-z0-9]+$ ]] || exit 71
-            echo "$case_id $id" >> /tmp/debugai-five/ids
-            echo "PARALLEL_LIVE_STARTED=$case_id:$id"
-          done
-          deadline=$((SECONDS+720))
-          while ((SECONDS < deadline)); do
-            pending=0
-            while read -r case_id id; do
-              [[ -f "/tmp/debugai-five/$case_id.done" ]] && continue
-              code="$(curl -sS --max-time 30 -o "/tmp/debugai-five/$case_id.status" -w '%{http_code}' -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" "https://debugai.asterav8.jp/v1/investigation-benchmark/status/$id")"
-              if [[ "$code" != "200" ]]; then echo "PARALLEL_LIVE_HTTP_ERROR=$case_id:$code"; pending=$((pending+1)); continue; fi
-              state="$(jq -r '.state // "UNKNOWN"' "/tmp/debugai-five/$case_id.status")"
-              if [[ "$state" == "DONE" || "$state" == "FAILED" ]]; then
-                jq -c --arg case_id "$case_id" '{case_id:$case_id,state:.state,error:(.error//null),pass:(.result.pass//null),role:(.result.role//null)}' "/tmp/debugai-five/$case_id.status"
-                touch "/tmp/debugai-five/$case_id.done"
-              else pending=$((pending+1)); fi
-            done < /tmp/debugai-five/ids
-            [[ "$pending" == "0" ]] && break
-            sleep 15
-          done
-          for case_id in "${cases[@]}"; do
-            [[ -f "/tmp/debugai-five/$case_id.done" ]] || echo "PARALLEL_LIVE_UNRESOLVED=$case_id"
-          done
-          echo "PARALLEL_LIVE_FIVE_DIAGNOSTIC_END"
