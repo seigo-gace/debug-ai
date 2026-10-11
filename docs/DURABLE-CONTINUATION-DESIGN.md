@@ -1150,3 +1150,31 @@ Invocation records carry a local event_sequence for deterministic readback when
 multiple observations share a millisecond. Scout inspection chooses an actually
 recorded progress event matching the authoritative durable cursor; UUID filename
 ordering is not execution ordering. This creates no additional durable owner.
+
+### Post-apply Reviewer continuation and six actual hook acceptance — 2026-10-11
+
+The final Source audit found a second gap: Local Reviewer was connected only at
+hypothesis fallback, while its primary post-apply review still invoked once.
+The same explicit `enableHorizontalLocalReviewer` now connects final review to the
+existing Module. Before the first bounded review call, existing RunAuthority stores
+an integrity-bound `approved_verification` stage with candidate/hash, applied
+receipt, deterministic retest result and post-apply Source revision. A subsequent
+same-candidate approved entry restores that stage and continues review without
+reapplying or rerunning retests. Candidate/hash/repo/revision mismatch refuses
+resume. Final review is cached in the existing stage store after Strict Completion;
+completed replay repeats neither model nor final provider. Terminal manifest status
+remains DONE/BLOCKED; unresolved final review remains PAUSED. No auto-approval,
+new API/transport, hidden model state or second mutation authority is introduced.
+The legacy default-off path and its tool-capable Reviewer remain unchanged.
+
+Independent actual-hook fixtures now exercise concurrent Scouts (successful peer
+saved once), E with A-D retained, Diagnoser, hypothesis Reviewer, Patch Engineer
+(candidate only after COMPLETE and still WAITING_APPROVAL), and final Reviewer
+(2 model steps, apply1, final provider fixture1, replay0). Native process acceptance
+remains PR101-only. Real API evidence remains the short same-Coder protocol with
+explicit CONTINUE/COMPLETE envelopes, not six-role real debugging correctness.
+Separate re-diagnosis/preapproval/re-fix and standalone read-only verification
+invocations retain their existing paths; this delta qualifies the primary six-role
+workflow hooks, not every auxiliary invocation in the product. Those secondary
+paths and automatic post-apply startup scheduling are NOT_VERIFIED for horizontal
+continuation; the saved final review is resumed through the same approved entry.

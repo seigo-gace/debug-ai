@@ -563,6 +563,20 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
     if(!patchService)throw new Error("PATCH_SERVICE_REQUIRED");
     let run=null;if(authority)run=authority.load(runId);
     if(decision!=="approve"){if(authority)authority.transition(run,"BLOCKED");throw new Error("PATCH_APPROVAL_REQUIRED");}
+    const horizontalFinal=authority?.durableEnabled?.()&&recoveryHooks?.enableHorizontalLocalReviewer===true;
+    if(horizontalFinal){
+      const saved=loadStageRef(runId,"approved_verification");
+      if(saved){
+        const context=saved.payload;
+        if(context.candidate_id!==candidateId||context.candidate_hash!==candidateHash||
+          path.resolve(String(repo||context.target_repo))!==path.resolve(String(context.target_repo))||
+          snapshotRepo(context.target_repo)!==context.post_apply_repository_revision)
+          throw new Error("FINAL_REVIEW_BINDING_MISMATCH");
+        const completed=loadStageRef(runId,"approved_review_result");
+        if(completed)return completed.payload;
+        return finishApprovedVerification({runId,candidateId,candidateHash,decision,run,out:context.out,targetRepo:context.target_repo,postApplyRepositoryRevision:context.post_apply_repository_revision,horizontalFinal});
+      }
+    }
     // A human approval does not certify a candidate already proven broken in the isolated sandbox.
     const failedPreapproval=runtimeEvidence?.list?.(runId,{types:["candidate_verification"],limit:128})||[];
     if(failedPreapproval.some(entry=>{const check=entry.payload||entry;return check.patch_candidate_id===candidateId&&check.patch_candidate_hash===candidateHash&&check.status==="FINAL_INVALID"&&check.checks?.some(c=>c.executed===true&&c.status==="FAIL");})){
@@ -577,11 +591,24 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
     runtimeEvidence?.write(runId,"verification",{checks:out.checks,invariants:out.invariants,gates:out.gates,pass:out.pass,post_apply_repository_revision:postApplyRepositoryRevision});
     await logRuntime({run_id:runId,severity:out.pass?"info":"error",kind:"verification",pass:out.pass,checks:out.checks,invariants:out.invariants,gates:out.gates,post_apply_repository_revision:postApplyRepositoryRevision});
     if(!out.pass){if(authority)run=authority.transition(run,"FAILED");return automaticRefixCandidate({runId,run,out,targetRepo});}
+    if(horizontalFinal)await saveStage(runId,"approved_verification",{candidate_id:candidateId,candidate_hash:candidateHash,target_repo:targetRepo,post_apply_repository_revision:postApplyRepositoryRevision,out},WorkflowStepId.FINAL_ANALYSIS);
+    return finishApprovedVerification({runId,candidateId,candidateHash,decision,run,out,targetRepo,postApplyRepositoryRevision,horizontalFinal});
+  }
+  async function finishApprovedVerification({runId,candidateId,candidateHash,decision,run,out,targetRepo,postApplyRepositoryRevision,horizontalFinal}){
     const verificationRecords=registerEvidenceList("LOCAL_RUNTIME",[...(out.checks||[]),{kind:"invariants",value:out.invariants},{kind:"gates",value:out.gates}]),verificationIds=evidenceIds(verificationRecords),executedTests=(out.checks||[]).filter(check=>check?.executed===true),receipt=out?.applied?.receipt||null;
     const reviewPacket=makeReviewPacket({candidateRef:candidateId,applyReceiptRef:String(receipt?.transaction_id||receipt?.candidate_id||""),repositoryRevision:postApplyRepositoryRevision,changedPaths:out?.candidate?.files||[],diff:out?.candidate?.diff||"",prePostHashes:reviewPacketHashes(out?.candidate,receipt),executedTests,testResults:out.checks||[],invariants:reviewPacketInvariants(out),evidenceRefs:verificationIds});
     runtimeEvidence?.write(runId,"review_packet",reviewPacket);
-    const lr=await callReadOnlyRole("local_reviewer",{system:"Local Reviewer. Review the local Review Packet from fresh context. JSON only.",user:JSON.stringify({review_packet:reviewPacket,verification_evidence:evidencePromptView(verificationRecords)})},makeReadOnlyToolRuntime(targetRepo,runId),{baseEvidenceIds:verificationIds,strictEvidenceRefs:true,runId});
-    const local_review=roleOutput(lr,"local_reviewer");
+    let local_review;
+    if(horizontalFinal){
+      const reviewInput={review_packet:reviewPacket,verification_evidence:evidencePromptView(verificationRecords)};
+      const stage=await continueRoleTask({runId,role:"local_reviewer",workItemId:`final.review.${candidateId}`,
+        inputBinding:contentHash({candidateId,candidateHash,review_packet_digest:reviewPacket.packet_digest}),
+        task:JSON.stringify(reviewInput),baseEvidenceIds:verificationIds,evidenceRecords:verificationRecords,maxStepsPerCall:1,maxTotalSteps:12});
+      local_review=assertHorizontalStageComplete("local_reviewer",stage);
+    }else{
+      const lr=await callReadOnlyRole("local_reviewer",{system:"Local Reviewer. Review the local Review Packet from fresh context. JSON only.",user:JSON.stringify({review_packet:reviewPacket,verification_evidence:evidencePromptView(verificationRecords)})},makeReadOnlyToolRuntime(targetRepo,runId),{baseEvidenceIds:verificationIds,strictEvidenceRefs:true,runId});
+      local_review=roleOutput(lr,"local_reviewer");
+    }
     const publicReviewSummary=publicReviewPacketSummary(reviewPacket,{localVerdict:local_review.verdict||"UNKNOWN"});
     const finalReview=await reviewWithLocalFallback("final",{privacy:{privacy_class:"PUBLIC",sanitized:true,opaque_evidence:true},summary:publicReviewSummary},async()=>local_review);
     const final=finalReview.external,localFinal=finalReview.local;
@@ -595,7 +622,12 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
     else if(authority&&finalPass&&!complete)run=authority.transition(run,"BLOCKED");
     const state=complete?"COMPLETE":finalPass?"BLOCKED_COMPLETION_GATE":"AWAITING_EXTERNAL_FINAL_REVIEW";
     await logRuntime({run_id:runId,severity:complete?"info":"warn",kind:"final_review",state,local_verdict:local_review.verdict||"UNKNOWN",external_verdict:final?.json?.verdict||"UNAVAILABLE",review_provider:localFinal?.provider||final?.provider||null,unavailable_code:localFinal?.unavailable_code||null,completion_gate});
-    return{run_id:runId,state,...out,local_review,review_packet:{schema:reviewPacket.schema,packet_digest:reviewPacket.packet_digest},external_final_review:final,local_final_review:localFinal,completion_gate,post_apply_repository_revision:postApplyRepositoryRevision,current_repository_revision:currentRepositoryRevision};
+    const result={run_id:runId,state,...out,local_review,review_packet:{schema:reviewPacket.schema,packet_digest:reviewPacket.packet_digest},external_final_review:final,local_final_review:localFinal,completion_gate,post_apply_repository_revision:postApplyRepositoryRevision,current_repository_revision:currentRepositoryRevision};
+    if(horizontalFinal){
+      await saveStage(runId,"approved_review_result",result,WorkflowStepId.FINAL_ANALYSIS,{stepPhase:StepPhase.DONE});
+      await setCursor(runId,WorkflowStepId.FINAL_ANALYSIS,StepPhase.DONE,{jobStatus:complete?"DONE":finalPass?"BLOCKED":"PAUSED"});
+    }
+    return result;
   }
   function resolveVerificationRepo(repo){if(!repoPolicy)throw new Error("VERIFY_REPO_POLICY_REQUIRED");return repoPolicy.assertRepo(repo);}
   function verificationScope(repo,selectedPaths){const paths=[...new Set((Array.isArray(selectedPaths)?selectedPaths:[]).map(String).filter(Boolean))];const files=paths.map(rel=>{const item=readText(repo,rel,{maxChars:1});return{path:item.path,sha256:item.sha256,size:item.size};});return{mode:files.length?"FILES":"REPOSITORY",files};}
