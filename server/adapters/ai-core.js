@@ -90,10 +90,14 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
   async function execute(role,{system="",user="",maxTokens=1024,responseFormat="json_object",temperature=0,topP=null,topK=null,selectedSkillIds=null,timeoutMsOverride=null,deadlineAt=null,toolBudgetFinalRound=null}={},runtimeMeta={}){
     const roleStartedAt=Date.now(),prepareStartedAt=Date.now();
     const cfg=ROLES[role];if(!cfg)throw new AiCoreError("ROLE_INVALID",`Unknown DebugAI role: ${role}`);
+    // One bounded wall-time budget for the entire model invocation, including
+    // preparation and transport retries. A transport retry must not receive
+    // a fresh full role timeout when the caller omits deadlineAt.
+    const invocationDeadlineAt=Number.isFinite(deadlineAt)?deadlineAt:roleStartedAt+resolveEffectiveTimeoutMs(role,timeoutMs,{timeoutMsOverride});
     runtimeMeta.observe?.({phase:"PREPARE",queue_wait_ms:runtimeMeta.queueWaitMs??0});
     const tokenBudget=resolveEffectiveMaxTokens(role,maxTokens,{runtimeContextTokens:qualifiedRuntimeContext,requireRuntimeContextQualification});
     const effectiveMaxTokens=tokenBudget.effective_max_tokens;
-    let effectiveTimeoutMs=resolveEffectiveTimeoutMs(role,timeoutMs,{timeoutMsOverride,deadlineAt,now:Date.now()});
+    let effectiveTimeoutMs=resolveEffectiveTimeoutMs(role,timeoutMs,{timeoutMsOverride,deadlineAt:invocationDeadlineAt,now:Date.now()});
     const preparedSystem=typeof runtimeMeta.preparedSystem==="string"&&runtimeMeta.preparedSystem?runtimeMeta.preparedSystem:null;
     const invocation=preparedSystem?null:compileInvocation(role,{task:user,extraSystem:system,selectedSkillIds});
     const effectiveSystem=preparedSystem||invocation.system;
@@ -102,6 +106,8 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
     const body={model:cfg.backend_model,messages:[{role:"system",content:effectiveSystem},{role:"user",content:wireUser}],max_tokens:effectiveMaxTokens,temperature,stream:false,cache_prompt:promptCache,response_format:responseFormat?{type:responseFormat}:undefined};if(topP!==null&&topP!==undefined){if(!Number.isFinite(topP)||topP<0||topP>1)throw new AiCoreError("AI_CORE_TOP_P_INVALID","topP must be between 0 and 1",{role,top_p:topP});body.top_p=topP;}if(topK!==null&&topK!==undefined){if(!Number.isInteger(topK)||topK<0)throw new AiCoreError("AI_CORE_TOP_K_INVALID","topK must be a nonnegative integer",{role,top_k:topK});body.top_k=topK;}
     if(typeof cfg.thinking==="boolean")body.chat_template_kwargs={enable_thinking:cfg.thinking};
     const requestBody=JSON.stringify(body),requestBytesPerAttempt=Buffer.byteLength(requestBody,"utf8"),prepareMs=Date.now()-prepareStartedAt;
+    // Byte counts are diagnostic only: never claim they are tokenizer-accurate input tokens.
+    const promptBytes=Buffer.byteLength(effectiveSystem,"utf8")+Buffer.byteLength(wireUser,"utf8");
     let upstreamMs=0,responseBytes=0,parseValidateMs=0;
     for(let attempt=1;attempt<=maxTransportTimeoutAttempts;attempt++){
       const ctl=new AbortController();let deadlineTriggered=false;
@@ -111,10 +117,10 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
         // A transport retry must not restart the absolute role deadline.
         // Recompute the remaining time after the previous attempt and fail
         // before making another request if the shared budget is exhausted.
-        effectiveTimeoutMs=resolveEffectiveTimeoutMs(role,timeoutMs,{timeoutMsOverride,deadlineAt,now:Date.now()});
+        effectiveTimeoutMs=resolveEffectiveTimeoutMs(role,timeoutMs,{timeoutMsOverride,deadlineAt:invocationDeadlineAt,now:Date.now()});
         timer=setTimeout(()=>{deadlineTriggered=true;ctl.abort();},effectiveTimeoutMs);
         requestDispatched=true;
-        runtimeMeta.observe?.({phase:"UPSTREAM_WAIT",dispatch_attempt:attempt,prepare_ms:prepareMs});
+        runtimeMeta.observe?.({phase:"UPSTREAM_WAIT",dispatch_attempt:attempt,prepare_ms:prepareMs,prompt_bytes:promptBytes,requested_output_tokens:maxTokens,effective_output_tokens:effectiveMaxTokens,runtime_context_tokens:qualifiedRuntimeContext});
         const upstreamStartedAt=Date.now();let r,text;
         try{r=await fetchImpl(endpoint,{method:"POST",headers:{authorization:`Bearer ${apiKey}`,"content-type":"application/json"},body:requestBody,signal:ctl.signal,dispatcher:transport});text=await r.text();}finally{upstreamMs+=Date.now()-upstreamStartedAt;}
         if(typeof text==="string")responseBytes+=Buffer.byteLength(text,"utf8");
@@ -126,7 +132,7 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
         const telemetry=makeTelemetry({queueWaitMs:runtimeMeta.queueWaitMs,prepareMs,upstreamMs,parseValidateMs,roleStartedAt,requestBytes:requestBytesPerAttempt*attempt,responseBytes,attempts:attempt,envelope,finishReason,prefix:compiledPrefixHash});
         if(String(finishReason||"").toLowerCase()==="length")throw truncationError(role,cfg,{maxTokens:effectiveMaxTokens,finishReason,content,envelope,telemetry});
         if(typeof content!=="string"||!content.trim()){const reasoningOnly=typeof envelope?.choices?.[0]?.message?.reasoning_content==="string"&&envelope.choices[0].message.reasoning_content.trim().length>0;throw new AiCoreError(reasoningOnly?"AI_CORE_REASONING_ONLY":"AI_CORE_EMPTY",reasoningOnly?"AI Core returned reasoning without final content":"AI Core returned empty content",{role,model:cfg.backend_model,finish_reason:finishReason,reasoning_content_present:reasoningOnly,telemetry});}
-        return {provider:"llama-swap",role,alias:cfg.alias,model:cfg.backend_model,thinking:cfg.thinking,content,raw:envelope,attempts:attempt,telemetry,control_plane:{selected_skill_ids:invocation?[...invocation.selected_skill_ids]:[...(selectedSkillIds||[])],skill_selection_mode:invocation?invocation.skill_selection_mode:"PRECOMPILED_MEASUREMENT",role_contract_version:invocation?invocation.role_contract_version:null,output_schema:invocation?invocation.output_schema:null,guardrail_profile:invocation?invocation.guardrail_profile:null,effective_timeout_ms:effectiveTimeoutMs,max_tokens:effectiveMaxTokens,requested_max_tokens:tokenBudget.requested_max_tokens,model_output_hard_ceiling_tokens:tokenBudget.model_output_hard_ceiling_tokens,runtime_context_tokens:tokenBudget.runtime_context_tokens,runtime_output_ceiling_tokens:tokenBudget.runtime_output_ceiling_tokens,runtime_context_qualified:tokenBudget.runtime_context_qualified,context_limited:tokenBudget.context_limited,prompt_cache_requested:promptCache,tool_budget_final_round:toolBudgetFinalRound===true,prefix_hash:compiledPrefixHash}};
+        return {provider:"llama-swap",role,alias:cfg.alias,model:cfg.backend_model,thinking:cfg.thinking,content,raw:envelope,attempts:attempt,telemetry,control_plane:{selected_skill_ids:invocation?[...invocation.selected_skill_ids]:[...(selectedSkillIds||[])],skill_selection_mode:invocation?invocation.skill_selection_mode:"PRECOMPILED_MEASUREMENT",role_contract_version:invocation?invocation.role_contract_version:null,output_schema:invocation?invocation.output_schema:null,guardrail_profile:invocation?invocation.guardrail_profile:null,effective_timeout_ms:effectiveTimeoutMs,max_tokens:effectiveMaxTokens,requested_max_tokens:tokenBudget.requested_max_tokens,model_output_hard_ceiling_tokens:tokenBudget.model_output_hard_ceiling_tokens,runtime_context_tokens:tokenBudget.runtime_context_tokens,runtime_output_ceiling_tokens:tokenBudget.runtime_output_ceiling_tokens,runtime_context_qualified:tokenBudget.runtime_context_qualified,context_limited:tokenBudget.context_limited,prompt_cache_requested:promptCache,prompt_utf8_bytes:promptBytes,tokenizer_input_tokens:usageTelemetry(envelope).prompt_tokens,tool_budget_final_round:toolBudgetFinalRound===true,prefix_hash:compiledPrefixHash}};
       }catch(e){
         const timeoutClass=classifyTimeoutError(e,{deadlineTriggered});
         const attemptsStarted=requestDispatched?attempt:attempt-1;
