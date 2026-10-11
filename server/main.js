@@ -31,7 +31,15 @@ const writerLock=DurableWriterLock.acquire({root:path.join(runtimeRoot,"durable"
 const durableIo=new DurableFileIO({writerLock});
 const authority=new RunAuthority({runtimeRoot,repoPolicy,durableIo});
 const aiCoreContextTokens=requiredEnvInt("DEBUG_AI_CORE_CONTEXT_TOKENS",{min:1001,max:1048576});
-const aiCore=createAiCoreAdapter({runtimeContextTokens:aiCoreContextTokens,requireRuntimeContextQualification:true});
+// Counter-only diagnostics are strictly opt-in. Normal startup must remain
+// byte-for-byte equivalent for model dispatch when no flag is configured.
+const inputTokenShadowFlag=process.env.DEBUG_AI_CORE_INPUT_TOKEN_SHADOW||"false";
+if(inputTokenShadowFlag!=="true"&&inputTokenShadowFlag!=="false")throw new Error("DEBUG_AI_CORE_INPUT_TOKEN_SHADOW_INVALID");
+const aiCore=createAiCoreAdapter({
+  runtimeContextTokens:aiCoreContextTokens,requireRuntimeContextQualification:true,
+  inputTokenShadow:inputTokenShadowFlag==="true",
+  inputTokenShadowRoute:process.env.DEBUG_AI_CORE_INPUT_TOKEN_SHADOW_ROUTE||"router"
+});
 if(!process.env.DEBUG_AI_EVIDENCE_SEARCH_URL)throw new Error("EVIDENCE_SEARCH_URL_REQUIRED");
 const evidenceSearch=createEvidenceSearchAdapter();
 if(!process.env.DEBUG_AI_TGSERVER_URL)throw new Error("TGSERVER_URL_REQUIRED");
