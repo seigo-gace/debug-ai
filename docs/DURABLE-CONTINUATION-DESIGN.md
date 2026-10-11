@@ -1404,3 +1404,24 @@ This section supersedes the older PRE-REFLECTION admission statements in §26.12
 4. No re-run of the 600s incident solely to reproduce a known timeout, no free-provider tests or 50+50 bulk benchmarks. Measure matched small real work before claiming speed/quality improvements.
 
 **State table:** PR103 Source=PASS; PR103 sampled deployed SHA parity/health/persistent volume=PASS (Composer Host receipt); primary opt-in module wiring tests=PASS in fixtures; **production primary horizontal invocation=NOT_ACTIVE_BY_INSPECTED_BOOTSTRAP**; actual per-slot context, tokenizer and true role semantic completion=UNKNOWN/NOT_VERIFIED. PR101 remains test-only; PR102 unadopted; PR104 docs-only.
+
+### 26.14 G0 real four-model 8192-slot qualification (2026-10-11)
+
+Evidence: [Issue #41 runtime G0](https://github.com/seigo-gace/debug-ai/issues/41#issuecomment-6108742603) and [#42 chronology](https://github.com/seigo-gace/debug-ai/issues/42#issuecomment-6108742792). All values below are read-only Host snapshot observations, not model benchmark performance or inference calls.
+
+| Backend | Loaded GGUF metadata n_ctx_train | Actual n_ctx, slots | Mem used / 9GiB limit | DebugAI mode |
+| --- | ---: | --- | ---: | --- |
+| Qwen2.5-Coder Q4_K_M | 131072 | 8192, 1 | 7.92GiB (88%) | Code Scout/Patch Engineer thinking=null |
+| Qwen3-8B Q4_K_M | 40960 | 8192, 1 | 8.61GiB (96%) | Causal=false, Diagnoser=true |
+| Granite-4.2-8B Q4_K_M | 131072 | 8192, 1 | 6.60GiB (73%) | Researcher=false |
+| Ministral-3-8B-Reasoning-2512 Q4_K_M | 262144 | 8192, 1 | 8.01GiB (89%) | Local Reviewer thinking=null |
+
+All four backends are separately **always loaded** llama.cpp:server 0.5.0-dev build11151 bd4f514db, with -c 8192 -t 3 --cache-ram 4096 -np 1 and per-container cgroup limit 9663676416 bytes (9GiB). Runtime /props confirms 8192 slots/context, matching application DEBUG_AI_CORE_CONTEXT_TOKENS=8192 **at this snapshot**. Container OOMKilled=false does not prove zero historical OOM. The router ai-core-llama-swap:v257 has globalConcurrencyLimit=2, responseHeader=600 seconds, unloadTimeout=10; reported peer unloaded is not actual container unload.
+
+All backend POST /tokenize routes returned HTTP200. This does NOT prove the same complete Chat Completions request can be counted through the llama-swap router; /v1/chat/completions/input_tokens remains UNVERIFIED for this installed build. /props reasoning_format=none at idle and remnant /slots deepseek may differ; do not infer actual thinking mode for roles whose setting is null. Actual token counts and template parity of the failed 600-second Diagnoser request remain UNKNOWN.
+
+Prompt cache eviction was observed on all backends under --cache-ram 4096; Qwen3/Granite logs include hundreds of MiB to ~1.1GiB cache entry eviction. Qwen3 memory 96% makes contention plausible, but does not prove the 600s root cause. Do not change memory limit, model/quantization, n_ctx, np, timeout, temperature, Thinking, backend or global concurrency without a separate measured qualified change. ai-core/README.md section12 has documented 6.5GiB/model versus currently deployed 9216m (9GiB); this is an owning ai-core documentation drift, not a request to change Compose.
+
+**G1 Source candidate**: [DebugAI PR105](https://github.com/seigo-gace/debug-ai/pull/105) is stacked directly on deployed product PR103. It implements optional input-token-count Shadow at the exact serialized Chat request body with a 2s bound, default OFF and no inference/Host invocation; deterministic arithmetic and tests. The observed count remains UNQUALIFIED until same endpoint/router/model/template and actual usage parity are verified. It never blocks a normal call or drops mandatory evidence. Retry candidate PR102 is separate and still unadopted.
+
+**Critical product condition**: server/main.js still supplies no recoveryHooks to workflow; the six-role primary horizontal continuation remains OFF in this startup despite PR103 code being deployed. Do not globally enable no-tools continuation and silently remove the tool-capable legacy path. First validate role-by-role semantic completion and the existing permission/effect gates. After G1's route and template qualification, do limited G2 evidence-window / G3 objective progress work without another 600s dogfood or external provider calls.
