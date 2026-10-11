@@ -37,6 +37,30 @@ jobs:
             jq -e '.gitops_request|keys==["enabled"]' "$file" >/dev/null
           fi
           echo "gitops_enabled=$enabled" >> "$GITHUB_OUTPUT"
+      - name: Read-only Host worktree preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          for command_id in project.git_status project.git_changed_paths; do
+            request="$(jq -nc --arg command_id "$command_id" '{repo:"/workspace/debug-ai",command_id:$command_id,arguments:[]}')"
+            http="$(curl -sS --max-time 35 -o /tmp/worktree-preflight-request.json -w '%{http_code}' -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" -H "content-type: application/json" --data-binary "$request" "https://debugai.asterav8.jp/v1/server-command/request")"
+            [[ "$http" == "202" ]] || { echo "HOST_PREFLIGHT_REQUEST_HTTP=$http"; exit 50; }
+            id="$(jq -r '.id // empty' /tmp/worktree-preflight-request.json)"
+            [[ "$id" =~ ^cmd_[0-9a-f]{24}$ ]] || exit 51
+            for attempt in {1..30}; do
+              body="$(jq -nc --arg id "$id" '{repo:"/workspace/debug-ai",id:$id}')"
+              http="$(curl -sS --max-time 35 -o /tmp/worktree-preflight-result.json -w '%{http_code}' -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" -H "content-type: application/json" --data-binary "$body" "https://debugai.asterav8.jp/v1/server-command/status")"
+              [[ "$http" == "200" ]] || exit 52
+              state="$(jq -r '.state // "UNKNOWN"' /tmp/worktree-preflight-result.json)"
+              if [[ "$state" == "PASS" ]]; then
+                jq -r --arg cmd "$command_id" '"HOST_PREFLIGHT="+$cmd+"|"+(.result.stdout//"UNKNOWN")' /tmp/worktree-preflight-result.json
+                break
+              fi
+              [[ "$state" == "QUEUED" || "$state" == "RUNNING" ]] || { echo "HOST_PREFLIGHT_STATUS=$state"; exit 53; }
+              sleep 2
+            done
+            [[ "$state" == "PASS" ]] || exit 54
+          done
       - name: Admitted GitOps deployment via existing DebugAI API
         if: ${{ steps.target.outputs.gitops_enabled == 'true' }}
         shell: bash
