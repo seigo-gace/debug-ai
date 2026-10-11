@@ -73,3 +73,14 @@ test("invalid store and oversized progress refuse execution",async()=>{
   await assert.rejects(continueWorkItem({...a,maxProgressBytes:32}),{code:"PROGRESS_TOO_LARGE"});
   await assert.rejects(continueWorkItem({...a,store:{}}),{code:"DURABLE_STORE_REQUIRED"});
 });
+
+test("reject corrupted or unverifiable restored final checkpoint",async()=>{
+  const s=store();const exec=async()=>({status:STATUS.COMPLETE,result:{verified:true}});
+  const args=base(s,exec);
+  const completed=await continueWorkItem(args);
+  assert.equal(completed.status,STATUS.COMPLETE);
+  await assert.rejects(continueWorkItem({...args,validateCompletion:async()=>false}),{code:"RESTORED_COMPLETION_NOT_VALIDATED"});
+  const key=JSON.stringify(["r1","diagnoser","investigation.A"]);
+  s.records.set(key,{...completed,schema:"unknown/v0"});
+  await assert.rejects(continueWorkItem(args),{code:"CORRUPT_CHECKPOINT"});
+});
