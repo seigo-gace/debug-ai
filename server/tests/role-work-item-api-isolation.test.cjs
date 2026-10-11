@@ -38,12 +38,35 @@ test("six workflow adapters persist same-item progress across process restart an
         const calls=[];let release;const bothScouts=new Promise(resolve=>release=resolve);let scouts=0;
         const wf=createWorkflow({authority,aiCore:{call:async(role,prompt)=>{
           const input=JSON.parse(prompt.user);calls.push({role,input});
-          if(role.endsWith("scout")){if(++scouts===2)release();await bothScouts;}
-          if(phase==="first")return {content:JSON.stringify({status:"CONTINUE",progress:{evidence_refs:[],remaining_work:"finish fixture item",verified_part:role}})};
+          if(phase!=="negative"&&role.endsWith("scout")){if(++scouts===2)release();await bothScouts;}
+          if(phase==="first"||phase==="negative")return {content:JSON.stringify({status:"CONTINUE",progress:{evidence_refs:[],remaining_work:"finish fixture item",verified_part:role}})};
           assert.equal(input.previous_progress.verified_part,role);
           return {content:JSON.stringify({status:"COMPLETE",result:finals[role]})};
         }}});
         const args=role=>({runId,role,workItemId:role==="researcher"?"researcher.E":"A",inputBinding:"fixture-v1",task:"finish fixture item",maxTotalSteps:2});
+        if(phase==="negative"){
+          const fs=require("node:fs"),{createHash}=require("node:crypto");
+          for(const role of roles){
+            const budget={...args(role),workItemId:"budget."+role,maxTotalSteps:1};
+            assert.equal((await wf.continueRoleTask(budget)).status,"CONTINUE");
+            const before=calls.length;
+            assert.equal((await wf.continueRoleTask(budget)).reason,"TOTAL_STEP_BUDGET_EXHAUSTED");
+            assert.equal(calls.length,before);
+            const same={...args(role),workItemId:"no_progress."+role};
+            await wf.continueRoleTask(same);
+            await assert.rejects(wf.continueRoleTask({...same,task:"changed input"}),{code:"INPUT_BINDING_MISMATCH"});
+            await assert.rejects(wf.continueRoleTask(same),{code:"NO_SEMANTIC_PROGRESS"});
+            const key=JSON.stringify([runId,role,same.workItemId]);
+            const index="role_work_item_"+createHash("sha256").update(key).digest("hex");
+            const ref=authority.loadDurable(runId).manifest.workflow_input_refs[index];
+            fs.writeFileSync(path.join(lock.root,ref),"{}\n");
+            const beforeCorrupt=calls.length;
+            await assert.rejects(wf.continueRoleTask(same));
+            assert.equal(calls.length,beforeCorrupt,"corrupt checkpoint must stop before model dispatch");
+          }
+          console.log(JSON.stringify({runId,roles:roles.length,calls:calls.length,negative_gates:"budget/input/no-progress/corrupt"}));
+          return;
+        }
         const results=await Promise.all(roles.map(role=>wf.continueRoleTask(args(role))));
         const expected=phase==="first"?"CONTINUE":"COMPLETE";
         assert.ok(results.every(result=>result.status===expected));
@@ -64,6 +87,7 @@ test("six workflow adapters persist same-item progress across process restart an
     assert.deepEqual(first.revisions,[1,1,1,1,1,1]);
     assert.deepEqual(second.revisions,[2,2,2,2,2,2]);
     assert.equal(replay.calls,0);
+    const negatives=run("negative");assert.equal(negatives.roles,6);assert.equal(negatives.calls,18);
   }finally{fs.rmSync(root,{recursive:true,force:true});}
 });
 
