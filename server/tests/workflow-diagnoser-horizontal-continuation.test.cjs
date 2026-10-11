@@ -43,3 +43,21 @@ test("opt-in model entrypoint does not allow absent evidence binding",async()=>{
   const wf=createWorkflow({aiCore:{call:async()=>({content:JSON.stringify({status:"CONTINUE",progress:{evidence_refs:["FORGED"],remaining_work:"next"}})})},authority:durableAuthority()});
   await assert.rejects(wf.continueDiagnoserTask({runId:"r",workItemId:"a",inputBinding:"x",task:"diagnose",baseEvidenceIds:["EVI_1"]}),{code:"MODEL_INTERMEDIATE_REJECTED"});
 });
+
+test("timeout in later Diagnoser turn retains earlier durable checkpoint",async()=>{
+  let calls=0;
+  const authority=durableAuthority();
+  const wf=createWorkflow({aiCore:{call:async()=>{
+    calls++;
+    if(calls===1)return{content:JSON.stringify({status:"CONTINUE",progress:{evidence_refs:["EVI_1"],remaining_work:"one last check",stage:1}})};
+    if(calls===2)throw Object.assign(new Error("DEADLINE_ABORT"),{code:"DEADLINE_ABORT"});
+    return{content:JSON.stringify({status:"BLOCKED",reason:"external evidence unavailable"})};
+  }},authority});
+  const args={runId:"rtimeout",workItemId:"A",inputBinding:"sha",task:"same task",baseEvidenceIds:["EVI_1"]};
+  assert.equal((await wf.continueDiagnoserTask(args)).status,"CONTINUE");
+  await assert.rejects(wf.continueDiagnoserTask(args),/DEADLINE_ABORT/);
+  const resumed=await wf.continueDiagnoserTask(args);
+  assert.equal(resumed.status,"BLOCKED");
+  assert.equal(resumed.steps,2,"failed model turn is not counted as a successful semantic step");
+  assert.equal(calls,3);
+});
