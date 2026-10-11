@@ -21,7 +21,7 @@ function tryRepositorySnapshotId(projectDir,options={}){
 }
 
 class RunAuthority{
-  constructor({runtimeRoot,repoPolicy=null,durableIo=null}={}){if(!runtimeRoot)throw new Error("RUNTIME_ROOT_REQUIRED");this.store=new Store(path.join(runtimeRoot,"authority"));this.machine=new StateMachine({store:this.store});this.repoPolicy=repoPolicy;this.commitProtocol=durableIo?new CommitProtocol({io:durableIo}):null;}
+  constructor({runtimeRoot,repoPolicy=null,durableIo=null}={}){if(!runtimeRoot)throw new Error("RUNTIME_ROOT_REQUIRED");this.store=new Store(path.join(runtimeRoot,"authority"));this.machine=new StateMachine({store:this.store});this.repoPolicy=repoPolicy;this.durableCommitTails=new Map();this.commitProtocol=durableIo?new CommitProtocol({io:durableIo}):null;}
   start({rawRequest,repo,projectId}={}){
     const projectDir=this.repoPolicy?this.repoPolicy.assertRepo(repo):path.resolve(String(repo||process.cwd()));
     const plan=compileInstruction(String(rawRequest||"")),request=plan.request;
@@ -59,7 +59,21 @@ class RunAuthority{
     const committed=await protocol.commit({runId:run.run_id,expected:{generation:0,execution_epoch:0},manifest,createIfMissing:true,initialState:initial});return{created:true,state:committed.state,manifest};
   }
   loadDurable(runId){const protocol=this._requireDurable();const state=protocol.loadRunState(String(runId||""));validateRunStateV2(state);const manifest=protocol.loadManifest(state.execution_ref.manifest_id);validateExecutionManifest(manifest);return{state,manifest};}
-  async commitDurable({runId,manifestPatch={},runStatePatch={},immutableRecords=[],commitId=null}={}){const protocol=this._requireDurable();const {state,manifest}=this.loadDurable(runId);const nextManifest=evolveManifest(manifest,manifestPatch);const committed=await protocol.commit({runId:state.run_id,expected:{generation:state.generation,execution_epoch:state.execution_epoch},manifest:nextManifest,runStatePatch,immutableRecords,commitId});return{state:committed.state,manifest:nextManifest,commit:committed};}
+  async commitDurable({runId,manifestPatch={},runStatePatch={},immutableRecords=[],commitId=null,expectedInputRef=null}={}){
+    const protocol=this._requireDurable(),epoch=this.loadDurable(runId).state.execution_epoch;
+    const prior=this.durableCommitTails.get(runId)||Promise.resolve();
+    const operation=prior.then(async()=>{
+      const {state,manifest}=this.loadDurable(runId);
+      if(state.execution_epoch!==epoch)throw Object.assign(new Error("EPOCH_FENCED"),{code:"EPOCH_FENCED"});
+      if(expectedInputRef&&(manifest.workflow_input_refs?.[expectedInputRef.index]??null)!==expectedInputRef.ref)
+        throw Object.assign(new Error("STALE_WORK_ITEM_REVISION"),{code:"STALE_WORK_ITEM_REVISION"});
+      const nextManifest=evolveManifest(manifest,manifestPatch);
+      const committed=await protocol.commit({runId:state.run_id,expected:{generation:state.generation,execution_epoch:state.execution_epoch},manifest:nextManifest,runStatePatch,immutableRecords,commitId});
+      return{state:committed.state,manifest:nextManifest,commit:committed};
+    });
+    const tail=operation.catch(()=>{});this.durableCommitTails.set(runId,tail);
+    try{return await operation;}finally{if(this.durableCommitTails.get(runId)===tail)this.durableCommitTails.delete(runId);}
+  }
   listRunIds(){return this.store.listRuns();}
   inspectDurableRuns(){const recoverable=[],terminal=[],incompatible=[];for(const runId of this.listRunIds()){try{const loaded=this.loadDurable(runId),status=loaded.state.job_status;if(loaded.manifest.cancellation!==null||status==="CANCELLED")terminal.push({run_id:runId,reason:"CANCELLED",...loaded});else if(RECOVERABLE_JOB_STATUSES.has(status))recoverable.push({run_id:runId,...loaded});else if(TERMINAL_JOB_STATUSES.has(status))terminal.push({run_id:runId,reason:status,...loaded});else incompatible.push({run_id:runId,error:`JOB_STATUS_INCOMPATIBLE:${status}`});}catch(error){incompatible.push({run_id:runId,error:String(error?.code||error?.message||error)});}}return{recoverable,terminal,incompatible};}
   async bumpDurableEpoch({runId,manifestPatch={},runStatePatch={}}={}){const protocol=this._requireDurable();const {state,manifest}=this.loadDurable(runId);const nextManifest=evolveManifest(manifest,manifestPatch);const committed=await protocol.bumpEpoch({runId:state.run_id,expectedGeneration:state.generation,expectedEpoch:state.execution_epoch,manifest:nextManifest,runStatePatch});return{state:committed.state,manifest:nextManifest,commit:committed};}

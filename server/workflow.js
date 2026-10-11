@@ -341,7 +341,24 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
         else if(unit.work_unit_id==="researcher.B")answer={payload:{knownKnowledge:evidencePromptView(knowledgeRecords)},evidence_refs:evidenceIds(knowledgeRecords)};
         else if(unit.work_unit_id==="researcher.C")answer={payload:{official:evidencePromptView(officialRecords),evidence_gap:evidenceGap,evidence_status:evidenceStatus,evidence_gap_scope:"official_evidence_search"},evidence_refs:evidenceIds(officialRecords)};
         else if(unit.work_unit_id==="researcher.D")answer={payload:{A:restoredResults["researcher.A"]?.payload||null,B:restoredResults["researcher.B"]?.payload||null,C:restoredResults["researcher.C"]?.payload||null},evidence_refs:researchBase};
-        else if(unit.work_unit_id==="researcher.E"){const assembled=restoredResults["researcher.D"]?.payload||{},durableHooks=createDurableToolEffectHooks({authority,runId,roleExecutionId,attemptId,workUnitId:unit.work_unit_id,inputBindingDigest,repoSnapshotId:context.repo_snapshot_id});research=await callReadOnlyRole("researcher",{system:["Researcher. Select decisive evidence. Return JSON only with exactly these top-level keys: research_status, answer, evidence_refs, rejected_source_refs, contradictions, bound_version. research_status must be SUPPORTED, CONTRADICTORY_EVIDENCE, or INSUFFICIENT_EVIDENCE. Keep answer under 120 characters; use at most 3 short strings per array; target under 100 tokens. Use only registered evidence IDs. If evidence_gap is true, do not treat official evidence as confirmed; local evidence remains available and must be evaluated on its own merits.",hintProtocol].filter(Boolean).join("\n"),user:JSON.stringify({task:rawRequest,failure,dap_hint:dapHint,...(assembled.A||{}),...(assembled.B||{}),...(assembled.C||{})})},toolRuntime,{baseEvidenceIds:researchBase,durableHooks,runId});const payload=roleOutput(research,"researcher"),tools=toolEvidenceRecords(research),effectRefs=[...(research?.tool_loop?.continuation_state?.completed_effect_ids||[])];answer={payload,evidence_refs:mergeEvidenceIds(researchBase,tools.map(x=>x.evidence_id)),effect_refs:effectRefs,validation_summary:"Validated by existing researcher role-output contract"};}
+        else if(unit.work_unit_id==="researcher.E"){
+          const assembled=restoredResults["researcher.D"]?.payload||{};
+          const researchInput={task:rawRequest,failure,dap_hint:dapHint,...(assembled.A||{}),...(assembled.B||{}),...(assembled.C||{})};
+          if(recoveryHooks?.enableHorizontalResearcher===true){
+            const stage=await continueRoleTask({runId,role:"researcher",workItemId:"researcher.E",
+              inputBinding:contentHash({inputBindingDigest,work_unit_id:unit.work_unit_id,input:researchInput}),
+              task:JSON.stringify(researchInput),baseEvidenceIds:researchBase,
+              evidenceRecords:[...localRecords,...knowledgeRecords,...officialRecords,...scoutToolEvidence],maxStepsPerCall:1,maxTotalSteps:12});
+            const payload=assertHorizontalStageComplete("researcher",stage);
+            research={content:JSON.stringify(payload),validated_output:payload};
+            answer={payload,evidence_refs:researchBase,effect_refs:[],validation_summary:"Existing researcher output contract; same E work item completed"};
+          }else{
+            const durableHooks=createDurableToolEffectHooks({authority,runId,roleExecutionId,attemptId,workUnitId:unit.work_unit_id,inputBindingDigest,repoSnapshotId:context.repo_snapshot_id});
+            research=await callReadOnlyRole("researcher",{system:["Researcher. Select decisive evidence. Return JSON only with exactly these top-level keys: research_status, answer, evidence_refs, rejected_source_refs, contradictions, bound_version. research_status must be SUPPORTED, CONTRADICTORY_EVIDENCE, or INSUFFICIENT_EVIDENCE. Keep answer under 120 characters; use at most 3 short strings per array; target under 100 tokens. Use only registered evidence IDs. If evidence_gap is true, do not treat official evidence as confirmed; local evidence remains available and must be evaluated on its own merits.",hintProtocol].filter(Boolean).join("\n"),user:JSON.stringify(researchInput)},toolRuntime,{baseEvidenceIds:researchBase,durableHooks,runId});
+            const payload=roleOutput(research,"researcher"),tools=toolEvidenceRecords(research),effectRefs=[...(research?.tool_loop?.continuation_state?.completed_effect_ids||[])];
+            answer={payload,evidence_refs:mergeEvidenceIds(researchBase,tools.map(x=>x.evidence_id)),effect_refs:effectRefs,validation_summary:"Validated by existing researcher role-output contract"};
+          }
+        }
         else throw new Error(`RESEARCHER_WORK_UNIT_UNKNOWN:${unit.work_unit_id}`);await recoveryHooks?.afterResearcherWorkUnit?.({...args,result:answer});return answer;}});
       researchJson=researchContinuation.payload;researchToolEvidence=durableResearchEvidence(researchContinuation.final_role_result);await logProgress(runId,WorkflowStepId.RESEARCHER,StepPhase.DONE);await setCursor(runId,WorkflowStepId.DIAGNOSER,StepPhase.PENDING,{activeRoleExecutionId:null});
     }else{await logProgress(runId,WorkflowStepId.RESEARCHER,StepPhase.RUNNING);research=await callReadOnlyRole("researcher",{system:["Researcher. Select decisive evidence. Return JSON only with exactly these top-level keys: research_status, answer, evidence_refs, rejected_source_refs, contradictions, bound_version. research_status must be SUPPORTED, CONTRADICTORY_EVIDENCE, or INSUFFICIENT_EVIDENCE. Keep answer under 120 characters; use at most 3 short strings per array; target under 100 tokens. Use only registered evidence IDs. If evidence_gap is true, do not treat official evidence as confirmed; local evidence remains available and must be evaluated on its own merits.",hintProtocol].filter(Boolean).join("\n"),user:JSON.stringify({task:rawRequest,failure,localEvidence:evidencePromptView(localRecords),dap_hint:dapHint,scouts:scoutJson,scout_tool_evidence:evidencePromptView(scoutToolEvidence),knownKnowledge:evidencePromptView(knowledgeRecords),official:evidencePromptView(officialRecords),evidence_gap:evidenceGap,evidence_status:evidenceStatus,evidence_gap_scope:"official_evidence_search"})},toolRuntime,{baseEvidenceIds:researchBase,runId});researchJson=roleOutput(research,"researcher");researchToolEvidence=toolEvidenceRecords(research);await logProgress(runId,WorkflowStepId.RESEARCHER,StepPhase.DONE);}
@@ -546,6 +563,20 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
     if(!patchService)throw new Error("PATCH_SERVICE_REQUIRED");
     let run=null;if(authority)run=authority.load(runId);
     if(decision!=="approve"){if(authority)authority.transition(run,"BLOCKED");throw new Error("PATCH_APPROVAL_REQUIRED");}
+    const horizontalFinal=authority?.durableEnabled?.()&&recoveryHooks?.enableHorizontalLocalReviewer===true;
+    if(horizontalFinal){
+      const saved=loadStageRef(runId,"approved_verification");
+      if(saved){
+        const context=saved.payload;
+        if(context.candidate_id!==candidateId||context.candidate_hash!==candidateHash||
+          path.resolve(String(repo||context.target_repo))!==path.resolve(String(context.target_repo))||
+          snapshotRepo(context.target_repo)!==context.post_apply_repository_revision)
+          throw new Error("FINAL_REVIEW_BINDING_MISMATCH");
+        const completed=loadStageRef(runId,"approved_review_result");
+        if(completed)return completed.payload;
+        return finishApprovedVerification({runId,candidateId,candidateHash,decision,run,out:context.out,targetRepo:context.target_repo,postApplyRepositoryRevision:context.post_apply_repository_revision,horizontalFinal});
+      }
+    }
     // A human approval does not certify a candidate already proven broken in the isolated sandbox.
     const failedPreapproval=runtimeEvidence?.list?.(runId,{types:["candidate_verification"],limit:128})||[];
     if(failedPreapproval.some(entry=>{const check=entry.payload||entry;return check.patch_candidate_id===candidateId&&check.patch_candidate_hash===candidateHash&&check.status==="FINAL_INVALID"&&check.checks?.some(c=>c.executed===true&&c.status==="FAIL");})){
@@ -560,11 +591,24 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
     runtimeEvidence?.write(runId,"verification",{checks:out.checks,invariants:out.invariants,gates:out.gates,pass:out.pass,post_apply_repository_revision:postApplyRepositoryRevision});
     await logRuntime({run_id:runId,severity:out.pass?"info":"error",kind:"verification",pass:out.pass,checks:out.checks,invariants:out.invariants,gates:out.gates,post_apply_repository_revision:postApplyRepositoryRevision});
     if(!out.pass){if(authority)run=authority.transition(run,"FAILED");return automaticRefixCandidate({runId,run,out,targetRepo});}
+    if(horizontalFinal)await saveStage(runId,"approved_verification",{candidate_id:candidateId,candidate_hash:candidateHash,target_repo:targetRepo,post_apply_repository_revision:postApplyRepositoryRevision,out},WorkflowStepId.FINAL_ANALYSIS);
+    return finishApprovedVerification({runId,candidateId,candidateHash,decision,run,out,targetRepo,postApplyRepositoryRevision,horizontalFinal});
+  }
+  async function finishApprovedVerification({runId,candidateId,candidateHash,decision,run,out,targetRepo,postApplyRepositoryRevision,horizontalFinal}){
     const verificationRecords=registerEvidenceList("LOCAL_RUNTIME",[...(out.checks||[]),{kind:"invariants",value:out.invariants},{kind:"gates",value:out.gates}]),verificationIds=evidenceIds(verificationRecords),executedTests=(out.checks||[]).filter(check=>check?.executed===true),receipt=out?.applied?.receipt||null;
     const reviewPacket=makeReviewPacket({candidateRef:candidateId,applyReceiptRef:String(receipt?.transaction_id||receipt?.candidate_id||""),repositoryRevision:postApplyRepositoryRevision,changedPaths:out?.candidate?.files||[],diff:out?.candidate?.diff||"",prePostHashes:reviewPacketHashes(out?.candidate,receipt),executedTests,testResults:out.checks||[],invariants:reviewPacketInvariants(out),evidenceRefs:verificationIds});
     runtimeEvidence?.write(runId,"review_packet",reviewPacket);
-    const lr=await callReadOnlyRole("local_reviewer",{system:"Local Reviewer. Review the local Review Packet from fresh context. JSON only.",user:JSON.stringify({review_packet:reviewPacket,verification_evidence:evidencePromptView(verificationRecords)})},makeReadOnlyToolRuntime(targetRepo,runId),{baseEvidenceIds:verificationIds,strictEvidenceRefs:true,runId});
-    const local_review=roleOutput(lr,"local_reviewer");
+    let local_review;
+    if(horizontalFinal){
+      const reviewInput={review_packet:reviewPacket,verification_evidence:evidencePromptView(verificationRecords)};
+      const stage=await continueRoleTask({runId,role:"local_reviewer",workItemId:`final.review.${candidateId}`,
+        inputBinding:contentHash({candidateId,candidateHash,review_packet_digest:reviewPacket.packet_digest}),
+        task:JSON.stringify(reviewInput),baseEvidenceIds:verificationIds,evidenceRecords:verificationRecords,maxStepsPerCall:1,maxTotalSteps:12});
+      local_review=assertHorizontalStageComplete("local_reviewer",stage);
+    }else{
+      const lr=await callReadOnlyRole("local_reviewer",{system:"Local Reviewer. Review the local Review Packet from fresh context. JSON only.",user:JSON.stringify({review_packet:reviewPacket,verification_evidence:evidencePromptView(verificationRecords)})},makeReadOnlyToolRuntime(targetRepo,runId),{baseEvidenceIds:verificationIds,strictEvidenceRefs:true,runId});
+      local_review=roleOutput(lr,"local_reviewer");
+    }
     const publicReviewSummary=publicReviewPacketSummary(reviewPacket,{localVerdict:local_review.verdict||"UNKNOWN"});
     const finalReview=await reviewWithLocalFallback("final",{privacy:{privacy_class:"PUBLIC",sanitized:true,opaque_evidence:true},summary:publicReviewSummary},async()=>local_review);
     const final=finalReview.external,localFinal=finalReview.local;
@@ -578,7 +622,12 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
     else if(authority&&finalPass&&!complete)run=authority.transition(run,"BLOCKED");
     const state=complete?"COMPLETE":finalPass?"BLOCKED_COMPLETION_GATE":"AWAITING_EXTERNAL_FINAL_REVIEW";
     await logRuntime({run_id:runId,severity:complete?"info":"warn",kind:"final_review",state,local_verdict:local_review.verdict||"UNKNOWN",external_verdict:final?.json?.verdict||"UNAVAILABLE",review_provider:localFinal?.provider||final?.provider||null,unavailable_code:localFinal?.unavailable_code||null,completion_gate});
-    return{run_id:runId,state,...out,local_review,review_packet:{schema:reviewPacket.schema,packet_digest:reviewPacket.packet_digest},external_final_review:final,local_final_review:localFinal,completion_gate,post_apply_repository_revision:postApplyRepositoryRevision,current_repository_revision:currentRepositoryRevision};
+    const result={run_id:runId,state,...out,local_review,review_packet:{schema:reviewPacket.schema,packet_digest:reviewPacket.packet_digest},external_final_review:final,local_final_review:localFinal,completion_gate,post_apply_repository_revision:postApplyRepositoryRevision,current_repository_revision:currentRepositoryRevision};
+    if(horizontalFinal){
+      await saveStage(runId,"approved_review_result",result,WorkflowStepId.FINAL_ANALYSIS,{stepPhase:StepPhase.DONE});
+      await setCursor(runId,WorkflowStepId.FINAL_ANALYSIS,StepPhase.DONE,{jobStatus:complete?"DONE":finalPass?"BLOCKED":"PAUSED"});
+    }
+    return result;
   }
   function resolveVerificationRepo(repo){if(!repoPolicy)throw new Error("VERIFY_REPO_POLICY_REQUIRED");return repoPolicy.assertRepo(repo);}
   function verificationScope(repo,selectedPaths){const paths=[...new Set((Array.isArray(selectedPaths)?selectedPaths:[]).map(String).filter(Boolean))];const files=paths.map(rel=>{const item=readText(repo,rel,{maxChars:1});return{path:item.path,sha256:item.sha256,size:item.size};});return{mode:files.length?"FILES":"REPOSITORY",files};}

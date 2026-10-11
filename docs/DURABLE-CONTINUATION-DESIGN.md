@@ -998,6 +998,41 @@ Until those conditions are satisfied, the correct project-level state remains **
 
 ## Design history — 2026-10-07 bounded control transport extension
 
+### Six-role Module acceptance delta — 2026-10-11
+
+Master prioritizes independent Module qualification before the separate 600s,
+token and context optimization work. PR100's role-owned continuation adapters
+are reused; PR101 remains the independent test branch, never a release branch.
+Researcher E now has the same explicit opt-in hook as the other five roles.
+Its item identity is `researcher.E`; A-D remain in the existing work-unit registry.
+An E CONTINUE is committed before the pending interruption returns. The existing
+Researcher checkpoint retains A-D and does not publish its final result or let
+Diagnoser proceed until E has passed the existing role-result validator.
+Existing models, legacy read-only Tool Loop, Evidence and approval paths remain.
+The opt-in bounded model interface continues to prohibit tool execution; it does
+not silently replace the legacy tool-capable role path or enable production.
+
+Independent real-file/process tests exposed a lost-generation race masked by
+memory authority fixtures: parallel work-item commits each read the same manifest
+before CommitProtocol's mutex. RunAuthority now queues manifest read/evolve/commit
+as one per-run operation. Only writes wait; model/Scout workflows remain parallel.
+The store supplies its expected manifest input reference, checked inside that
+queue, so two stale same-item writers cannot both publish. Execution epoch is
+captured before queuing and checked before commit; takeover still fences queued
+old work. CommitProtocol's native lock, immutable records and fences stay intact.
+Rejected alternative: retrying a stale whole manifest (can lose peer progress).
+Rejected alternative: serialize Scout model calls (violates independent workflows).
+
+Focused acceptance covers E CONTINUE/resume/replay, A-D and Scout non-reexecution,
+downstream blocking and independent/stale write behavior. PR101 separately uses
+real native locked file IO and three child processes to prove all six adapters'
+checkpoint/restart/completion/replay with canonical fixture outputs. Deterministic
+completion proves only fixture objectives; JSON role validation is not independent
+proof of real debugging semantics. Short gated local API protocol, role-specific
+semantic completion and production activation are distinct qualification states.
+Rollback: disable `enableHorizontalResearcher`, or revert this delta on the owning
+product branch. No durable format migration or new execution authority is added.
+
 The HTTP/CLI/MCP transport surface now connects the existing Bounded Server Command and Guarded GitOps paths directly. Added HTTP POST routes are `/v1/server-command/request` and `/v1/server-command/status`; existing GitOps request/status routes are reused. Four MCP tools are appended after the original nine: `debugai_server_read`, `debugai_server_status`, `debugai_gitops_request`, `debugai_gitops_status`. MCP delegates to the existing CLI; CLI forwards structured JSON to HTTP. Request/status delegate to existing service contracts without a second service, executor, queue, workflow, allowlist or approval owner. This is an additive transport extension; removing the new registrations/routes/CLI commands reverses the extension while preserving the original paths. All existing repository, approval, exact SHA, candidate identity, file scope and remote readback boundaries remain authoritative. Source tests/CI do not authorize or establish Production reflection.
 
 ## 25. Scout observation, scoped intake and local Stage reuse — Codex 2026-10-10
@@ -1115,3 +1150,31 @@ Invocation records carry a local event_sequence for deterministic readback when
 multiple observations share a millisecond. Scout inspection chooses an actually
 recorded progress event matching the authoritative durable cursor; UUID filename
 ordering is not execution ordering. This creates no additional durable owner.
+
+### Post-apply Reviewer continuation and six actual hook acceptance — 2026-10-11
+
+The final Source audit found a second gap: Local Reviewer was connected only at
+hypothesis fallback, while its primary post-apply review still invoked once.
+The same explicit `enableHorizontalLocalReviewer` now connects final review to the
+existing Module. Before the first bounded review call, existing RunAuthority stores
+an integrity-bound `approved_verification` stage with candidate/hash, applied
+receipt, deterministic retest result and post-apply Source revision. A subsequent
+same-candidate approved entry restores that stage and continues review without
+reapplying or rerunning retests. Candidate/hash/repo/revision mismatch refuses
+resume. Final review is cached in the existing stage store after Strict Completion;
+completed replay repeats neither model nor final provider. Terminal manifest status
+remains DONE/BLOCKED; unresolved final review remains PAUSED. No auto-approval,
+new API/transport, hidden model state or second mutation authority is introduced.
+The legacy default-off path and its tool-capable Reviewer remain unchanged.
+
+Independent actual-hook fixtures now exercise concurrent Scouts (successful peer
+saved once), E with A-D retained, Diagnoser, hypothesis Reviewer, Patch Engineer
+(candidate only after COMPLETE and still WAITING_APPROVAL), and final Reviewer
+(2 model steps, apply1, final provider fixture1, replay0). Native process acceptance
+remains PR101-only. Real API evidence remains the short same-Coder protocol with
+explicit CONTINUE/COMPLETE envelopes, not six-role real debugging correctness.
+Separate re-diagnosis/preapproval/re-fix and standalone read-only verification
+invocations retain their existing paths; this delta qualifies the primary six-role
+workflow hooks, not every auxiliary invocation in the product. Those secondary
+paths and automatic post-apply startup scheduling are NOT_VERIFIED for horizontal
+continuation; the saved final review is resumed through the same approved entry.
