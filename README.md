@@ -1,8 +1,6 @@
-## DebugAI product / common CHAT boundary — 2026-10-11
-
-Common GitHub Project CHAT dispatch/read client is owned by `G-ACE-inc/server-core`; its duplicate client and client tests are removed here. The existing live workflow now retains only fixed-repository DebugAI product runtime reflection with existing Host admission, receipt, exact SHA and post-reflection readback. No arbitrary command, cross-repository Source reflection, Project inventory or general CHAT dogfood dispatch remains in that workflow. Runtime API/MCP, read-only tools, Evidence, Host executor/registries, diagnostics/candidate/review and Artifact intake remain required product dependencies; no new shared control plane or server-core mutation.
-
 # DebugAI
+
+Current product boundary (2026-10-11): one evidence-grounded repository investigation → diagnosis → candidate → isolated verification → guarded apply/retest → fresh review/Strict Completion. Keep usable Artifact/Evidence, read-only tools and existing execution components as DebugAI product parts. Generic CHAT/Project dispatch is outside this product. The existing development workflow handles only DebugAI's own admitted runtime reflection. Existing MCP contracts stay unchanged; final MCP usability work follows a working, measured diagnosis/repair loop.
 
 On-demand GitHub Actions Artifact intake uses existing Host gh authentication, strict nonexecuting ZIP validation, RuntimeEvidence registration and TGserver ZERO correlation. CLI entry and exact real-slice/production boundary: [Artifact evidence §7](docs/TGSERVER_ZERO_DEVELOPMENT_EVIDENCE.md#7-adopted-on-demand-actions-artifact-to-zero-evidence-2026-10-10).
 
