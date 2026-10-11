@@ -1,9 +1,9 @@
 {
   "base_url": "https://debugai.asterav8.jp",
   "mode": "readonly",
-  "run_id": "",
   "repo": "/workspace/debug-ai",
-  "request": "2026-10-11 Tool B: CHAT route idle after registered_container_logs E2E; bounded read skipped.",
-  "gitops_request": { "enabled": false },
-  "source_reflect_request": { "enabled": false }
+  "request": "DebugAI product reflection only; common Project CHAT dispatch is owned by server-core.",
+  "gitops_request": {
+    "enabled": false
+  }
 }
