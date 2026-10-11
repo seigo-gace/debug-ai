@@ -12,6 +12,14 @@ const {registerEvidenceList,evidenceIds,registrySummary}=require("./control/evid
 const {runResearcherContinuation}=require("./control/researcher-continuation.js");
 const {continueDiagnoserWorkItem}=require("./control/diagnoser-work-item-adapter.js");
 const {continueRoleWorkItem,ROLES:CONTINUABLE_ROLES}=require("./control/role-work-item-adapter.js");
+const {validateEvidenceRecords,mergeBaseEvidenceWithRecords}=require("./control/role-work-item-evidence.js");
+const {isRoleWorkItemPending,makeRoleWorkItemContinuePending}=require("./control/role-work-item/pending.js");
+const {continueCodeScoutWorkItem}=require("./control/role-work-item/adapters/code-scout-work-item-adapter.js");
+const {continueCausalScoutWorkItem}=require("./control/role-work-item/adapters/causal-scout-work-item-adapter.js");
+const {continueResearcherWorkItem}=require("./control/role-work-item/adapters/researcher-work-item-adapter.js");
+const {continuePatchEngineerWorkItem}=require("./control/role-work-item/adapters/patch-engineer-work-item-adapter.js");
+const {continueLocalReviewerWorkItem}=require("./control/role-work-item/adapters/local-reviewer-work-item-adapter.js");
+const ROLE_WORK_ITEM_ADAPTERS=Object.freeze({code_scout:continueCodeScoutWorkItem,causal_scout:continueCausalScoutWorkItem,researcher:continueResearcherWorkItem,patch_engineer:continuePatchEngineerWorkItem,local_reviewer:continueLocalReviewerWorkItem});
 const {createDurableToolEffectHooks,toolResultPath,TOOL_CONTRACT_VERSION}=require("./control/durable-tool-effects.js");
 const {ROLE_CONTRACT_VERSION}=require("./control/role-contracts.js");
 const {makeDurableAnalysisInput,loadDurableAnalysisInput}=require("./control/durable-workflow-input.js");
@@ -102,20 +110,31 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
   // Kept separate from legacy analysis until live E2E acceptance is proven.
   // Six independent role consumers, all using the ONE continuation module.
   // Explicit opt-in until the legacy full workflow passes live semantic acceptance.
+  function registeredEvidenceUserPayload({task,step,previousProgress,evidence,validatedRecords}){
+    const views=evidencePromptView(validatedRecords);
+    return JSON.stringify({task,step,previous_progress:previousProgress,registered_evidence_ids:evidence,registered_evidence:views,evidence:views});
+  }
+  function assertHorizontalStageComplete(role,stage){
+    if(stage.status==="CONTINUE")throw makeRoleWorkItemContinuePending(role);
+    if(stage.status!=="COMPLETE")throw new Error(`${String(role).toUpperCase()}_WORK_ITEM_BLOCKED:`+String(stage.reason||"UNKNOWN"));
+    return stage.result;
+  }
   async function continueRoleTask({runId,role,workItemId,inputBinding,task,baseEvidenceIds=[],
-    maxStepsPerCall=1,maxTotalSteps=12}={}){
+    evidenceRecords=[],maxStepsPerCall=1,maxTotalSteps=12}={}){
     if(!CONTINUABLE_ROLES.includes(role))throw new Error("ROLE_NOT_ALLOWED");
     if(!authority?.durableEnabled?.())throw new Error("ROLE_DURABLE_AUTHORITY_REQUIRED");
     if(typeof task!=="string"||!task.trim())throw new Error("ROLE_TASK_REQUIRED");
     if(!Array.isArray(baseEvidenceIds)||!baseEvidenceIds.every(x=>typeof x==="string"))
       throw new Error("ROLE_EVIDENCE_IDS_INVALID");
     authority.loadDurable(runId);
-    const evidence=mergeEvidenceIds(baseEvidenceIds);
+    const validatedRecords=validateEvidenceRecords(evidenceRecords);
+    const evidence=mergeBaseEvidenceWithRecords(baseEvidenceIds,validatedRecords);
     const boundTask=contentHash({role,task,evidence,input_binding:inputBinding});
-    return continueRoleWorkItem({authority,runId,role,workItemId,inputBinding:boundTask,maxStepsPerCall,maxTotalSteps,
+    const continueViaRole=ROLE_WORK_ITEM_ADAPTERS[role]||continueRoleWorkItem;
+    return continueViaRole({authority,runId,role,workItemId,inputBinding:boundTask,maxStepsPerCall,maxTotalSteps,
       buildStepPrompt:async({step,previousProgress})=>({
         system:`Role: ${role}. Continue ONLY the same assigned work item using a bounded JSON response. status=CONTINUE requires progress.evidence_refs and progress.remaining_work. status=COMPLETE requires the original role's full canonical output under result. status=BLOCKED requires reason. Do not invent evidence; preserve role-specific permissions. No tool execution or mutation in this opt-in interface.`,
-        user:JSON.stringify({task,step,previous_progress:previousProgress,registered_evidence_ids:evidence})
+        user:registeredEvidenceUserPayload({task,step,previousProgress,evidence,validatedRecords})
       }),
       invokeRole:async prompt=>parseJson((await callDirectRole(role,prompt)).content),
       validateIntermediate:async({progress})=>Boolean(progress&&typeof progress==="object"&&!Array.isArray(progress)&&
@@ -128,19 +147,20 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
     });
   }
   async function continueDiagnoserTask({runId,workItemId,inputBinding,task,
-    baseEvidenceIds=[],maxStepsPerCall=1,maxTotalSteps=12}={}){
+    baseEvidenceIds=[],evidenceRecords=[],maxStepsPerCall=1,maxTotalSteps=12}={}){
     if(!authority?.durableEnabled?.())throw new Error("DIAGNOSER_DURABLE_AUTHORITY_REQUIRED");
     if(typeof task!=="string"||!task.trim())throw new Error("DIAGNOSER_TASK_REQUIRED");
     if(!Array.isArray(baseEvidenceIds)||!baseEvidenceIds.every(x=>typeof x==="string"))
       throw new Error("DIAGNOSER_EVIDENCE_IDS_INVALID");
     authority.loadDurable(runId); // No implicit new run, no approval bypass.
-    const evidence=mergeEvidenceIds(baseEvidenceIds);
+    const validatedRecords=validateEvidenceRecords(evidenceRecords);
+    const evidence=mergeBaseEvidenceWithRecords(baseEvidenceIds,validatedRecords);
     const boundInput=contentHash({role:"diagnoser",task,evidence,input_binding:inputBinding});
     return continueDiagnoserWorkItem({authority,runId,workItemId,inputBinding:boundInput,
       maxStepsPerCall,maxTotalSteps,
       buildStepPrompt:async({step,previousProgress})=>({
         system:"Diagnoser. Investigate only the SAME diagnosis task. Each response must be a compact JSON object with status CONTINUE, COMPLETE, or BLOCKED. For CONTINUE return progress with verified evidence_refs and explicit remaining_work. For COMPLETE return result matching the existing Diagnoser canonical role contract. No unsupported evidence or hidden reasoning. No tools or mutations in this opt-in path.",
-        user:JSON.stringify({task,step,previous_progress:previousProgress,registered_evidence_ids:evidence})
+        user:registeredEvidenceUserPayload({task,step,previousProgress,evidence,validatedRecords})
       }),
       invokeDiagnoser:async prompt=>{
         const out=await callDirectRole("diagnoser",prompt);
@@ -215,7 +235,7 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
   function durableResearchEvidence(roleResult){const out=[];for(const effectId of roleResult?.effect_refs||[]){const result=authority.readDurableRecord(toolResultPath(effectId),{expectedSchema:"debugai.tool-result/v1",allowMissing:true});if(!result)throw new Error(`DURABLE_EFFECT_RESULT_MISSING:${effectId}`);assertToolResultIntegrity(result);out.push({evidence_id:result.evidence_id,tool:result.tool,data:result.data,integrity:result.integrity});}return out;}
   function failClosedRecoveryError(error){return /(?:INCOMPATIBLE|MISMATCH|DIGEST|CORRUPT|SECURITY|FORBIDDEN|CANCELLED|EPOCH_FENCED|GENERATION_CONFLICT|INPUT_REF_MISSING)/i.test(String(error?.code||error?.message||error));}
   async function recordExecutionFailure(runId,error){
-    const meta=error?.meta||{},isWorkItemPending=error?.code==="DIAGNOSER_WORK_ITEM_CONTINUE_PENDING",prior=authority?.durableEnabled?.()?loadStageRef(runId,"last_execution_failure")?.payload:null,priorRetries=Number.isInteger(prior?.autonomous_retry_attempt)?prior.autonomous_retry_attempt:0;
+    const meta=error?.meta||{},isWorkItemPending=isRoleWorkItemPending(error?.code),prior=authority?.durableEnabled?.()?loadStageRef(runId,"last_execution_failure")?.payload:null,priorRetries=Number.isInteger(prior?.autonomous_retry_attempt)?prior.autonomous_retry_attempt:0;
     const failure={code:String(error?.code||error?.message||"EXECUTION_ERROR").split(":")[0].slice(0,80),role:meta.role||null,model:meta.model||null,invocation_id:meta.invocation_id||null,timeout_class:meta.timeout_class||null,attempts:Number.isInteger(meta.attempts)?meta.attempts:null,retryable:typeof meta.retryable==="boolean"?meta.retryable:null,failed_at:Date.now(),autonomous_retry_attempt:isWorkItemPending?priorRetries:priorRetries+1,telemetry:meta.telemetry?require("./control/tool-loop.js").summarizeAiTelemetry([meta.telemetry]):null};
     runtimeEvidence?.write(runId,"execution_failure",failure);
     Promise.resolve(logRuntime({run_id:runId,severity:"error",kind:"execution_failure",...failure})).catch(()=>console.error("DebugAI failure log delivery failed"));
@@ -277,7 +297,19 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
         await logProgress(runId,step,StepPhase.RUNNING);
         const scoutStartedAt=Date.now();
         try{
-          const out=await callReadOnlyRole(role,{system:[system,hintProtocol,"Use initial scoped source and reproduction evidence first. Request additional search only to resolve an explicit missing fact or obtain counter-evidence. PARTIAL source scope is not exhaustive coverage; retain UNKNOWNs and falsification checks."].filter(Boolean).join("\n"),user},toolRuntime,{baseEvidenceIds:localIds,runId});
+          const horizontalScout=(role==="code_scout"?recoveryHooks?.enableHorizontalCodeScout:recoveryHooks?.enableHorizontalCausalScout)===true;
+          let out;
+          if(horizontalScout&&durable){
+            const scoutInput={task:rawRequest,failure,evidence:evidencePromptView(localRecords),initial_scope:initialScope,dap_hint:dapHint};
+            const stage=await continueRoleTask({runId,role,workItemId:`analysis.scout.${role}`,
+              inputBinding:contentHash({binding,role,system,user:scoutInput}),
+              task:JSON.stringify(scoutInput),baseEvidenceIds:localIds,evidenceRecords:localRecords,
+              maxStepsPerCall:1,maxTotalSteps:12});
+            const result=assertHorizontalStageComplete(role,stage);
+            out={content:JSON.stringify(result),validated_output:result,tool_loop:{observations:[],evidence_ids:localIds,progress:null}};
+          }else{
+            out=await callReadOnlyRole(role,{system:[system,hintProtocol,"Use initial scoped source and reproduction evidence first. Request additional search only to resolve an explicit missing fact or obtain counter-evidence. PARTIAL source scope is not exhaustive coverage; retain UNKNOWNs and falsification checks."].filter(Boolean).join("\n"),user},toolRuntime,{baseEvidenceIds:localIds,runId});
+          }
           const output=roleOutput(out,role);toolEvidenceRecords(out);
           const reusable=(out.tool_loop?.observations||[]).every(observation=>(observation.results||[]).every(item=>["source.read","source.search","symbol.lookup","dependency.map","test.inventory"].includes(item.request?.tool)&&item.result?.status==="OK"));
           const peerRole=role==="code_scout"?"causal_scout":"code_scout",peerStep=peerRole==="code_scout"?WorkflowStepId.CODE_SCOUT:WorkflowStepId.CAUSAL_SCOUT;
@@ -315,24 +347,19 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
     }else{await logProgress(runId,WorkflowStepId.RESEARCHER,StepPhase.RUNNING);research=await callReadOnlyRole("researcher",{system:["Researcher. Select decisive evidence. Return JSON only with exactly these top-level keys: research_status, answer, evidence_refs, rejected_source_refs, contradictions, bound_version. research_status must be SUPPORTED, CONTRADICTORY_EVIDENCE, or INSUFFICIENT_EVIDENCE. Keep answer under 120 characters; use at most 3 short strings per array; target under 100 tokens. Use only registered evidence IDs. If evidence_gap is true, do not treat official evidence as confirmed; local evidence remains available and must be evaluated on its own merits.",hintProtocol].filter(Boolean).join("\n"),user:JSON.stringify({task:rawRequest,failure,localEvidence:evidencePromptView(localRecords),dap_hint:dapHint,scouts:scoutJson,scout_tool_evidence:evidencePromptView(scoutToolEvidence),knownKnowledge:evidencePromptView(knowledgeRecords),official:evidencePromptView(officialRecords),evidence_gap:evidenceGap,evidence_status:evidenceStatus,evidence_gap_scope:"official_evidence_search"})},toolRuntime,{baseEvidenceIds:researchBase,runId});researchJson=roleOutput(research,"researcher");researchToolEvidence=toolEvidenceRecords(research);await logProgress(runId,WorkflowStepId.RESEARCHER,StepPhase.DONE);}
     const diagnosisBase=mergeEvidenceIds(researchBase,researchContinuation?.final_role_result?.evidence_refs||[],researchToolEvidence.map(x=>x.evidence_id));let diagnosisStage=durable?loadStageRef(runId,"diagnosis"):null,diagnosisJson,diagnosisToolEvidence,diagnosisAudit;
     if(diagnosisStage){diagnosisJson=diagnosisStage.payload.diagnosis;diagnosisToolEvidence=diagnosisStage.payload.tool_evidence||[];diagnosisAudit=diagnosisStage.payload.tool_audit||null;}
-    else{if(durable)await setCursor(runId,WorkflowStepId.DIAGNOSER,StepPhase.RUNNING);await logProgress(runId,WorkflowStepId.DIAGNOSER,StepPhase.RUNNING);const handoff=researchContinuation?buildDownstreamInputBundle({roleResult:researchContinuation.final_role_result,roleContractVersion:ROLE_CONTRACT_VERSION,workflowVersion:1,workflowIteration:0,repoSnapshotId:context.repo_snapshot_id,upstreamResultDigests:[],toolContractVersions:[TOOL_CONTRACT_VERSION],evidencePolicyVersion:"debugai.evidence-registry/v1",budgetPolicyVersion:"debugai.default-budget/v1"}):null;const diagnosis=durable&&recoveryHooks?.enableHorizontalDiagnoser===true
+    else{if(durable)await setCursor(runId,WorkflowStepId.DIAGNOSER,StepPhase.RUNNING);await logProgress(runId,WorkflowStepId.DIAGNOSER,StepPhase.RUNNING);const handoff=researchContinuation?buildDownstreamInputBundle({roleResult:researchContinuation.final_role_result,roleContractVersion:ROLE_CONTRACT_VERSION,workflowVersion:1,workflowIteration:0,repoSnapshotId:context.repo_snapshot_id,upstreamResultDigests:[],toolContractVersions:[TOOL_CONTRACT_VERSION],evidencePolicyVersion:"debugai.evidence-registry/v1",budgetPolicyVersion:"debugai.default-budget/v1"}):null;const diagEvidenceRecords=[...localRecords,...knowledgeRecords,...officialRecords,...researchToolEvidence];const diagnosis=durable&&recoveryHooks?.enableHorizontalDiagnoser===true
       ?await (async()=>{
         const diagInput={task:rawRequest,failure,localEvidence:evidencePromptView(localRecords),dap_hint:dapHint,research:researchJson,researcher_role_result:handoff?{...handoff,payload:undefined}:null,research_tool_evidence:evidencePromptView(researchToolEvidence),knownKnowledge:evidencePromptView(knowledgeRecords),official:evidencePromptView(officialRecords),evidence_gap:evidenceGap,evidence_status:evidenceStatus,evidence_gap_scope:"official_evidence_search"};
-        const stage=await continueRoleTask({runId,role:"diagnoser",workItemId:"analysis.diagnosis",
+        const stage=await continueDiagnoserTask({runId,workItemId:"analysis.diagnosis",
           inputBinding:contentHash({input:diagInput,repo_snapshot:context.repo_snapshot_id}),
-          task:JSON.stringify(diagInput),baseEvidenceIds:diagnosisBase,
+          task:JSON.stringify(diagInput),baseEvidenceIds:diagnosisBase,evidenceRecords:diagEvidenceRecords,
           maxStepsPerCall:1,maxTotalSteps:12});
-        if(stage.status==="CONTINUE"){
-          const pending=new Error("DIAGNOSER_WORK_ITEM_CONTINUE_PENDING");
-          pending.code="DIAGNOSER_WORK_ITEM_CONTINUE_PENDING";
-          throw pending;
-        }
-        if(stage.status!=="COMPLETE")throw new Error("DIAGNOSER_WORK_ITEM_BLOCKED:"+String(stage.reason||"UNKNOWN"));
-        return {validated_output:stage.result,tool_loop:{observations:[],evidence_ids:diagnosisBase,progress:null}};
+        const result=assertHorizontalStageComplete("diagnoser",stage);
+        return {validated_output:result,tool_loop:{observations:[],evidence_ids:diagnosisBase,progress:null}};
       })()
       :await callReadOnlyRole("diagnoser",{system:["Diagnoser. Produce a falsifiable diagnosis as one compact JSON object under 600 tokens, with at most 3 items per array and no prose outside JSON. Preserve uncertainty about official evidence when evidence_gap is true, but do not discard supplied local evidence.",hintProtocol].filter(Boolean).join("\n"),user:JSON.stringify({task:rawRequest,failure,localEvidence:evidencePromptView(localRecords),dap_hint:dapHint,research:researchJson,researcher_role_result:handoff?{...handoff,payload:undefined}:null,research_tool_evidence:evidencePromptView(researchToolEvidence),knownKnowledge:evidencePromptView(knowledgeRecords),official:evidencePromptView(officialRecords),evidence_gap:evidenceGap,evidence_status:evidenceStatus,evidence_gap_scope:"official_evidence_search"})},toolRuntime,{baseEvidenceIds:diagnosisBase,runId});diagnosisJson=roleOutput(diagnosis,"diagnoser");diagnosisToolEvidence=toolEvidenceRecords(diagnosis);diagnosisAudit=toolAudit(diagnosis);await logProgress(runId,WorkflowStepId.DIAGNOSER,StepPhase.DONE);if(durable)diagnosisStage=await saveStage(runId,"diagnosis",{diagnosis:diagnosisJson,tool_evidence:diagnosisToolEvidence,tool_audit:diagnosisAudit,research_role_result_id:researchContinuation.final_role_result.role_result_id},WorkflowStepId.EXTERNAL_REVIEW);}
     const localPublic=publicLocalEvidence(localEvidence),hypothesis={privacy_class:"PUBLIC",sanitized:true,opaque_evidence:true,statement:pickDiagnosisStatement(diagnosisJson),cause_class:String(diagnosisJson?.cause_kind||"UNKNOWN"),evidence_count:localEvidence.length+deterministicChecks.length+knownKnowledge.length+official.length,local_evidence_count:localPublic.length,local_evidence:localPublic,evidence_gap:evidenceGap,evidence_status:evidenceStatus,evidence_gap_scope:evidenceGap?"official_evidence_search":null};
-    let externalStage=durable?loadStageRef(runId,"external_review"):null,external,localHypothesis=null;if(externalStage){external=externalStage.payload.external;localHypothesis=externalStage.payload.local_hypothesis_review||null;}else{if(durable)await setCursor(runId,WorkflowStepId.EXTERNAL_REVIEW,StepPhase.RUNNING);await logProgress(runId,WorkflowStepId.EXTERNAL_REVIEW,StepPhase.RUNNING);const review=await reviewWithLocalFallback("hypothesis",{privacy:{privacy_class:"PUBLIC",sanitized:true,opaque_evidence:true},hypothesis},async()=>roleOutput(await callReadOnlyRole("local_reviewer",{system:"Local Reviewer. Review the diagnosed hypothesis from fresh context using supplied evidence. Return the existing review contract: verdict PASS, FAIL or INSUFFICIENT_EVIDENCE, decision DONE, BLOCKED or INSUFFICIENT_EVIDENCE, and claims array. Preserve evidence gaps. JSON only. Never apply.",user:JSON.stringify({hypothesis,diagnosis:diagnosisJson,evidence:evidencePromptView([...localRecords,...officialRecords,...researchToolEvidence,...diagnosisToolEvidence])})},toolRuntime,{baseEvidenceIds:mergeEvidenceIds(diagnosisBase,diagnosisToolEvidence.map(x=>x.evidence_id)),runId}),"local_reviewer"));external=review.external;localHypothesis=review.local;if(durable)externalStage=await saveStage(runId,"external_review",{external,local_hypothesis_review:localHypothesis},WorkflowStepId.FINAL_ANALYSIS);await logProgress(runId,WorkflowStepId.EXTERNAL_REVIEW,StepPhase.DONE);}
+    let externalStage=durable?loadStageRef(runId,"external_review"):null,external,localHypothesis=null;if(externalStage){external=externalStage.payload.external;localHypothesis=externalStage.payload.local_hypothesis_review||null;}else{if(durable)await setCursor(runId,WorkflowStepId.EXTERNAL_REVIEW,StepPhase.RUNNING);await logProgress(runId,WorkflowStepId.EXTERNAL_REVIEW,StepPhase.RUNNING);const review=await reviewWithLocalFallback("hypothesis",{privacy:{privacy_class:"PUBLIC",sanitized:true,opaque_evidence:true},hypothesis},async()=>{const lrEvidence=[...localRecords,...officialRecords,...researchToolEvidence,...diagnosisToolEvidence],lrBase=mergeEvidenceIds(diagnosisBase,diagnosisToolEvidence.map(x=>x.evidence_id));if(durable&&recoveryHooks?.enableHorizontalLocalReviewer===true){const lrInput={hypothesis,diagnosis:diagnosisJson,evidence:evidencePromptView(lrEvidence)};const stage=await continueRoleTask({runId,role:"local_reviewer",workItemId:"analysis.local_review",inputBinding:contentHash({input:lrInput,repo_snapshot:context.repo_snapshot_id}),task:JSON.stringify(lrInput),baseEvidenceIds:lrBase,evidenceRecords:lrEvidence,maxStepsPerCall:1,maxTotalSteps:12});return assertHorizontalStageComplete("local_reviewer",stage);}return roleOutput(await callReadOnlyRole("local_reviewer",{system:"Local Reviewer. Review the diagnosed hypothesis from fresh context using supplied evidence. Return the existing review contract: verdict PASS, FAIL or INSUFFICIENT_EVIDENCE, decision DONE, BLOCKED or INSUFFICIENT_EVIDENCE, and claims array. Preserve evidence gaps. JSON only. Never apply.",user:JSON.stringify({hypothesis,diagnosis:diagnosisJson,evidence:evidencePromptView(lrEvidence)})},toolRuntime,{baseEvidenceIds:lrBase,runId}),"local_reviewer");});external=review.external;localHypothesis=review.local;if(durable)externalStage=await saveStage(runId,"external_review",{external,local_hypothesis_review:localHypothesis},WorkflowStepId.FINAL_ANALYSIS);await logProgress(runId,WorkflowStepId.EXTERNAL_REVIEW,StepPhase.DONE);}
     const researcherAudit=research?toolAudit(research):researchContinuation?{durable_reuse:researchContinuation.reused_complete,role_execution_id:researchContinuation.role_execution_id,attempt_no:researchContinuation.attempt_no,executed_work_units:researchContinuation.executed_work_units}:null,tool_audit={code_scout:context.scout_tool_audit?.code_scout||null,causal_scout:context.scout_tool_audit?.causal_scout||null,researcher:researcherAudit,diagnoser:diagnosisAudit};
     const evidence_registry=registrySummary({local:localRecords,knowledge:knowledgeRecords,official:officialRecords});evidence_registry.tool_evidence_ids=mergeEvidenceIds(scoutToolEvidence.map(x=>x.evidence_id),researchToolEvidence.map(x=>x.evidence_id),diagnosisToolEvidence.map(x=>x.evidence_id));evidence_registry.total_with_tools=evidence_registry.total+evidence_registry.tool_evidence_ids.length;
     const result={run_id:runId,resumed:resuming,requirement_input:scrub({raw_request:rawRequest,specification:failure?.requirements??null}),durable_researcher:researchContinuation?{role_execution_id:researchContinuation.role_execution_id,attempt_no:researchContinuation.attempt_no,reused_complete:researchContinuation.reused_complete,executed_work_units:researchContinuation.executed_work_units}:null,deterministic_verification:{status:deterministicVerification.status,checks:deterministicChecks},dap_hint:dapHint,scouts:scoutJson,known_knowledge:knownKnowledge,official_evidence:official,evidence_gap:evidenceGap,evidence_status:evidenceStatus,evidence_registry,research:researchJson,diagnosis:diagnosisJson,tool_audit,external_hypothesis_review:external,local_hypothesis_review:localHypothesis,state:(external||localHypothesis)?.json?.verdict==="PASS"?"HYPOTHESIS_APPROVED":"AWAITING_EXTERNAL_HYPOTHESIS_REVIEW"};
@@ -368,7 +395,15 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
     const targetRepo=repoPolicy?repoPolicy.assertRepo(repo):repo,source=patchPacketSource(targetRepo,selectedPaths),inventory=verificationInventory(targetRepo),refs=patchPacketEvidenceRefs(analysis);
     const patchPacket=makePatchPacket({runId,diagnosisRef:`diagnosis_${contentHash(analysis?.diagnosis||{})}`,repositoryRevision:snapshotRepo(targetRepo),paths:selectedPaths,sourceExcerpts:source.sourceExcerpts,preconditionHashes:source.preconditionHashes,reproductionSummary:{status:String(analysis?.deterministic_verification?.status||"UNKNOWN"),checks:analysis?.deterministic_verification?.checks||[]},testInventory:inventory.checks,invariants:[{name:"candidate-only-patch-engineer",status:"PASS"},{name:"explicit-approval-required",status:"PASS"}],prohibitedPaths:source.prohibitedPaths,evidenceRefs:refs,requirementInput:patchRequirementInput({runId,analysis,context,task})});
     runtimeEvidence?.write(runId,"patch_packet",patchPacket);
-    const out=await callReadOnlyRole("patch_engineer",{system:"Patch Engineer. Candidate only. Preserve the packet requirement contract; missing fields and semantic verification remain UNKNOWN. Never apply. JSON only.",user:JSON.stringify({patch_packet:patchPacket,diagnosis:analysis.diagnosis,context:patchPacket.payload.requirement_contract.input.verbatim_context,task:patchPacket.payload.requirement_contract.input.verbatim_task})},makeReadOnlyToolRuntime(targetRepo,runId),{baseEvidenceIds:refs,strictEvidenceRefs:true,runId});
+    let out;
+    if(authority?.durableEnabled?.()&&recoveryHooks?.enableHorizontalPatchEngineer===true){
+      const peInput={patch_packet:patchPacket,diagnosis:analysis.diagnosis,context:patchPacket.payload.requirement_contract.input.verbatim_context,task:patchPacket.payload.requirement_contract.input.verbatim_task};
+      const stage=await continueRoleTask({runId,role:"patch_engineer",workItemId:"patch.candidate.primary",inputBinding:contentHash({input:peInput,paths:selectedPaths}),task:JSON.stringify(peInput),baseEvidenceIds:refs,maxStepsPerCall:1,maxTotalSteps:12});
+      const result=assertHorizontalStageComplete("patch_engineer",stage);
+      out={content:JSON.stringify(result),validated_output:result,tool_loop:{observations:[],evidence_ids:refs,progress:null}};
+    }else{
+      out=await callReadOnlyRole("patch_engineer",{system:"Patch Engineer. Candidate only. Preserve the packet requirement contract; missing fields and semantic verification remain UNKNOWN. Never apply. JSON only.",user:JSON.stringify({patch_packet:patchPacket,diagnosis:analysis.diagnosis,context:patchPacket.payload.requirement_contract.input.verbatim_context,task:patchPacket.payload.requirement_contract.input.verbatim_task})},makeReadOnlyToolRuntime(targetRepo,runId),{baseEvidenceIds:refs,strictEvidenceRefs:true,runId});
+    }
     const candidateResult=roleOutput(out,"patch_engineer");
     assertPatchRequirements(patchPacket,{operations:candidateResult.operations||[],repositoryRevision:snapshotRepo(targetRepo),sourceHashes:patchPacketSource(targetRepo,selectedPaths).preconditionHashes,availableEvidenceIds:patchPacketEvidenceRefs(analysis)});
     const patchEngineerRuntime={telemetry:out?.tool_loop?.telemetry||out?.tool_loop?.progress?.runtime_telemetry||null,selected_skill_ids:[...(out?.tool_loop?.selected_skill_ids||out?.control_plane?.selected_skill_ids||[])]};

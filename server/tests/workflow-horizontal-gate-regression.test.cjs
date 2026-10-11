@@ -13,7 +13,14 @@ test("normal workflow remains functional without enabling horizontal Diagnoser",
 test("Diagnoser full-flow continuation has a strict off-by-default gate",()=>{
   const source=fs.readFileSync(path.join(__dirname,"../workflow.js"),"utf8");
   assert.match(source,/durable&&recoveryHooks\?\.enableHorizontalDiagnoser===true/);
-  assert.match(source,/DIAGNOSER_WORK_ITEM_CONTINUE_PENDING/);
+  assert.match(source,/makeRoleWorkItemContinuePending/);
+  assert.match(source,/isRoleWorkItemPending\(error\?\.code\)/);
   assert.match(source,/isWorkItemPending\?priorRetries:priorRetries\+1/);
   assert.match(source,/Promise\.allSettled\(\[scout\("code_scout"/);
+  assert.match(source,/enableHorizontalCodeScout/);
+  assert.match(source,/enableHorizontalCausalScout/);
+  assert.match(source,/enableHorizontalPatchEngineer/);
+  assert.match(source,/enableHorizontalLocalReviewer/);
+  assert.match(source,/registeredEvidenceUserPayload/);
+  assert.match(source,/role-work-item-evidence\.js/);
 });
