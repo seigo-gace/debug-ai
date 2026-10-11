@@ -3,6 +3,7 @@ const crypto=require("node:crypto");
 const {Agent,fetch:undiciFetch}=require("undici");
 const {ROLES}=require("../roles.js");
 const {compileInvocation}=require("../control/invocation-compiler.js");
+const {assessInputReservation}=require("../control/input-token-shadow.js");
 const {OUTPUT_HEADROOM_TOKENS,getModelOutputHardCeilingForRole}=require("../control/model-profiles.js");
 const ROLE_ALIASES=Object.freeze(Object.fromEntries(Object.entries(ROLES).map(([k,v])=>[k,v.alias])));
 const TIMEOUT_CLASS=Object.freeze({QUEUE_TIMEOUT:"QUEUE_TIMEOUT",DEADLINE_ABORT:"DEADLINE_ABORT",TRANSPORT_TIMEOUT:"TRANSPORT_TIMEOUT",EXTERNAL_ABORT:"EXTERNAL_ABORT"});
@@ -74,12 +75,13 @@ function runtimeControlWireUser(user,toolBudgetFinalRound){
   if(typeof toolBudgetFinalRound!=="boolean")throw new AiCoreError("AI_CORE_TOOL_BUDGET_CONTROL_INVALID","toolBudgetFinalRound must be boolean or null");
   return `${String(user||"")}\n\nRUNTIME_CONTROL_DATA_ONLY=${JSON.stringify({tool_budget_final_round:toolBudgetFinalRound})}`;
 }
-function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=process.env.AI_CORE_API_KEY,fetchImpl=undiciFetch,timeoutMs=600000,maxTransportTimeoutAttempts=2,maxTimeoutRetries,dispatcher,runtimeContextTokens=process.env.DEBUG_AI_CORE_CONTEXT_TOKENS??null,requireRuntimeContextQualification=false,promptCache=true,observationIntervalMs=60000}={}){
+function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=process.env.AI_CORE_API_KEY,fetchImpl=undiciFetch,timeoutMs=600000,maxTransportTimeoutAttempts=2,maxTimeoutRetries,dispatcher,runtimeContextTokens=process.env.DEBUG_AI_CORE_CONTEXT_TOKENS??null,requireRuntimeContextQualification=false,promptCache=true,inputTokenShadow=false,observationIntervalMs=60000}={}){
   if(!baseUrl)throw new AiCoreError("AI_CORE_URL_REQUIRED","DEBUG_AI_CORE_URL is required");
   if(!apiKey)throw new AiCoreError("AI_CORE_API_KEY_REQUIRED","AI_CORE_API_KEY is required");
   if(typeof fetchImpl!=="function")throw new AiCoreError("FETCH_REQUIRED","fetch implementation is required");
   if(!Number.isSafeInteger(observationIntervalMs)||observationIntervalMs<1||observationIntervalMs>60000)throw new AiCoreError("AI_CORE_OBSERVATION_INTERVAL_INVALID","Observation interval must be 1..60000ms");
   if(typeof promptCache!=="boolean")throw new AiCoreError("AI_CORE_PROMPT_CACHE_INVALID","promptCache must be boolean");
+  if(typeof inputTokenShadow!=="boolean")throw new AiCoreError("AI_CORE_INPUT_SHADOW_INVALID","inputTokenShadow must be boolean");
   const qualifiedRuntimeContext=normalizeRuntimeContextTokens(runtimeContextTokens);
   if(requireRuntimeContextQualification&&qualifiedRuntimeContext===null)throw new AiCoreError("AI_CORE_RUNTIME_CONTEXT_UNQUALIFIED","DEBUG_AI_CORE_CONTEXT_TOKENS is required for qualified production execution");
   if(maxTimeoutRetries!==undefined)maxTransportTimeoutAttempts=maxTimeoutRetries;
@@ -102,6 +104,26 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
     const body={model:cfg.backend_model,messages:[{role:"system",content:effectiveSystem},{role:"user",content:wireUser}],max_tokens:effectiveMaxTokens,temperature,stream:false,cache_prompt:promptCache,response_format:responseFormat?{type:responseFormat}:undefined};if(topP!==null&&topP!==undefined){if(!Number.isFinite(topP)||topP<0||topP>1)throw new AiCoreError("AI_CORE_TOP_P_INVALID","topP must be between 0 and 1",{role,top_p:topP});body.top_p=topP;}if(topK!==null&&topK!==undefined){if(!Number.isInteger(topK)||topK<0)throw new AiCoreError("AI_CORE_TOP_K_INVALID","topK must be a nonnegative integer",{role,top_k:topK});body.top_k=topK;}
     if(typeof cfg.thinking==="boolean")body.chat_template_kwargs={enable_thinking:cfg.thinking};
     const requestBody=JSON.stringify(body),requestBytesPerAttempt=Buffer.byteLength(requestBody,"utf8"),prepareMs=Date.now()-prepareStartedAt;
+    // Optional observational exact-chat-count endpoint; never modify dispatch.
+    let inputShadow=null;
+    if(inputTokenShadow){
+      let counted=null;
+      try{
+        const counter=await fetchImpl(new URL("/v1/chat/completions/input_tokens",baseUrl).toString(),{
+          method:"POST",headers:{authorization:"Bearer "+apiKey,"content-type":"application/json"},
+          body:requestBody,dispatcher:transport,signal:AbortSignal.timeout(2000)
+        });
+        if(counter?.ok===true){
+          const payload=await counter.text();
+          if(typeof payload==="string"&&Buffer.byteLength(payload,"utf8")<=4096){
+            const count=JSON.parse(payload)?.input_tokens;
+            if(Number.isSafeInteger(count)&&count>0)counted=count;
+          }
+        }
+      }catch{ /* unavailable counter remains UNKNOWN; original call still runs */ }
+      inputShadow=assessInputReservation({inputTokens:counted,contextTokens:qualifiedRuntimeContext,outputTokens:effectiveMaxTokens});
+      runtimeMeta.observe?.({phase:"INPUT_TOKEN_SHADOW",input_token_shadow:inputShadow});
+    }
     let upstreamMs=0,responseBytes=0,parseValidateMs=0;
     for(let attempt=1;attempt<=maxTransportTimeoutAttempts;attempt++){
       const ctl=new AbortController();let deadlineTriggered=false;
@@ -126,7 +148,7 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
         const telemetry=makeTelemetry({queueWaitMs:runtimeMeta.queueWaitMs,prepareMs,upstreamMs,parseValidateMs,roleStartedAt,requestBytes:requestBytesPerAttempt*attempt,responseBytes,attempts:attempt,envelope,finishReason,prefix:compiledPrefixHash});
         if(String(finishReason||"").toLowerCase()==="length")throw truncationError(role,cfg,{maxTokens:effectiveMaxTokens,finishReason,content,envelope,telemetry});
         if(typeof content!=="string"||!content.trim()){const reasoningOnly=typeof envelope?.choices?.[0]?.message?.reasoning_content==="string"&&envelope.choices[0].message.reasoning_content.trim().length>0;throw new AiCoreError(reasoningOnly?"AI_CORE_REASONING_ONLY":"AI_CORE_EMPTY",reasoningOnly?"AI Core returned reasoning without final content":"AI Core returned empty content",{role,model:cfg.backend_model,finish_reason:finishReason,reasoning_content_present:reasoningOnly,telemetry});}
-        return {provider:"llama-swap",role,alias:cfg.alias,model:cfg.backend_model,thinking:cfg.thinking,content,raw:envelope,attempts:attempt,telemetry,control_plane:{selected_skill_ids:invocation?[...invocation.selected_skill_ids]:[...(selectedSkillIds||[])],skill_selection_mode:invocation?invocation.skill_selection_mode:"PRECOMPILED_MEASUREMENT",role_contract_version:invocation?invocation.role_contract_version:null,output_schema:invocation?invocation.output_schema:null,guardrail_profile:invocation?invocation.guardrail_profile:null,effective_timeout_ms:effectiveTimeoutMs,max_tokens:effectiveMaxTokens,requested_max_tokens:tokenBudget.requested_max_tokens,model_output_hard_ceiling_tokens:tokenBudget.model_output_hard_ceiling_tokens,runtime_context_tokens:tokenBudget.runtime_context_tokens,runtime_output_ceiling_tokens:tokenBudget.runtime_output_ceiling_tokens,runtime_context_qualified:tokenBudget.runtime_context_qualified,context_limited:tokenBudget.context_limited,prompt_cache_requested:promptCache,tool_budget_final_round:toolBudgetFinalRound===true,prefix_hash:compiledPrefixHash}};
+        return {provider:"llama-swap",role,alias:cfg.alias,model:cfg.backend_model,thinking:cfg.thinking,content,raw:envelope,attempts:attempt,telemetry,control_plane:{selected_skill_ids:invocation?[...invocation.selected_skill_ids]:[...(selectedSkillIds||[])],skill_selection_mode:invocation?invocation.skill_selection_mode:"PRECOMPILED_MEASUREMENT",role_contract_version:invocation?invocation.role_contract_version:null,output_schema:invocation?invocation.output_schema:null,guardrail_profile:invocation?invocation.guardrail_profile:null,effective_timeout_ms:effectiveTimeoutMs,max_tokens:effectiveMaxTokens,requested_max_tokens:tokenBudget.requested_max_tokens,model_output_hard_ceiling_tokens:tokenBudget.model_output_hard_ceiling_tokens,runtime_context_tokens:tokenBudget.runtime_context_tokens,runtime_output_ceiling_tokens:tokenBudget.runtime_output_ceiling_tokens,runtime_context_qualified:tokenBudget.runtime_context_qualified,context_limited:tokenBudget.context_limited,prompt_cache_requested:promptCache,...(inputTokenShadow?{input_token_shadow:inputShadow}:{}),tool_budget_final_round:toolBudgetFinalRound===true,prefix_hash:compiledPrefixHash}};
       }catch(e){
         const timeoutClass=classifyTimeoutError(e,{deadlineTriggered});
         const attemptsStarted=requestDispatched?attempt:attempt-1;
