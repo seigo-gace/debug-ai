@@ -3,7 +3,7 @@ const crypto=require("node:crypto");
 const {Agent,fetch:undiciFetch}=require("undici");
 const {ROLES}=require("../roles.js");
 const {compileInvocation}=require("../control/invocation-compiler.js");
-const {assessInputReservation}=require("../control/input-token-shadow.js");
+const {assessInputReservation,resolveCounterTarget}=require("../control/input-token-shadow.js");
 const {OUTPUT_HEADROOM_TOKENS,getModelOutputHardCeilingForRole}=require("../control/model-profiles.js");
 const ROLE_ALIASES=Object.freeze(Object.fromEntries(Object.entries(ROLES).map(([k,v])=>[k,v.alias])));
 const TIMEOUT_CLASS=Object.freeze({QUEUE_TIMEOUT:"QUEUE_TIMEOUT",DEADLINE_ABORT:"DEADLINE_ABORT",TRANSPORT_TIMEOUT:"TRANSPORT_TIMEOUT",EXTERNAL_ABORT:"EXTERNAL_ABORT"});
@@ -75,13 +75,14 @@ function runtimeControlWireUser(user,toolBudgetFinalRound){
   if(typeof toolBudgetFinalRound!=="boolean")throw new AiCoreError("AI_CORE_TOOL_BUDGET_CONTROL_INVALID","toolBudgetFinalRound must be boolean or null");
   return `${String(user||"")}\n\nRUNTIME_CONTROL_DATA_ONLY=${JSON.stringify({tool_budget_final_round:toolBudgetFinalRound})}`;
 }
-function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=process.env.AI_CORE_API_KEY,fetchImpl=undiciFetch,timeoutMs=600000,maxTransportTimeoutAttempts=2,maxTimeoutRetries,dispatcher,runtimeContextTokens=process.env.DEBUG_AI_CORE_CONTEXT_TOKENS??null,requireRuntimeContextQualification=false,promptCache=true,inputTokenShadow=false,observationIntervalMs=60000}={}){
+function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=process.env.AI_CORE_API_KEY,fetchImpl=undiciFetch,timeoutMs=600000,maxTransportTimeoutAttempts=2,maxTimeoutRetries,dispatcher,runtimeContextTokens=process.env.DEBUG_AI_CORE_CONTEXT_TOKENS??null,requireRuntimeContextQualification=false,promptCache=true,inputTokenShadow=false,inputTokenShadowRoute="router",observationIntervalMs=60000}={}){
   if(!baseUrl)throw new AiCoreError("AI_CORE_URL_REQUIRED","DEBUG_AI_CORE_URL is required");
   if(!apiKey)throw new AiCoreError("AI_CORE_API_KEY_REQUIRED","AI_CORE_API_KEY is required");
   if(typeof fetchImpl!=="function")throw new AiCoreError("FETCH_REQUIRED","fetch implementation is required");
   if(!Number.isSafeInteger(observationIntervalMs)||observationIntervalMs<1||observationIntervalMs>60000)throw new AiCoreError("AI_CORE_OBSERVATION_INTERVAL_INVALID","Observation interval must be 1..60000ms");
   if(typeof promptCache!=="boolean")throw new AiCoreError("AI_CORE_PROMPT_CACHE_INVALID","promptCache must be boolean");
   if(typeof inputTokenShadow!=="boolean")throw new AiCoreError("AI_CORE_INPUT_SHADOW_INVALID","inputTokenShadow must be boolean");
+  if(inputTokenShadowRoute!=="router"&&inputTokenShadowRoute!=="g0_loopback")throw new AiCoreError("AI_CORE_INPUT_SHADOW_ROUTE_INVALID","unsupported counter route");
   const qualifiedRuntimeContext=normalizeRuntimeContextTokens(runtimeContextTokens);
   if(requireRuntimeContextQualification&&qualifiedRuntimeContext===null)throw new AiCoreError("AI_CORE_RUNTIME_CONTEXT_UNQUALIFIED","DEBUG_AI_CORE_CONTEXT_TOKENS is required for qualified production execution");
   if(maxTimeoutRetries!==undefined)maxTransportTimeoutAttempts=maxTimeoutRetries;
@@ -107,12 +108,16 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
     // Optional observational exact-chat-count endpoint; never modify dispatch.
     let inputShadow=null;
     if(inputTokenShadow){
-      let counted=null;
+      let counted=null,counterStatus=null;
+      const target=resolveCounterTarget({routerUrl:baseUrl,model:cfg.backend_model,route:inputTokenShadowRoute});
       try{
-        const counter=await fetchImpl(new URL("/v1/chat/completions/input_tokens",baseUrl).toString(),{
-          method:"POST",headers:{authorization:"Bearer "+apiKey,"content-type":"application/json"},
-          body:requestBody,dispatcher:transport,signal:AbortSignal.timeout(2000)
+        if(target){
+        const headers=target.include_router_auth?{authorization:"Bearer "+apiKey,"content-type":"application/json"}:{"content-type":"application/json"};
+        const counter=await fetchImpl(target.url,{
+          method:"POST",headers,body:requestBody,dispatcher:transport,
+          redirect:"error",signal:AbortSignal.timeout(2000)
         });
+        counterStatus=Number.isInteger(counter?.status)?counter.status:null;
         if(counter?.ok===true){
           const payload=await counter.text();
           if(typeof payload==="string"&&Buffer.byteLength(payload,"utf8")<=4096){
@@ -120,8 +125,9 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
             if(Number.isSafeInteger(count)&&count>0)counted=count;
           }
         }
+        }
       }catch{ /* unavailable counter remains UNKNOWN; original call still runs */ }
-      inputShadow=assessInputReservation({inputTokens:counted,contextTokens:qualifiedRuntimeContext,outputTokens:effectiveMaxTokens});
+      inputShadow=Object.freeze({...assessInputReservation({inputTokens:counted,contextTokens:qualifiedRuntimeContext,outputTokens:effectiveMaxTokens}),counter_route:target?.route||"ROUTE_NOT_ADMITTED",counter_http_status:counterStatus});
       runtimeMeta.observe?.({phase:"INPUT_TOKEN_SHADOW",input_token_shadow:inputShadow});
     }
     let upstreamMs=0,responseBytes=0,parseValidateMs=0;
