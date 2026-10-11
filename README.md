@@ -1,5 +1,9 @@
 # DebugAI
 
+Current product boundary (2026-10-11): one evidence-grounded repository investigation → diagnosis → candidate → isolated verification → guarded apply/retest → fresh review/Strict Completion. Keep usable Artifact/Evidence, read-only tools and existing execution components as DebugAI product parts. Generic CHAT/Project dispatch is outside this product. The existing development workflow handles only DebugAI's own admitted runtime reflection. Existing MCP contracts stay unchanged; final MCP usability work follows a working, measured diagnosis/repair loop.
+
+On-demand GitHub Actions Artifact intake uses existing Host gh authentication, strict nonexecuting ZIP validation, RuntimeEvidence registration and TGserver ZERO correlation. CLI entry and exact real-slice/production boundary: [Artifact evidence §7](docs/TGSERVER_ZERO_DEVELOPMENT_EVIDENCE.md#7-adopted-on-demand-actions-artifact-to-zero-evidence-2026-10-10).
+
 FREE Groq/Gemini reviews use the existing hypothesis/final gates with durable rolling quota reservations. Live HTTP stays blocked until Host-owned account and remaining-budget evidence is qualified; Source/CI does not prove runtime reflection. Contract and protected activation gate: [Product decision context §12](docs/DEBUGAI_PRODUCT_DECISION_CONTEXT_20261009.md#12-codex-p0-free-reviewer-protection--2026-10-09).
 
 ## Master Internal Persistent Delegation — source implementation
