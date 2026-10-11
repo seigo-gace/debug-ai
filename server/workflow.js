@@ -111,7 +111,8 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
       throw new Error("ROLE_EVIDENCE_IDS_INVALID");
     authority.loadDurable(runId);
     const evidence=mergeEvidenceIds(baseEvidenceIds);
-    return continueRoleWorkItem({authority,runId,role,workItemId,inputBinding,maxStepsPerCall,maxTotalSteps,
+    const boundTask=contentHash({role,task,evidence,input_binding:inputBinding});
+    return continueRoleWorkItem({authority,runId,role,workItemId,inputBinding:boundTask,maxStepsPerCall,maxTotalSteps,
       buildStepPrompt:async({step,previousProgress})=>({
         system:`Role: ${role}. Continue ONLY the same assigned work item using a bounded JSON response. status=CONTINUE requires progress.evidence_refs and progress.remaining_work. status=COMPLETE requires the original role's full canonical output under result. status=BLOCKED requires reason. Do not invent evidence; preserve role-specific permissions. No tool execution or mutation in this opt-in interface.`,
         user:JSON.stringify({task,step,previous_progress:previousProgress,registered_evidence_ids:evidence})
