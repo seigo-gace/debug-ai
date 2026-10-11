@@ -6,6 +6,6 @@
   "gitops_request": {
     "enabled": true,
     "branch": "fix/scout-observation-reuse-20261010",
-    "sha": "791cf2537da1170a60f26eed64bfa1b2d0ffb66f"
+    "sha": "45352a1c374ba1ef775df106218566aa3fef8443"
   }
 }
