@@ -1348,3 +1348,36 @@ The following are **external reference techniques**, not observed DebugAI improv
 - LangGraph durable execution (checkpoint/replay and side-effect/idempotency design patterns): https://langchain-ai.github.io/langgraph/concepts/durable_execution/
 
 None of these external studies tested the exact DebugAI GGUF set, prompts, native Store and Contabo runtime together. Therefore no external paper's speedup, pass rate, context limit or framework safety property may be copied into DebugAI acceptance without its own matched evidence.
+
+### 26.12 Integrated product-module handoff and historic runtime measurements — 2026-10-11
+
+Master directed one integrated DebugAI product mission. **Do not conflate acceptance planes.** Product PR103 (Codex owner, Source/CI PASS, Host admission BLOCKED), isolated non-release test PR101 (Codex, short real Coder API protocol PASS), stacked design-only PR104 (GPT CHAT) and independently reviewed retry candidate PR102 (GPT CHAT, Source CI PASS, real performance UNKNOWN) remain separate branches. Reuse PR100/PR103 Module, original role contracts, RunAuthority, Effect Ledger and tools. Do not merge the PR101 test branch as a deployable product.
+
+#### Recovered G0 facts (old runs, NOT new live tests)
+
+| Evidence | Stage | Measured facts | Unknown |
+| --- | --- | --- | --- |
+| [Issue41#6096673968](https://github.com/seigo-gace/debug-ai/issues/41#issuecomment-6096673968) | Older recovered Code Scout | 161,433ms total; prompt eval 146,514.168ms; decode 11,540.543ms; prompt 3,564 tokens; completion 73 tokens | Applicability to today's GGUF/runtime |
+| [Issue41#6096673968](https://github.com/seigo-gace/debug-ai/issues/41#issuecomment-6096673968) | Earlier Causal Scout | Queue 161,410ms plus upstream 600,003ms, DEADLINE_ABORT, attempt 1 | Backend prompt/decode and cause |
+| [Actions run38062125213](https://github.com/seigo-gace/debug-ai/actions/runs/38062125213), [Issue41#6099024958](https://github.com/seigo-gace/debug-ai/issues/41#issuecomment-6099024958) | Original run `run_mv24304l_700ed16315` Diagnoser, autonomous attempt3 | queue 0ms; prepare 1ms; upstream 600,003ms; wall 600,004ms; HTTP request 17,230 bytes; response 0 bytes; DEADLINE_ABORT; that API attempt1; provider prompt_eval/decode/completion-token metrics all null | Upstream loading vs prefill vs Thinking/decode vs transport |
+| [Issue41#6104935524](https://github.com/seigo-gace/debug-ai/issues/41#issuecomment-6104935524) | Reasoning-format-only probe | Timeout 600,012ms, final bytes0; cgroup memory.current equals reported 9GiB memory limit | OOM or memory pressure *causing* timeout |
+| [Issue41#6107942804](https://github.com/seigo-gace/debug-ai/issues/41#issuecomment-6107942804) | Independent PR101 live local Coder | Same work item, native durable CONTINUE→COMPLETE over 2 real calls in 4.713s | Real six-role debugging correctness and production activation |
+
+**Do not infer model token count from 17,230 HTTP request bytes.** No repeated 600s probe is justified merely to reconfirm the timeout. The absence of response usage is UNKNOWN, not measured zero model execution.
+
+#### Exact Host/Source admission boundary
+
+Installed Host delegation `dlg_master_debugai_v1` was reported enabled and unrevoked, but PR103's branch `fix/researcher-e-continuation-20261011` is not admitted; two forbidden changed source paths are `server/run-authority.js` and `server/control/role-work-item/durable-store.js` ([Issue41#6107942804](https://github.com/seigo-gace/debug-ai/issues/41#issuecomment-6107942804)). This is an authorization scope issue distinct from model functionality.
+
+The canonical registry is existing `G-ACE-inc/server-core/operations/master-internal-repositories.json`; its current PR42 path set does not admit those two paths or PR103 branch. Keep existing operation `deploy`, `debugai.compose.reflect` scope and all five protected effects=false. Only the verified trusted policy owner/writer may reconcile exact branch and changed paths, perform registered `scripts/host-gitops-register-master.sh` installation, then read back installed policy digest. A GitHub file edit or Master technical-delegation statement is not an installed Host permission. PR42 source ownership must be reconciled before any overlapping edit. The already approved alternative protected merge route does not bypass changed-path admission.
+
+#### Integrated priority and verified next gates
+
+1. **P0 product gate (separately blocked):** Codex/policy owner resolves minimum branch+two-source-path admission, exact PR103 Source/CI, then existing DebugAI-only guarded reflection and installed Source/image/health/readback. No test-branch deploy, self-grant, new workflow/token or common server-core CHAT executor changes.
+2. **P0 independent G0:** Use existing authenticated read-only lane to recover live GGUF digests, effective per-slot n_ctx and version/template, Thinking settings, model-switch timeline, backend slot/metrics, cgroup OOM/pressure and relevant provider usage. Tag every missing value UNKNOWN. This can continue while admission is blocked.
+3. **P1 G1:** Shadow exact-template input-token admission against the actual serving path; fail closed only for qualified opt-in requests before production enforcement.
+4. **P1 G2/G3:** Reuse Evidence Window, evidence.read and existing Module; require independently verifiable role-specific work deltas (not paraphrase-only digest differences). Codex-owned continuation files require one reconciled owner.
+5. **P1 G5/G6:** A small matched local-model **real debugging** scenario, then authorized whole product loop with apply/retest/local review/required final gates. Full 50+50 benchmarking only after reliable bounded integration.
+6. **P2 G4:** Review PR102 retry-deadline semantics against queue exclusion and caller budgets before adoption; hold unmeasured sampling, n_ctx/timeout changes or parallel model slots.
+
+**Current acceptance:** PR103/101 Source/CI and scoped short API protocol qualified; deployed PR103 and full semantic/debugging success NOT_VERIFIED. PR104 remains design-only, no source/Host/provider changes.
