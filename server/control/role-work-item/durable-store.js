@@ -43,7 +43,7 @@ function makeRoleWorkItemDurableStore({authority,runId}={}){
         throw new ContinuationError("STALE_WORK_ITEM_REVISION");
       const path=pathPrefix+"/"+String(nextState.revision).padStart(6,"0")+".json";
       try{
-        await authority.commitDurable({runId,manifestPatch:{workflow_input_refs:{[index]:path}},
+        await authority.commitDurable({runId,expectedInputRef:{index,ref:ref??null},manifestPatch:{workflow_input_refs:{[index]:path}},
           immutableRecords:[{path,record:nextState}]});
       }catch(error){
         // Existing durable authority rejects stale writer generation/epoch.
