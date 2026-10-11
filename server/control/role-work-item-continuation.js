@@ -63,11 +63,14 @@ async function continueWorkItem({
     if(!Number.isSafeInteger(value)||value<1)throw new ContinuationError("INVALID_LIMIT_"+name);
   let state=await store.load(key);
   if(state!==null&&state!==undefined){
+    if(state.schema!=="role-work-item-continuation/v1")throw new ContinuationError("CORRUPT_CHECKPOINT");
     if(state.key!==key||state.input_binding!==inputBinding)throw new ContinuationError("INPUT_BINDING_MISMATCH");
-    if(!Number.isSafeInteger(state.revision)||state.revision<1||!Number.isSafeInteger(state.steps))
+    if(!Number.isSafeInteger(state.revision)||state.revision<1||!Number.isSafeInteger(state.steps)||state.steps<1||state.steps>state.revision)
       throw new ContinuationError("CORRUPT_CHECKPOINT");
     if(!Object.values(STATUS).includes(state.status))throw new ContinuationError("CORRUPT_CHECKPOINT");
     boundedJSON(state.progress,maxProgressBytes,"STORED_PROGRESS_TOO_LARGE");
+    if(state.status===STATUS.COMPLETE&&!(await validateCompletion({previousProgress:state.progress,result:state.result,restored:true})))
+      throw new ContinuationError("RESTORED_COMPLETION_NOT_VALIDATED");
   }else{
     state={schema:"role-work-item-continuation/v1",key,input_binding:inputBinding,revision:0,steps:0,status:STATUS.CONTINUE,progress:{},result:null};
   }
