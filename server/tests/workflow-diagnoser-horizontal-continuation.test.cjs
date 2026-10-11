@@ -61,3 +61,11 @@ test("timeout in later Diagnoser turn retains earlier durable checkpoint",async(
   assert.equal(resumed.steps,2,"failed model turn is not counted as a successful semantic step");
   assert.equal(calls,3);
 });
+
+test("dedicated Diagnoser route rejects changed task or evidence after checkpoint",async()=>{
+  const wf=createWorkflow({aiCore:{call:async()=>({content:JSON.stringify({status:"CONTINUE",progress:{evidence_refs:[],remaining_work:"inspect next"}})})},authority:durableAuthority()});
+  const args={runId:"bound",workItemId:"A",inputBinding:"snapshot",task:"Original diagnosis"};
+  assert.equal((await wf.continueDiagnoserTask(args)).status,"CONTINUE");
+  await assert.rejects(wf.continueDiagnoserTask({...args,task:"Other diagnosis"}),{code:"INPUT_BINDING_MISMATCH"});
+  await assert.rejects(wf.continueDiagnoserTask({...args,baseEvidenceIds:["EVI_new"]}),{code:"INPUT_BINDING_MISMATCH"});
+});
