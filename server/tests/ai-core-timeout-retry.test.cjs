@@ -167,22 +167,22 @@ test("queue timeout fails closed without breaking single-flight ordering",async(
 });
 
 test("excluding queue wait from deadline preserves full execution allowance after dequeue",async()=>{
-  let releaseFirst,secondTimeout=null;
-  const fetchImpl=async(_url,opts)=>{
-    const body=JSON.parse(opts.body);
-    if(body.messages[1].content==="first")await new Promise(resolve=>{releaseFirst=resolve;});
-    return {ok:true,status:200,text:async()=>JSON.stringify({choices:[{message:{content:"{\"ok\":true}"},finish_reason:"stop"}]})};
-  };
-  const ai=createAiCoreAdapter({baseUrl:"http://127.0.0.1:18080",apiKey:"test",fetchImpl,timeoutMs:1000,maxTransportTimeoutAttempts:1});
-  const first=ai.call("code_scout",{user:"first"});
-  await new Promise(resolve=>setTimeout(resolve,5));
-  const started=Date.now();
-  const secondPromise=ai.call("causal_scout",{user:"second",timeoutMsOverride:80,deadlineAt:started+80,queueTimeoutMs:100,excludeQueueFromDeadline:true}).then(out=>{secondTimeout=out.control_plane.effective_timeout_ms;return out;});
-  await new Promise(resolve=>setTimeout(resolve,25));
-  releaseFirst();
-  await first;
-  await secondPromise;
-  assert.ok(secondTimeout>=70,secondTimeout);
+  const originalNow=Date.now;let now=1000000,releaseFirst,markFirstStarted;
+  const firstStarted=new Promise(resolve=>{markFirstStarted=resolve;});
+  Date.now=()=>now;
+  try{
+    const fetchImpl=async(_url,opts)=>{
+      const body=JSON.parse(opts.body);
+      if(body.messages[1].content==="first"){markFirstStarted();await new Promise(resolve=>{releaseFirst=resolve;});}
+      return {ok:true,status:200,text:async()=>JSON.stringify({choices:[{message:{content:"{\"ok\":true}"},finish_reason:"stop"}]})};
+    };
+    const ai=createAiCoreAdapter({baseUrl:"http://127.0.0.1:18080",apiKey:"test",fetchImpl,timeoutMs:1000,maxTransportTimeoutAttempts:1});
+    const first=ai.call("code_scout",{user:"first"});await firstStarted;
+    const second=ai.call("causal_scout",{user:"second",timeoutMsOverride:80,deadlineAt:now+80,queueTimeoutMs:100,excludeQueueFromDeadline:true});
+    now+=250;releaseFirst();await first;const out=await second;
+    assert.equal(out.telemetry.queue_wait_ms,250);
+    assert.equal(out.control_plane.effective_timeout_ms,80);
+  }finally{Date.now=originalNow;}
 });
 
 test("AI Core transport remains single-flight because current runtime has one effective slot",async()=>{

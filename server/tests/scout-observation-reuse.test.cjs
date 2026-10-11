@@ -139,3 +139,35 @@ test("durable Scout timeout retries are bounded and remain recorded across workf
   assert.equal(f.calls.code_scout,1);
   assert.equal(f.calls.causal_scout,3);
 });
+
+test("non-retryable Diagnoser failure blocks once and preserves scoped masked invocation evidence",async t=>{
+  const f=fixture(t);f.fix();let diagnosisCalls=0;
+  const original=f.aiCore.call;
+  f.aiCore.call=async(role,options)=>{
+    if(role!=="diagnoser")return original(role,options);
+    diagnosisCalls++;
+    assert.equal(typeof options.onProgress,"function");
+    options.onProgress({phase:"UPSTREAM_WAIT",dispatch_attempt:1,raw_prompt:"private-secret",reasoning_content:"private-secret"});
+    throw Object.assign(new Error("deadline"),{code:"AI_CORE_TIMEOUT",meta:{timeout_class:"DEADLINE_ABORT",attempts:1,retryable:false,body:"private-secret"}});
+  };
+  const {workflow,authority}=f.make();
+  await assert.rejects(workflow.runAnalysis({repo:f.repo,rawRequest:"Investigate count-active.cjs",failure:{message:"last item omitted"}}),e=>e.code==="AI_CORE_TIMEOUT");
+  const inventory=authority.inspectDurableRuns();assert.equal(inventory.recoverable.length,0);assert.equal(inventory.terminal.length,1);
+  const runId=inventory.terminal[0].run_id,status=workflow.status(runId);
+  assert.equal(status.durable.job_status,"BLOCKED");assert.equal(status.durable.workflow_cursor.step_id,"DIAGNOSER");
+  const failure=status.durable.last_execution_failure;
+  assert.equal(failure.retryable,false);assert.equal(failure.autonomous_retry_attempt,1);assert.equal(failure.role,"diagnoser");assert.match(failure.invocation_id,/^call_[0-9a-f]{24}$/);
+  const events=f.store.list(runId,{types:["ai_invocation"],limit:100});
+  assert.ok(events.some(e=>e.payload.role==="researcher"&&e.payload.phase==="SUCCEEDED"));
+  assert.ok(events.some(e=>e.payload.role==="diagnoser"&&e.payload.phase==="FAILED"&&e.payload.invocation_id===failure.invocation_id));
+  assert.doesNotMatch(JSON.stringify(events),/private-secret|raw_prompt|reasoning_content/);
+  const restarted=f.make();await assert.rejects(restarted.workflow.runAnalysis({runId}),/RUN_NOT_RECOVERABLE:BLOCKED/);
+  assert.equal(diagnosisCalls,1);
+});
+
+test("explicit retryable failure keeps bounded recovery and its durable classification",async t=>{
+  const f=fixture(t),original=f.aiCore.call;
+  f.aiCore.call=async(role,options)=>{try{return await original(role,options);}catch(e){e.meta={...e.meta,retryable:true};throw e;}};
+  const first=await interrupt(f),failure=first.workflow.status(first.runId).durable.last_execution_failure;
+  assert.equal(failure.retryable,true);assert.equal(first.workflow.status(first.runId).durable.job_status,"RETRY_WAIT");
+});
