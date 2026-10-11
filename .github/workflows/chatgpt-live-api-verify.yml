@@ -7,6 +7,7 @@ on:
       - feat/chat-gitops-request-20261009
       - fix/codex-debugai-live-20261011
       - fix/gace-registered-repo-source-reflect-20261010
+      - fix/p1c-refix-no-new-evidence-20261010
     paths:
       - .github/chatgpt-live-api-target.json
       - .github/workflows/chatgpt-live-api-verify.yml
@@ -221,7 +222,7 @@ jobs:
         run: |
           set -euo pipefail
           case "$GITHUB_REF_NAME" in
-            feat/tgserver-async-log-sink-20261003|feat/chat-gitops-request-20261009|fix/gace-registered-repo-source-reflect-20261010) ;;
+            feat/tgserver-async-log-sink-20261003|feat/chat-gitops-request-20261009|fix/gace-registered-repo-source-reflect-20261010|fix/p1c-refix-no-new-evidence-20261010) ;;
             *) echo "CHAT_SOURCE_REFLECT_TRIGGER_BRANCH_DENIED"; exit 46 ;;
           esac
           file=".github/chatgpt-live-api-target.json"
