@@ -25,3 +25,17 @@ test("tool loop stops after three successive tool rounds produce zero durable pr
   const aiCore={call:async()=>{n++;if(n<=3)return{content:JSON.stringify({tool_requests:[{tool:"source.read",arguments:{path:`${n}.js`}}]})};return{content:JSON.stringify({decision:"INSUFFICIENT_EVIDENCE"})};}};
   await assert.rejects(()=>runRoleWithReadOnlyTools({aiCore,role:"code_scout",user:"x",toolRuntime,maxToolRounds:3,maxToolCalls:4}),/ROLE_TOOL_NO_PROGRESS:code_scout:PROGRESS_DELTA_0/);
 });
+
+test("G3 counterexample: distinct evidence IDs alone currently reset no-progress even without verified semantic delta",()=>{
+  const progress=createProgressController({maxNoProgressRounds:1});
+  const first=progress.observe({evidenceIds:["TRE_unrelated_1"]});
+  const second=progress.observe({evidenceIds:["TRE_unrelated_2"]});
+  const third=progress.observe({evidenceIds:["TRE_unrelated_3"]});
+  assert.equal(first.progress_delta,1);
+  assert.equal(second.progress_delta,1);
+  assert.equal(third.progress_delta,1);
+  assert.equal(third.stop,false);
+  assert.equal(progress.snapshot().total_evidence_ids,3);
+  // CHARACTERIZATION ONLY: no input records claim/task relevance, so this
+  // does not satisfy G3's semantic progress acceptance or claim a runtime fix.
+});
