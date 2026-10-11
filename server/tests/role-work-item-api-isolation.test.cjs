@@ -27,7 +27,7 @@ test("six workflow adapters persist same-item progress across process restart an
       researcher:{research_status:"INSUFFICIENT_EVIDENCE",answer:"missing trace",evidence_refs:[],rejected_source_refs:[],contradictions:[],bound_version:"fixture/v1"},
       diagnoser:{diagnosis_status:"INSUFFICIENT_EVIDENCE",hypotheses:[],confirmed_root_cause:null,unsupported_claims:["trace missing"]},
       patch_engineer:{operations:[{type:"replace",path:"a.js",old:"return 0",new:"return 1"}],summary:"fixture candidate only"},
-      local_reviewer:{verdict:"PENDING",reason:"verification missing"}
+      local_reviewer:{verdict:"INSUFFICIENT_EVIDENCE",decision:"INSUFFICIENT_EVIDENCE",reason:"verification missing"}
     };
     (async()=>{
       const lock=DurableWriterLock.acquire({root:path.join(root,"durable")});
