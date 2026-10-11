@@ -1,13 +1,13 @@
 {
   "base_url": "https://debugai.asterav8.jp",
   "mode": "readonly",
-  "run_id": "run_mv24304l_700ed16315",
+  "run_id": "run_mv2l3pxc_bc2e23acf3",
   "repo": "/workspace/debug-ai",
-  "request": "Codex same-Run practical qualification; preserves current PR96/TGserver Owner source and pinned combined diagnosis/GC/Artifact Source.",
+  "request": "Codex Artifact integration qualified reflection; preserve current Owner Tool B and diagnosis/GC Source. Existing terminal dogfood inspected only.",
   "gitops_request": {
     "enabled": true,
     "branch": "fix/scout-observation-reuse-20261010",
-    "sha": "d39ed3e056c7a826563b4d7eb7cd1961a12268fc"
+    "sha": "24bf1b838710fe94b0b8a14575cdc8dd527cb5ff"
   },
   "source_reflect_request": {
     "enabled": false

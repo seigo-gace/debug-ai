@@ -111,5 +111,10 @@ test("existing Host bounded Docker devlog read permits only known Compose servic
     for(const invalid of [[],["server-core","12"],["debug-ai","21"],["debug-ai","0"],["debug-ai","10","exec"],["debug-ai","1;rm"]]){
       assert.throws(()=>f.service.request({command_id:"service.debug_ai_logs",arguments:invalid}),/SERVER_COMMAND|LOG_TAIL/);
     }
+    const z=f.service.request({command_id:"service.registered_container_logs",arguments:["tgserver-tgs","5"]});
+    assert.deepEqual(z.arguments,["tgserver-tgs","5"]);
+    for(const invalid of [[],["","5"],["../x","5"],["tgserver-tgs","21"],["tgserver-tgs","0"]]){
+      assert.throws(()=>f.service.request({command_id:"service.registered_container_logs",arguments:invalid}),/SERVER_COMMAND|REGISTERED_CONTAINER|LOG_TAIL/);
+    }
   }finally{f.cleanup();}
 });

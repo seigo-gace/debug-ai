@@ -15,6 +15,16 @@
       "root_key": "projects",
       "repository": "seigo-gace/webhook-gateway",
       "owners": ["seigo-gace"]
+    },
+    "TGserver": {
+      "root_key": "projects",
+      "repository": "seigo-gace/TGserver",
+      "owners": ["seigo-gace", "G-ACE-inc"]
+    },
+    "asteria": {
+      "root_key": "projects",
+      "repository": "seigo-gace/asteria",
+      "owners": ["seigo-gace"]
     }
   }
 }
