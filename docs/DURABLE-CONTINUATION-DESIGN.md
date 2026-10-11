@@ -16,6 +16,8 @@ Purpose: define the complete DebugAI execution architecture, durable-continuatio
 
 > Documentation completeness is not implementation completeness. This document describes both implemented behavior and explicitly pending behavior. A component, module, or test existing in source is not sufficient to claim runtime completion unless the real workflow calls it with authoritative runtime evidence and the required verification has passed.
 
+> **Current optimization design addendum (2026-10-11):** Section 26 is the proposed engineering contract for input-token preflight, evidence delivery, model-runtime qualification and measurable same-work-item progress. Historic branch/SHA/status snapshots in earlier sections are retained as historical records; section 26 does not overwrite their provenance or represent production activation.
+
 ---
 
 ## 1. System purpose
@@ -153,6 +155,8 @@ Model-specific configuration must also remain independent: thinking, sampling, p
 ---
 
 ## 5. AI-side optimization authority
+
+The existing measured/role-specific optimization order below remains authoritative. Section 26 refines its execution prerequisites, including pre-dispatch token admission and role-specific progress validation; no implementation or performance PASS is implied by this design change.
 
 Optimization priority is fixed in this order unless measured evidence justifies a change:
 
@@ -795,6 +799,8 @@ Do not describe an API behavior as complete merely because durable state exists 
 
 ## 18. Model A/B authority
 
+For the 2026-10-11 proposed multi-model qualification sequence, see section 26.8. The figures in this section are historical, configuration-bound measurements and must not be treated as current end-to-end latency, default sampling recommendations, or guaranteed performance.
+
 Current measured generation profile recorded for the active server/model setup:
 
 ```text
@@ -898,6 +904,8 @@ Implementation snapshot: `926dda4d17d739452b06e07f23ea5de8a5b8b800`.
 ---
 
 ## 21. Current next-work order
+
+The sequence below is the historic reviewed snapshot's order. For the later distinct AI Core optimization CU, use section 26.9 without displacing the active DebugAI Project Current, Module PR103/PR101 ownership, or protected Host admission.
 
 Do not revert to older branch status documents that listed already completed durable work as `NEXT`.
 
@@ -1178,3 +1186,165 @@ invocations retain their existing paths; this delta qualifies the primary six-ro
 workflow hooks, not every auxiliary invocation in the product. Those secondary
 paths and automatic post-apply startup scheduling are NOT_VERIFIED for horizontal
 continuation; the saved final review is resumed through the same approved entry.
+
+---
+
+## 26. AI Core input, model runtime and semantic-work optimization — proposed design revision, 2026-10-11
+
+### 26.1 Purpose, change boundary and evidence grades
+
+**Intent:** make the existing four local 7B/8B models and six specialized roles usable at their qualified capability, without weakening the whole DebugAI evidence-driven debugging contract. Optimize *correct verified work completed per elapsed time and resource used*, not shortest answers or highest nominal context alone. In the Master analogy this improves the fuel delivery, workload control and measured engine operating point; it does not replace or downsize the engines.
+
+**Design status: PROPOSED / NOT YET IMPLEMENTED / NOT DEPLOYED.** This section is an approved-scope design amendment and implementation plan, not a new workflow, executor, source patch, admission policy or production assertion. The final selection of thresholds, sampling and rollout depends on measured qualified runtime evidence. New facts must update this section through ordinary owning-branch review, not through untracked prompt heuristics.
+
+**Authoritative existing parts to reuse (source-confirmed):**
+- One RunAuthority / native commit and fencing protocol / Work Unit Registry / RoleResult / Effect Ledger. Never duplicate or migrate these merely for optimization.
+- Six intact role/model contracts in server/roles.js and server/control/model-profiles.js; role-specific budgets in server/control/role-runtime-budgets.js.
+- Existing AI Core telemetry, queue and prompt-cache request in server/adapters/ai-core.js; existing Tool Loop and context-compression.js; Evidence Registry, source/evidence.read, active-evidence-window.js, deterministic validators.
+- Original Researcher A-E units, concurrent Scout workflows with a globally serialized effective AI Core slot, and strict patch approval, post-apply retest, fresh review and completion controls.
+- Existing same-item Module from merged PR100. Product PR103 and independent test PR101 provide separate Source and test evidence: primary opt-in six-role hooks, Researcher E/final Reviewer, fenced native checkpoint saving, and a short two-call local Coder CONTINUE/COMPLETE protocol. They do **not** establish actual six-role debugging semantics or production deployment.
+
+**Observed, not inferred:** The historical dogfood recorded Code Scout prompt evaluation about 146.5 seconds, Causal Scout about 161.4 seconds waiting in a queue and a separate upstream timeout near 600 seconds. Later original run readback was BLOCKED at Diagnoser with AI_CORE_TIMEOUT. These are different observations/stages, not proof of one common context-root-cause. Production n_ctx per slot, actual prompt token budget for the failing request, model load/swap time, memory pressure causality, response streaming support and final correct diagnosis remain **UNKNOWN** until Host readback.
+
+**Separate candidate:** Draft PR102 (branch fix/ai-core-bounded-retry-wall-budget-20261011, HEAD at review 27d67300a6684baccb9c6e5582b12a072079e783) has source changes for one invocation-wide transport retry deadline and prompt-size diagnostics; four GitHub CI workflows passed that exact SHA. It is **not** merged, deployed, or proof of lower real-model latency. Inspect the exact diff/test/race semantics before considering integration, especially caller-supplied deadline/queue exclusions. Do not cherry-pick or redevelop it automatically.
+
+### 26.2 Invariants and separation of concerns
+
+1. Keep model IDs, GGUF artifacts, role split, Thinking mode and sampling unchanged until the corresponding exact-host experiment qualifies a difference. Official model-card defaults are comparison candidates, not an order to change production.
+2. Do not equate a model's advertised context length with the loaded GGUF/runtime/per-slot available context. Model capability, model-generation ceiling, effective slot context, input size and requested output allowance are different fields.
+3. Maintain authenticated model/tool/evidence boundaries and data-not-instruction classification. Never add a new orchestration authority, second continuation engine, project sibling, workflow, MCP, secret or paid-model test.
+4. Store no raw hidden chain-of-thought. The durable work item holds only externally verifiable progress, provenance, incomplete items, budgets and validated final role output.
+5. A successful API reply, JSON schema, checkpoint revision, changed text digest or heartbeat alone cannot prove productive semantic progress, source correctness or whole-product completion.
+6. Never trim original source text, exact patch edits, required constraints, contradictory evidence or registered counter-evidence merely to make a context admission pass. Projection/selection affects only the next prompt view, not immutable source/evidence.
+7. No state write/apply, final-review PASS, external free-tier review call or broader concurrency is authorized by the optimization work itself. Preserve current FREE Groq/Gemini ledger and permitted two review points.
+8. Remain fail-closed at *the specific uncertain operation*, while independent read-only/source/fixture work continues. The original production path must not be changed by turning on proposed gates before shadow qualification.
+
+### 26.3 G0 — read-only host/runtime identity and failure reconstruction
+
+Before tuning, obtain from the existing authorized DebugAI product Host/read lane and its registered Evidence/Runtime logs:
+
+- Canonical Host/source/image exact SHA, deployed branch, model alias -> loaded GGUF file/hash, effective llama.cpp and llama-swap versions/builds, model template and actual Thinking invocation settings.
+- Qualified per-model effective context and slot count; loaded configuration, memory/container limit and current use/OOM signs; swap/unload policy and single-flight queue state. Do not expose raw model files, credentials or private prompt/evidence content in records.
+- By role, count of invocations, queue wait, preparation, upstream request time, provider prompt evaluation, decode, input/output token counts, cache-hit/miss, termination class, attempt, received bytes and checkpoint commit. Record each unavailable provider metric as UNKNOWN/null, never zero.
+- Distinguish wait before a loaded model is ready, prompt prefill, Thinking/decode, HTTP header/body wait, backend abort, validation/rejection and RunAuthority pause. Total request wall time does not identify its component by itself.
+- Reuse the original historical run and artifacts first. Do not start another 600-second dogfood, six-model benchmark, whole 100-question suite or Groq/Gemini call merely for observability.
+
+Exit G0 only with an immutable model/runtime identity matrix, a per-incident timeline with measured versus unknown columns, and evidence that each subsequent test will run against the intended exact runtime rather than an imagined generic configuration.
+
+### 26.4 G1 — pre-dispatch, model-true input-token admission
+
+**Gap:** The current resolveEffectiveMaxTokens path limits requested generation against model/runtime ceilings, but does not prove that the *actual formatted input plus reserved output* fits the executing model slot. Current 85% context compression is reactive to **previous returned** prompt_tokens; it cannot save a first request that fails before delivering usage.
+
+Proposed change: add a narrow pre-dispatch admission decision at the existing AI Core/Tool Loop prompt-building boundary, without creating a new executor or separate tokenizer truth plane.
+
+Contract:
+- Input identity binds exact model/GGUF, serving version, effective chat template, Thinking kwargs, selected skills, system+user+tool payload, response format, prompt prefix and runtime slot capacity. A token count obtained from another model or unqualified template is invalid.
+- Use the serving stack's supported template application and tokenizer read interface (for example llama.cpp /apply-template plus /tokenize), **only after proving** that the resulting counts correspond to the actual /v1/chat/completions path and observing backend usage to calibrate its agreement. Plain UTF-8 bytes and a raw-text token count are diagnostics, not an exact chat input allowance.
+- Admit a call only when: measured formatted input tokens + bounded output reservation (including any Thinking budget) + qualified safety reservation <= actual per-slot effective context. The output reservation is a per-step *capacity request*, never a claim that those tokens will be consumed; do not force model-native maximum output for every small step. Exact reservation/overhead and token accounting must be measured and version-bound, not guessed.
+- If counted input does not fit, choose the existing evidence-window selection/rehydration and same-item bounded step before any call. If mandatory data still cannot fit, return an explicit INPUT_CONTEXT_BUDGET_EXCEEDED/UNQUALIFIED status and preserve the work item. Never silently truncate required evidence or lie with a numeric guess.
+- If exact token admission is unavailable, report TOKENIZER_OR_TEMPLATE_UNQUALIFIED. The gate is initially *shadow/read-only* in qualified testing; do not globally block an otherwise unchanged production legacy path based on an untested estimator.
+- In failure and success telemetry, keep tokenizer identity, counted inputs, requested vs effective output reserve, observed provider usage, context capacity, count disagreement and refusal reason. No secret/raw prompt logging.
+
+Acceptance: same-model exact-template fixtures including special tokens, long source snippets, mixed Unicode, Thinking/template variants and a near-boundary input must agree with backend usage within an empirically qualified tolerance. An over-budget call is rejected **before** expensive model dispatch; valid evidence-complete calls remain valid.
+
+### 26.5 G2 — evidence-first, task-bound working context
+
+**Reuse existing:** context-compression.js (recent five full tool results, up to fifteen retained historical pointers, 85% reactive threshold), active-evidence-window.js (up to twelve items / 12,000 excerpt chars, 2,400 per projection), Tool Loop evidence.read and durable originals. These numbers describe existing prompt-view controls; they are **not** proven optimal token limits and must not be mechanically replaced.
+
+For each bounded same-work-item step, construct a deterministic *working-context view*:
+1. Pin the fixed task, prohibited actions, acceptance predicates, source revision, candidate identity and exact role/evidence permissions. Pin all required evidence and counter-evidence IDs.
+2. Carry the compact, validated previousProgress and explicit next unmet criterion. Select exact excerpts for this step from registered evidence; preserve integrity hashes, source bindings and provenance for every omitted body.
+3. Use relevance and current unmet criteria to choose optional/recent evidence projections. Keep counter-evidence/contradictions mandatory where the role needs them; preserve UNKNOWN for facts not in the selected material.
+4. If any required projection is absent, too large or no longer bound to the source, fail closed and arrange authorized evidence.read/repartition rather than dropping it or pretending its reference proves content. Rehydration remains a bounded, observable tool cost.
+5. Maintain the static instruction prefix where safe for prompt caching; verify actual cache-hit and prefill savings. A shorter prompt that increases total tool calls/latency or loses verified facts is a regression.
+
+Role-specific view requirements:
+- Code Scout: exact relevant paths/call graph excerpts, inspected-scope boundary and negative-search coverage; no invented absence.
+- Causal Scout: observed failures, competing links, alternative hypotheses and unsupported connections.
+- Researcher A-E: source version, rejected/contradictory evidence and research completeness, preserving distinct A-D inputs while E resumes.
+- Diagnoser: retained hypotheses, falsification conditions, counter-evidence and source-bound evidence IDs; no promotion of a hypothesis to fact.
+- Patch Engineer: exact target code/spec, candidate-specific operation contract and deterministic test evidence; candidate-only, not apply.
+- Local Reviewer: applied candidate/hash/approval receipt, independent retest results, all material regressions and contradictions; never reduce evidence merely to obtain PASS.
+
+Acceptance: deterministic window tests for oversized mandatory evidence, corrupted ID/digest, missing projection, omitted contradictions, unauthorized rehydrate, prompt injection and source revision change, plus quality parity against an unchanged eligible baseline. Preserve evidence in the original registry regardless of prompt size.
+
+### 26.6 G3 — semantic progress and strict same-item continuation
+
+**Gap:** Existing Module continuation checks structure, validators, checkpoint revision and changed digest. The opt-in workflow intermediate contract currently requires registered evidence_refs and non-empty remaining_work. A different paraphrase can change the progress digest without proving that any original criterion has advanced.
+
+Extend *role-owned validators*, not the generic RunAuthority, to judge measurable deltas in the same original bound work item. Define a small set of typed verified_work markers associated with fixed criterion IDs / existing Work IDs / admitted Evidence IDs (field names and versioning must conform to the existing checkpoint schema). For CONTINUE, require at least one independent state change: a newly verified criterion, a newly qualified nonduplicate evidence link, a falsified/updated hypothesis with bound proof, or a reduced explicitly enumerated unfinished work set. Mere text changes, repeated IDs, synthetic checklist increments, new unsupported guesses or a clock heartbeat are not progress.
+
+Each role's validator and independent completion predicate remain separate:
+- Code Scout: new inspected source edge or bounded coverage fact, never a fabricated repository-wide finding.
+- Causal Scout: a new supported/refuted causal edge with retained alternatives.
+- Researcher: new source-qualified evidence, contradiction resolution or distinctly completed A-E obligation; no E completion from an unverified sentence.
+- Diagnoser: evidence-bound hypothesis state/falsification update, or explicit INSUFFICIENT_EVIDENCE as an honest terminal outcome rather than a false root cause.
+- Patch Engineer: reproducible candidate operation/test delta tied to exact source and specification; it cannot apply the patch.
+- Local Reviewer: independently validated review obligation and test/invariant finding; restored review must match approved candidate, source revision and apply receipt.
+
+A nonproductive step returns existing NO_SEMANTIC_PROGRESS / blocked semantics without infinite retry. Persist only verified bounded progress and remaining criteria before another call; inspect readback across real process restart. Maintain the writer fencing and per-run commit queue from PR103. Do not promote a model's COMPLETE envelope without the current canonical role result validator and downstream independently checked predicates. Avoid schema migration without proving its need.
+
+### 26.7 G4 — wall time, model load, transport retry and cache
+
+The 600-second ceiling is a diagnostic boundary, not a target response time and not a solution to slow generation. Keep the present role timeout, globally serialized dispatch, queue discipline and retry permissions until measured G0/role qualification says otherwise. Do not increase timeout because a previous request failed.
+
+Distinguish three budgets: queue admission wait, one model-invocation wall time across transport attempts (with caller absolute deadline semantics preserved), and overall same-work-item multi-step budget. Bound each by existing authority and document whether queue is excluded from an explicit caller deadline. An abort with no complete response yields *no* validated partial progress. If the effect/commit status is uncertain, do not blindly replay it; use authority/ledger readback and approved idempotency rules.
+
+llama.cpp streaming/slot and KV features can reveal observability or accelerate a stable common prefix, but:
+- partial stream bytes/unfinished JSON are **not** role results or saved verified progress;
+- KV state is not durable semantic continuation and is not portable across unqualified model/swap/revision changes;
+- saved slot caches must not be introduced as a second persistent authority or as an unreviewed security/retention path;
+- provider absence of prompt/decode timings is UNKNOWN, not proof of model inactivity.
+
+Measure model-load/swap and queue costs before any speculative increase in parallel slots, speculative decoding or different backend. Prior reported near-9GiB pressure is a capacity concern to investigate, not proof of OOM root cause.
+
+### 26.8 Model- and role-specific qualification matrix
+
+Keep the currently declared identities and baselines **unchanged** until actual runtime qualification. Separate *official capability*, *configured Source declaration*, *loaded GGUF/runtime slot* and *measured outcome*.
+
+| Model and roles | Current Source facts | Qualification before changing behavior |
+| --- | --- | --- |
+| Qwen2.5-Coder-7B Q4_K_M / Code Scout, Patch Engineer | Shared Coder backend; Source profile declares 131,072 model context and up to 8,192 generation, historical ~14.66 output tok/s | Read exact GGUF RoPE/template and effective n_ctx; compare official GGUF ordinary-context/default versus any extended configuration; separately benchmark source traversal and exact patch candidate validity; no blanket short-answer cap. |
+| Qwen3-8B Q4_K_M / Causal Scout | thinking=false; Source profile native 32,768 / extended 131,072; historical ~4.18 tok/s is shared model baseline | Verify thinking really off in the llama.cpp chat template and actual runtime; qualified short causal-hypothesis task; preserve alternatives/unknowns. |
+| Qwen3-8B Q4_K_M / Diagnoser | thinking=true on same backend; current adapter default temperature 0 | Measure reasoning/final separation and hidden-reasoning budget impact; compare official supported sampling candidates in *isolated* one-axis tests with fixed facts, not production change by assertion. |
+| Granite-4.2-8B Q4_K_M / Researcher A-E | current thinking=false; profile native 131,072 and extended 524,288; historical ~5.82 tok/s | Verify GGUF/template/runtime slot, source-qualified citation and conflict preservation; compare sampling only if needed; prove E resumes without repeating A-D. |
+| Ministral-3-8B-Reasoning-2512 Q4_K_M / Local Reviewer | reasoning model, thinking field currently null; Source profile declares 262,144; historical ~7.98 tok/s | Verify exact reasoning template and final-content extraction, reasoning-only/empty reply classification, genuine independent review and contradictions; one-variable sampling tests only after correctness baseline. |
+
+Historical tok/s figures are Source-recorded for a particular September 2026 Contabo sequential runtime gate, **not guaranteed throughput today**. Do not assume a model card's maximum context, generation limit or sampling recommendation is supported by the currently deployed quantized backend without GGUF/runtime evidence. Do not change model, subscription, provider, hosting or GPU capacity under this design.
+
+### 26.9 Adoption order, bounded verification and completion gates
+
+| Gate | Owning action | Required acceptance | Status at this design revision |
+| --- | --- | --- | --- |
+| G0 | Read-only current Source/Host/Config/Run evidence and provider metrics | Exact deployed model/template/slot/Memory identity and failure timeline; known vs UNKNOWN marked | PENDING runtime readback |
+| G1 | Shadow exact-template/tokenizer admission using existing serving path | Accurate input+reserved output allowance; over-limit denied before dispatch; qualified-missing fails closed only in opted-in path | DESIGN_ONLY |
+| G2 | Deterministic task-bound evidence projection/rehydrate | No required constraint, exact source, contradiction, digest or evidence is omitted; measured call/latency cost | DESIGN_ONLY |
+| G3 | Role-specific verified work delta with current Module validators | All six roles reject paraphrase-only/no-progress and unsupported COMPLETE, survive restart and preserve approved effects | DESIGN_ONLY; Module protocol itself separately qualified |
+| G4 | Model/runtime observability and bounded retry/queue integration | Distinct wait and inference causes; no duplicate expensive work; model quality not degraded | PR102 candidate only; unqualified real performance |
+| G5 | Small local-model semantic acceptance from historical failure cases | Six role-specific correct evidence-bound outputs and same-item continuation; measure total time, tokens, quality, tool calls, prompt cache; no blind 600s loops | NOT_VERIFIED |
+| G6 | Whole DebugAI real closed loop and authorized Host reflection | Exact-SHA/bytes, approval/apply/retest/review/final evidence, TGserver log and source/CI/runtime readback distinct | NOT_COMPLETE |
+
+Order of execution: first G0, then G1-G3 offline/observational tests and compatibility review; G4/G5 only with bounded real local-model probes after the known root causes and rollback are recorded. A full 50+50 or 100-task quality benchmark belongs **after** integration qualification, not as a first discovery loop. Groq/Gemini calls for this optimization CU = 0. CI green alone does not qualify live model semantics or performance; Source design green is not a thing.
+
+Success criteria for a change: non-regressing role outputs and registered evidence, strict approval/review/final gating, replay safety, and an explicitly *measured* improvement in correct terminal-work completion per total elapsed time or resources on matched tasks. An observed regression or UNKNOWN safety boundary blocks adoption. No preselected percentage, guessed tokenizer tolerance, made-up token target or claimed paper-derived speedup is acceptable.
+
+### 26.10 Ownership, rollout boundary, exclusions and rollback
+
+- The Codex-owned Module product CU remains PR103 with the independent PR101 test. Do not edit its role-work-item Source from the parallel optimization design CU. Existing Project Current reflects a blocked Host policy/admission boundary for PR103; only the verified trusted owner/writer can apply least-privilege branch/two-path admission (or the actual protected merge route), followed by exact deployment/source parity/health readback. Do not deploy the test branch.
+- This design revision changes only this existing design file on a distinct documentation branch based on PR103, and should be reviewed as a stacked documentation-only PR into PR103. It is not a permission change, policy amendment, source implementation, release, source merge, external model call or Host execution.
+- Once G0 facts are collected, only the named owner of each touched source path should implement G1/G2/G3. If the proposed path overlaps a Codex-owned file, record exact change requirements and hand off under **one** mutation owner; do not create competing edits. The separate PR102 must remain separately reviewed.
+- Rejected now: rebuilding the continuation engine, introducing LangGraph/MemGPT as infrastructure, changing all four model samplers at once, truncating mandatory source/evidence, changing output cap based on unverified speed, globally enabling streaming/parallelism, saving hidden reasoning, or expanding Host/security/free-provider scope.
+- Rollback proposed preflight and context optimizations independently, using an explicit opt-in/shadow switch on the existing path when implemented; preserve original durable records, candidate/receipt/effect identities and existing runtime budget behavior. A design-only revert has no production effect.
+
+### 26.11 External evidence and scope limitations
+
+The following are **external reference techniques**, not observed DebugAI improvements or a mandate to replace the local stack:
+
+- llama.cpp server: supported slot inspection, template application, tokenizer interface, optional metrics, streaming and cache controls. Actual supported routes and access are build/config/version-dependent: https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md
+- Qwen3-8B official generation configuration (temperature 0.6, top-k 20, top-p 0.95 on its Transformers card): https://huggingface.co/Qwen/Qwen3-8B/blob/main/generation_config.json — candidate for isolated verification, not default replacement in llama.cpp.
+- Qwen2.5-Coder-7B Instruct GGUF official distribution: https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct-GGUF — validate exact quantized artifact and context path.
+- Agentless (staged software repair): https://arxiv.org/abs/2407.01489 ; SWE-agent (bounded source interface): https://arxiv.org/abs/2405.15793 ; Anthropic long-running agent harnesses (checkpoint/progress contract): https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents
+- MemGPT (external context hierarchy): https://arxiv.org/abs/2310.08560 ; Lost in the Middle (long-context position risks): https://aclanthology.org/2024.tacl-1.9/ ; LongLLMLingua (research-specific compression experiments): https://aclanthology.org/2024.acl-long.91/
+- LangGraph durable execution (checkpoint/replay and side-effect/idempotency design patterns): https://langchain-ai.github.io/langgraph/concepts/durable_execution/
+
+None of these external studies tested the exact DebugAI GGUF set, prompts, native Store and Contabo runtime together. Therefore no external paper's speedup, pass rate, context limit or framework safety property may be copied into DebugAI acceptance without its own matched evidence.
