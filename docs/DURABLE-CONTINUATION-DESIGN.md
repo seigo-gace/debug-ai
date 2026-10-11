@@ -16,6 +16,8 @@ Purpose: define the complete DebugAI execution architecture, durable-continuatio
 
 > Documentation completeness is not implementation completeness. This document describes both implemented behavior and explicitly pending behavior. A component, module, or test existing in source is not sufficient to claim runtime completion unless the real workflow calls it with authoritative runtime evidence and the required verification has passed.
 
+> **Current optimization design addendum (2026-10-11):** Section 26 is the proposed engineering contract for input-token preflight, evidence delivery, model-runtime qualification and measurable same-work-item progress. Historic branch/SHA/status snapshots in earlier sections are retained as historical records; section 26 does not overwrite their provenance or represent production activation.
+
 ---
 
 ## 1. System purpose
@@ -153,6 +155,8 @@ Model-specific configuration must also remain independent: thinking, sampling, p
 ---
 
 ## 5. AI-side optimization authority
+
+The existing measured/role-specific optimization order below remains authoritative. Section 26 refines its execution prerequisites, including pre-dispatch token admission and role-specific progress validation; no implementation or performance PASS is implied by this design change.
 
 Optimization priority is fixed in this order unless measured evidence justifies a change:
 
@@ -795,6 +799,8 @@ Do not describe an API behavior as complete merely because durable state exists 
 
 ## 18. Model A/B authority
 
+For the 2026-10-11 proposed multi-model qualification sequence, see section 26.8. The figures in this section are historical, configuration-bound measurements and must not be treated as current end-to-end latency, default sampling recommendations, or guaranteed performance.
+
 Current measured generation profile recorded for the active server/model setup:
 
 ```text
@@ -898,6 +904,8 @@ Implementation snapshot: `926dda4d17d739452b06e07f23ea5de8a5b8b800`.
 ---
 
 ## 21. Current next-work order
+
+The sequence below is the historic reviewed snapshot's order. For the later distinct AI Core optimization CU, use section 26.9 without displacing the active DebugAI Project Current, Module PR103/PR101 ownership, or protected Host admission.
 
 Do not revert to older branch status documents that listed already completed durable work as `NEXT`.
 
@@ -1178,3 +1186,381 @@ invocations retain their existing paths; this delta qualifies the primary six-ro
 workflow hooks, not every auxiliary invocation in the product. Those secondary
 paths and automatic post-apply startup scheduling are NOT_VERIFIED for horizontal
 continuation; the saved final review is resumed through the same approved entry.
+
+---
+
+## 26. AI Core input, model runtime and semantic-work optimization — proposed design revision, 2026-10-11
+
+### 26.1 Purpose, change boundary and evidence grades
+
+**Intent:** make the existing four local 7B/8B models and six specialized roles usable at their qualified capability, without weakening the whole DebugAI evidence-driven debugging contract. Optimize *correct verified work completed per elapsed time and resource used*, not shortest answers or highest nominal context alone. In the Master analogy this improves the fuel delivery, workload control and measured engine operating point; it does not replace or downsize the engines.
+
+**Design status: PROPOSED / NOT YET IMPLEMENTED / NOT DEPLOYED.** This section is an approved-scope design amendment and implementation plan, not a new workflow, executor, source patch, admission policy or production assertion. The final selection of thresholds, sampling and rollout depends on measured qualified runtime evidence. New facts must update this section through ordinary owning-branch review, not through untracked prompt heuristics.
+
+**Authoritative existing parts to reuse (source-confirmed):**
+- One RunAuthority / native commit and fencing protocol / Work Unit Registry / RoleResult / Effect Ledger. Never duplicate or migrate these merely for optimization.
+- Six intact role/model contracts in server/roles.js and server/control/model-profiles.js; role-specific budgets in server/control/role-runtime-budgets.js.
+- Existing AI Core telemetry, queue and prompt-cache request in server/adapters/ai-core.js; existing Tool Loop and context-compression.js; Evidence Registry, source/evidence.read, active-evidence-window.js, deterministic validators.
+- Original Researcher A-E units, concurrent Scout workflows with a globally serialized effective AI Core slot, and strict patch approval, post-apply retest, fresh review and completion controls.
+- Existing same-item Module from merged PR100. Product PR103 and independent test PR101 provide separate Source and test evidence: primary opt-in six-role hooks, Researcher E/final Reviewer, fenced native checkpoint saving, and a short two-call local Coder CONTINUE/COMPLETE protocol. They do **not** establish actual six-role debugging semantics or production deployment.
+
+**Observed, not inferred:** The historical dogfood recorded Code Scout prompt evaluation about 146.5 seconds, Causal Scout about 161.4 seconds waiting in a queue and a separate upstream timeout near 600 seconds. Later original run readback was BLOCKED at Diagnoser with AI_CORE_TIMEOUT. These are different observations/stages, not proof of one common context-root-cause. Production n_ctx per slot, actual prompt token budget for the failing request, model load/swap time, memory pressure causality, response streaming support and final correct diagnosis remain **UNKNOWN** until Host readback.
+
+**Separate candidate:** Draft PR102 (branch fix/ai-core-bounded-retry-wall-budget-20261011, HEAD at review 27d67300a6684baccb9c6e5582b12a072079e783) has source changes for one invocation-wide transport retry deadline and prompt-size diagnostics; four GitHub CI workflows passed that exact SHA. It is **not** merged, deployed, or proof of lower real-model latency. Inspect the exact diff/test/race semantics before considering integration, especially caller-supplied deadline/queue exclusions. Do not cherry-pick or redevelop it automatically.
+
+### 26.2 Invariants and separation of concerns
+
+1. Keep model IDs, GGUF artifacts, role split, Thinking mode and sampling unchanged until the corresponding exact-host experiment qualifies a difference. Official model-card defaults are comparison candidates, not an order to change production.
+2. Do not equate a model's advertised context length with the loaded GGUF/runtime/per-slot available context. Model capability, model-generation ceiling, effective slot context, input size and requested output allowance are different fields.
+3. Maintain authenticated model/tool/evidence boundaries and data-not-instruction classification. Never add a new orchestration authority, second continuation engine, project sibling, workflow, MCP, secret or paid-model test.
+4. Store no raw hidden chain-of-thought. The durable work item holds only externally verifiable progress, provenance, incomplete items, budgets and validated final role output.
+5. A successful API reply, JSON schema, checkpoint revision, changed text digest or heartbeat alone cannot prove productive semantic progress, source correctness or whole-product completion.
+6. Never trim original source text, exact patch edits, required constraints, contradictory evidence or registered counter-evidence merely to make a context admission pass. Projection/selection affects only the next prompt view, not immutable source/evidence.
+7. No state write/apply, final-review PASS, external free-tier review call or broader concurrency is authorized by the optimization work itself. Preserve current FREE Groq/Gemini ledger and permitted two review points.
+8. Remain fail-closed at *the specific uncertain operation*, while independent read-only/source/fixture work continues. The original production path must not be changed by turning on proposed gates before shadow qualification.
+
+### 26.3 G0 — read-only host/runtime identity and failure reconstruction
+
+Before tuning, obtain from the existing authorized DebugAI product Host/read lane and its registered Evidence/Runtime logs:
+
+- Canonical Host/source/image exact SHA, deployed branch, model alias -> loaded GGUF file/hash, effective llama.cpp and llama-swap versions/builds, model template and actual Thinking invocation settings.
+- Qualified per-model effective context and slot count; loaded configuration, memory/container limit and current use/OOM signs; swap/unload policy and single-flight queue state. Do not expose raw model files, credentials or private prompt/evidence content in records.
+- By role, count of invocations, queue wait, preparation, upstream request time, provider prompt evaluation, decode, input/output token counts, cache-hit/miss, termination class, attempt, received bytes and checkpoint commit. Record each unavailable provider metric as UNKNOWN/null, never zero.
+- Distinguish wait before a loaded model is ready, prompt prefill, Thinking/decode, HTTP header/body wait, backend abort, validation/rejection and RunAuthority pause. Total request wall time does not identify its component by itself.
+- Reuse the original historical run and artifacts first. Do not start another 600-second dogfood, six-model benchmark, whole 100-question suite or Groq/Gemini call merely for observability.
+
+Exit G0 only with an immutable model/runtime identity matrix, a per-incident timeline with measured versus unknown columns, and evidence that each subsequent test will run against the intended exact runtime rather than an imagined generic configuration.
+
+### 26.4 G1 — pre-dispatch, model-true input-token admission
+
+**Gap:** The current resolveEffectiveMaxTokens path limits requested generation against model/runtime ceilings, but does not prove that the *actual formatted input plus reserved output* fits the executing model slot. Current 85% context compression is reactive to **previous returned** prompt_tokens; it cannot save a first request that fails before delivering usage.
+
+Proposed change: add a narrow pre-dispatch admission decision at the existing AI Core/Tool Loop prompt-building boundary, without creating a new executor or separate tokenizer truth plane.
+
+Contract:
+- Input identity binds exact model/GGUF, serving version, effective chat template, Thinking kwargs, selected skills, system+user+tool payload, response format, prompt prefix and runtime slot capacity. A token count obtained from another model or unqualified template is invalid.
+- Use the serving stack's supported template application and tokenizer read interface (for example llama.cpp /apply-template plus /tokenize), **only after proving** that the resulting counts correspond to the actual /v1/chat/completions path and observing backend usage to calibrate its agreement. Plain UTF-8 bytes and a raw-text token count are diagnostics, not an exact chat input allowance.
+- Admit a call only when: measured formatted input tokens + bounded output reservation (including any Thinking budget) + qualified safety reservation <= actual per-slot effective context. The output reservation is a per-step *capacity request*, never a claim that those tokens will be consumed; do not force model-native maximum output for every small step. Exact reservation/overhead and token accounting must be measured and version-bound, not guessed.
+- If counted input does not fit, choose the existing evidence-window selection/rehydration and same-item bounded step before any call. If mandatory data still cannot fit, return an explicit INPUT_CONTEXT_BUDGET_EXCEEDED/UNQUALIFIED status and preserve the work item. Never silently truncate required evidence or lie with a numeric guess.
+- If exact token admission is unavailable, report TOKENIZER_OR_TEMPLATE_UNQUALIFIED. The gate is initially *shadow/read-only* in qualified testing; do not globally block an otherwise unchanged production legacy path based on an untested estimator.
+- In failure and success telemetry, keep tokenizer identity, counted inputs, requested vs effective output reserve, observed provider usage, context capacity, count disagreement and refusal reason. No secret/raw prompt logging.
+
+Acceptance: same-model exact-template fixtures including special tokens, long source snippets, mixed Unicode, Thinking/template variants and a near-boundary input must agree with backend usage within an empirically qualified tolerance. An over-budget call is rejected **before** expensive model dispatch; valid evidence-complete calls remain valid.
+
+### 26.5 G2 — evidence-first, task-bound working context
+
+**Reuse existing:** context-compression.js (recent five full tool results, up to fifteen retained historical pointers, 85% reactive threshold), active-evidence-window.js (up to twelve items / 12,000 excerpt chars, 2,400 per projection), Tool Loop evidence.read and durable originals. These numbers describe existing prompt-view controls; they are **not** proven optimal token limits and must not be mechanically replaced.
+
+For each bounded same-work-item step, construct a deterministic *working-context view*:
+1. Pin the fixed task, prohibited actions, acceptance predicates, source revision, candidate identity and exact role/evidence permissions. Pin all required evidence and counter-evidence IDs.
+2. Carry the compact, validated previousProgress and explicit next unmet criterion. Select exact excerpts for this step from registered evidence; preserve integrity hashes, source bindings and provenance for every omitted body.
+3. Use relevance and current unmet criteria to choose optional/recent evidence projections. Keep counter-evidence/contradictions mandatory where the role needs them; preserve UNKNOWN for facts not in the selected material.
+4. If any required projection is absent, too large or no longer bound to the source, fail closed and arrange authorized evidence.read/repartition rather than dropping it or pretending its reference proves content. Rehydration remains a bounded, observable tool cost.
+5. Maintain the static instruction prefix where safe for prompt caching; verify actual cache-hit and prefill savings. A shorter prompt that increases total tool calls/latency or loses verified facts is a regression.
+
+Role-specific view requirements:
+- Code Scout: exact relevant paths/call graph excerpts, inspected-scope boundary and negative-search coverage; no invented absence.
+- Causal Scout: observed failures, competing links, alternative hypotheses and unsupported connections.
+- Researcher A-E: source version, rejected/contradictory evidence and research completeness, preserving distinct A-D inputs while E resumes.
+- Diagnoser: retained hypotheses, falsification conditions, counter-evidence and source-bound evidence IDs; no promotion of a hypothesis to fact.
+- Patch Engineer: exact target code/spec, candidate-specific operation contract and deterministic test evidence; candidate-only, not apply.
+- Local Reviewer: applied candidate/hash/approval receipt, independent retest results, all material regressions and contradictions; never reduce evidence merely to obtain PASS.
+
+Acceptance: deterministic window tests for oversized mandatory evidence, corrupted ID/digest, missing projection, omitted contradictions, unauthorized rehydrate, prompt injection and source revision change, plus quality parity against an unchanged eligible baseline. Preserve evidence in the original registry regardless of prompt size.
+
+### 26.6 G3 — semantic progress and strict same-item continuation
+
+**Gap:** Existing Module continuation checks structure, validators, checkpoint revision and changed digest. The opt-in workflow intermediate contract currently requires registered evidence_refs and non-empty remaining_work. A different paraphrase can change the progress digest without proving that any original criterion has advanced.
+
+Extend *role-owned validators*, not the generic RunAuthority, to judge measurable deltas in the same original bound work item. Define a small set of typed verified_work markers associated with fixed criterion IDs / existing Work IDs / admitted Evidence IDs (field names and versioning must conform to the existing checkpoint schema). For CONTINUE, require at least one independent state change: a newly verified criterion, a newly qualified nonduplicate evidence link, a falsified/updated hypothesis with bound proof, or a reduced explicitly enumerated unfinished work set. Mere text changes, repeated IDs, synthetic checklist increments, new unsupported guesses or a clock heartbeat are not progress.
+
+Each role's validator and independent completion predicate remain separate:
+- Code Scout: new inspected source edge or bounded coverage fact, never a fabricated repository-wide finding.
+- Causal Scout: a new supported/refuted causal edge with retained alternatives.
+- Researcher: new source-qualified evidence, contradiction resolution or distinctly completed A-E obligation; no E completion from an unverified sentence.
+- Diagnoser: evidence-bound hypothesis state/falsification update, or explicit INSUFFICIENT_EVIDENCE as an honest terminal outcome rather than a false root cause.
+- Patch Engineer: reproducible candidate operation/test delta tied to exact source and specification; it cannot apply the patch.
+- Local Reviewer: independently validated review obligation and test/invariant finding; restored review must match approved candidate, source revision and apply receipt.
+
+A nonproductive step returns existing NO_SEMANTIC_PROGRESS / blocked semantics without infinite retry. Persist only verified bounded progress and remaining criteria before another call; inspect readback across real process restart. Maintain the writer fencing and per-run commit queue from PR103. Do not promote a model's COMPLETE envelope without the current canonical role result validator and downstream independently checked predicates. Avoid schema migration without proving its need.
+
+### 26.7 G4 — wall time, model load, transport retry and cache
+
+The 600-second ceiling is a diagnostic boundary, not a target response time and not a solution to slow generation. Keep the present role timeout, globally serialized dispatch, queue discipline and retry permissions until measured G0/role qualification says otherwise. Do not increase timeout because a previous request failed.
+
+Distinguish three budgets: queue admission wait, one model-invocation wall time across transport attempts (with caller absolute deadline semantics preserved), and overall same-work-item multi-step budget. Bound each by existing authority and document whether queue is excluded from an explicit caller deadline. An abort with no complete response yields *no* validated partial progress. If the effect/commit status is uncertain, do not blindly replay it; use authority/ledger readback and approved idempotency rules.
+
+llama.cpp streaming/slot and KV features can reveal observability or accelerate a stable common prefix, but:
+- partial stream bytes/unfinished JSON are **not** role results or saved verified progress;
+- KV state is not durable semantic continuation and is not portable across unqualified model/swap/revision changes;
+- saved slot caches must not be introduced as a second persistent authority or as an unreviewed security/retention path;
+- provider absence of prompt/decode timings is UNKNOWN, not proof of model inactivity.
+
+Measure model-load/swap and queue costs before any speculative increase in parallel slots, speculative decoding or different backend. Prior reported near-9GiB pressure is a capacity concern to investigate, not proof of OOM root cause.
+
+### 26.8 Model- and role-specific qualification matrix
+
+Keep the currently declared identities and baselines **unchanged** until actual runtime qualification. Separate *official capability*, *configured Source declaration*, *loaded GGUF/runtime slot* and *measured outcome*.
+
+| Model and roles | Current Source facts | Qualification before changing behavior |
+| --- | --- | --- |
+| Qwen2.5-Coder-7B Q4_K_M / Code Scout, Patch Engineer | Shared Coder backend; Source profile declares 131,072 model context and up to 8,192 generation, historical ~14.66 output tok/s | Read exact GGUF RoPE/template and effective n_ctx; compare official GGUF ordinary-context/default versus any extended configuration; separately benchmark source traversal and exact patch candidate validity; no blanket short-answer cap. |
+| Qwen3-8B Q4_K_M / Causal Scout | thinking=false; Source profile native 32,768 / extended 131,072; historical ~4.18 tok/s is shared model baseline | Verify thinking really off in the llama.cpp chat template and actual runtime; qualified short causal-hypothesis task; preserve alternatives/unknowns. |
+| Qwen3-8B Q4_K_M / Diagnoser | thinking=true on same backend; current adapter default temperature 0 | Measure reasoning/final separation and hidden-reasoning budget impact; compare official supported sampling candidates in *isolated* one-axis tests with fixed facts, not production change by assertion. |
+| Granite-4.2-8B Q4_K_M / Researcher A-E | current thinking=false; profile native 131,072 and extended 524,288; historical ~5.82 tok/s | Verify GGUF/template/runtime slot, source-qualified citation and conflict preservation; compare sampling only if needed; prove E resumes without repeating A-D. |
+| Ministral-3-8B-Reasoning-2512 Q4_K_M / Local Reviewer | reasoning model, thinking field currently null; Source profile declares 262,144; historical ~7.98 tok/s | Verify exact reasoning template and final-content extraction, reasoning-only/empty reply classification, genuine independent review and contradictions; one-variable sampling tests only after correctness baseline. |
+
+Historical tok/s figures are Source-recorded for a particular September 2026 Contabo sequential runtime gate, **not guaranteed throughput today**. Do not assume a model card's maximum context, generation limit or sampling recommendation is supported by the currently deployed quantized backend without GGUF/runtime evidence. Do not change model, subscription, provider, hosting or GPU capacity under this design.
+
+### 26.9 Adoption order, bounded verification and completion gates
+
+| Gate | Owning action | Required acceptance | Status at this design revision |
+| --- | --- | --- | --- |
+| G0 | Read-only current Source/Host/Config/Run evidence and provider metrics | Exact deployed model/template/slot/Memory identity and failure timeline; known vs UNKNOWN marked | PENDING runtime readback |
+| G1 | Shadow exact-template/tokenizer admission using existing serving path | Accurate input+reserved output allowance; over-limit denied before dispatch; qualified-missing fails closed only in opted-in path | DESIGN_ONLY |
+| G2 | Deterministic task-bound evidence projection/rehydrate | No required constraint, exact source, contradiction, digest or evidence is omitted; measured call/latency cost | DESIGN_ONLY |
+| G3 | Role-specific verified work delta with current Module validators | All six roles reject paraphrase-only/no-progress and unsupported COMPLETE, survive restart and preserve approved effects | DESIGN_ONLY; Module protocol itself separately qualified |
+| G4 | Model/runtime observability and bounded retry/queue integration | Distinct wait and inference causes; no duplicate expensive work; model quality not degraded | PR102 candidate only; unqualified real performance |
+| G5 | Small local-model semantic acceptance from historical failure cases | Six role-specific correct evidence-bound outputs and same-item continuation; measure total time, tokens, quality, tool calls, prompt cache; no blind 600s loops | NOT_VERIFIED |
+| G6 | Whole DebugAI real closed loop and authorized Host reflection | Exact-SHA/bytes, approval/apply/retest/review/final evidence, TGserver log and source/CI/runtime readback distinct | NOT_COMPLETE |
+
+Order of execution: first G0, then G1-G3 offline/observational tests and compatibility review; G4/G5 only with bounded real local-model probes after the known root causes and rollback are recorded. A full 50+50 or 100-task quality benchmark belongs **after** integration qualification, not as a first discovery loop. Groq/Gemini calls for this optimization CU = 0. CI green alone does not qualify live model semantics or performance; Source design green is not a thing.
+
+Success criteria for a change: non-regressing role outputs and registered evidence, strict approval/review/final gating, replay safety, and an explicitly *measured* improvement in correct terminal-work completion per total elapsed time or resources on matched tasks. An observed regression or UNKNOWN safety boundary blocks adoption. No preselected percentage, guessed tokenizer tolerance, made-up token target or claimed paper-derived speedup is acceptable.
+
+### 26.10 Ownership, rollout boundary, exclusions and rollback
+
+- The Codex-owned Module product CU remains PR103 with the independent PR101 test. Do not edit its role-work-item Source from the parallel optimization design CU. Existing Project Current reflects a blocked Host policy/admission boundary for PR103; only the verified trusted owner/writer can apply least-privilege branch/two-path admission (or the actual protected merge route), followed by exact deployment/source parity/health readback. Do not deploy the test branch.
+- This design revision changes only this existing design file on a distinct documentation branch based on PR103, and should be reviewed as a stacked documentation-only PR into PR103. It is not a permission change, policy amendment, source implementation, release, source merge, external model call or Host execution.
+- Once G0 facts are collected, only the named owner of each touched source path should implement G1/G2/G3. If the proposed path overlaps a Codex-owned file, record exact change requirements and hand off under **one** mutation owner; do not create competing edits. The separate PR102 must remain separately reviewed.
+- Rejected now: rebuilding the continuation engine, introducing LangGraph/MemGPT as infrastructure, changing all four model samplers at once, truncating mandatory source/evidence, changing output cap based on unverified speed, globally enabling streaming/parallelism, saving hidden reasoning, or expanding Host/security/free-provider scope.
+- Rollback proposed preflight and context optimizations independently, using an explicit opt-in/shadow switch on the existing path when implemented; preserve original durable records, candidate/receipt/effect identities and existing runtime budget behavior. A design-only revert has no production effect.
+
+### 26.11 External evidence and scope limitations
+
+The following are **external reference techniques**, not observed DebugAI improvements or a mandate to replace the local stack:
+
+- llama.cpp server: supported slot inspection, template application, tokenizer interface, optional metrics, streaming and cache controls. Actual supported routes and access are build/config/version-dependent: https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md
+- Qwen3-8B official generation configuration (temperature 0.6, top-k 20, top-p 0.95 on its Transformers card): https://huggingface.co/Qwen/Qwen3-8B/blob/main/generation_config.json — candidate for isolated verification, not default replacement in llama.cpp.
+- Qwen2.5-Coder-7B Instruct GGUF official distribution: https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct-GGUF — validate exact quantized artifact and context path.
+- Agentless (staged software repair): https://arxiv.org/abs/2407.01489 ; SWE-agent (bounded source interface): https://arxiv.org/abs/2405.15793 ; Anthropic long-running agent harnesses (checkpoint/progress contract): https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents
+- MemGPT (external context hierarchy): https://arxiv.org/abs/2310.08560 ; Lost in the Middle (long-context position risks): https://aclanthology.org/2024.tacl-1.9/ ; LongLLMLingua (research-specific compression experiments): https://aclanthology.org/2024.acl-long.91/
+- LangGraph durable execution (checkpoint/replay and side-effect/idempotency design patterns): https://langchain-ai.github.io/langgraph/concepts/durable_execution/
+
+None of these external studies tested the exact DebugAI GGUF set, prompts, native Store and Contabo runtime together. Therefore no external paper's speedup, pass rate, context limit or framework safety property may be copied into DebugAI acceptance without its own matched evidence.
+
+### 26.12 Integrated product-module handoff and historic runtime measurements — 2026-10-11
+
+Master directed one integrated DebugAI product mission. **Do not conflate acceptance planes.** Product PR103 (Codex owner, Source/CI PASS, Host admission BLOCKED), isolated non-release test PR101 (Codex, short real Coder API protocol PASS), stacked design-only PR104 (GPT CHAT) and independently reviewed retry candidate PR102 (GPT CHAT, Source CI PASS, real performance UNKNOWN) remain separate branches. Reuse PR100/PR103 Module, original role contracts, RunAuthority, Effect Ledger and tools. Do not merge the PR101 test branch as a deployable product.
+
+#### Recovered G0 facts (old runs, NOT new live tests)
+
+| Evidence | Stage | Measured facts | Unknown |
+| --- | --- | --- | --- |
+| [Issue41#6096673968](https://github.com/seigo-gace/debug-ai/issues/41#issuecomment-6096673968) | Older recovered Code Scout | 161,433ms total; prompt eval 146,514.168ms; decode 11,540.543ms; prompt 3,564 tokens; completion 73 tokens | Applicability to today's GGUF/runtime |
+| [Issue41#6096673968](https://github.com/seigo-gace/debug-ai/issues/41#issuecomment-6096673968) | Earlier Causal Scout | Queue 161,410ms plus upstream 600,003ms, DEADLINE_ABORT, attempt 1 | Backend prompt/decode and cause |
+| [Actions run38062125213](https://github.com/seigo-gace/debug-ai/actions/runs/38062125213), [Issue41#6099024958](https://github.com/seigo-gace/debug-ai/issues/41#issuecomment-6099024958) | Original run `run_mv24304l_700ed16315` Diagnoser, autonomous attempt3 | queue 0ms; prepare 1ms; upstream 600,003ms; wall 600,004ms; HTTP request 17,230 bytes; response 0 bytes; DEADLINE_ABORT; that API attempt1; provider prompt_eval/decode/completion-token metrics all null | Upstream loading vs prefill vs Thinking/decode vs transport |
+| [Issue41#6104935524](https://github.com/seigo-gace/debug-ai/issues/41#issuecomment-6104935524) | Reasoning-format-only probe | Timeout 600,012ms, final bytes0; cgroup memory.current equals reported 9GiB memory limit | OOM or memory pressure *causing* timeout |
+| [Issue41#6107942804](https://github.com/seigo-gace/debug-ai/issues/41#issuecomment-6107942804) | Independent PR101 live local Coder | Same work item, native durable CONTINUE→COMPLETE over 2 real calls in 4.713s | Real six-role debugging correctness and production activation |
+
+**Do not infer model token count from 17,230 HTTP request bytes.** No repeated 600s probe is justified merely to reconfirm the timeout. The absence of response usage is UNKNOWN, not measured zero model execution.
+
+#### Exact Host/Source admission boundary
+
+Installed Host delegation `dlg_master_debugai_v1` was reported enabled and unrevoked, but PR103's branch `fix/researcher-e-continuation-20261011` is not admitted; two forbidden changed source paths are `server/run-authority.js` and `server/control/role-work-item/durable-store.js` ([Issue41#6107942804](https://github.com/seigo-gace/debug-ai/issues/41#issuecomment-6107942804)). This is an authorization scope issue distinct from model functionality.
+
+The canonical registry is existing `G-ACE-inc/server-core/operations/master-internal-repositories.json`; its current PR42 path set does not admit those two paths or PR103 branch. Keep existing operation `deploy`, `debugai.compose.reflect` scope and all five protected effects=false. Only the verified trusted policy owner/writer may reconcile exact branch and changed paths, perform registered `scripts/host-gitops-register-master.sh` installation, then read back installed policy digest. A GitHub file edit or Master technical-delegation statement is not an installed Host permission. PR42 source ownership must be reconciled before any overlapping edit. The already approved alternative protected merge route does not bypass changed-path admission.
+
+#### Integrated priority and verified next gates
+
+1. **P0 product gate (separately blocked):** Codex/policy owner resolves minimum branch+two-source-path admission, exact PR103 Source/CI, then existing DebugAI-only guarded reflection and installed Source/image/health/readback. No test-branch deploy, self-grant, new workflow/token or common server-core CHAT executor changes.
+2. **P0 independent G0:** Use existing authenticated read-only lane to recover live GGUF digests, effective per-slot n_ctx and version/template, Thinking settings, model-switch timeline, backend slot/metrics, cgroup OOM/pressure and relevant provider usage. Tag every missing value UNKNOWN. This can continue while admission is blocked.
+3. **P1 G1:** Shadow exact-template input-token admission against the actual serving path; fail closed only for qualified opt-in requests before production enforcement.
+4. **P1 G2/G3:** Reuse Evidence Window, evidence.read and existing Module; require independently verifiable role-specific work deltas (not paraphrase-only digest differences). Codex-owned continuation files require one reconciled owner.
+5. **P1 G5/G6:** A small matched local-model **real debugging** scenario, then authorized whole product loop with apply/retest/local review/required final gates. Full 50+50 benchmarking only after reliable bounded integration.
+6. **P2 G4:** Review PR102 retry-deadline semantics against queue exclusion and caller budgets before adoption; hold unmeasured sampling, n_ctx/timeout changes or parallel model slots.
+
+**Current acceptance:** PR103/101 Source/CI and scoped short API protocol qualified; deployed PR103 and full semantic/debugging success NOT_VERIFIED. PR104 remains design-only, no source/Host/provider changes.
+
+### 26.13 Production reflection G0 correction — 2026-10-11
+
+This section supersedes the older PRE-REFLECTION admission statements in §26.12 **for the PR103 deployed HEAD only**; it preserves historical prior blockers and separate semantic acceptance gates. Source owner Composer report was cross-read from [DebugAI #41 Host receipt 6108541911](https://github.com/seigo-gace/debug-ai/issues/41#issuecomment-6108541911) and [#42 Host chronology 6108542062](https://github.com/seigo-gace/debug-ai/issues/42#issuecomment-6108542062). Do not infer new actual model capability from the configured runtime variable.
+
+**Installed Host facts as reported by the authorized Host executor**:
+- Installed canonical↔private `dlg_master_debugai_v1` equality `POLICY_CANONICAL_MATCH=YES`; policy digest `720e76ff6ff0491447ecd593163af86ab50cabce36ca140af2711629ed2f1839`; one product branch and two exact source paths admitted. Host canonical file was synced from source-qualified server-core PR97 HEAD `e691ecac899064fdecc39c3ee5271ce89c65a7f9`; this stacked PR remains unmerged, and origin/main need not equal installed Host canonical.
+- Guarded DebugAI product GitOps operation `gitops_b63b3b358457d7a168194eb5` completed PASS for PR103 `490f180014961e5c5199c8e303681769c9bb8b45`; private health HTTP200/running|healthy, Host checkout HEAD and sampled SHA256 file parity; persistent authority/durable volume remained after Compose recreation/restart, recovery-enabled health. **Whole source-image byte parity** beyond sampled files was not claimed by this readback.
+- AI Core URL `127.0.0.1:18080` points to llama-swap; four llama.cpp:server backends. Configured DebugAI `DEBUG_AI_CORE_CONTEXT_TOKENS=8192`. This env is the adapter's claimed runtime context, **not** a freshly measured per-model/per-slot llama.cpp `n_ctx` nor a full-chat-template tokenizer count.
+- A Ministral cgroup limit 9,663,676,416 bytes (9GiB) and observed usage approximately 8GiB were read; no contemporaneous OOM-kill or model failure causality is proven.
+- No new known 600s run, Groq/Gemini call or actual six-role semantic debugging qualification. Current continuation deployment is **SOURCE_REFLECTED_RUNTIME_HEALTHY**, not **HORIZONTAL_PRODUCTION_ACTIVE** or **SEMANTIC_COMPLETE**.
+
+**Direct current source finding at deployed PR103 HEAD**: `server/main.js` constructs `createWorkflow({aiCore,externalReview,evidenceSearch,runtimeEvidence,tgserver,patchService,authority,repoPolicy,sandboxVerification,dapEvidence,serverCommand})` with **no `recoveryHooks` option**. `server/workflow-observed.js` forwards its options unchanged; in `server/workflow.js` primary six-role horizontal hooks all check `recoveryHooks?.enableHorizontal...===true`. Hence the normal deployed bootstrap currently uses the legacy branches unless separately demonstrated otherwise: installing new code and a durable volume does not activate its opt-in behavior. This is Source-proven for this main.js bootstrap, not a claim about all external fixture entrypoints. Do not globally turn hooks ON: the opt-in direct continuation interface explicitly prohibits tools, while legacy work uses tool-capable roles, and real semantic equivalence is NOT_VERIFIED. Missing bootstrap activation is a **separate controlled integration / shadow-qualification gate**, not a justification to alter Compose or silently drop tools.
+
+**Critical pre-dispatch budget concern**: deployed `server/adapters/ai-core.js` uses `resolveEffectiveMaxTokens` to cap requested generation by `runtime_context_tokens - OUTPUT_HEADROOM_TOKENS`; existing `OUTPUT_HEADROOM_TOKENS=1000`. At configured 8192 this permits an output `max_tokens` as high as `7192` for some roles **without subtracting the already formatted actual input tokens**. This is *not* a measured 7192-token output or proof of an actual overflow, but it makes the configured cap an insufficient admission guarantee. Effective output cap and reserved input do not by themselves prove `input+output` fits. Preserve present settings until exact served tokenizer/template and slot readback qualify G1 in shadow. Never guess actual input tokens from the old 17,230 request bytes.
+
+**Revised immediate priority**:
+1. G0 residual: read-only backend version/loaded GGUF digest/chat-template/actual n_ctx for each slot, current CPU/RAM/OOM events, swap/load and provider timing availability; independent of PR97/103 already completed Host execution. Restore or qualify #16 bootstrap verification without assuming missing local script means rule was applied.
+2. Check six-role opt-in eligibility with existing tests and one role-scoped no-mutation, tool-policy-preserving shadow acceptance plan before creating an activation patch. Explicitly measure differences between tool-capable legacy path and direct no-tools continuation interface. Maintain default-off and no changed Compose/env without separate qualification.
+3. G1 implement exact actual-template/token-count shadow and explicit non-dispatch refusal in *qualified opt-in* only, verifying valid requests including any Thinking allocation; G2 evidence selection and G3 semantic progress after that.
+4. No re-run of the 600s incident solely to reproduce a known timeout, no free-provider tests or 50+50 bulk benchmarks. Measure matched small real work before claiming speed/quality improvements.
+
+**State table:** PR103 Source=PASS; PR103 sampled deployed SHA parity/health/persistent volume=PASS (Composer Host receipt); primary opt-in module wiring tests=PASS in fixtures; **production primary horizontal invocation=NOT_ACTIVE_BY_INSPECTED_BOOTSTRAP**; actual per-slot context, tokenizer and true role semantic completion=UNKNOWN/NOT_VERIFIED. PR101 remains test-only; PR102 unadopted; PR104 docs-only.
+
+### 26.14 G0 real four-model 8192-slot qualification (2026-10-11)
+
+Evidence: [Issue #41 runtime G0](https://github.com/seigo-gace/debug-ai/issues/41#issuecomment-6108742603) and [#42 chronology](https://github.com/seigo-gace/debug-ai/issues/42#issuecomment-6108742792). All values below are read-only Host snapshot observations, not model benchmark performance or inference calls.
+
+| Backend | Loaded GGUF metadata n_ctx_train | Actual n_ctx, slots | Mem used / 9GiB limit | DebugAI mode |
+| --- | ---: | --- | ---: | --- |
+| Qwen2.5-Coder Q4_K_M | 131072 | 8192, 1 | 7.92GiB (88%) | Code Scout/Patch Engineer thinking=null |
+| Qwen3-8B Q4_K_M | 40960 | 8192, 1 | 8.61GiB (96%) | Causal=false, Diagnoser=true |
+| Granite-4.2-8B Q4_K_M | 131072 | 8192, 1 | 6.60GiB (73%) | Researcher=false |
+| Ministral-3-8B-Reasoning-2512 Q4_K_M | 262144 | 8192, 1 | 8.01GiB (89%) | Local Reviewer thinking=null |
+
+All four backends are separately **always loaded** llama.cpp:server 0.5.0-dev build11151 bd4f514db, with -c 8192 -t 3 --cache-ram 4096 -np 1 and per-container cgroup limit 9663676416 bytes (9GiB). Runtime /props confirms 8192 slots/context, matching application DEBUG_AI_CORE_CONTEXT_TOKENS=8192 **at this snapshot**. Container OOMKilled=false does not prove zero historical OOM. The router ai-core-llama-swap:v257 has globalConcurrencyLimit=2, responseHeader=600 seconds, unloadTimeout=10; reported peer unloaded is not actual container unload.
+
+All backend POST /tokenize routes returned HTTP200. This does NOT prove the same complete Chat Completions request can be counted through the llama-swap router; /v1/chat/completions/input_tokens remains UNVERIFIED for this installed build. /props reasoning_format=none at idle and remnant /slots deepseek may differ; do not infer actual thinking mode for roles whose setting is null. Actual token counts and template parity of the failed 600-second Diagnoser request remain UNKNOWN.
+
+Prompt cache eviction was observed on all backends under --cache-ram 4096; Qwen3/Granite logs include hundreds of MiB to ~1.1GiB cache entry eviction. Qwen3 memory 96% makes contention plausible, but does not prove the 600s root cause. Do not change memory limit, model/quantization, n_ctx, np, timeout, temperature, Thinking, backend or global concurrency without a separate measured qualified change. ai-core/README.md section12 has documented 6.5GiB/model versus currently deployed 9216m (9GiB); this is an owning ai-core documentation drift, not a request to change Compose.
+
+**G1 Source candidate**: [DebugAI PR105](https://github.com/seigo-gace/debug-ai/pull/105) is stacked directly on deployed product PR103. It implements optional input-token-count Shadow at the exact serialized Chat request body with a 2s bound, default OFF and no inference/Host invocation; deterministic arithmetic and tests. The observed count remains UNQUALIFIED until same endpoint/router/model/template and actual usage parity are verified. It never blocks a normal call or drops mandatory evidence. Retry candidate PR102 is separate and still unadopted.
+
+**Critical product condition**: server/main.js still supplies no recoveryHooks to workflow; the six-role primary horizontal continuation remains OFF in this startup despite PR103 code being deployed. Do not globally enable no-tools continuation and silently remove the tool-capable legacy path. First validate role-by-role semantic completion and the existing permission/effect gates. After G1's route and template qualification, do limited G2 evidence-window / G3 objective progress work without another 600s dogfood or external provider calls.
+
+### 26.15 G1 router 404, four backend counting confirmations and safe candidate (2026-10-11)
+
+**Observed G1 result (read-only, no inference)**: [Issue #41](https://github.com/seigo-gace/debug-ai/issues/41#issuecomment-6108913953) / [#42](https://github.com/seigo-gace/debug-ai/issues/42#issuecomment-6108914203). Four POST requests to llama-swap Router :18080 at /v1/chat/completions/input_tokens returned HTTP404 (route not registered), whereas the four llama.cpp backend listeners at localhost ports 18081=Granite, 18082=Qwen3, 18083=Ministral, 18084=Qwen2.5 Coder returned HTTP200 with response.input_tokens. Same fixed system+user: Granite35; Qwen3 plain32 / thinking:false36 / thinking:true32; Ministral24; Coder32. The separate raw /tokenize of user text alone was 11 tokens, **not equivalent** to full chat-template counting. No /v1/chat/completions generation request was made.
+
+**Upstream exact-version verification**: mostlygeek/llama-swap [v257 server/server.go](https://github.com/mostlygeek/llama-swap/blob/v257/internal/server/server.go) does not include the exact /v1/chat/completions/input_tokens in its modelPostJSONRoutes (it does include other model POST endpoints); this agrees with the Router404 observation. v257 exposes /upstream/{upstreamPath...} passthrough in server/api.go, but current peer model IDs contain slash sequences such as qwen3//models/... and its FindModelInPath helper builds nonempty slash segments. **Do not assume** this alternative resolves the exact existing model IDs or preserves backend policy without a separate probe. Direct loopback backends, rather than adding proxy infrastructure or guessing an alias, are the narrowly bounded candidate.
+
+**GPT CHAT Source candidate revised in existing PR105**: optional inputTokenShadowRoute=g0_loopback, default remains inputTokenShadow=false and inputTokenShadowRoute=router. A static 4-entry model-ID-to-loopback-port mapping from the measured Host snapshot is only admitted if main model inference URL is exactly http://127.0.0.1:18080. It sends the same existing JSON Chat request body to the model's localhost /v1/chat/completions/input_tokens, but **never sends the Router Bearer API key to a backend**; redirect-following is prohibited and deadline is 2 seconds. Unknown model, runtime/port drift, failed count or unavailable path becomes nullable, nonblocking UNQUALIFIED Shadow. Source unit tests verify allowlist, Thinking false/true body fields, port binding, no credential forwarding and unchanged inference behavior. It does not enable new Host egress, new processes, secrets, frameworks, Work Units, or any provider calls. This branch remains **DRAFT / not deployed / not enabled by normal server/main.js**.
+
+**Acceptance still needed before any production decision**: read back the exact deployed debug-ai container network_mode host, actual backend model identity and local bindings at 18081-18084, confirm that the full role Chat request body with the same chat template kwargs produces counts at the expected backend with no error and no inference. Confirm the count against provider prompt_tokens on a separately authorized small model call, without repeating the historic 600-second work. The current backend 200 short probe proves endpoint availability and Qwen3 +4 Thinking-off delta; it does not establish full-workload template parity, race-free model identity, or latency savings. Do not clamp output, truncate evidence, or turn on the six-role horizontal hooks from this result.
+
+**Ordering and authority**: (1) PR105 same-head Source CI and static review; (2) minimal admitted Host path/identity/count qualification; (3) decide feature activation/measurement with explicit branch and allowed-path verification; (4) only then consider a qualified input admission gate and per-role semantic continuation rollout. PR102 retry and PR103 Product code remain separate. Leave the current healthy production SHA unchanged during this diagnostic phase.
+
+### 26.16 G1 default-off bootstrap and exact Host promotion scope — 2026-10-11
+
+Post-G1 Source owner readback: [PR105](https://github.com/seigo-gace/debug-ai/pull/105) now includes a **default-off, selectable** token-counter route. Its `server/main.js` passes two opt-in environment values to the already existing AI Core adapter, and `compose.yaml` forwards them with defaults `false` and `router`. The `g0_loopback` route is available only if explicitly opted in while the canonical inference URL is **exactly** `http://127.0.0.1:18080`; the unchanged inference endpoint remains the authenticated Router. The counting request alone can target one of the four observed fixed local listener URLs based on the trusted role's existing exact backend model ID; it has a 2-second bound, a no-redirect condition, no Router API key forwarding and no enforcement power. Unknown model/port drift is UNKNOWN, not a guessed count.
+
+Security and runtime gate: This Source implementation **does not enable the feature** in the deployed product. Never use positive counts for production admission until actual model identity, template/Thinking parity and output usage have been verified for the selected backend. A direct backend listener is a local, read-only counting surface. No external address is accepted for `g0_loopback`; the sensitive Router key stays exclusively on the Router inference call. It does not add an independent authority or authorization to bypass the application's inference Router.
+
+Host grant readback at current installed policy from server-core PR97 shows branch `feat/ai-core-input-token-shadow-20261011` is not yet admitted, and **three** changed source paths are not in the old exact grant: `compose.yaml`, `server/main.js`, `server/control/input-token-shadow.js`; existing `server/adapters/ai-core.js` and `server/tests/` are already admitted. Should Host qualification and adoption require PR105 reflection, prepare only this one branch and these three paths as a **new stacked registry Source diff** based on already installed PR97, then have the existing authorized Host writer install and read back private policy. Source CI and a proposed registry edit are not installation or deployment. Do not mutate PR97's installed digest behind the owner's back. No new credential, wildcard, workflow or protected effect.
+
+Quality gate: same-HEAD PR105 full CI including Targeted TGserver Logging must finish PASS before a Host action; one local no-inference full-envelope count via the exact existing product container network namespace is the next verification input, not a 600-second test. For the independent Module PR103, `server/main.js` continues to omit `recoveryHooks`; **G1 Shadow opt-in is not horizontal continuation activation**. Keep the no-tools and tool-enabled contract divergence unmodified until its own evidence-based semantic gate.
+
+Runtime memory and caching are unchanged. Router4-model direct counter results of the short G1 experiment are only endpoint availability, not proof of real job token counts, runtime CPU saving, diagnostics quality, or an exact match for Qwen3 Thinking output.
+
+### 26.17 G1 Host policy rejection and non-Compose correction — 2026-10-11
+
+**Observed G1 Host Phase A:** [#41 Host attempt](https://github.com/seigo-gace/debug-ai/issues/41#issuecomment-6109133911), [#42 minutes](https://github.com/seigo-gace/debug-ai/issues/42#issuecomment-6109134099). The installed debug-ai process, using the existing host network, probed full role-compatible Chat envelopes (compiled system, response_format=json_object, per-role Thinking) via direct localhost /v1/chat/completions/input_tokens, *no inference*. ALL 6 returned HTTP200: Code Scout/Coder:698, Causal Scout/Qwen3=false:670, Researcher/Granite:821, Diagnoser/Qwen3=true:883, Patch Engineer/Coder:858, Local Reviewer/Ministral:1089. Direct port and known model mapping matched the proposed G0 four-port static map. This establishes endpoint/model-routing availability for these static role envelopes, **not** exact comparison with prompt_tokens of a production generation request.
+
+**Actual Phase B failure and preservation:** Existing `host-gitops-register-master.sh dlg_master_debugai_v1 admit` rejected previous server-core admission PR104 because its allowed_paths added forbidden `compose.yaml`: `MASTER_PATH_POLICY_INVALID`. The script `scripts/host-gitops-master-internal.sh` path guard rejects `compose*` within allowed_paths; changing Host permission to accommodate this is not permitted. No DebugAI PR105 deployment or Shadow activation occurred. Composer re-synchronized Host canonical policy from the previous installed private registry after the failed attempt; the previously healthy PR103 production remains unchanged. The previous §26.16 three-path admission proposal (including compose.yaml) is **SUPERSEDED** by the below.
+
+**GitHub Source-only correction:** Restore `compose.yaml` in DebugAI [PR105](https://github.com/seigo-gace/debug-ai/pull/105) byte-for-byte to its original PR103 base; replace the corresponding test assertions with proof that Compose has **no** Shadow environment entries and normal server/main.js is default-off. This keeps the existing optional main.js runtime reader available for a separately guarded future activation, but standard deployed Compose has no path for these optional variables: **PR105 deployment alone cannot activate Shadow**. It is an intentionally dormant readiness improvement, not measured active protection. Do not misreport as an operational admission gate.
+
+Update only the stacked existing registry [server-core PR104](https://github.com/G-ACE-inc/server-core/pull/104) by removing `compose.yaml` from newly added allowed_paths. Its delta against previously installed PR97 is now **one exact branch** `feat/ai-core-input-token-shadow-20261011` and **two exact Source paths** `server/main.js`, `server/control/input-token-shadow.js`. Adapter and tests were already permitted. Keep all existing owner/issuer/project/runtime/operation/scope/protected effect constraints and grants unchanged. This is a policy-conformant Source candidate, not installed private Host authority.
+
+**Repeat decision:** Old admit scope will deterministically fail; do not repeat it. Qualify the new PR105 and server-core PR104 exact heads via their own CI, recheck actual PR changed-file and Compose digest parity, and then allow ONLY the existing trusted Host writer to reconcile the new policy Source with the actual current Host canonical/private state and installed digest. Do not change the Host guard, add wildcards, or deploy an unqualified SHA. No new model inference, Groq/Gemini call, or 600s benchmark is necessary to validate a protected path correction.
+
+After safe reflect of product PR105 with Shadow still OFF, enablement requires a **separate**, source/Host-policy-qualified mechanism for passing the flags into the running container; existing Compose does not expose them. That issue must be resolved without modifying protected Compose, weakening its digest guard or claiming a non-existent env injection lane. The work item does **not** complete the full six-role semantic continuation, context admission, or overall debugging product.
+
+### 26.18 G1 Host reflection and G2 integrity hardening — 2026-10-11
+
+**Authoritative G1 Host completion:** [#41 Composer receipt 6109253835](https://github.com/seigo-gace/debug-ai/issues/41#issuecomment-6109253835) and [#42 6109254010](https://github.com/seigo-gace/debug-ai/issues/42#issuecomment-6109254010) confirm protected private policy admit PASS with digest `9c46de6b5f52cdf8753e19fce5ba1012b818df249a6d1e53e7ad425634aab2e7`, canonical/private equality, seven admitted branches and 54 paths, all effects/Compose digest retained. Product GitOps receipt `gitops_b3fe88e37c38acf605d69106` reflects **exact Source HEAD `b2ebb87c047f593b7b48561e83bdc3a82995f757`** to the live DebugAI Host, HTTP200/healthy, key sampled container/checkout bytes equal and durable volume retained. PR105 and registry PR104 remain GitHub OPEN/unmerged. The long-standing old Host BLOCKED state in §26.12–17 is historical, not Current.
+
+**Current G1 qualification boundary:** Shadow is **OFF** in normal production startup because protected Compose does not inject opt-in env flags. Six real complete-ish per-role Chat request bodies to local backend **count-only** endpoints were HTTP200 (Code Scout698, Causal670, Researcher821, Diagnoser883, Patch858, Local Reviewer1089); this does not validate counter agreement with actual production `prompt_tokens` or enforce admission. The still-unverified horizontal continuation opt-in remains OFF. No cache/timeout/quantization/Thinking changes or new inferencing calls were authorized by this Host reflection.
+
+**Independent G2 Source candidate:** [DebugAI PR106](https://github.com/seigo-gace/debug-ai/pull/106), based on the now-reflected PR105 HEAD, edits only existing `server/control/active-evidence-window.js` and its test. Existing `makeEvidenceProjection()` generates content-addressed `projection_id` and `projection_digest` from bounded payload. Existing `buildActiveEvidenceWindow()` selected/deduplicated records without checking that declared digest still matched payload, could suppress conflicting identical projection IDs, and allowed a blank required excerpt. PR106 verifies runtime versioned projection integrity before selection/deduplication, blocks duplicate mismatches, rejects empty mandatory excerpts, and tests valid/tampered/counter-evidence/legacy cases. Unversioned legacy test fixtures remain allowed but are **not** authenticated evidence. This is evidence *consistency* and required-input completeness, not a proof that a source record is true or that a model reached semantic completion.
+
+**Source release boundary:** PR106 is DRAFT and **not installed/reflected**. Exact-head CI and existing tool-loop integration regression required first. Its proposed branch `fix/evidence-window-integrity-20261011` and changed `server/control/active-evidence-window.js` are not included in currently installed DebugAI Host registry. If the Source candidate qualifies for activation, only the existing trusted registry writer may prepare/register that one branch+path and install/readback policy; no new workflow/MCP/Token or modification of protected Compose. Do not deploy PR106 merely because it follows PR105's already deployed head. Independently inspect the Codex-owned continuation logic and full DebugAI semantic acceptance *without* overwriting its Product PR103 Source.
+
+**Priority:** G2 evidence integrity Source/test qualification can progress now; G1 real counter usage parity and non-Compose activation remain a separate *later* guarded option. Then G3 objective per-role semantic progress and bounded real debugging, preserving fallback/evidence rehydration and authority gates. No 600-second replay or free-provider calls are necessary to validate deterministic G2 checks.
+
+### 26.20 G3 Codex continuation — deterministic role-owned acceptance, 2026-10-11 JST
+
+Master transferred PR107 to Codex for the G3 continuation. Fresh Project item
+PVTI_lAHODOQFoM4BEJIIzg-sWS8 names Codex sole product mutation owner. Parent
+`/home/admin1/projects/debug-ai` is the deployed G2 SHA68aa86c; an isolated owned
+worktree `.worktrees/g3-semantic` reuses PR107's existing branch. G2 is already a
+PR103 descendant: no unconditional PR103/107 merge or rewrite is needed. Existing
+PR103 continuation/store/RunAuthority files remain unchanged. This section adopts
+only bounded G3 source behavior; it does not activate the primary horizontal path.
+
+**Gap and decision.** Existing continuation admits paraphrased `remaining_work`
+strings with admitted Evidence IDs; a changed digest is not verified work. PR107's
+qualified Progress Controller/Tool Loop plumbing is reused, not reimplemented.
+Extend the existing role-output-validator with fixed, role-specific acceptance
+criteria supplied by the trusted caller from independently executed observations.
+Never derive criteria or their expected outcome from the model response, a new
+Evidence ID, or untrusted repository instructions. Evidence Registry hashes prove
+consistency, not external truth: the independent criterion producer is an explicit
+trust boundary. Missing criteria in requested G3 mode fail before model dispatch.
+
+| Role | Accepted independent obligation |
+| --- | --- |
+| Code Scout | exact source path + SHA256 inspected; result retains that path |
+| Causal Scout | observed supported/refuted edge with from/to/state and retained alternatives; same structured edge and Evidence in candidates |
+| Researcher | independently verified source retrieval, exact version and Evidence reference |
+| Diagnoser | independently observed hypothesis state/falsification condition and supporting or counter-Evidence; canonical retained/rejected hypothesis |
+| Patch Engineer | independently executed PASS check, candidate hash/source revision and exact candidate operations; no apply |
+| Local Reviewer | independently executed review/test obligation, candidate hash/post-apply revision/apply receipt/name/status; matching verdict |
+
+Criteria bind fixed IDs, source references, observations, Evidence IDs and canonical
+role output expectations to the original input binding. Intermediate output contains
+`verified_work:[{criterion_id,evidence_refs}]` and an exactly enumerated
+`remaining_work` array. The caller reconstructs a verified snapshot using the
+existing qualified Progress Controller; model-supplied snapshots are discarded.
+Semantic objective identity excludes criterion/Evidence/Work/Effect ID churn and
+prose. Duplicate semantics/markers, missing or unrelated Evidence, corrupt records,
+false remaining sets, changed policy and no-op/paraphrase-only turns fail closed.
+No schema migration: the existing bounded progress object carries the optional
+qualification snapshot, within the existing v1 immutable work-item record.
+
+COMPLETE requires canonical enforced role output validation, every fixed criterion
+and Evidence marker, plus equality to independently expected role outcomes.
+Terminal results are revalidated on restart; state/criterion changes reject reuse.
+Existing primary six-role entry hooks consume caller criteria when opted in, and
+the dedicated Diagnoser route reuses that same checker instead of duplicating it.
+This is acceptance of an independently fixed bounded obligation, **not general
+proof of arbitrary natural-language debugging truth**. Ordinary production tasks
+still require qualified independent criteria/oracles; no model self-certification.
+
+Tool Loop reuses the existing durable result hook and qualified mode. A verified
+source.read or complete evidence.read can derive a criterion objective only with
+its committed Effect reference and matching admitted source/Evidence content.
+Transient lookup is reconstructed from existing observations on resume; no second
+ledger or state authority. Same task binding is retained in the controller snapshot.
+Final role output also passes the same completion checker in qualified mode,
+including no-tool paths. Legacy default and tool permissions remain unchanged.
+
+**Alternatives rejected:** a new progress framework/orchestrator; arbitrary caller
+ID strings as proof; new evidence schemas or model-based judges; removal of tools;
+global bootstrap activation; inventing trusted causal/candidate evidence from a
+model's own narrative. Exact expected result matching is deliberately conservative;
+unqualified task equivalence stays UNKNOWN, rather than guessed from synonyms.
+
+**Validation and remaining gates.** Six-role deterministic positive/negative tests,
+actual owning source.read integration and three independent native processes verify
+CONTINUE -> restart -> COMPLETE -> replay with zero repeated model calls. Existing
+Approval/apply/retest/review/Strict Completion and Effect Ledger regressions remain
+mandatory. Test model fixtures and independent test observations are clearly
+separated from real-model debugging. No Groq/Gemini calls, 600s runs, 100-task suite,
+model/provider/Thinking/Token Shadow/Compose change or new workflow/MCP/token.
+
+At Fresh Host readback PR107 branch and two control paths (progress-controller.js,
+tool-loop.js) are not installed in the existing delegation. Source tests/CI do not
+permit their reflection. Only the existing authorized policy owner/writer can
+reconcile the exact branch+paths, preserving other owners and protected effects,
+then issue the existing exact-SHA receipt. Current G2 stays live until this separate
+Host gate passes. G3 production acceptance additionally needs independent criteria
+for actual six-role debugging and bounded real-model Runtime evidence; Source
+fixtures, API health and CI alone do not satisfy it. Rollback omits the optional
+criteria/qualification settings; saved G3 items cannot downgrade in place, and
+approved effects are never reapplied automatically.
+
+Expected role answers and observed acceptance predicates remain outside the model
+prompt; only criterion IDs/types/Evidence source references are exposed. A model
+must produce the original role output from Evidence, not copy a supplied answer.
+The independent checker keeps exact conservative expectations as a hidden oracle.
+G3 no-progress/invalid-observation errors are explicitly nonretryable, preserving
+the existing workflow failure classifier instead of consuming retry steps.

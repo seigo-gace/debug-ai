@@ -83,6 +83,7 @@ async function runRoleWithReadOnlyTools({aiCore,role,system="",user="",toolRunti
     const deadlineAt=Date.now()+budget.turn_timeout_ms;
     const out=await aiCore.call(role,{system:[system,evidencePolicy].filter(Boolean).join("\n"),user,maxTokens:budget.max_tokens,timeoutMsOverride:budget.turn_timeout_ms,deadlineAt,queueTimeoutMs:budget.turn_timeout_ms,excludeQueueFromDeadline:true});
     const available=mergeEvidenceIds(baseEvidenceIds),telemetry=summarizeAiTelemetry([out.telemetry]);
+    if(progressQualification?.validateFinal&&progressQualification.validateFinal({result:parseAndValidateRoleOutput(role,out.content,{availableEvidenceIds:available,strictEvidenceRefs})})!==true)throw new Error(`ROLE_COMPLETION_NOT_QUALIFIED:${role}`);
     return {...out,validated_output:parseAndValidateRoleOutput(role,out.content,{availableEvidenceIds:available,strictEvidenceRefs}),tool_loop:{rounds:0,total_calls:0,observations:[],evidence_ids:available,progress:{max_no_progress_rounds:2,no_progress_rounds:0,total_evidence_ids:available.length,total_work_ids:0,total_effect_ids:0,seen_evidence_ids:[...available],completed_work_ids:[],completed_effect_ids:[],history:[],runtime_telemetry:telemetry},parse_status:"FINAL",selected_skill_ids:[...(out.control_plane?.selected_skill_ids||[])],continuation_state:null,telemetry}};
   }
   const rounds=maxToolRounds===null?budget.max_tool_rounds:maxToolRounds,calls=maxToolCalls===null?budget.max_tool_calls:maxToolCalls;
@@ -92,11 +93,16 @@ async function runRoleWithReadOnlyTools({aiCore,role,system="",user="",toolRunti
   if(resume.rounds_completed>rounds)throw new Error("ROLE_TOOL_CONTINUATION_EXCEEDS_ROUND_BUDGET");
   if(resume.total_calls>calls)throw new Error("ROLE_TOOL_CONTINUATION_EXCEEDS_CALL_BUDGET");
   const evidenceContext=typeof toolRuntime.createEvidenceContext==="function"?toolRuntime.createEvidenceContext({user,baseEvidenceIds,observations:resume.observations}):null;
-  const selected=availableForSelection(role,toolRuntime,user),protocol=toolProtocol(selected.tools),deadlineAt=Date.now()+(budget.tool_loop_wall_ms||budget.turn_timeout_ms),progress=createProgressController({maxNoProgressRounds:2,initialState:resume.progress,requireQualifiedProgress:progressQualification!==null,verifyQualifiedProgress:progressQualification?.verify||null});
+  const selected=availableForSelection(role,toolRuntime,user),protocol=toolProtocol(selected.tools),deadlineAt=Date.now()+(budget.tool_loop_wall_ms||budget.turn_timeout_ms),progress=createProgressController({maxNoProgressRounds:2,initialState:resume.progress,requireQualifiedProgress:progressQualification!==null,verifyQualifiedProgress:progressQualification?.verify||null,qualificationBinding:progressQualification?.binding??null});
   const baseUser=String(user||"");
   let currentUser=withObservations(baseUser,resume.observations),totalCalls=resume.total_calls;
   const observations=resume.observations,seenToolCalls=new Set(resume.seen_tool_fingerprints),completedWorkIds=new Set(resume.completed_work_ids),completedEffectIds=new Set(resume.completed_effect_ids),llmTelemetry=[],inMemoryToolResults=new Map(),qualifiedProgressIds=new Set();
   let last=null,toolWallMs=0,toolCallsExecutedCurrent=0,toolCallsReusedCurrent=0;
+  function qualifyObservations(){
+    if(typeof progressQualification?.qualifyResult!=="function")return;
+    for(const observation of observations)for(const item of observation.results||[])for(const id of progressQualification.qualifyResult({result:item.result,effectId:item.effect_id}))qualifiedProgressIds.add(id);
+  }
+  qualifyObservations();
   for(let round=resume.rounds_completed;round<=rounds;round++){
     if(Date.now()>=deadlineAt)throw new Error(`ROLE_TOOL_WALL_BUDGET_EXHAUSTED:${role}`);
     const finalRound=round===rounds;
@@ -106,6 +112,7 @@ async function runRoleWithReadOnlyTools({aiCore,role,system="",user="",toolRunti
     const parsed=parseIntermediate(role,last.content),requests=requestList(parsed);
     if(!requests.length){
       const toolEvidenceIds=collectEvidenceIds(observations),available=mergeEvidenceIds(baseEvidenceIds,toolEvidenceIds),validated=parseAndValidateRoleOutput(role,last.content,{availableEvidenceIds:available,strictEvidenceRefs});
+      if(progressQualification?.validateFinal&&progressQualification.validateFinal({result:validated})!==true)throw new Error(`ROLE_COMPLETION_NOT_QUALIFIED:${role}`);
       const state=continuationSnapshot({roundsCompleted:round,totalCalls,observations,seenToolCalls,progress,completedWorkIds,completedEffectIds}),telemetry=summarizeAiTelemetry(llmTelemetry,{toolWallMs,toolCallsExecutedCurrent,toolCallsReusedCurrent});
       return {...last,validated_output:validated,tool_loop:{rounds:round,total_calls:totalCalls,observations,evidence_ids:available,tool_evidence_ids:toolEvidenceIds,base_evidence_ids:mergeEvidenceIds(baseEvidenceIds),progress:{...progress.snapshot(),runtime_telemetry:telemetry},parse_status:"FINAL",selected_skill_ids:[...selected.skillIds],continuation_state:state,telemetry}};
     }
@@ -129,6 +136,7 @@ async function runRoleWithReadOnlyTools({aiCore,role,system="",user="",toolRunti
       results.push({request:{tool,reason:String(req.reason||"").slice(0,300)},result,reused:false,effect_id:persisted?.effect_id||null,work_unit_id:persisted?.completed_work_id||null});totalCalls++;
     }
     observations.push({round:round+1,results});
+    qualifyObservations();
     const toolEvidenceIds=collectEvidenceIds(observations),progressState=progress.observe({evidenceIds:toolEvidenceIds,completedWorkIds:[...completedWorkIds],completedEffectIds:[...completedEffectIds],qualifiedProgressIds:[...qualifiedProgressIds]});
     const committed=continuationSnapshot({roundsCompleted:round+1,totalCalls,observations,seenToolCalls,progress,completedWorkIds,completedEffectIds});
     await callHook(durableHooks,"onRoundCommitted",{role,round:round+1,progress:progressState,continuationState:committed});

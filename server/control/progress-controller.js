@@ -17,10 +17,11 @@ function restoredEvidence(initialState){
   return fromHistory;
 }
 
-function createProgressController({maxNoProgressRounds=1,initialState=null,requireQualifiedProgress=false,verifyQualifiedProgress=null}={}){
+function createProgressController({maxNoProgressRounds=1,initialState=null,requireQualifiedProgress=false,verifyQualifiedProgress=null,qualificationBinding=null}={}){
   if(requireQualifiedProgress&&typeof verifyQualifiedProgress!=="function")throw new Error("PROGRESS_QUALIFICATION_VERIFIER_REQUIRED");
   if(typeof requireQualifiedProgress!=="boolean")throw new Error("PROGRESS_QUALIFICATION_MODE_INVALID");
   if(initialState?.require_qualified_progress!==undefined&&initialState.require_qualified_progress!==requireQualifiedProgress)throw new Error("PROGRESS_QUALIFICATION_POLICY_MISMATCH");
+  if(initialState&&(initialState.qualification_binding??null)!==qualificationBinding)throw new Error("PROGRESS_QUALIFICATION_BINDING_MISMATCH");
   if(!Number.isInteger(maxNoProgressRounds)||maxNoProgressRounds<0||maxNoProgressRounds>3)throw new Error("PROGRESS_NO_PROGRESS_LIMIT_INVALID");
   if(initialState!==null&&(typeof initialState!=="object"||Array.isArray(initialState)))throw new Error("PROGRESS_INITIAL_STATE_INVALID");
   if(initialState?.max_no_progress_rounds!==undefined&&initialState.max_no_progress_rounds!==maxNoProgressRounds)throw new Error("PROGRESS_POLICY_MISMATCH");
@@ -96,6 +97,7 @@ function createProgressController({maxNoProgressRounds=1,initialState=null,requi
     return {
       max_no_progress_rounds:maxNoProgressRounds,
       require_qualified_progress:requireQualifiedProgress,
+      qualification_binding:qualificationBinding,
       no_progress_rounds:noProgressRounds,
       total_evidence_ids:seenEvidence.size,
       total_work_ids:completedWork.size,
