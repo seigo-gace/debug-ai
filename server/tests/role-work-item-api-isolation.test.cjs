@@ -5,6 +5,67 @@ const {createAiCoreAdapter}=require("../adapters/ai-core.js");
 const {continueWorkItem}=require("../control/role-work-item/continuation.js");
 const {makeModelStepExecutor}=require("../control/role-work-item/model-step.js");
 const {makeRoleWorkItemDurableStore}=require("../control/role-work-item/durable-store.js");
+const fs=require("node:fs");
+const os=require("node:os");
+const path=require("node:path");
+const {spawnSync}=require("node:child_process");
+
+// Independent processes, real RunAuthority + native locked file IO; no AI HTTP.
+test("six workflow adapters persist same-item progress across process restart and never replay completed work",()=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),"six-role-module-"));
+  const child=String.raw`
+    const assert=require("node:assert/strict"),path=require("node:path");
+    const {RunAuthority}=require("./server/run-authority.js");
+    const {DurableWriterLock}=require("./orchestrator/durable-writer-lock.js");
+    const {DurableFileIO}=require("./orchestrator/durable-file-io.js");
+    const {createWorkflow}=require("./server/workflow.js");
+    const [root,phase,id]=process.argv.slice(1);
+    const roles=["code_scout","causal_scout","researcher","diagnoser","patch_engineer","local_reviewer"];
+    const finals={
+      code_scout:{relevant_files:["a.js"],call_path:["a.js:f"],contract_mismatch:null,excluded_files:[],unknowns:[]},
+      causal_scout:{claims:[{type:"UNKNOWN",statement:"cause needs investigation"}]},
+      researcher:{research_status:"INSUFFICIENT_EVIDENCE",answer:"missing trace",evidence_refs:[],rejected_source_refs:[],contradictions:[],bound_version:"fixture/v1"},
+      diagnoser:{diagnosis_status:"INSUFFICIENT_EVIDENCE",hypotheses:[],confirmed_root_cause:null,unsupported_claims:["trace missing"]},
+      patch_engineer:{operations:[{type:"replace",path:"a.js",old:"return 0",new:"return 1"}],summary:"fixture candidate only"},
+      local_reviewer:{verdict:"PENDING",reason:"verification missing"}
+    };
+    (async()=>{
+      const lock=DurableWriterLock.acquire({root:path.join(root,"durable")});
+      try{
+        const authority=new RunAuthority({runtimeRoot:root,durableIo:new DurableFileIO({writerLock:lock})});
+        const runId=id||authority.start({rawRequest:"independent Module fixture"}).run_id;
+        if(!id)await authority.initializeDurable(runId);
+        const calls=[];let release;const bothScouts=new Promise(resolve=>release=resolve);let scouts=0;
+        const wf=createWorkflow({authority,aiCore:{call:async(role,prompt)=>{
+          const input=JSON.parse(prompt.user);calls.push({role,input});
+          if(role.endsWith("scout")){if(++scouts===2)release();await bothScouts;}
+          if(phase==="first")return {content:JSON.stringify({status:"CONTINUE",progress:{evidence_refs:[],remaining_work:"finish fixture item",verified_part:role}})};
+          assert.equal(input.previous_progress.verified_part,role);
+          return {content:JSON.stringify({status:"COMPLETE",result:finals[role]})};
+        }}});
+        const args=role=>({runId,role,workItemId:role==="researcher"?"researcher.E":"A",inputBinding:"fixture-v1",task:"finish fixture item",maxTotalSteps:2});
+        const results=await Promise.all(roles.map(role=>wf.continueRoleTask(args(role))));
+        const expected=phase==="first"?"CONTINUE":"COMPLETE";
+        assert.ok(results.every(result=>result.status===expected));
+        if(phase!=="first")for(let i=0;i<roles.length;i++)assert.deepEqual(results[i].result,finals[roles[i]]);
+        assert.equal(calls.length,phase==="replay"?0:6);
+        if(phase!=="first")await assert.rejects(wf.continueRoleTask({...args("researcher"),task:"other input"}),{code:"INPUT_BINDING_MISMATCH"});
+        console.log(JSON.stringify({runId,statuses:results.map(x=>x.status),calls:calls.length,revisions:results.map(x=>x.revision)}));
+      }finally{lock.close();}
+    })().catch(error=>{console.error(error);process.exitCode=1;});
+  `;
+  const run=(phase,id="")=>{
+    const out=spawnSync(process.execPath,["-e",child,root,phase,id],{cwd:path.join(__dirname,"../.."),encoding:"utf8",timeout:15000});
+    assert.equal(out.status,0,out.stderr||String(out.error));
+    return JSON.parse(out.stdout.trim());
+  };
+  try{
+    const first=run("first"),second=run("resume",first.runId),replay=run("replay",first.runId);
+    assert.deepEqual(first.revisions,[1,1,1,1,1,1]);
+    assert.deepEqual(second.revisions,[2,2,2,2,2,2]);
+    assert.equal(replay.calls,0);
+  }finally{fs.rmSync(root,{recursive:true,force:true});}
+});
 
 // Real local AI Core ONLY. No fake model HTTP server; no Groq/Gemini calls.
 // Run intentionally only with:
