@@ -168,3 +168,5 @@ independent boundary holdouts in Core Verify. Design/limitations belong to
 - `server/tests/actions-artifact-evidence.test.cjs`: hostile archive, provenance, masking, retention and existing Diagnoser input regressions.
 
 Design: Unified Plan §15/15.1; real slice and separate pending production gate: TGserver ZERO Development Evidence §7.
+
+Product boundary (2026-10-11): common `scripts/chatgpt-bounded-server-read.cjs` and its client regression suite reside in server-core, removed from DebugAI. Existing `.github/workflows/chatgpt-live-api-verify.yml` / target retain DebugAI-only admitted product reflection; Runtime Host request/runner/helper compatibility stays tested in `server/tests/host-read-runtime-bundle.test.cjs`.

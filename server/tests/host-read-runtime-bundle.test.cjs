@@ -22,22 +22,13 @@ function commandIdsFromRequestModule(text) {
   return [...match[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]);
 }
 
-function allowedFromBoundedRead(text) {
-  const match = /ALLOWED=new Set\(\[([^\]]+)\]\)/.exec(text);
-  assert.ok(match, "chatgpt-bounded-server-read ALLOWED set missing");
-  return [...match[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]);
-}
-
-test("host read bundle keeps request, runner, CHAT preflight and helpers aligned", () => {
+test("host read bundle keeps request, runner and installed runtime helpers aligned", () => {
   const requestText = read("server/control/server-command-request.js");
   const runnerText = read("scripts/host-server-command-runner.sh");
-  const chatText = read("scripts/chatgpt-bounded-server-read.cjs");
   const requestCommands = commandIdsFromRequestModule(requestText);
-  const chatAllowed = allowedFromBoundedRead(chatText);
 
   for (const commandId of READ_COMMANDS) {
     assert.ok(requestCommands.includes(commandId), commandId);
-    assert.ok(chatAllowed.includes(commandId), commandId);
     assert.match(runnerText, new RegExp(commandId.replace(".", "\\.")));
   }
 
