@@ -17,7 +17,8 @@ function restoredEvidence(initialState){
   return fromHistory;
 }
 
-function createProgressController({maxNoProgressRounds=1,initialState=null,requireQualifiedProgress=false}={}){
+function createProgressController({maxNoProgressRounds=1,initialState=null,requireQualifiedProgress=false,verifyQualifiedProgress=null}={}){
+  if(requireQualifiedProgress&&typeof verifyQualifiedProgress!=="function")throw new Error("PROGRESS_QUALIFICATION_VERIFIER_REQUIRED");
   if(typeof requireQualifiedProgress!=="boolean")throw new Error("PROGRESS_QUALIFICATION_MODE_INVALID");
   if(initialState?.require_qualified_progress!==undefined&&initialState.require_qualified_progress!==requireQualifiedProgress)throw new Error("PROGRESS_QUALIFICATION_POLICY_MISMATCH");
   if(!Number.isInteger(maxNoProgressRounds)||maxNoProgressRounds<0||maxNoProgressRounds>3)throw new Error("PROGRESS_NO_PROGRESS_LIMIT_INVALID");
@@ -53,7 +54,15 @@ function createProgressController({maxNoProgressRounds=1,initialState=null,requi
     const freshEvidence=collectFresh(seenEvidence,evidenceIds);
     const freshWork=collectFresh(completedWork,completedWorkIds);
     const freshEffects=collectFresh(completedEffects,completedEffectIds);
-    const freshQualified=collectFresh(qualifiedProgress,qualifiedProgressIds);
+    const candidates=asIdSet(qualifiedProgressIds);
+    const verified=[];
+    for(const id of candidates){
+      // IDs alone are not authority: the caller must provide a trusted,
+      // deterministic task-bound verifier. A false result cannot reset stall.
+      if(requireQualifiedProgress&&verifyQualifiedProgress({id,roleEvidenceIds:[...seenEvidence],completedWorkIds:[...completedWork],completedEffectIds:[...completedEffects]})!==true)continue;
+      verified.push(id);
+    }
+    const freshQualified=collectFresh(qualifiedProgress,verified);
     // Collect raw evidence as before, but never treat its mere creation as
     // task progress in the explicitly qualified mode. The caller must supply
     // independently verified, task-bound progress identities.
