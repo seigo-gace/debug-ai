@@ -103,6 +103,7 @@ function createProgressController({maxNoProgressRounds=1,initialState=null,requi
       seen_evidence_ids:[...seenEvidence].sort(),
       completed_work_ids:[...completedWork].sort(),
       completed_effect_ids:[...completedEffects].sort(),
+      total_qualified_progress_ids:qualifiedProgress.size,
       qualified_progress_ids:[...qualifiedProgress].sort(),
       history:history.map(x=>({
         ...x,
