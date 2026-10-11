@@ -35,3 +35,11 @@ test("invalid role is rejected before invoking model",async()=>{
   const wf=createWorkflow({authority:authority(),aiCore:{call:async()=>{throw Error("MUST_NOT_CALL");}}});
   await assert.rejects(wf.continueRoleTask({runId:"run",role:"admin",workItemId:"A",inputBinding:"x",task:"t"}),/ROLE_NOT_ALLOWED/);
 });
+
+test("changed evidence or task refuses to reuse previous role work item",async()=>{
+  const wf=createWorkflow({authority:authority(),aiCore:{call:async()=>({content:JSON.stringify({status:"CONTINUE",progress:{evidence_refs:[],remaining_work:"next",step:1}})})}});
+  const args={runId:"r2",role:"diagnoser",workItemId:"A",inputBinding:"source",task:"investigate A"};
+  await wf.continueRoleTask(args);
+  await assert.rejects(wf.continueRoleTask({...args,task:"investigate B"}),{code:"INPUT_BINDING_MISMATCH"});
+  await assert.rejects(wf.continueRoleTask({...args,baseEvidenceIds:["EVI_CHANGED"]}),{code:"INPUT_BINDING_MISMATCH"});
+});
