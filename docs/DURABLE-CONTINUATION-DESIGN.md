@@ -1564,3 +1564,10 @@ must produce the original role output from Evidence, not copy a supplied answer.
 The independent checker keeps exact conservative expectations as a hidden oracle.
 G3 no-progress/invalid-observation errors are explicitly nonretryable, preserving
 the existing workflow failure classifier instead of consuming retry steps.
+
+Fresh Review holdout: an extra FACT with a valid known Evidence ID can pass the
+canonical shape/binding validator while asserting an unrelated conclusion. G3
+therefore rejects extra final fields outside the independent expected role output;
+known-ID citation is not semantic support. Six additional holdouts first prove the
+canonical output validator accepts the well-shaped artifact, then prove G3 rejects
+it. Non-Researcher observation obligations require LOCAL_RUNTIME authority.

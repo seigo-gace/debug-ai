@@ -126,3 +126,10 @@ test("tool objectives refuse an uncommitted result and a mismatched source hash"
  const ids=evaluator.toolQualification.qualifyResult({result,effectId:"receipt"});assert.equal(ids.length,1);
  assert.equal(evaluator.toolQualification.verify({id:ids[0],roleEvidenceIds:[result.evidence_id],completedEffectIds:[]}),false);
 });
+
+for(const role of Object.keys(examples))test(`${role}: reject additional unsupported FACT even with valid known evidence`,()=>{
+ const {evaluator,e,record,marker}=setup(role);
+ const forged={...e.result,verified_work:[marker],claims:[{statement:"unrelated conclusion is proven",type:"FACT",evidence_refs:[record.evidence_id],counter_evidence_refs:[]}]};
+ require("../control/role-output-validator.js").parseAndValidateRoleOutput(role,forged,{availableEvidenceIds:[record.evidence_id],strictEvidenceRefs:true,roleSemantics:"enforce"});
+ assert.equal(evaluator.validateCompletion({result:forged}),false);
+});

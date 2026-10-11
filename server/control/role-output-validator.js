@@ -213,6 +213,7 @@ function createRoleProgressEvaluator({role,criteria,evidenceRecords=[]}={}){
     const c=byId.get(marker?.criterion_id),record=records.get(c?.evidence_id);
     if(!c||!record||!Array.isArray(marker.evidence_refs)||!same(marker.evidence_refs,[c.evidence_id]))fail("ROLE_PROGRESS_EVIDENCE_REQUIRED");
     assertEvidenceRecord(record);
+    if(role!=="researcher"&&record.source_type!=="LOCAL_RUNTIME")fail("ROLE_PROGRESS_EVIDENCE_AUTHORITY_MISMATCH");
     if(record.source_ref!==c.source_ref||record.payload?.kind!==c.kind||!Object.entries(c.observation).every(([k,v])=>same(record.payload[k],v)))fail("ROLE_PROGRESS_EVIDENCE_MISMATCH");
     return c;
   }
@@ -242,6 +243,7 @@ function createRoleProgressEvaluator({role,criteria,evidenceRecords=[]}={}){
       if(result?.applied===true||result?.deployed===true||result?.apply||result?.deploy)return false;
       parseAndValidateRoleOutput(role,result,{availableEvidenceIds:[...records.keys()],strictEvidenceRefs:true,roleSemantics:"enforce"});
       const completed=markers(result);if(completed.length!==fixed.length)return false;
+      if(Object.keys(result).some(key=>key!=="verified_work"&&!fixed.some(c=>Object.prototype.hasOwnProperty.call(c.result,key))))return false;
       // Role outcomes are independently fixed; prose, IDs and COMPLETE itself
       // cannot satisfy an obligation. Unknown fields never substitute for it.
       return fixed.every(c=>Object.entries(c.result).every(([k,v])=>same(result[k],v)));
