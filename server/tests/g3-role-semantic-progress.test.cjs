@@ -133,3 +133,15 @@ for(const role of Object.keys(examples))test(`${role}: reject additional unsuppo
  require("../control/role-output-validator.js").parseAndValidateRoleOutput(role,forged,{availableEvidenceIds:[record.evidence_id],strictEvidenceRefs:true,roleSemantics:"enforce"});
  assert.equal(evaluator.validateCompletion({result:forged}),false);
 });
+
+test("resumed G3 prompt retains semantic obligations without exposing internal controller history",async()=>{
+ const {criteria,record,marker,e}=setup("code_scout");let calls=0,second;
+ const wf=createWorkflow({authority:authority(),aiCore:{call:async(_role,prompt)=>{
+  calls++;if(calls===1)return{content:JSON.stringify({status:"CONTINUE",progress:{verified_work:[marker],remaining_work:[]}})};
+  second=JSON.parse(prompt.user);return{content:JSON.stringify({status:"COMPLETE",result:{...e.result,verified_work:[marker]}})};
+ }}});
+ const args={runId:"r",role:"code_scout",workItemId:"original",inputBinding:"source",task:"same",semanticCriteria:criteria,evidenceRecords:[record]};
+ await wf.continueRoleTask(args);await wf.continueRoleTask(args);
+ assert.deepEqual(second.previous_progress,{verified_work:[marker],remaining_work:[],evidence_refs:[record.evidence_id]});
+ assert.deepEqual(second.registered_evidence[0].payload,record.payload);
+});

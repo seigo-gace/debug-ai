@@ -1571,3 +1571,18 @@ therefore rejects extra final fields outside the independent expected role outpu
 known-ID citation is not semantic support. Six additional holdouts first prove the
 canonical output validator accepts the well-shaped artifact, then prove G3 rejects
 it. Non-Researcher observation obligations require LOCAL_RUNTIME authority.
+
+Bounded native/local Coder Dogfood on owning Source at8e275c7: first CONTINUE
+accepted in11.397s (3096prompt/81completion, prompt_eval160.101ms,
+decode11153.761ms, cache3095hit/1miss); second call45005ms AI_CORE_TIMEOUT,
+no complete result. This is one source-inspection step, not actual six-role repair.
+The probe's disposable runtime was not a production Run; free-provider calls0.
+Early harness attempts lacked a writable result path under cap-drop/root and yielded
+no recoverable role telemetry; those are NOT acceptance evidence. The harness was
+corrected to uid1000 with a pre-call write check. No unchanged45s/600s retry is
+justified. Prompt inspection independently found the saved controller/history
+snapshot being sent to the model. G3 now projects only validated work markers,
+exact remaining IDs and Evidence references; full authoritative qualification
+state stays durable, and all original Evidence bodies remain available. This
+removes irrelevant accounting from the prompt without claiming it caused the
+observed timeout or changing context/output/model/runtime defaults.
