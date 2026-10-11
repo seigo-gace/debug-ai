@@ -145,3 +145,15 @@ test("resumed G3 prompt retains semantic obligations without exposing internal c
  assert.deepEqual(second.previous_progress,{verified_work:[marker],remaining_work:[],evidence_refs:[record.evidence_id]});
  assert.deepEqual(second.registered_evidence[0].payload,record.payload);
 });
+
+for(const role of Object.keys(examples)){
+ test(`${role}: continuation failure retains run-scoped sanitized observation without progress commit`,async()=>{
+  const {criteria,record}=setup(role),auth=authority(),events=[];
+  const failure=Object.assign(new Error("private provider detail"),{code:"AI_CORE_TIMEOUT",meta:{timeout_class:"CALL_DEADLINE"}});
+  const wf=createWorkflow({authority:auth,runtimeEvidence:{write:(runId,type,payload)=>events.push({runId,type,payload})},aiCore:{call:async()=>{throw failure;}}});
+  await assert.rejects(wf.continueRoleTask({runId:"observed-run",role,workItemId:"observed",task:"fixed",inputBinding:"v1",semanticCriteria:criteria,evidenceRecords:[record]}),error=>error.code==="AI_CORE_TIMEOUT"&&error.meta.role===role&&/^call_/.test(error.meta.invocation_id));
+  assert.equal(auth.records.size,0);assert.equal(events.length,2);
+  const last=events[1];assert.equal(last.runId,"observed-run");assert.equal(last.type,"ai_invocation");assert.equal(last.payload.phase,"FAILED");assert.equal(last.payload.failure_code,"AI_CORE_TIMEOUT");assert.equal(last.payload.backend_progress,"UNKNOWN");assert.equal(last.payload.telemetry,null);assert.equal(last.payload.invocation_id,events[0].payload.invocation_id);
+  assert.equal(JSON.stringify(events).includes("private provider detail"),false);
+ });
+}

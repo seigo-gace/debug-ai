@@ -152,7 +152,7 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
         user:evaluator?JSON.stringify({task,step,previous_progress:{verified_work:previousProgress.verified_work||[],remaining_work:previousProgress.remaining_work||evaluator.criteria.map(c=>c.id),evidence_refs:previousProgress.evidence_refs||[]},registered_evidence_ids:evidence,registered_evidence:evidencePromptView(validatedRecords),criteria:evaluator.criteria.map(({id,kind,evidence_id,source_ref})=>({id,kind,evidence_id,source_ref}))}):registeredEvidenceUserPayload({task,step,previousProgress,evidence,validatedRecords})
       }),
       invokeRole:async(prompt,ctx)=>{
-        const output=parseJson((await callDirectRole(role,prompt)).content);
+        const output=parseJson((await callDirectRole(role,prompt,runId)).content);
         if(evaluator&&output.status==="CONTINUE")output.progress=evaluator.qualifyProgress({progress:output.progress,previousProgress:ctx.previousProgress});
         return output;
       },
@@ -182,7 +182,7 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
         user:registeredEvidenceUserPayload({task,step,previousProgress,evidence,validatedRecords})
       }),
       invokeDiagnoser:async prompt=>{
-        const out=await callDirectRole("diagnoser",prompt);
+        const out=await callDirectRole("diagnoser",prompt,runId);
         return parseJson(out.content);
       },
       validateIntermediate:async({progress})=>{
@@ -199,7 +199,7 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
       }
     });
   }
-  async function callDirectRole(role,{system,user}){const b=getRoleRuntimeBudget(role);return aiCore.call(role,{system,user,maxTokens:b.max_tokens,timeoutMsOverride:b.turn_timeout_ms,deadlineAt:Date.now()+b.turn_timeout_ms});}
+  async function callDirectRole(role,{system,user},runId=null){const b=getRoleRuntimeBudget(role);const adapter=runId?observeAiCalls({aiCore,runId,runtimeEvidence,onEvent:logRuntime}):aiCore;return adapter.call(role,{system,user,maxTokens:b.max_tokens,timeoutMsOverride:b.turn_timeout_ms,deadlineAt:Date.now()+b.turn_timeout_ms});}
   function externalUnavailable(error){
     const code=String(error?.code||error?.message||"");
     return /^(?:LIVE_BLOCKED_FREE_TIER_UNVERIFIED|EXTERNAL_FREE_PROVIDERS_UNAVAILABLE|EXTERNAL_FREE_REQUEST_BUDGET_EXHAUSTED|EXTERNAL_REVIEW_CI_EGRESS_BLOCKED|EXTERNAL_REVIEW_QUOTA_[A-Z_]+|EXTERNAL_REVIEW_(?:SCHEMA|EMPTY|INCOMPLETE)|(?:GROQ|GEMINI)_(?:KEY_MISSING|NETWORK|JSON|ENVELOPE|HTTP_(?:401|403|429|5[0-9]{2})))$/.test(code);

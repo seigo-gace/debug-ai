@@ -1586,3 +1586,5 @@ exact remaining IDs and Evidence references; full authoritative qualification
 state stays durable, and all original Evidence bodies remain available. This
 removes irrelevant accounting from the prompt without claiming it caused the
 observed timeout or changing context/output/model/runtime defaults.
+
+G3 direct continuation calls now reuse the existing run-scoped AI invocation observer, including the legacy Diagnoser adapter. A failed call records its invocation ID, role, terminal failure and sanitized telemetry without committing semantic progress. Missing provider metrics remain UNKNOWN; this does not establish the cause of a model timeout or relax its budget. Six deterministic timeout regressions cover this connection without provider requests.
