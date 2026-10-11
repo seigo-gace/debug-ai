@@ -119,13 +119,13 @@ test("local counter errors cannot turn an ordinary model call into a rejection",
   assert.equal(out.control_plane.input_token_shadow.reservation_fits,null);
 });
 
-test("product startup wires the counter only through explicit, default-disabled Compose values",()=>{
+test("product startup remains default-OFF without modifying protected Compose",()=>{
   const fs=require("node:fs"),path=require("node:path");
   const startup=fs.readFileSync(path.resolve(__dirname,"../main.js"),"utf8");
   const compose=fs.readFileSync(path.resolve(__dirname,"../../compose.yaml"),"utf8");
   assert.match(startup,/DEBUG_AI_CORE_INPUT_TOKEN_SHADOW\|\|"false"/);
   assert.match(startup,/inputTokenShadow:inputTokenShadowFlag==="true"/);
   assert.match(startup,/inputTokenShadowRoute:process\.env\.DEBUG_AI_CORE_INPUT_TOKEN_SHADOW_ROUTE\|\|"router"/);
-  assert.match(compose,/DEBUG_AI_CORE_INPUT_TOKEN_SHADOW: \$\{DEBUG_AI_CORE_INPUT_TOKEN_SHADOW:-false\}/);
-  assert.match(compose,/DEBUG_AI_CORE_INPUT_TOKEN_SHADOW_ROUTE: \$\{DEBUG_AI_CORE_INPUT_TOKEN_SHADOW_ROUTE:-router\}/);
+  assert.doesNotMatch(compose,/^\s*DEBUG_AI_CORE_INPUT_TOKEN_SHADOW(?:_ROUTE)?:/m);
+  // Runtime flags are not passed by existing Compose; deployed startup stays OFF.
 });
