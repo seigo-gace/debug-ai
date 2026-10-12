@@ -417,3 +417,39 @@ Unexecuted, failed, incomplete, source/runtime-unmatched, and approval-blocked i
 ## Bounded control transport extension — 2026-10-07
 
 The source extends the original nine MCP tools with four direct control tools; exact mapping and contracts are in [`MCP_ADAPTER.md`](MCP_ADAPTER.md). Two Server Command HTTP routes delegate to the existing service instance. CLI forwards service-contract JSON for Server Command and the existing GitOps request/status routes. No Host runner, queue, Service policy or runtime path is replaced. Source/fixture verification and final exact-HEAD CI are recorded in the implementing commit and PR #40 / Issue #41. Runtime reflection, merge, deploy and Secret/Provider/Model mutation are NOT_RUN for this change unit. Historical live/source records above remain bound to their recorded revisions.
+
+## 2026-10-12 — Product handoff reconciliation and G3 resume prefix
+
+Owner Codex; existing PR107/worktree `.worktrees/g3-semantic` reused. SERVER_AI16,
+Project1/Issue41, repository adopted plan/decision context, and accessible adopted
+Notion history were checked. History supplements repository authority; no old
+PENDING is treated as current source. Product goal remains the complete
+six-role evidence-grounded diagnosis→candidate→isolated verification→approved
+apply/retest→fresh review→Strict Completion with durable recovery and dogfood.
+
+| Adopted phase / responsibility | Current source/test evidence | Remaining real acceptance |
+| --- | --- | --- |
+| Phase0 authority/baseline | Project Current verified; PR103 ancestry preserved in G2/G3; historical50/60 baselines retained | New results must remain condition/SHA-bound |
+| Phase1 execution/control | Six-role contracts, RunAuthority, durable locks/checkpoints/Effect Ledger; G3 negatives; telemetry; offline canonical882/882 | Actual role-specific failure metrics/settings and native semantic outcomes |
+| Phase2 investigation/diagnosis | source tools, independently bound Evidence, existing Role/Tool Loop | Successful actual investigation/causal diagnosis; no fixture promotion |
+| Phase3 generation/verification | workflow `makePatchPacket`, bound requirement handoff, candidate snapshot/Sidecar, guarded apply/retest and bounded re-fix; existing regression tests | Real model-generated candidate and independent language-native verification |
+| Phase4 Review/Strict Completion | workflow `makeReviewPacket` and `evaluateCompletionGate(buildCompletionGateInput(...))` are CONNECTED and TESTED; all11 AND conditions retained | Real same-revision closed-loop repair and six-role/runtime dogfood |
+| Capability ownership | Existing `audit:control-plane-gaps` v2 finds26/26 skill procedures,19 requirements,0 unresolved; five non-model capabilities belong to existing core/packets | Audit detects implementation availability, not runtime quality |
+| Phase5 search/performance | Existing Search Gate shadow/candidate safety and A/B machinery available | Qualified real shadow data before activation; later one-variable experiments only |
+
+The older §20 matrix in DURABLE-CONTINUATION-DESIGN is an explicitly dated
+implementation snapshot. Its pending Packet/Strict Completion entries and11 gaps
+must not be implemented a second time. This fresh reconciliation is Source/Test
+only; no claim that every capability is runtime-qualified.
+
+Priority: remove the verified G3 changing-prefix defect; verify saved native
+progress against a finite, separately recorded probe budget; qualify actual
+independent task criteria/role outcomes; then the existing real closed-loop path.
+Do not lead with speculative model changes or full repeated benchmarks.
+See [Design§26.21](DURABLE-CONTINUATION-DESIGN.md#2621-g3-resume-prefix-and-probeproduct-budget-separation--2026-10-12-jst)
+for source decision, exact observed backend facts, unknowns and rollback.
+Fresh Host now runs bb70d06, healthy; existing mapping/branch/two control-path
+checks pass with installed policy e85e3f7d. This executor did not modify policy.
+New source ordering: focused62/62; canonical882/882 (fail0/skip0/real TS7).
+Exact new-head CI, real-model resume and reflection are pending at this source
+checkpoint. Whole-product COMPLETE=NO. Created new top-level sibling=NO.

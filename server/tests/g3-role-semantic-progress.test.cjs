@@ -146,6 +146,32 @@ test("resumed G3 prompt retains semantic obligations without exposing internal c
  assert.deepEqual(second.registered_evidence[0].payload,record.payload);
 });
 
+for(const role of Object.keys(examples))test(`${role}: restart keeps immutable evidence before the changing continuation suffix`,async()=>{
+ const {criteria,record,marker,e}=setup(role),auth=authority(),prompts=[];
+ const aiCore={call:async(_role,prompt)=>{
+  prompts.push(prompt);
+  return{content:JSON.stringify(prompts.length===1
+   ?{status:"CONTINUE",progress:{verified_work:[marker],remaining_work:[]}}
+   :{status:"COMPLETE",result:{...e.result,verified_work:[marker]}})};
+ }};
+ const args={runId:"stable",role,workItemId:"original",inputBinding:"source",task:"same obligation",semanticCriteria:criteria,evidenceRecords:[record]};
+ await createWorkflow({authority:auth,aiCore}).continueRoleTask(args);
+ await createWorkflow({authority:auth,aiCore}).continueRoleTask(args);
+ const [first,second]=prompts.map(p=>p.user),a=JSON.parse(first),b=JSON.parse(second);
+ assert.equal(prompts[0].system,prompts[1].system);
+ assert.equal(a.step,1);assert.equal(b.step,2);
+ assert.deepEqual(a.registered_evidence,b.registered_evidence);
+ assert.deepEqual(a.criteria,b.criteria);
+ const boundary=first.indexOf(',"step":');
+ assert.ok(boundary>first.indexOf('"registered_evidence":'));
+ assert.ok(boundary>first.indexOf('"criteria":'));
+ assert.equal(first.slice(0,boundary),second.slice(0,boundary),"all fixed task/evidence/criterion bytes survive restart as the same prefix");
+ assert.deepEqual(b.previous_progress,{verified_work:[marker],remaining_work:[],evidence_refs:[record.evidence_id]});
+ const before=prompts.length;
+ assert.equal((await createWorkflow({authority:auth,aiCore}).continueRoleTask(args)).status,"COMPLETE");
+ assert.equal(prompts.length,before,"completed replay must not call a model");
+});
+
 for(const role of Object.keys(examples)){
  test(`${role}: continuation failure retains run-scoped sanitized observation without progress commit`,async()=>{
   const {criteria,record}=setup(role),auth=authority(),events=[];

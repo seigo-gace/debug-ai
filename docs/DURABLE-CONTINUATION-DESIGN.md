@@ -1588,3 +1588,59 @@ removes irrelevant accounting from the prompt without claiming it caused the
 observed timeout or changing context/output/model/runtime defaults.
 
 G3 direct continuation calls now reuse the existing run-scoped AI invocation observer, including the legacy Diagnoser adapter. A failed call records its invocation ID, role, terminal failure and sanitized telemetry without committing semantic progress. Missing provider metrics remain UNKNOWN; this does not establish the cause of a model timeout or relax its budget. Six deterministic timeout regressions cover this connection without provider requests.
+
+### 26.21 G3 resume prefix and probe/product budget separation — 2026-10-12 JST
+
+**FACT:** the existing observed native run `run_mv3yskzt_c8b4107afe`
+committed CONTINUE at revision1, then the probe aborted resume after45s.
+The harness explicitly supplies both `timeoutMsOverride:45000` and an absolute
+45s deadline; this is not the product role deadline. Retained Coder logs for
+2026-10-11 15:15–15:18 UTC independently identify tasks55994/56076:
+initial slot prefix similarity1.000, resumed0.431 (retained0.427), resume launch
+15:15:16.719, cancellation15:16:01.635, release15:17:02.179. The failure has no
+prompt-eval/decode timing line or complete output: those metrics remain UNKNOWN.
+Release after cancellation does not prove a completed result or a particular
+backend phase. Prior measured uncached Coder prompt evaluation costs roughly
+55–68ms/token; do not assume a45s cold probe can process the same input that
+completed in14s with3109 cached prompt tokens.
+
+**Source defect and adopted bounded improvement:** G3 serialized changing `step`
+and `previous_progress` before immutable evidence/criteria. Existing workflow now
+serializes fixed task, registered Evidence IDs/content and public criterion
+references first, with step/progress last. No field, evidence byte, hidden oracle,
+validator, input binding, Role/model/Thinking default or timeout is changed.
+Legacy unqualified prompt layout remains compatible. No second prompt/state/cache
+owner is introduced. Cache is disposable acceleration, never accepted Evidence
+or durable progress. Six independent Role regressions first fail against the old
+ordering, then prove byte-identical fixed prefix across a fresh workflow restart,
+correct changing suffix and completed replay with zero model calls. Focused62/62;
+canonical882/882, fail0/skip0, including real TS7, passed in an offline disposable
+container. A first local full run traversed private probe state and lacked the
+explicit TS7 switch (880 pass/1 environment failure/1 skip); rerunning with an
+empty disposable `.debugai-input` mount and the real TS7 switch passed, without
+changing tests or permissions on saved checkpoints.
+
+**Alternatives rejected:** increasing production deadlines, lowering output
+allowance/evidence coverage, altering model/cache state, dropping semantic
+validation, repeatedly rerunning the same45s probe or enabling horizontal
+production by default. One measured read-only native probe may use an explicitly
+recorded finite caller budget derived from uncached prefill plus canonical output
+cost, bounded below the unchanged product role ceiling. A changed probe budget
+must be reported as a separate condition, never a same-budget speed improvement.
+No free-provider review, bulk benchmark, blind retry or600s experiment.
+
+**Fresh Host readback supersedes §26.20's old denial:** canonical checkout is
+bb70d0654056eed555cfdb424ce41ec4e4dfdb1d and healthy; existing mapping validator
+passes and installed branch plus both previously denied control paths now pass.
+Installed policy SHA256 is
+e85e3f7da61722b8b4ba5141df76ad68b3538404bea22034017c22eb729073d9.
+This executor did not write the registry/policy. Every subsequent reflection
+still requires fresh complete changed-path/remote-SHA/CI admission and the existing
+single-use receipt. Current input-order change is not reflected by this readback.
+
+**Acceptance/rollback:** unchanged integrity/no-progress/unsupported-COMPLETE
+negatives and existing approved apply/retest/Strict Completion must pass. Native
+real-model resume and current-source Host reflection remain separate gates until
+measured. Reverting only the G3 JSON field order restores old wire layout without
+checkpoint migration; failed/partial model output never advances revision. This
+bounded source inspection does not establish real six-role debugging completion.

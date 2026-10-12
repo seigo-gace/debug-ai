@@ -148,8 +148,10 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
     const continueViaRole=ROLE_WORK_ITEM_ADAPTERS[role]||continueRoleWorkItem;
     return continueViaRole({authority,runId,role,workItemId,inputBinding:boundTask,maxStepsPerCall,maxTotalSteps,
       buildStepPrompt:async({step,previousProgress})=>({
+        // Keep fixed task/evidence/criteria ahead of changing step/progress for
+        // backend prefix reuse. Cache is never a semantic completion authority.
         system:(evaluator?"CONTINUE requires progress.verified_work [{criterion_id,evidence_refs}] and progress.remaining_work [unmet criterion IDs]. COMPLETE requires result.verified_work for ALL fixed criteria and a canonical role result inferred from evidence. ":"")+`Role: ${role}. Continue ONLY the same assigned work item using a bounded JSON response. status=CONTINUE requires progress.evidence_refs and progress.remaining_work. status=COMPLETE requires the original role's full canonical output under result. status=BLOCKED requires reason. Do not invent evidence; preserve role-specific permissions. No tool execution or mutation in this opt-in interface.`,
-        user:evaluator?JSON.stringify({task,step,previous_progress:{verified_work:previousProgress.verified_work||[],remaining_work:previousProgress.remaining_work||evaluator.criteria.map(c=>c.id),evidence_refs:previousProgress.evidence_refs||[]},registered_evidence_ids:evidence,registered_evidence:evidencePromptView(validatedRecords),criteria:evaluator.criteria.map(({id,kind,evidence_id,source_ref})=>({id,kind,evidence_id,source_ref}))}):registeredEvidenceUserPayload({task,step,previousProgress,evidence,validatedRecords})
+        user:evaluator?JSON.stringify({task,registered_evidence_ids:evidence,registered_evidence:evidencePromptView(validatedRecords),criteria:evaluator.criteria.map(({id,kind,evidence_id,source_ref})=>({id,kind,evidence_id,source_ref})),step,previous_progress:{verified_work:previousProgress.verified_work||[],remaining_work:previousProgress.remaining_work||evaluator.criteria.map(c=>c.id),evidence_refs:previousProgress.evidence_refs||[]}}):registeredEvidenceUserPayload({task,step,previousProgress,evidence,validatedRecords})
       }),
       invokeRole:async(prompt,ctx)=>{
         const output=parseJson((await callDirectRole(role,prompt,runId)).content);
