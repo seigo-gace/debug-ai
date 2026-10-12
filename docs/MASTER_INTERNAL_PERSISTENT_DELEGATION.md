@@ -152,3 +152,34 @@ checking remote, ancestry, clean state and the actual changed-path policy. The
 existing MCP request and existing watcher/runner then perform the formal automatic
 receipt/build/recreate/health cycle. Record source preparation separately from
 Runtime completion; the later real MCP E2E is mandatory.
+
+
+## Registered-item metadata projection and bounded gateway recovery (2026-10-12)
+
+Observed FACT: a real GitHub Project board read returned HTTP 504. A successful
+board-wide diagnostic fetched 243,289 bytes; the exact registered-item GraphQL
+read fetched 343 bytes in 714ms. This establishes an avoidable broad read and a
+current transport failure, not the cause of every historical admission failure.
+
+The existing Host helper now queries the policy-bound ProjectV2Item node and its
+actual parent Project in one read. It requires the exact item ID, non-archived
+Issue/PullRequest, controlling URL, repository, parent ID/owner/number and open
+Project. Null, draft, removed, archived, mismatched and GraphQL partial-error
+responses reject admission. No board body or historical rule content is authority.
+All existing registry, ownership/admin, principal, mapping, branch/SHA/path,
+receipt and repeated pre-effect checks remain mandatory.
+
+Only the three recognized read-only identity command shapes may retry a CLI
+HTTP 502/503/504 failure once, within one shared 30-second budget. Failed partial
+output is discarded. Authentication/permission errors, timeout and arbitrary API
+commands or mutations are never replayed. Exhaustion remains fail-closed, with no
+receipt or production effects; raw provider errors remain unlogged. No grant,
+issuer, Secret, model, service, volume or transport is introduced or broadened.
+
+Qualification covers real Bash/jq negatives for exact-node binding, partial
+GraphQL errors, gateway recovery/exhaustion, 401/403, shared deadline and mutation
+non-replay, alongside the existing legacy/Standing/Host suites. Source/local tests
+and real read-only metadata checks are distinct from exact-head CI and guarded
+production reflection; the latter must supply its own PASS and image readback.
+Rollback reverts this helper/test change through the existing qualified deployment
+lane; an unavailable old broad read still rejects admission and is never bypassed.

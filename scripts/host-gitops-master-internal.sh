@@ -14,10 +14,32 @@ is_master_internal() {
   trusted_delegation_file "$DELEGATION_ROOT/policies/$id.json" &&
     "$JQ_BIN" -e '.delegation_mode=="MASTER_INTERNAL_PERSISTENT"' "$DELEGATION_ROOT/policies/$id.json" >/dev/null 2>&1
 }
-master_gh() { run_timed 30s "$GH_BIN" "$@" 2>/dev/null; }
+master_gh() {
+  local readonly=false started now remaining duration attempt output status=1 prefix
+  # Retry only the existing identity reads, never an arbitrary API mutation.
+  if [ "$#" -eq 4 ] && [ "$1" = api ] && [ "$2" = user ] && [ "$3" = --jq ] && [ "$4" = .login ]; then readonly=true
+  elif [ "$#" -eq 2 ] && [ "$1" = api ] && [[ "$2" = repos/* ]]; then readonly=true
+  elif [ "$#" -eq 6 ] && [ "$1" = api ] && [ "$2" = graphql ] && [ "$3" = -f ] && [[ "$4" = 'query=query('* ]] && [ "$5" = -f ] && [[ "$6" = id=* ]]; then readonly=true
+  fi
+  if [ "$readonly" != true ]; then run_timed 30s "$GH_BIN" "$@" 2>/dev/null; return $?; fi
+  started="$(date +%s%3N)"
+  for attempt in 1 2; do
+    now="$(date +%s%3N)"; remaining=$((30000 - now + started))
+    [ "$remaining" -gt 0 ] || return "$status"
+    [ "$remaining" -le 30000 ] || remaining=30000
+    printf -v duration '%d.%03ds' "$((remaining / 1000))" "$((remaining % 1000))"
+    # Error output stays in memory; no raw provider body/credential is logged.
+    output="$(run_timed "$duration" "$GH_BIN" "$@" 2>&1)"; status=$?
+    if [ "$status" -eq 0 ]; then printf '%s\n' "$output"; return 0; fi
+    prefix="${output:0:240}"
+    [ "$attempt" -lt 2 ] && [[ "$prefix" =~ (non-200\ OK\ status\ code:\ |gh:\ HTTP\ |HTTP\ )(502|503|504)([[:space:]]|$) ]] || return "$status"
+    # A failed/partial response is discarded; all original identity gates follow.
+  done
+  return "$status"
+}
 
 master_verify_mapping() {
-  local entry="$1" path remote compose digest project metadata items principal error services
+  local entry="$1" path remote compose digest metadata items principal error services
   trusted_delegation_file "$entry" || fail MASTER_REGISTRY_ENTRY_UNTRUSTED || return 1
   [ -f "$MASTER_REGISTRY" ] && [ ! -L "$MASTER_REGISTRY" ] || fail MASTER_REGISTRY_MISSING || return 1
   error="$("$JQ_BIN" -r --arg root "$MASTER_PROJECT_ROOT" --slurpfile registry "$MASTER_REGISTRY" '
@@ -72,10 +94,13 @@ master_verify_mapping() {
   [ "$principal" = "$("$JQ_BIN" -r '.master_principal' "$entry")" ] || fail MASTER_PRINCIPAL_MISMATCH || return 1
   metadata="$(master_gh api "repos/$("$JQ_BIN" -r '.repository' "$entry")")" || fail MASTER_REPOSITORY_NOT_VERIFIED || return 1
   "$JQ_BIN" -e --slurpfile p "$entry" '$p[0] as $p | .full_name==$p.repository and .id==$p.repository_id and .node_id==$p.repository_node_id and .owner.login==$p.repository_owner and .default_branch==$p.default_branch and .permissions.admin==true' <<<"$metadata" >/dev/null || fail MASTER_REPOSITORY_OWNER_MISMATCH || return 1
-  project="$(master_gh project view 1 --owner seigo-gace --format json)" || fail MASTER_PROJECT_NOT_VERIFIED || return 1
-  "$JQ_BIN" -e '.id=="PVT_kwHODOQFoM4BEJII" and .owner.login=="seigo-gace" and .number==1 and .closed==false' <<<"$project" >/dev/null || fail MASTER_PROJECT_MISMATCH || return 1
-  items="$(master_gh project item-list 1 --owner seigo-gace --limit 1000 --format json)" || fail MASTER_PROJECT_NOT_VERIFIED || return 1
-  "$JQ_BIN" -e --slurpfile p "$entry" '$p[0] as $p | ([.items[]|select(.id==$p.project.item_id and .content.repository==$p.repository and .content.url==$p.project.control_url)]|length)==1' <<<"$items" >/dev/null || fail MASTER_PROJECT_REPOSITORY_UNREGISTERED || return 1
+  # Read the exact registered item and its actual Project in one small query.
+  # Board-wide issue bodies are neither admission evidence nor needed here.
+  items="$(master_gh api graphql -f 'query=query($id:ID!){node(id:$id){__typename ... on ProjectV2Item{id isArchived project{id number closed owner{... on User{login} ... on Organization{login}}} content{__typename ... on Issue{url repository{nameWithOwner}} ... on PullRequest{url repository{nameWithOwner}}}}}}' -f "id=$("$JQ_BIN" -r '.project.item_id' "$entry")")" || fail MASTER_PROJECT_NOT_VERIFIED || return 1
+  "$JQ_BIN" -e '(.errors // [] | length)==0' <<<"$items" >/dev/null || fail MASTER_PROJECT_NOT_VERIFIED || return 1
+  "$JQ_BIN" -e '.data.node.__typename=="ProjectV2Item" and .data.node.isArchived==false' <<<"$items" >/dev/null || fail MASTER_PROJECT_REPOSITORY_UNREGISTERED || return 1
+  "$JQ_BIN" -e --slurpfile p "$entry" '$p[0] as $p | .data.node.project | .id==$p.project.node_id and .owner.login==$p.project.owner and .number==$p.project.number and .closed==false' <<<"$items" >/dev/null || fail MASTER_PROJECT_MISMATCH || return 1
+  "$JQ_BIN" -e --slurpfile p "$entry" '$p[0] as $p | .data.node as $n | $n.id==$p.project.item_id and ($n.content.__typename=="Issue" or $n.content.__typename=="PullRequest") and $n.content.repository.nameWithOwner==$p.repository and $n.content.url==$p.project.control_url' <<<"$items" >/dev/null || fail MASTER_PROJECT_REPOSITORY_UNREGISTERED || return 1
 }
 
 validate_master_internal() {

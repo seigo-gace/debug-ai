@@ -493,3 +493,13 @@ PASS. This is in-scope configuration alignment, not permission creation or an
 unqualified-local-source bypass. Old failed operation not replayed. A fresh
 current-SHA guarded reflection remains the next gate. Runtime pin is rechecked
 after manager restart; whole-product COMPLETE=NO.
+
+
+2026-10-12 Host metadata correction: observed real HTTP504 and verified the exact
+registered-item GraphQL read (343 bytes versus243,289 board bytes). Existing helper
+retains all admission bindings, rejects archived/draft/partial-error items, and
+limits recognized read-only gateway recovery to2 attempts in a shared30s budget.
+No policy/grant change. Source/local and read-only mapping qualification are
+separate from exact-head CI and production reflection; Runtime remains pending
+until the existing guarded lane and packaged-source readbacks pass. See
+MASTER_INTERNAL_PERSISTENT_DELEGATION.md for adopted rationale and rollback.
