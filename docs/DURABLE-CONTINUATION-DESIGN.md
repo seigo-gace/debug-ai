@@ -1780,3 +1780,34 @@ setting, with the explicit consequence that G3 again fails readback against the
 newer installed policy. This is a runtime manager pin, not a claim of permanent
 source/config promotion across manager restarts. Reverify effective pin on future
 reflect/resume. Whole-product acceptance and six-role actual repair remain pending.
+
+### 26.23 Unicode search excerpts and real-source dogfood — 2026-10-12
+
+Observed defect at production/source c9b2f14: `source.search` finds an ASCII marker
+following 900 U+0130 characters, yet returns an empty original-source excerpt.
+Default lowercasing expands that prefix, so an index in the lowered string is
+incorrectly applied to the original string. ASCII control passes; independent
+astral-plus-expanding-prefix and case-expanded-query regressions fail. The hit
+and source SHA are genuine, but the supplied excerpt cannot support investigation.
+
+Adopted requirement: preserve the current lowercase-substring matching semantics,
+original source case/bytes and SHA, one hit per file, bounded read/search and
+coverage receipts. Convert a matched lowercase offset back to its original UTF-16
+source position when casing changes length; leave equal-length matches on the
+existing cheap path. Do not lowercase the returned excerpt, replace matching with
+locale-dependent/regex semantics, weaken truncation disclosure or broaden reads.
+No new Tool, Validator, state owner, provider/model or production flag is needed.
+Rollback is the existing source-qualified guarded reflection of the prior source.
+
+Dogfood uses the existing live workflow, current assigned models and RunAuthority.
+The qualification input is the twelve exact repository files in the static import
+closure of the affected module, plus an independent, fixed dependency-free Node
+regression oracle. This is a source projection inside the existing owned parent,
+not a clone, Git repository or new registered project. Its manifest binds every
+original file to c9b2f14 and SHA256; the owning production source is never modified
+by generated candidates. The existing sandbox materializes and runs candidates;
+approval and fresh review remain required before any application. Full-repository
+external dependency admission and full-product completion are separate, unproven
+claims. Preserve actual failure, run ID, tool/model observations, candidate result
+and limitations in existing Current/minutes rather than fabricating a fixture PASS
+or expected diagnosis as model evidence.

@@ -503,3 +503,16 @@ No policy/grant change. Source/local and read-only mapping qualification are
 separate from exact-head CI and production reflection; Runtime remains pending
 until the existing guarded lane and packaged-source readbacks pass. See
 MASTER_INTERNAL_PERSISTENT_DELEGATION.md for adopted rationale and rollback.
+
+
+2026-10-12 real-source dogfood: productionc9b2f14 source.search reproduces an
+empty original excerpt after900 U+0130 characters despite one real hit. Added
+four independent source regressions; baseline5/9pass4fail; corrected relevant
+19/19pass. Equal-length case mappings keep the existing path; expanded lowercase
+match offsets are translated to original UTF16 before excerpting. Original case,
+SHA, lowercase match semantics and search/truncation receipts remain unchanged.
+Design§26.23 records requirements, alternatives and rollback. Live actual-model
+run_mv5agtgf_96b706c70a uses the original12-file exact source closure and fixed
+3-case test, not the developer's correction. Source/local, live dogfood outcome,
+exact-headCI and Compose reflection must each be reported independently in#41/#42.
+No candidate-generated code runs against owning production source.
