@@ -465,3 +465,15 @@ The new diagnostic identified VERIFIED_WORK_INVALID on the same saved run;
 45s warm response16.431s, cache3165hit/1miss. Rejection remains fail-closed and
 checkpoint revision1 unchanged. Next bounded source correction clarifies COMPLETE
 marker shape and placement for all six Roles. No expected answer or weaker gate.
+
+2026-10-12 further G3 dogfood: the corrected prompt still fails; a bounded shape
+probe confirms final result lacks verified_work. Adopted Design§26.22 restores
+only omitted markers from every independently qualified, same-bound checkpoint
+obligation; supplied wrong markers/partial/stale evidence remain rejected and the
+canonical/outcome checker is unchanged. This is runtime proof recovery, not model
+self-certification. Existing guarded reflection ofb33808c was actually DENIED:
+MASTER_REGISTRY_READBACK_MISMATCH (gitops_fbd76bf8bf467f1b1a22a7fe). Effective
+systemd manager uses qualifiedfd1657f7 registry, which differs from installed
+policy; neither existing qualified snapshot matches. Default dirty registry is
+not used as a bypass. Livebb70d06 preserved, no policy/registry/environment write.
+Trusted owner reconciliation remains separate from continued source/native tests.

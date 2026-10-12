@@ -4,6 +4,43 @@ const {makeEvidenceRecord}=require("../control/evidence-registry.js");
 const {createRoleProgressEvaluator}=require("../control/role-output-validator.js");
 const {setup,examples}=require("./fixtures/g3-semantic-cases.cjs");
 for(const role of Object.keys(examples)){
+ test(`${role}: canonical completion can reuse all independently qualified prior markers without model transcription`,async()=>{
+  const {criteria,record,marker,e}=setup(role),auth=authority();let calls=0;
+  const aiCore={call:async()=>({content:JSON.stringify(++calls===1
+   ?{status:"CONTINUE",progress:{verified_work:[marker],remaining_work:[]}}
+   :{status:"COMPLETE",result:e.result})})};
+  const args={runId:"restore-markers",role,workItemId:"a",inputBinding:"v1",task:"fixed",semanticCriteria:criteria,evidenceRecords:[record]};
+  await createWorkflow({authority:auth,aiCore}).continueRoleTask(args);
+  const completed=await createWorkflow({authority:auth,aiCore}).continueRoleTask(args);
+  assert.equal(completed.status,"COMPLETE");assert.deepEqual(completed.result.verified_work,[marker]);
+  assert.equal((await createWorkflow({authority:auth,aiCore}).continueRoleTask(args)).status,"COMPLETE");assert.equal(calls,2);
+  const evaluator=createRoleProgressEvaluator({role,criteria,evidenceRecords:[record]});
+  assert.equal(evaluator.validateCompletion({result:completed.result}),true);
+ });
+ test(`${role}: restored markers never repair unverified, corrupt, stale or model-supplied proof`,()=>{
+  const {evaluator,marker,e}=setup(role);
+  const saved=evaluator.qualifyProgress({progress:{verified_work:[marker],remaining_work:[]},previousProgress:{}});
+  const before=JSON.stringify({saved,result:e.result});
+  for(const mutate of [
+   p=>delete p.qualification,
+   p=>p.qualification.qualification_binding="stale",
+   p=>p.qualification.qualified_progress_ids=["forged"],
+   p=>p.qualification.total_qualified_progress_ids=0,
+   p=>p.verified_work[0].evidence_refs=["unknown"],
+   p=>p.remaining_work=["unfinished"],
+   p=>p.evidence_refs=[]
+  ]){
+   const damaged=structuredClone(saved);mutate(damaged);
+   assert.equal(evaluator.restoreCompletionMarkers({result:e.result,previousProgress:damaged}),e.result);
+  }
+  assert.equal(evaluator.restoreCompletionMarkers({result:e.result}),e.result);
+  const supplied={...e.result,verified_work:[]};
+  assert.equal(evaluator.restoreCompletionMarkers({result:supplied,previousProgress:saved}),supplied);
+  assert.equal(evaluator.validateCompletion({result:supplied}),false);
+  const unsupported=evaluator.restoreCompletionMarkers({result:{...e.result,unsupported_claim:true},previousProgress:saved});
+  assert.equal(evaluator.validateCompletion({result:unsupported}),false,"all canonical/outcome/extra-field checks still run");
+  assert.equal(JSON.stringify({saved,result:e.result}),before);
+ });
  test(`${role}: rejected completion records a bounded reason without model content or a progress commit`,async()=>{
   const {criteria,record,marker,e}=setup(role),auth=authority(),events=[],logs=[];
   const rejected={...e.result,verified_work:[marker],private_model_note:"PRIVATE_RESULT_MUST_NOT_BE_RETAINED"};

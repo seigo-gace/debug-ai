@@ -1690,3 +1690,56 @@ regressions cover all Roles, preserving identical initial/resume system bytes.
 This changes the causal model input before any further bounded acceptance call;
 no validation/assertion is relaxed. The observed16s warm vs125s cold is a cache
 condition comparison, not proof of full debugging speed or semantic correctness.
+
+### 26.22 Deterministic recovery of omitted final proof markers — 2026-10-12 JST
+
+**Dogfood finding:** atb33808cda09459e69047dd7aac17dca77aeb1161, explicit final
+marker instructions still yielded VERIFIED_WORK_INVALID after143.741s
+(prefill122.751s/decode17.792s,3220prompt/114completion). One newly instrumented
+warm45s diagnostic,16.610s, retained only fixed booleans/counts about the parsed
+contract: status COMPLETE, result present, `result.verified_work` absent.
+No model text, unknown field names/values, hidden answer or raw error was saved.
+All rejected attempts preserved the original run's CONTINUE/revision1.
+
+**Adopted nonregressing alternative:** restore omitted final markers ONLY from
+ALL already independently qualified obligations in the existing SAME task-bound
+checkpoint. This is trusted runtime proof recovery, never a model output promoted
+into evidence. Reuse the canonical evaluator/Progress Controller and existing
+continuation context. `restoreCompletionMarkers` requires every fixed criterion,
+matching source/Evidence records, the exact qualification binding/policy, qualified
+objective IDs/count, no unfinished work and exact Evidence references. Missing,
+partial, corrupt, stale or unqualified state returns the original unmodified
+result and remains rejected by the existing completion checker. A model-supplied
+marker field (including null/empty/forged) is NEVER overwritten. The server only
+adds omitted proof markers; it never changes canonical role fields, expected
+outcomes, unsupported fields or effect claims. The same enforced shape/Evidence,
+all-criteria and independent expected-outcome checks still decide completion.
+Fresh and restored terminal results retain the existing complete proof shape.
+No checkpoint migration, second validator/ledger, added permission, primary-path
+activation or automatic apply. Tool Loop behavior is unchanged.
+
+**Why:** asking a small model to retranscribe already committed proof adds a
+format failure without adding independent truth. Restoring complete validated
+proof deterministically preserves the stronger external outcome checks. Rejected
+alternatives: accept marker-free first-call COMPLETE, infer unknown work from
+model prose, fill expected role answers, silently repair supplied wrong markers,
+or relax false-FACT/unsupported-field/Source/Approval/Review gates. Six fail-first
+workflow/restart/replay positives plus six corrupt/stale/unfinished/supplied-proof
+negative groups qualify the change. Actual-model success is separately measured;
+fixture acceptance is not real debugging. Rollback removes restoration only;
+normalized saved complete results still contain all originally required markers.
+
+**Effective Host boundary correction:** exactb33808c has6/6 CI SUCCESS, but
+existing guarded requestgitops_fbd76bf8bf467f1b1a22a7fe fails
+MASTER_REGISTRY_READBACK_MISMATCH before deployment. Source/default-registry
+preflight differed from the real systemd user-manager environment:
+DEBUG_AI_MASTER_REGISTRY points to the existing qualified registry
+`fd1657f7c8b5b21a78a812dc0040eb68a83d2f74.json`. Neither existing qualified snapshot
+(fd1657f7 or3e84bc06) matches the installed policye85e3f7d. The default local
+registry does match, but is another owner's dirty source; it is NOT substituted
+as a trusted runtime credential. No policy/grant/manager-environment change or
+retry of the same refused deployment. Canonical live revision remainsbb70d06.
+Existing trusted registry owner must qualify/pin a matching snapshot through its
+approved lane, preserving scope/effects. Only then a fresh exact-SHA receipt and
+normal reflection. This blocks that runtime operation, not independent source
+work or native disposable read-only qualification.

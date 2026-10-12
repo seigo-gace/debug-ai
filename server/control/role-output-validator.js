@@ -254,6 +254,22 @@ function createRoleProgressEvaluator({role,criteria,evidenceRecords=[]}={}){
     return {valid:true,reason:null};
   }
   function validateCompletion(args){return assessCompletion(args).valid;}
+  function restoreCompletionMarkers({result,previousProgress={}}){
+    // Only the existing task-bound checkpoint may supply omitted proof markers.
+    // Never overwrite a marker supplied by the model or derive unfinished work.
+    if(!plainObject(result)||Object.hasOwn(result,"verified_work"))return result;
+    try{
+      const prior=markers(previousProgress),saved=previousProgress.qualification;
+      if(prior.length!==fixed.length||!saved||saved.require_qualified_progress!==true||
+        saved.total_qualified_progress_ids!==prior.length||
+        !same(previousProgress.remaining_work,[])||
+        !Array.isArray(saved.qualified_progress_ids)||
+        !same([...saved.qualified_progress_ids].sort(),prior.map(c=>c.objective).sort())||
+        !same(previousProgress.evidence_refs,[...new Set(prior.map(c=>c.evidence_id))].sort()))return result;
+      controller(saved); // Recheck original qualification/policy binding.
+      return {...result,verified_work:prior.sort((a,b)=>a.id.localeCompare(b.id)).map(c=>({criterion_id:c.id,evidence_refs:[c.evidence_id]}))};
+    }catch{return result;}
+  }
   // The existing Tool Loop supplies only committed result observations. This
   // index is derived on restart from those observations, never another ledger.
   const toolProofs=new Map();
@@ -275,6 +291,6 @@ function createRoleProgressEvaluator({role,criteria,evidenceRecords=[]}={}){
   const toolQualification={binding,qualifyResult,validateFinal:validateCompletion,verify:({id,roleEvidenceIds,completedEffectIds})=>{
     const proof=toolProofs.get(id);return Boolean(proof&&roleEvidenceIds.includes(proof.evidenceId)&&completedEffectIds.includes(proof.effectId));
   }};
-  return {qualifyProgress,validateCompletion,assessCompletion,toolQualification,criteria:JSON.parse(JSON.stringify(fixed)),binding};
+  return {qualifyProgress,validateCompletion,assessCompletion,restoreCompletionMarkers,toolQualification,criteria:JSON.parse(JSON.stringify(fixed)),binding};
 }
 module.exports={ROLE_SEMANTIC_RULES,REVIEW_VERDICT,parseJsonContent,validateEvidenceBindings,validateRequiredRoleShape,evaluateRoleSemantics,attachSemanticShadow,getSemanticShadow,parseAndValidateRoleOutput,ROLE_PROGRESS_KINDS,createRoleProgressEvaluator};

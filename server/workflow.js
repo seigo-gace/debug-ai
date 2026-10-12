@@ -156,6 +156,7 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
       invokeRole:async(prompt,ctx)=>{
         const output=parseJson((await callDirectRole(role,prompt,runId)).content);
         if(evaluator&&output.status==="CONTINUE")output.progress=evaluator.qualifyProgress({progress:output.progress,previousProgress:ctx.previousProgress});
+        if(evaluator&&output.status==="COMPLETE")output.result=evaluator.restoreCompletionMarkers({result:output.result,previousProgress:ctx.previousProgress});
         return output;
       },
       validateIntermediate,
