@@ -460,3 +460,8 @@ but independent semantic acceptance rejected it; saved revision1 unchanged.
 CI at576bad4 is6/6 SUCCESS. Actual outcome remains NOT_COMPLETE. Existing evaluator
 now provides fixed failure categories through the same boolean gate, local
 RuntimeEvidence and TGserver; model content/oracle/Secret are not logged.
+
+The new diagnostic identified VERIFIED_WORK_INVALID on the same saved run;
+45s warm response16.431s, cache3165hit/1miss. Rejection remains fail-closed and
+checkpoint revision1 unchanged. Next bounded source correction clarifies COMPLETE
+marker shape and placement for all six Roles. No expected answer or weaker gate.

@@ -189,6 +189,7 @@ for(const role of Object.keys(examples))test(`${role}: restart keeps immutable e
  await createWorkflow({authority:auth,aiCore}).continueRoleTask(args);
  const [first,second]=prompts.map(p=>p.user),a=JSON.parse(first),b=JSON.parse(second);
  assert.equal(prompts[0].system,prompts[1].system);
+ assert.ok(prompts[0].system.includes("COMPLETE result.verified_work must be an array of {criterion_id,evidence_refs} objects, exactly like progress.verified_work"));
  assert.equal(a.step,1);assert.equal(b.step,2);
  assert.deepEqual(a.registered_evidence,b.registered_evidence);
  assert.deepEqual(a.criteria,b.criteria);

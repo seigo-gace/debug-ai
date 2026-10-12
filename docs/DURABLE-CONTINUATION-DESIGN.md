@@ -1675,3 +1675,18 @@ zero progress commit and sanitized local/TGserver routing. A diagnostic real
 call must be separately bounded and justified by the newly observable failure;
 never rerun a known failure after its category is obtained without changing the
 causal input. Rollback removes only diagnostics; the boolean gate remains required.
+
+At05b770acb113c97d7562aa27f1a96f61511a4c23, exactly one newly instrumented,
+45s-bound diagnostic resume returned in16,431ms (prefill142.618ms, decode16,221.126ms,
+cache3165hit/1miss,3166prompt/114completion). The checker records
+VERIFIED_WORK_INVALID; saved CONTINUE/revision1 is unchanged. This proves a
+rejected marker contract, not the precise omitted/malformed field or a causal
+model defect. No raw model response was saved. New source therefore clarifies the
+existing wire contract: COMPLETE `result.verified_work` is the same array of
+`{criterion_id,evidence_refs}` objects as intermediate progress; retain the admitted
+marker references inside `result`, never substitute ID strings or move markers
+outside the result. No expected role answer is supplied. Six fail-first prompt
+regressions cover all Roles, preserving identical initial/resume system bytes.
+This changes the causal model input before any further bounded acceptance call;
+no validation/assertion is relaxed. The observed16s warm vs125s cold is a cache
+condition comparison, not proof of full debugging speed or semantic correctness.
