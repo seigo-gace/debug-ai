@@ -238,17 +238,22 @@ function createRoleProgressEvaluator({role,criteria,evidenceRecords=[]}={}){
     if(!observation.progress_delta)fail("NO_SEMANTIC_PROGRESS");
     return {verified_work:[...all.values()].sort((a,b)=>a.id.localeCompare(b.id)).map(c=>({criterion_id:c.id,evidence_refs:[c.evidence_id]})),evidence_refs:[...new Set([...all.values()].map(c=>c.evidence_id))].sort(),remaining_work:remaining,qualification:p.snapshot()};
   }
-  function validateCompletion({result}){
-    try{
-      if(result?.applied===true||result?.deployed===true||result?.apply||result?.deploy)return false;
-      parseAndValidateRoleOutput(role,result,{availableEvidenceIds:[...records.keys()],strictEvidenceRefs:true,roleSemantics:"enforce"});
-      const completed=markers(result);if(completed.length!==fixed.length)return false;
-      if(Object.keys(result).some(key=>key!=="verified_work"&&!fixed.some(c=>Object.prototype.hasOwnProperty.call(c.result,key))))return false;
-      // Role outcomes are independently fixed; prose, IDs and COMPLETE itself
-      // cannot satisfy an obligation. Unknown fields never substitute for it.
-      return fixed.every(c=>Object.entries(c.result).every(([k,v])=>same(result[k],v)));
-    }catch{return false;}
+  function assessCompletion({result}){
+    const reject=reason=>({valid:false,reason});
+    if(result?.applied===true||result?.deployed===true||result?.apply||result?.deploy)return reject("FORBIDDEN_EFFECT");
+    try{parseAndValidateRoleOutput(role,result,{availableEvidenceIds:[...records.keys()],strictEvidenceRefs:true,roleSemantics:"enforce"});}
+    catch{return reject("ROLE_OUTPUT_INVALID");}
+    let completed;
+    try{completed=markers(result);}catch{return reject("VERIFIED_WORK_INVALID");}
+    if(completed.length!==fixed.length)return reject("CRITERIA_INCOMPLETE");
+    if(Object.keys(result).some(key=>key!=="verified_work"&&!fixed.some(c=>Object.prototype.hasOwnProperty.call(c.result,key))))return reject("UNSUPPORTED_FIELD");
+    // Role outcomes are independently fixed; prose, IDs and COMPLETE itself
+    // cannot satisfy an obligation. Unknown fields never substitute for it.
+    try{if(!fixed.every(c=>Object.entries(c.result).every(([k,v])=>same(result[k],v))))return reject("OUTCOME_MISMATCH");}
+    catch{return reject("OUTCOME_MISMATCH");}
+    return {valid:true,reason:null};
   }
+  function validateCompletion(args){return assessCompletion(args).valid;}
   // The existing Tool Loop supplies only committed result observations. This
   // index is derived on restart from those observations, never another ledger.
   const toolProofs=new Map();
@@ -270,6 +275,6 @@ function createRoleProgressEvaluator({role,criteria,evidenceRecords=[]}={}){
   const toolQualification={binding,qualifyResult,validateFinal:validateCompletion,verify:({id,roleEvidenceIds,completedEffectIds})=>{
     const proof=toolProofs.get(id);return Boolean(proof&&roleEvidenceIds.includes(proof.evidenceId)&&completedEffectIds.includes(proof.effectId));
   }};
-  return {qualifyProgress,validateCompletion,toolQualification,criteria:JSON.parse(JSON.stringify(fixed)),binding};
+  return {qualifyProgress,validateCompletion,assessCompletion,toolQualification,criteria:JSON.parse(JSON.stringify(fixed)),binding};
 }
 module.exports={ROLE_SEMANTIC_RULES,REVIEW_VERDICT,parseJsonContent,validateEvidenceBindings,validateRequiredRoleShape,evaluateRoleSemantics,attachSemanticShadow,getSemanticShadow,parseAndValidateRoleOutput,ROLE_PROGRESS_KINDS,createRoleProgressEvaluator};

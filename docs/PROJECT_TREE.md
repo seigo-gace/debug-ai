@@ -176,4 +176,7 @@ G3 uses the existing `server/control/role-output-validator.js` criterion evaluat
 `server/tests/g3-role-semantic-progress.test.cjs` covers six-role semantic holdouts,
 workflow and real source/tool integration; `server/tests/fixtures/g3-process-child.cjs`
 uses native RunAuthority records across three independent processes, with shared
-role cases in `g3-semantic-cases.cjs`. Design authority: Durable Design §26.20.
+role cases in `g3-semantic-cases.cjs`. Same evaluator exposes bounded completion
+rejection reasons; workflow routes them through existing RuntimeEvidence/TGserver
+without retaining rejected output. Prefix/restart and diagnostic tests use the
+same G3 suite. Design authority: Durable Design §26.20–§26.21.

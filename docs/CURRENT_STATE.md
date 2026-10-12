@@ -453,3 +453,10 @@ checks pass with installed policy e85e3f7d. This executor did not modify policy.
 New source ordering: focused62/62; canonical882/882 (fail0/skip0/real TS7).
 Exact new-head CI, real-model resume and reflection are pending at this source
 checkpoint. Whole-product COMPLETE=NO. Created new top-level sibling=NO.
+
+Native resume follow-up: exact576bad4 returned a complete model response in125s
+(105.275s prefill/17.661s decode,3166prompt/114completion,1361cache-hit/1805miss),
+but independent semantic acceptance rejected it; saved revision1 unchanged.
+CI at576bad4 is6/6 SUCCESS. Actual outcome remains NOT_COMPLETE. Existing evaluator
+now provides fixed failure categories through the same boolean gate, local
+RuntimeEvidence and TGserver; model content/oracle/Secret are not logged.

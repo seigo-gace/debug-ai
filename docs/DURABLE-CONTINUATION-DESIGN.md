@@ -1644,3 +1644,34 @@ real-model resume and current-source Host reflection remain separate gates until
 measured. Reverting only the G3 JSON field order restores old wire layout without
 checkpoint migration; failed/partial model output never advances revision. This
 bounded source inspection does not establish real six-role debugging completion.
+
+#### 26.21 measured native resume and failure diagnostics
+
+At source576bad420b10f5e0be7d2e19162750e4812d8e35, one150s-bound native
+resume of the SAME saved run returned in125,266ms. Measured prompt3166,
+completion114, prompt_eval105,274.740ms, decode17,661.164ms, cache1361hit/1805miss,
+finish_reason=stop, transport attempts1. The new ordering necessarily differs
+from the OLD checkpoint probe's cached layout; this is a first-call cold-transition
+measurement, not an initial→resume cache-speed comparison. It confirms the45s
+probe was shorter than this measured uncached prefill. Model final output was
+rejected as MODEL_FINAL_REJECTED; original CONTINUE/revision1 remains intact.
+No incomplete or unsupported result is admitted. This establishes response and
+checkpoint preservation, NOT successful semantic completion or source-read truth
+beyond the existing independent observation.
+
+The real dogfood exposed an actionable observation gap: the existing semantic
+completion checker returns only false, so the caller cannot distinguish missing
+markers, unsupported extra fields or an outcome mismatch. Extend that SAME checker
+with `assessCompletion` and retain `validateCompletion` as its boolean projection;
+no alternative validator/state authority. The checks and required outcomes stay
+unchanged. On rejected G3 final output the existing workflow records
+`debugai.role-validation/v1` in RuntimeEvidence and the existing TGserver log sink.
+Only role, stage, valid=false and an authored reason enum are retained:
+FORBIDDEN_EFFECT, ROLE_OUTPUT_INVALID, VERIFIED_WORK_INVALID, CRITERIA_INCOMPLETE,
+UNSUPPORTED_FIELD or OUTCOME_MISMATCH. No rejected model text, raw error, extra
+field names/values, hidden oracle, expected answer or Evidence content is logged.
+Six fail-first Role cases and category checks establish unchanged rejection,
+zero progress commit and sanitized local/TGserver routing. A diagnostic real
+call must be separately bounded and justified by the newly observable failure;
+never rerun a known failure after its category is obtained without changing the
+causal input. Rollback removes only diagnostics; the boolean gate remains required.

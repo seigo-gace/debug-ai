@@ -4,6 +4,18 @@ const {makeEvidenceRecord}=require("../control/evidence-registry.js");
 const {createRoleProgressEvaluator}=require("../control/role-output-validator.js");
 const {setup,examples}=require("./fixtures/g3-semantic-cases.cjs");
 for(const role of Object.keys(examples)){
+ test(`${role}: rejected completion records a bounded reason without model content or a progress commit`,async()=>{
+  const {criteria,record,marker,e}=setup(role),auth=authority(),events=[],logs=[];
+  const rejected={...e.result,verified_work:[marker],private_model_note:"PRIVATE_RESULT_MUST_NOT_BE_RETAINED"};
+  const wf=createWorkflow({authority:auth,runtimeEvidence:{write:(runId,type,payload)=>events.push({runId,type,payload})},tgserver:{log:async event=>logs.push(event)},aiCore:{call:async()=>({content:JSON.stringify({status:"COMPLETE",result:rejected})})}});
+  await assert.rejects(wf.continueRoleTask({runId:"reject-run",role,workItemId:"a",inputBinding:"v1",task:"fixed",semanticCriteria:criteria,evidenceRecords:[record]}),/MODEL_FINAL_REJECTED/);
+  assert.equal(auth.records.size,0);
+  const failures=events.filter(x=>x.type==="role_validation");
+  assert.deepEqual(failures,[{runId:"reject-run",type:"role_validation",payload:{schema:"debugai.role-validation/v1",role,stage:"COMPLETE",valid:false,reason:"UNSUPPORTED_FIELD"}}]);
+  assert.ok(logs.some(x=>x.kind==="role_validation"&&x.reason==="UNSUPPORTED_FIELD"));
+  assert.ok(!JSON.stringify({events,logs}).includes("PRIVATE_RESULT_MUST_NOT_BE_RETAINED"));
+  assert.ok(!JSON.stringify(failures).includes(record.evidence_id),"oracle and Evidence are not copied into diagnostics");
+ });
  test(`${role}: reject churn, paraphrase, missing evidence and unsupported COMPLETE`,()=>{
   const {evaluator,record,marker,e}=setup(role);
   assert.throws(()=>evaluator.qualifyProgress({progress:{evidence_refs:[record.evidence_id],remaining_work:"done differently"},previousProgress:{}}),/NO_SEMANTIC_PROGRESS/);
@@ -18,6 +30,24 @@ for(const role of Object.keys(examples)){
  });
 }
 module.exports={setup,examples};
+
+test("G3 completion assessment distinguishes fixed rejection categories without exposing the oracle",()=>{
+ const {evaluator,marker,e}=setup("code_scout"),valid={...e.result,verified_work:[marker]};
+ const cases=[
+  [{...valid,applied:true},"FORBIDDEN_EFFECT"],
+  [{},"ROLE_OUTPUT_INVALID"],
+  [e.result,"VERIFIED_WORK_INVALID"],
+  [{...valid,verified_work:[]},"CRITERIA_INCOMPLETE"],
+  [{...valid,untrusted_field:"sensitive"},"UNSUPPORTED_FIELD"],
+  [{...valid,relevant_files:[]},"OUTCOME_MISMATCH"]
+ ];
+ for(const [result,reason] of cases){
+  assert.deepEqual(evaluator.assessCompletion({result}),{valid:false,reason});
+  assert.equal(evaluator.validateCompletion({result}),false);
+ }
+ assert.deepEqual(evaluator.assessCompletion({result:valid}),{valid:true,reason:null});
+ assert.equal(evaluator.validateCompletion({result:valid}),true);
+});
 
 const {createWorkflow}=require("../workflow.js");
 function authority(){

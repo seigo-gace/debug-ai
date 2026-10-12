@@ -160,7 +160,15 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
       },
       validateIntermediate,
       validateRoleResult:async({result})=>{
-        if(evaluator)return evaluator.validateCompletion({result});
+        if(evaluator){
+          const assessment=evaluator.assessCompletion({result});
+          if(!assessment.valid){
+            const failure={schema:"debugai.role-validation/v1",role,stage:"COMPLETE",valid:false,reason:assessment.reason};
+            runtimeEvidence?.write(runId,"role_validation",failure);
+            await logRuntime({run_id:runId,severity:"warn",kind:"role_validation",...failure});
+          }
+          return assessment.valid;
+        }
         try{parseAndValidateRoleOutput(role,result,{availableEvidenceIds:evidence,strictEvidenceRefs:true});return true;}
         catch{return false;}
       }
