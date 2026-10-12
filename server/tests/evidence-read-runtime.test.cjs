@@ -133,18 +133,26 @@ test("projected initial evidence is re-readable from the same authenticated role
 test("runtime-seeded evidence cannot broaden admission or hide tampering",async()=>{
  const f=fixture();try{
   const admitted=makeEvidenceRecord("LOCAL_RUNTIME",{observation:"original"}),hidden=makeEvidenceRecord("LOCAL_RUNTIME",{observation:"not admitted"});
-  const context=f.runtime.createEvidenceContext({baseEvidenceIds:[admitted.evidence_id],registeredEvidence:[admitted,hidden],user:"{}"});
+  const context=f.runtime.createEvidenceContext({baseEvidenceIds:[admitted.evidence_id],user:"{}"});
+  f.runtime.addEvidenceToContext(context,[admitted,hidden],{allowedEvidenceIds:[admitted.evidence_id]});
   await assert.rejects(()=>f.runtime.execute({role:"causal_scout",selectedSkillIds:["failure-taxonomy-router"],tool:"evidence.read",arguments:{evidence_id:hidden.evidence_id},evidenceContext:context}),/EVIDENCE_READ_NOT_REGISTERED/);
-  assert.throws(()=>f.runtime.createEvidenceContext({baseEvidenceIds:[admitted.evidence_id],registeredEvidence:[{...admitted,payload:{observation:"changed"}}]}),/EVIDENCE/);
+  assert.throws(()=>f.runtime.addEvidenceToContext(context,[{...admitted,payload:{observation:"changed"}}],{allowedEvidenceIds:[admitted.evidence_id]}),/EVIDENCE/);
  }finally{f.cleanup();}
 });
 
 test("seeded records retain later evidence without overstating the bounded read",async()=>{
  const f=fixture();try{
   const record=makeEvidenceRecord("LOCAL_RUNTIME",{observation:"x".repeat(7000)+"LATE_COUNTER_EVIDENCE"});
-  const context=f.runtime.createEvidenceContext({baseEvidenceIds:[record.evidence_id],registeredEvidence:[record],user:"{}"});
+  const context=f.runtime.createEvidenceContext({baseEvidenceIds:[record.evidence_id],user:"{}"});
+  f.runtime.addEvidenceToContext(context,[record],{allowedEvidenceIds:[record.evidence_id]});
   const result=await f.runtime.execute({role:"causal_scout",selectedSkillIds:["failure-taxonomy-router"],tool:"evidence.read",arguments:{evidence_id:record.evidence_id,max_chars:800},evidenceContext:context});
   assert.equal(result.data.projection_completeness,"PARTIAL");assert.doesNotMatch(result.data.excerpt,/LATE_COUNTER_EVIDENCE/);
   assert.equal(require("../control/read-only-tool-runtime.js").contextEvidenceRecord(context,record.evidence_id).payload.observation,record.payload.observation);
  }finally{f.cleanup();}
+});
+
+test("projected seed cannot silently disappear in a runtime without its context API",async()=>{
+ const record=makeEvidenceRecord("LOCAL_RUNTIME",{observation:"required"});let calls=0;
+ for(const toolRuntime of [null,{availableTools:[],createEvidenceContext:()=>({})}])await assert.rejects(()=>runRoleWithReadOnlyTools({role:"causal_scout",toolRuntime,registeredEvidence:[record],baseEvidenceIds:[record.evidence_id],aiCore:{call:async()=>{calls++;return{content:'{"claims":[]}'}}}}),/ROLE_REGISTERED_EVIDENCE_CONTEXT_UNAVAILABLE/);
+ assert.equal(calls,0);
 });

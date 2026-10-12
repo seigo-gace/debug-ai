@@ -529,3 +529,14 @@ input + saved sandbox reproduction no-model capture10120→7280user bytes (-28.1
 not latency/token/semantic proof. Re-read remains bounded; late undisplayed facts
 stayPARTIAL/UNKNOWN. Design§26.24 rationale/rollback; exactCI/runtime/native outcome
 belong to owning#41/#42. No unchanged600s repeat is authorized by these source facts.
+
+
+Final Causal projection consolidation: reuse existing addEvidenceToContext in the
+Tool Loop rather than altering either runtime constructor. Both runtime files
+restored to qualified880c8ee bytes; whole seven-path net diff is inside installed
+Host policy. Focused42/42, qualified-old-source baseline39/36pass3fail, stable-source
+canonical910/910fail0skip0/realTS7. Prior SIGKILL check failure retained; complete
+rerun passes without weakening it. Master requests clean checkpoint/pause; actual
+same-run resume is deferred until an explicit continuation. Source/CI/qualified
+reflection and GitHub Current/minutes are the pause checkpoint; never claim native
+recovery or whole-product completion from them.

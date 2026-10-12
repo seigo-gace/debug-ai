@@ -75,10 +75,12 @@ function summarizeAiTelemetry(items,{toolWallMs=0,toolCallsExecutedCurrent=0,too
 }
 
 async function runRoleWithReadOnlyTools({aiCore,role,system="",user="",toolRuntime=null,maxToolRounds=null,maxToolCalls=null,baseEvidenceIds=[],registeredEvidence=[],strictEvidenceRefs=false,continuationState=null,durableHooks=null,progressQualification=null}={}){
+  if(!Array.isArray(registeredEvidence))throw new Error("ROLE_REGISTERED_EVIDENCE_INVALID");
   if(progressQualification!==null&&(typeof progressQualification!=="object"||typeof progressQualification.verify!=="function"))throw new Error("ROLE_PROGRESS_QUALIFICATION_INVALID");
   if(!aiCore||typeof aiCore.call!=="function")throw new Error("AI_CORE_CALL_REQUIRED");
   const budget=getRoleRuntimeBudget(role),evidencePolicy=evidenceProtocol(baseEvidenceIds,strictEvidenceRefs);
   if(!toolRuntime){
+    if(registeredEvidence.length)throw new Error("ROLE_REGISTERED_EVIDENCE_CONTEXT_UNAVAILABLE");
     if(continuationState!==null)throw new Error("ROLE_TOOL_CONTINUATION_REQUIRES_TOOL_RUNTIME");
     const deadlineAt=Date.now()+budget.turn_timeout_ms;
     const out=await aiCore.call(role,{system:[system,evidencePolicy].filter(Boolean).join("\n"),user,maxTokens:budget.max_tokens,timeoutMsOverride:budget.turn_timeout_ms,deadlineAt,queueTimeoutMs:budget.turn_timeout_ms,excludeQueueFromDeadline:true});
@@ -92,7 +94,11 @@ async function runRoleWithReadOnlyTools({aiCore,role,system="",user="",toolRunti
   const resume=normalizeContinuationState(continuationState);
   if(resume.rounds_completed>rounds)throw new Error("ROLE_TOOL_CONTINUATION_EXCEEDS_ROUND_BUDGET");
   if(resume.total_calls>calls)throw new Error("ROLE_TOOL_CONTINUATION_EXCEEDS_CALL_BUDGET");
-  const evidenceContext=typeof toolRuntime.createEvidenceContext==="function"?toolRuntime.createEvidenceContext({user,baseEvidenceIds,registeredEvidence,observations:resume.observations}):null;
+  const evidenceContext=typeof toolRuntime.createEvidenceContext==="function"?toolRuntime.createEvidenceContext({user,baseEvidenceIds,observations:resume.observations}):null;
+  if(registeredEvidence.length){
+    if(!evidenceContext||typeof toolRuntime.addEvidenceToContext!=="function")throw new Error("ROLE_REGISTERED_EVIDENCE_CONTEXT_UNAVAILABLE");
+    toolRuntime.addEvidenceToContext(evidenceContext,registeredEvidence,{allowedEvidenceIds:baseEvidenceIds});
+  }
   const selected=availableForSelection(role,toolRuntime,user),protocol=toolProtocol(selected.tools),deadlineAt=Date.now()+(budget.tool_loop_wall_ms||budget.turn_timeout_ms),progress=createProgressController({maxNoProgressRounds:2,initialState:resume.progress,requireQualifiedProgress:progressQualification!==null,verifyQualifiedProgress:progressQualification?.verify||null,qualificationBinding:progressQualification?.binding??null});
   const baseUser=String(user||"");
   let currentUser=withObservations(baseUser,resume.observations),totalCalls=resume.total_calls;

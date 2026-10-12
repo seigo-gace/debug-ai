@@ -1854,3 +1854,32 @@ capture gives causal user10120→7280bytes (-2840/-28.1%). This is payload size,
 not measured tokens, speed or successful real diagnosis. Tool observation/read
 bounds remain in force: evidence beyond those bounds stays explicitly PARTIAL
 and UNKNOWN, even though its complete authenticated record remains in context.
+
+
+Host scope reconciliation: operationgitops_5bfaf591d98c1f5757928c4f was rejected
+DELEGATION_CHANGED_PATH_FORBIDDEN before receipt/effects because the initial diff
+modified read-only-tool-runtime.js. Inspection finds an already exported, verified
+addEvidenceToContext API in both runtime implementations. Reuse it inside the
+existing Tool Loop after context creation, with the existing admitted-ID filter;
+restore both runtime files to their preceding qualified bytes. This reduces the
+actual code diff and constructor coupling while preserving the same re-read gates.
+No policy/registry/grant write or receipt bypass; the rejected history remains.
+An unavailable context/seeding API rejects before dispatch rather than silently
+losing compacted evidence. Final consolidated Source requires its own exactCI and
+normal guarded reflection; earlier-head proof is not inherited.
+
+
+Final existing-API qualification: real880c8ee baseline39tests36pass3fail; current
+focused42/42pass and full canonical910/910pass,fail0skip0/realTS7. Both runtime
+implementation files are byte-identical to880c8ee; only existing Tool Loop/workflow
+wiring changes code. The entire consolidated seven-path diff matches the unchanged
+installed Host policy. An earlier full check had one SIGKILL/restart test failure;
+the complete stable-source rerun passes without altering that test or its gates.
+The failed run remains recorded; do not treat it as a qualified pass.
+
+Master requested a clean checkpoint and pause on2026-10-12. Finish Source/CI and
+admitted reflection readback, then pause without restarting the real model run.
+Native timeout recovery/diagnosis/candidate/full repair remains NOT_PROVEN. Resume
+only on a later Master continuation, fresh Current/pin/HEAD/runtime readback, with
+original run_mv5agtgf_96b706c70a and the materially changed projection input. No
+background developer or new model run is launched to circumvent the pause.
