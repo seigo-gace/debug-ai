@@ -179,4 +179,6 @@ uses native RunAuthority records across three independent processes, with shared
 role cases in `g3-semantic-cases.cjs`. Same evaluator exposes bounded completion
 rejection reasons; workflow routes them through existing RuntimeEvidence/TGserver
 without retaining rejected output. Prefix/restart and diagnostic tests use the
-same G3 suite. Design authority: Durable Design §26.20–§26.21.
+same G3 suite. The same evaluator restores omitted final markers only from all
+independently qualified checkpoint obligations; the original final gate still
+runs. Design authority: Durable Design §26.20–§26.22.

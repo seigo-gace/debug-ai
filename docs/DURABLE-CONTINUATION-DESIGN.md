@@ -1743,3 +1743,40 @@ Existing trusted registry owner must qualify/pin a matching snapshot through its
 approved lane, preserving scope/effects. Only then a fresh exact-SHA receipt and
 normal reflection. This blocks that runtime operation, not independent source
 work or native disposable read-only qualification.
+
+#### 26.22 real native acceptance and existing qualified registry pin
+
+Actual engineeeadc29983dc820b47d48432ef76e4d9a6e3e486 resumed the ORIGINAL
+run_mv3yskzt_c8b4107afe in a fresh native process under45s bound: COMPLETE,
+17,798ms model wall,3220prompt/114completion,132.985ms prefill/17,591.983ms decode,
+3219cache-hit/1miss. Restored trusted markers plus unchanged canonical/independent
+outcome checks accepted result; durable status COMPLETE/revision2. Another fresh
+process restored COMPLETE/revision2 in29ms with zero model calls, proving no
+reexecution of completed work. This is one bounded owning-source inspection with
+independent file/hash observation, not six-role diagnosis/repair E2E. Existing
+six-role holdouts/full suite901/901 (fail0/skip0/real TS7) pass; exacteeadc29 CI6/6
+SUCCESS. No free-provider call, source apply or horizontal production activation.
+
+The rejected reflection exposed stale runtime configuration, not a need to grant
+new permissions. Existing server-core PR122 exact
+9d3554550c25d3e2fb7efac317a311c7cc1cf0a7 is CI3/3 SUCCESS and its GitHub registry
+blob/DebugAI entry is byte/structure-verified against installed policye85e3f7d.
+All non-DebugAI registry content equals previously pinnedfd1657f7; only its
+already-installed allowed branch/path sets differ. Preserve other owner's dirty
+server-core source and the entire installed policy. Under Master's delegated
+routine technical authority, copied ONLY that existing qualified GitHub snapshot
+into the existing trusted qualified-registry directory (owner check,0600,
+exclusive/no-symlink write, exact Git blob identity), verified full mapping, then
+repointed the existing user-manager DEBUG_AI_MASTER_REGISTRY pin to it. Effective
+readback matches9d355455; existing branch/path validators pass. No grant, issuer,
+Secret, policy, service/Compose, workflow, token or unrelated registry entry change.
+This fixes the pinned readback mismatch without substituting unqualified local
+source or bypassing admission. Snapshot provenance remains that existing PR.
+Old failed operation is terminal and is never replayed; the next deployment uses
+a new exact-SHA request/single-use receipt through the normal Host validator.
+
+Rollback for the pin is the previousfd1657f7 path through the same user-manager
+setting, with the explicit consequence that G3 again fails readback against the
+newer installed policy. This is a runtime manager pin, not a claim of permanent
+source/config promotion across manager restarts. Reverify effective pin on future
+reflect/resume. Whole-product acceptance and six-role actual repair remain pending.

@@ -477,3 +477,19 @@ systemd manager uses qualifiedfd1657f7 registry, which differs from installed
 policy; neither existing qualified snapshot matches. Default dirty registry is
 not used as a bypass. Livebb70d06 preserved, no policy/registry/environment write.
 Trusted owner reconciliation remains separate from continued source/native tests.
+
+Native gate closed at engineeeadc29: SAME run_mv3yskzt_c8b4107afe successfully
+resumes under45s in17.798s, COMPLETE/revision2; fresh native replay29ms with ZERO
+model calls. Six-role source regression901/901, fail0/skip0/real TS7; same-eeadc29
+CI6/6 PASS. Scope is one owning-source inspection; actual six-role full debugging
+and Strict Completion E2E remain PENDING, not silently qualified.
+
+Host mismatch reconciled using EXISTING source-qualified server-core PR122
+9d355455, CI3/3. Exact GitHub blob verified, entry equals already-installed
+policye85e3f7d, all other registry content unchanged. Preserved dirty server-core
+source and installed policy; created only its0600 qualified snapshot and repinned
+existing manager registry setting with effective readback/mapping/branch/path
+PASS. This is in-scope configuration alignment, not permission creation or an
+unqualified-local-source bypass. Old failed operation not replayed. A fresh
+current-SHA guarded reflection remains the next gate. Runtime pin is rechecked
+after manager restart; whole-product COMPLETE=NO.
