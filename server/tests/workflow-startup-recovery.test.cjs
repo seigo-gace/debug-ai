@@ -139,7 +139,7 @@ test("G3 explicit blocked Causal Scout recovery preserves completed Code Scout a
     await new Promise(resolve=>setTimeout(resolve,10));
   }
   assert.equal(calls.code_scout,1,"completed Code Scout must not rerun");
-  assert.ok(calls.causal_scout>=2,"Causal Scout must be re-dispatched");
+  assert.equal(calls.causal_scout,1,"one successful Causal dispatch must follow the initial thrown timeout");
   assert.equal(progressed.manifest.policy_refs.g3_causal_manual_recovery_used,true);
   assert.ok(progressed.state.execution_epoch>=1);
 });
