@@ -171,3 +171,18 @@ test("explicit retryable failure keeps bounded recovery and its durable classifi
   const first=await interrupt(f),failure=first.workflow.status(first.runId).durable.last_execution_failure;
   assert.equal(failure.retryable,true);assert.equal(first.workflow.status(first.runId).durable.job_status,"RETRY_WAIT");
 });
+
+test("local Causal Scout gets smaller authenticated projections and can recover omitted source facts",async t=>{
+ const f=fixture(t);fs.writeFileSync(path.join(f.repo,"count-active.cjs"),'module.exports=items=>items.length-1;\n'+' '.repeat(900)+'// RETAINED_SOURCE_FACT\n'+' '.repeat(1400));
+ const original=f.aiCore.call;let causalCalls=0,causalUser,codeUser;
+ f.aiCore.call=async(role,options)=>{
+  if(role==="code_scout"){codeUser=JSON.parse(options.user);return original(role,options);}
+  if(role!=="causal_scout")return original(role,options);
+  causalCalls++;
+  if(causalCalls===1){causalUser=JSON.parse(options.user);const source=causalUser.evidence.find(x=>x.schema==="debugai.evidence-projection/v1");assert.ok(source);assert.equal(source.projection_completeness,"PARTIAL");assert.doesNotMatch(source.excerpt,/RETAINED_SOURCE_FACT/);return{content:JSON.stringify({tool_requests:[{tool:"evidence.read",arguments:{evidence_id:source.parent_evidence_id,max_chars:6000},reason:"read omitted source"}]})};}
+  assert.match(options.user,/RETAINED_SOURCE_FACT/);return original(role,options);
+ };
+ const {workflow}=f.make();await assert.rejects(workflow.runAnalysis({repo:f.repo,rawRequest:"Investigate count-active.cjs and preserve all requirements",failure:{message:"last item omitted"}}),e=>e.code==="AI_CORE_TIMEOUT");
+ assert.equal(causalCalls,2);assert.equal(causalUser.task,codeUser.task);assert.deepEqual(causalUser.failure,codeUser.failure);assert.deepEqual(causalUser.initial_scope,codeUser.initial_scope);
+ assert.ok(JSON.stringify(causalUser).length<JSON.stringify(codeUser).length);
+});

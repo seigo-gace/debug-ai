@@ -74,7 +74,7 @@ function summarizeAiTelemetry(items,{toolWallMs=0,toolCallsExecutedCurrent=0,too
   return out;
 }
 
-async function runRoleWithReadOnlyTools({aiCore,role,system="",user="",toolRuntime=null,maxToolRounds=null,maxToolCalls=null,baseEvidenceIds=[],strictEvidenceRefs=false,continuationState=null,durableHooks=null,progressQualification=null}={}){
+async function runRoleWithReadOnlyTools({aiCore,role,system="",user="",toolRuntime=null,maxToolRounds=null,maxToolCalls=null,baseEvidenceIds=[],registeredEvidence=[],strictEvidenceRefs=false,continuationState=null,durableHooks=null,progressQualification=null}={}){
   if(progressQualification!==null&&(typeof progressQualification!=="object"||typeof progressQualification.verify!=="function"))throw new Error("ROLE_PROGRESS_QUALIFICATION_INVALID");
   if(!aiCore||typeof aiCore.call!=="function")throw new Error("AI_CORE_CALL_REQUIRED");
   const budget=getRoleRuntimeBudget(role),evidencePolicy=evidenceProtocol(baseEvidenceIds,strictEvidenceRefs);
@@ -92,7 +92,7 @@ async function runRoleWithReadOnlyTools({aiCore,role,system="",user="",toolRunti
   const resume=normalizeContinuationState(continuationState);
   if(resume.rounds_completed>rounds)throw new Error("ROLE_TOOL_CONTINUATION_EXCEEDS_ROUND_BUDGET");
   if(resume.total_calls>calls)throw new Error("ROLE_TOOL_CONTINUATION_EXCEEDS_CALL_BUDGET");
-  const evidenceContext=typeof toolRuntime.createEvidenceContext==="function"?toolRuntime.createEvidenceContext({user,baseEvidenceIds,observations:resume.observations}):null;
+  const evidenceContext=typeof toolRuntime.createEvidenceContext==="function"?toolRuntime.createEvidenceContext({user,baseEvidenceIds,registeredEvidence,observations:resume.observations}):null;
   const selected=availableForSelection(role,toolRuntime,user),protocol=toolProtocol(selected.tools),deadlineAt=Date.now()+(budget.tool_loop_wall_ms||budget.turn_timeout_ms),progress=createProgressController({maxNoProgressRounds:2,initialState:resume.progress,requireQualifiedProgress:progressQualification!==null,verifyQualifiedProgress:progressQualification?.verify||null,qualificationBinding:progressQualification?.binding??null});
   const baseUser=String(user||"");
   let currentUser=withObservations(baseUser,resume.observations),totalCalls=resume.total_calls;

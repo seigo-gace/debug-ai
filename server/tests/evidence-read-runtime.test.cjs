@@ -116,3 +116,35 @@ test("durable-style resumed observations rebuild evidence context without a shar
     assert.equal(result.data.execution_status,"EXECUTED");
   }finally{f.cleanup();}
 });
+
+test("projected initial evidence is re-readable from the same authenticated role context",async()=>{
+ const f=fixture();try{
+  const record=makeEvidenceRecord("LOCAL_RUNTIME",{observation:"x".repeat(900)+"RETAINED_COUNTER_EVIDENCE"});
+  const projection=require("../control/read-only-tool-runtime-base.js").evidenceProjection(record,{maxChars:700});
+  assert.doesNotMatch(projection.excerpt,/RETAINED_COUNTER_EVIDENCE/);
+  let calls=0;
+  const out=await runRoleWithReadOnlyTools({role:"causal_scout",toolRuntime:f.runtime,registeredEvidence:[record],baseEvidenceIds:[record.evidence_id],user:JSON.stringify({task:"failure taxonomy",evidence:[projection]}),aiCore:{call:async(role,options)=>{
+   calls++;if(calls===1){assert.doesNotMatch(options.user,/RETAINED_COUNTER_EVIDENCE/);return{content:JSON.stringify({tool_requests:[{tool:"evidence.read",arguments:{evidence_id:record.evidence_id,max_chars:6000},reason:"read omitted counter-evidence"}]})};}
+   assert.match(options.user,/RETAINED_COUNTER_EVIDENCE/);return{content:JSON.stringify({claims:[{type:"UNKNOWN",statement:"retain the unresolved counter-evidence"}]})};
+  }}});
+  assert.equal(calls,2);assert.equal(out.tool_loop.total_calls,1);assert.equal(out.tool_loop.observations[0].results[0].result.data.parent_evidence_id,record.evidence_id);
+ }finally{f.cleanup();}
+});
+test("runtime-seeded evidence cannot broaden admission or hide tampering",async()=>{
+ const f=fixture();try{
+  const admitted=makeEvidenceRecord("LOCAL_RUNTIME",{observation:"original"}),hidden=makeEvidenceRecord("LOCAL_RUNTIME",{observation:"not admitted"});
+  const context=f.runtime.createEvidenceContext({baseEvidenceIds:[admitted.evidence_id],registeredEvidence:[admitted,hidden],user:"{}"});
+  await assert.rejects(()=>f.runtime.execute({role:"causal_scout",selectedSkillIds:["failure-taxonomy-router"],tool:"evidence.read",arguments:{evidence_id:hidden.evidence_id},evidenceContext:context}),/EVIDENCE_READ_NOT_REGISTERED/);
+  assert.throws(()=>f.runtime.createEvidenceContext({baseEvidenceIds:[admitted.evidence_id],registeredEvidence:[{...admitted,payload:{observation:"changed"}}]}),/EVIDENCE/);
+ }finally{f.cleanup();}
+});
+
+test("seeded records retain later evidence without overstating the bounded read",async()=>{
+ const f=fixture();try{
+  const record=makeEvidenceRecord("LOCAL_RUNTIME",{observation:"x".repeat(7000)+"LATE_COUNTER_EVIDENCE"});
+  const context=f.runtime.createEvidenceContext({baseEvidenceIds:[record.evidence_id],registeredEvidence:[record],user:"{}"});
+  const result=await f.runtime.execute({role:"causal_scout",selectedSkillIds:["failure-taxonomy-router"],tool:"evidence.read",arguments:{evidence_id:record.evidence_id,max_chars:800},evidenceContext:context});
+  assert.equal(result.data.projection_completeness,"PARTIAL");assert.doesNotMatch(result.data.excerpt,/LATE_COUNTER_EVIDENCE/);
+  assert.equal(require("../control/read-only-tool-runtime.js").contextEvidenceRecord(context,record.evidence_id).payload.observation,record.payload.observation);
+ }finally{f.cleanup();}
+});

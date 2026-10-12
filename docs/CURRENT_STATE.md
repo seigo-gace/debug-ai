@@ -516,3 +516,16 @@ run_mv5agtgf_96b706c70a uses the original12-file exact source closure and fixed
 3-case test, not the developer's correction. Source/local, live dogfood outcome,
 exact-headCI and Compose reflection must each be reported independently in#41/#42.
 No candidate-generated code runs against owning production source.
+
+
+2026-10-12 Causal projection qualification: actual previous real-source run blocked
+at Causal Scout600.007s upstream after249.996s queue, no result body; backend cause
+UNKNOWN. Existing local non-horizontal reproduction path now sends authenticated
+700-character projections for large initial records, keeping full admitted records
+in the existing Evidence Context for evidence.read. Literal task/requirements and
+scopes, other role/open inputs, model/budgets and approval stay unchanged. Four new
+baseline negatives fail; focused38/38 and canonical909/909pass fail0skip0. Same real
+input + saved sandbox reproduction no-model capture10120→7280user bytes (-28.1%);
+not latency/token/semantic proof. Re-read remains bounded; late undisplayed facts
+stayPARTIAL/UNKNOWN. Design§26.24 rationale/rollback; exactCI/runtime/native outcome
+belong to owning#41/#42. No unchanged600s repeat is authorized by these source facts.

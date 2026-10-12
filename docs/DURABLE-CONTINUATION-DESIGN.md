@@ -1811,3 +1811,46 @@ external dependency admission and full-product completion are separate, unproven
 claims. Preserve actual failure, run ID, tool/model observations, candidate result
 and limitations in existing Current/minutes rather than fabricating a fixture PASS
 or expected diagnosis as model evidence.
+
+### 26.24 Local Causal Scout evidence projections with authenticated re-read
+
+The real-source dogfood run_mv5agtgf_96b706c70a stopped at a Causal Scout deadline:
+249.996s queue wait then600.007s upstream wait, no response/body telemetry. Its
+17,640-byte request contains full initial source/reproduction records even though
+this role reasons from observations and may need only selected details. The exact
+backend cause remains UNKNOWN; a smaller payload is not proven timeout recovery.
+
+Reuse the existing Evidence Projection, role-local Evidence Context and read-only
+Tool Loop. For the existing non-horizontal LOCAL_REPRODUCTION path only, large initial Causal Scout records become
+700-character projections; smaller records, literal task, failure/requirements,
+initial scope and registered IDs remain intact. Projections disclose omissions and
+retain parent ID/digest. The full canonical records seed that same role-local
+context independently of the serialized model prompt. Existing evidence.read can
+recover omitted source/counter-evidence within its existing bound and admission.
+Code Scout and all other role inputs and open-investigation inputs are unchanged.
+No information is promoted from a pointer into FACT, and a projection alone does
+not prove sufficiency or a cause. Retention/RunAuthority remain the existing owners.
+
+Only runtime-admitted baseEvidenceIds may seed that context. Canonical evidence
+integrity, duplicate conflicts, role/Skill/tool admission and response validation
+still apply. Caller payload cannot grant seed authority; the workflow passes its
+own registered records. Defaults keep existing callers compatible. Full records
+are still available downstream and in durable context; no expected answer, new
+Reviewer, endpoint, state store or provider/model/budget change is introduced.
+
+Rejected alternatives: truncating raw records without disclosed/re-readable parents,
+discarding failed tests/counter-evidence, extending timeouts, lowering generation
+ceilings, or blindly retrying the unchanged failed request. Qualification must prove
+actual omitted-evidence re-read through the Tool Loop, admission/tamper negatives,
+unchanged small/open inputs and restart/reuse. Measure payload size separately from
+latency/semantic success. Only a qualified changed-input same-run resume can supply
+runtime outcome; rollback reverts this projection/seed wiring through the existing
+exact-head guarded lane. Unicode search qualification at880c8ee remains separate.
+
+Deterministic qualification: focused38/38; exact before-source38 tests34pass4fail,
+all four new re-read/seed/integration cases fail without the wiring. Replaying the
+same real request plus actual saved sandbox reproduction through a no-model
+capture gives causal user10120→7280bytes (-2840/-28.1%). This is payload size,
+not measured tokens, speed or successful real diagnosis. Tool observation/read
+bounds remain in force: evidence beyond those bounds stays explicitly PARTIAL
+and UNKNOWN, even though its complete authenticated record remains in context.

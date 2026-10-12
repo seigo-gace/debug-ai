@@ -1,3 +1,5 @@
+Local Causal Scout now uses small authenticated Evidence projections for large initial records, with the full admitted records retained for existing evidence.read. A deterministic replay of the real failure reduces user payload28.1%; real timeout recovery is not yet proven. See [Design§26.24](docs/DURABLE-CONTINUATION-DESIGN.md#2624-local-causal-scout-evidence-projections-with-authenticated-re-read) and GitHub Current for exact qualification.
+
 Unicode source-search correction (2026-10-12): actual production search reproduced a hit with an empty excerpt after an expanding lowercase prefix. The existing search now translates matching offsets back to original source positions while preserving matching semantics, source hashes, bounds and coverage. See [Design§26.23](docs/DURABLE-CONTINUATION-DESIGN.md#2623-unicode-search-excerpts-and-real-source-dogfood--2026-10-12). Source tests and the live real-source dogfood run are separate gates; GitHub Current records their exact results.
 
 # DebugAI

@@ -4,7 +4,7 @@ const path=require("node:path");
 const {contentHash,WorkflowStepId,StepPhase}=require("../orchestrator/durable-contracts.js");
 const {buildDownstreamInputBundle}=require("../orchestrator/role-result.js");
 const {assertPromotable}=require("./asset-promotion.js");
-const {initialInvestigationEvidence,createReadOnlyToolRuntime,assertToolResultIntegrity,readText,testInventory,blockedReadPath}=require("./control/read-only-tool-runtime.js");
+const {initialInvestigationEvidence,createReadOnlyToolRuntime,assertToolResultIntegrity,evidenceProjection,readText,testInventory,blockedReadPath}=require("./control/read-only-tool-runtime.js");
 const {runRoleWithReadOnlyTools,mergeEvidenceIds}=require("./control/tool-loop.js");
 const {parseAndValidateRoleOutput,createRoleProgressEvaluator}=require("./control/role-output-validator.js");
 const {getRoleRuntimeBudget}=require("./control/role-runtime-budgets.js");
@@ -61,6 +61,7 @@ function reviewableVerificationCheck(check){
   const item=check&&typeof check==="object"?check:{};const status=String(item.status||"").toUpperCase(),includeExcerpt=status!=="PASS";
   return {...item,stdout:reviewStreamEvidence(item.stdout,{includeExcerpt}),stderr:reviewStreamEvidence(item.stderr,{includeExcerpt})};
 }
+function causalEvidencePromptView(records){return records.map(record=>JSON.stringify(record.payload).length>1400?evidenceProjection(record,{maxChars:700}):evidencePromptView([record])[0]);}
 function evidencePromptView(records){return (Array.isArray(records)?records:[]).map(record=>{if(!record||typeof record!=="object")return record;const {integrity,...view}=record;return view;});}
 function patchPacketSource(repo,selectedPaths){
   const sourceExcerpts=[],preconditionHashes={},prohibitedPaths=[];
@@ -105,11 +106,11 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
       await logRuntime({run_id:runId,severity:payload.status==="FAIL"?"error":"info",kind:"server_command",...payload});
     }});
   }
-  async function callReadOnlyRole(role,{system,user},toolRuntime,{baseEvidenceIds=[],strictEvidenceRefs=true,continuationState=null,durableHooks=null,runId=null}={}){
+  async function callReadOnlyRole(role,{system,user},toolRuntime,{baseEvidenceIds=[],registeredEvidence=[],strictEvidenceRefs=true,continuationState=null,durableHooks=null,runId=null}={}){
     const adapter=runId?observeAiCalls({aiCore,runId,runtimeEvidence,onEvent:logRuntime}):aiCore;
     const semantic=recoveryHooks?.semanticToolCriteria?.[role];
     const progressQualification=semantic?createRoleProgressEvaluator({...semantic,role}).toolQualification:null;
-    return runRoleWithReadOnlyTools({aiCore:adapter,role,system,user,toolRuntime:runId?observeToolCalls({toolRuntime,runId,runtimeEvidence,onEvent:logRuntime}):toolRuntime,baseEvidenceIds,strictEvidenceRefs,continuationState,durableHooks,progressQualification});
+    return runRoleWithReadOnlyTools({aiCore:adapter,role,system,user,toolRuntime:runId?observeToolCalls({toolRuntime,runId,runtimeEvidence,onEvent:logRuntime}):toolRuntime,baseEvidenceIds,registeredEvidence,strictEvidenceRefs,continuationState,durableHooks,progressQualification});
   }
   // Opt-in bounded same-item continuation through the EXISTING Diagnoser model.
   // Kept separate from legacy analysis until live E2E acceptance is proven.
@@ -317,7 +318,8 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
       async function scout(role,system){
         scoutStates.set(role,StepPhase.RUNNING);
         const step=role==="code_scout"?WorkflowStepId.CODE_SCOUT:WorkflowStepId.CAUSAL_SCOUT;
-        const user=JSON.stringify({task:rawRequest,failure,evidence:evidencePromptView(localRecords),initial_scope:initialScope,dap_hint:dapHint});
+        const compactCausal=role==="causal_scout"&&initialScope.mode==="LOCAL_REPRODUCTION"&&recoveryHooks?.enableHorizontalCausalScout!==true;
+        const user=JSON.stringify({task:rawRequest,failure,evidence:compactCausal?causalEvidencePromptView(localRecords):evidencePromptView(localRecords),initial_scope:initialScope,dap_hint:dapHint});
         const scoutBinding=binding?contentHash({binding,role,system,user}):null,saved=durable?loadStageRef(runId,role):null;
         if(reusableLocalStage(saved,scoutBinding)&&saved.payload.reusable===true){
           const out=saved.payload.result;parseAndValidateRoleOutput(role,JSON.stringify(out.validated_output),{availableEvidenceIds:mergeEvidenceIds(localIds,out.tool_loop?.evidence_ids||[]),strictEvidenceRefs:true});toolEvidenceRecords(out);
@@ -338,7 +340,7 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
             const result=assertHorizontalStageComplete(role,stage);
             out={content:JSON.stringify(result),validated_output:result,tool_loop:{observations:[],evidence_ids:localIds,progress:null}};
           }else{
-            out=await callReadOnlyRole(role,{system:[system,hintProtocol,"Use initial scoped source and reproduction evidence first. Request additional search only to resolve an explicit missing fact or obtain counter-evidence. PARTIAL source scope is not exhaustive coverage; retain UNKNOWNs and falsification checks."].filter(Boolean).join("\n"),user},toolRuntime,{baseEvidenceIds:localIds,runId});
+            out=await callReadOnlyRole(role,{system:[system,hintProtocol,"Use initial scoped source and reproduction evidence first. Request additional search only to resolve an explicit missing fact or obtain counter-evidence. PARTIAL source scope is not exhaustive coverage; retain UNKNOWNs and falsification checks."].filter(Boolean).join("\n"),user},toolRuntime,{baseEvidenceIds:localIds,registeredEvidence:compactCausal?localRecords:[],runId});
           }
           const output=roleOutput(out,role);toolEvidenceRecords(out);
           const reusable=(out.tool_loop?.observations||[]).every(observation=>(observation.results||[]).every(item=>["source.read","source.search","symbol.lookup","dependency.map","test.inventory"].includes(item.request?.tool)&&item.result?.status==="OK"));

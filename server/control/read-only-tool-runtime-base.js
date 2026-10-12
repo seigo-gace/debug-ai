@@ -292,8 +292,9 @@ function addEvidenceToContext(context,records,{allowedEvidenceIds=null}={}){
   }
   return context;
 }
-function createEvidenceContext({user="",baseEvidenceIds=[],observations=[]}={}){
+function createEvidenceContext({user="",baseEvidenceIds=[],observations=[],registeredEvidence=[]}={}){
   const context={[EVIDENCE_CONTEXT]:true,records:new Map()},allowed=[...new Set((Array.isArray(baseEvidenceIds)?baseEvidenceIds:[]).map(String).filter(Boolean))];
+  addEvidenceToContext(context,registeredEvidence,{allowedEvidenceIds:allowed});
   addEvidenceToContext(context,evidenceViewCandidates(user),{allowedEvidenceIds:allowed});
   const observed=[];for(const observation of Array.isArray(observations)?observations:[])for(const item of observation?.results||[])if(item?.result?.status==="OK")observed.push(item.result);
   addEvidenceToContext(context,observed);
