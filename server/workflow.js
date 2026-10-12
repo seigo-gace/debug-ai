@@ -417,7 +417,30 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
   async function executePrepared(prepared){const existing=activeRuns.get(prepared.runId);if(existing)return existing.promise;const promise=(async()=>{try{const result=await executeAnalysis(prepared);backgroundErrors.delete(prepared.runId);return result;}catch(error){backgroundErrors.set(prepared.runId,String(error?.code||error?.message||error));try{await recordExecutionFailure(prepared.runId,error);}catch(markError){error.recovery_mark_error=String(markError?.code||markError?.message||markError);}throw error;}finally{activeRuns.delete(prepared.runId);}})();activeRuns.set(prepared.runId,{promise,started_at:Date.now()});return promise;}
   async function runAnalysis(input={}){return executePrepared(await prepareAnalysis(input));}
   async function startAnalysis(input={}){const prepared=await prepareAnalysis(input),duplicate=activeRuns.has(prepared.runId);void executePrepared(prepared).catch(()=>{});return{schema:"debugai.run-accepted/v1",run_id:prepared.runId,state:duplicate?"ALREADY_RUNNING":"RUNNING",resumed:prepared.resuming,duplicate_resume_suppressed:duplicate};}
-  async function resumeAnalysis({runId}={}){if(typeof runId!=="string"||!runId)throw new Error("RUN_ID_REQUIRED");return startAnalysis({runId});}
+  async function resumeAnalysis({runId,recovery=null}={}){
+    if(typeof runId!=="string"||!runId)throw new Error("RUN_ID_REQUIRED");
+    if(recovery!==null){
+      if(!recovery||typeof recovery!=="object"||Array.isArray(recovery)||
+         Object.keys(recovery).sort().join("|")!=="expected_generation|expected_step|failure_code")
+        throw new Error("BLOCKED_RECOVERY_CONTRACT_INVALID");
+      if(!authority?.durableEnabled?.())throw new Error("BLOCKED_RECOVERY_DURABLE_REQUIRED");
+      const loaded=authority.loadDurable(runId),cursor=loaded.manifest.workflow_cursor;
+      if(loaded.manifest.cancellation!==null||loaded.state.job_status==="CANCELLED")throw new Error("RUN_CANCELLED");
+      if(loaded.state.job_status!=="BLOCKED"||cursor.step_id!==WorkflowStepId.CAUSAL_SCOUT||
+         cursor.step_phase!==StepPhase.BLOCKED||recovery.expected_step!=="CAUSAL_SCOUT"||
+         !Number.isInteger(recovery.expected_generation)||recovery.expected_generation!==loaded.state.generation)
+        throw new Error("BLOCKED_RECOVERY_STATE_MISMATCH");
+      const previous=loadStageRef(runId,"last_execution_failure")?.payload;
+      if(!previous||previous.code!=="AI_CORE_TIMEOUT"||recovery.failure_code!==previous.code||
+         loaded.manifest.policy_refs?.g3_causal_manual_recovery_used===true)
+        throw new Error("BLOCKED_RECOVERY_EVIDENCE_DENIED");
+      await authority.bumpDurableEpoch({runId,
+        manifestPatch:{job:{status:"RUNNING"},workflow_cursor:{step_phase:StepPhase.PENDING},
+          policy_refs:{g3_causal_manual_recovery_used:true,g3_causal_manual_recovery_from_generation:loaded.state.generation}},
+        runStatePatch:{job_status:"RUNNING"}});
+    }
+    return startAnalysis({runId});
+  }
   async function recoverStartup({awaitCompletion=false}={}){if(!authority?.durableEnabled?.())return{schema:"debugai.startup-recovery/v1",claimed:[],terminal:[],incompatible:[],completed:[]};const scan=authority.inspectDurableRuns(),claimed=[],scheduled=[];for(const item of scan.recoverable){let owned=false;try{await authority.claimRecoverableRun(item.run_id);owned=true;const prepared=await prepareAnalysis({runId:item.run_id});claimed.push(item.run_id);scheduled.push(executePrepared(prepared));}catch(error){if(owned)try{await recordExecutionFailure(item.run_id,error);}catch{}scan.incompatible.push({run_id:item.run_id,error:String(error?.code||error?.message||error)});}}const completed=awaitCompletion?await Promise.allSettled(scheduled):[];if(!awaitCompletion)for(const promise of scheduled)void promise.catch(()=>{});return{schema:"debugai.startup-recovery/v1",claimed,terminal:scan.terminal.map(x=>({run_id:x.run_id,reason:x.reason})),incompatible:scan.incompatible,completed:completed.map((x,index)=>({run_id:claimed[index],status:x.status,error:x.status==="rejected"?String(x.reason?.message||x.reason):null}))};}
   function patchRequirementInput({runId,analysis,context,task}){
     let origin=analysis?.requirement_input||null;
