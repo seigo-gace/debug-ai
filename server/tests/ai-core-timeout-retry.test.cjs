@@ -259,3 +259,23 @@ test("G3 upstream wait heartbeat reports measured wait without dispatching anoth
   assert.equal(events.at(-1).phase,"SUCCEEDED");
   assert.equal(events.at(-1).upstream_wait_ms,null);
 });
+
+test("G3 serialized dispatch records preceding model role without extra requests",async()=>{
+  const seen=[],events=[],releases=[];
+  const ai=createAiCoreAdapter({baseUrl:"http://127.0.0.1:18080",apiKey:"test",timeoutMs:500,fetchImpl:async(_url,options)=>{
+    const body=JSON.parse(options.body);seen.push(body.model);
+    if(seen.length===1)await new Promise(resolve=>releases.push(resolve));
+    return{ok:true,status:200,text:async()=>JSON.stringify({choices:[{message:{content:'{"ok":true}'},finish_reason:"stop"}]})};
+  }});
+  const first=ai.call("code_scout",{user:"A"});
+  for(let i=0;i<100&&releases.length===0;i++)await new Promise(resolve=>setTimeout(resolve,1));
+  assert.equal(releases.length,1);
+  const second=ai.call("causal_scout",{user:"B",onProgress:event=>events.push(event)});
+  await new Promise(resolve=>setTimeout(resolve,5));
+  const queued=events.find(event=>event.phase==="QUEUE"&&event.queue_predecessor_role==="code_scout");
+  assert.ok(queued,"queue must identify predecessor model role");
+  assert.equal(seen.length,1,"second model call stays queued");
+  releases[0]();
+  await Promise.all([first,second]);
+  assert.equal(seen.length,2);
+});
