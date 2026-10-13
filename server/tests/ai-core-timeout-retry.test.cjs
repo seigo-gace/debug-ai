@@ -244,3 +244,18 @@ test("final JSON remains authoritative when reasoning content is separately pres
   const out=await ai.call("local_reviewer",{user:"review"});
   assert.equal(out.content,'{"verdict":"PASS"}');
 });
+
+test("G3 upstream wait heartbeat reports measured wait without dispatching another model request",async()=>{
+  const events=[];let count=0;
+  const ai=createAiCoreAdapter({baseUrl:"http://127.0.0.1:18080",apiKey:"test",observationIntervalMs:5,timeoutMs:250,fetchImpl:async()=>{
+    count++;await new Promise(resolve=>setTimeout(resolve,23));
+    return{ok:true,status:200,text:async()=>JSON.stringify({choices:[{message:{content:'{"ok":true}'},finish_reason:"stop"}]})};
+  }});
+  await ai.call("code_scout",{user:"x",onProgress:event=>events.push(event)});
+  const heartbeat=events.find(e=>e.phase==="UPSTREAM_WAIT"&&e.event_kind==="HEARTBEAT"&&e.upstream_wait_ms>0);
+  assert.ok(heartbeat,"actual upstream wait must appear in heartbeat");
+  assert.ok(heartbeat.upstream_wait_ms<=heartbeat.elapsed_ms);
+  assert.equal(count,1);
+  assert.equal(events.at(-1).phase,"SUCCEEDED");
+  assert.equal(events.at(-1).upstream_wait_ms,null);
+});
