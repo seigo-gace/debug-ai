@@ -13,7 +13,7 @@ function plan(mapping){
     const changed=ROLE_PROFILE[role]!==mapping[role];
     return {role,model_id:mapping[role],backend_model:MODEL_PROFILES[mapping[role]].backend_model,
       baseline_model_id:ROLE_PROFILE[role],changed,case_ids:ids,case_count:ids.length,
-      qualified_for_candidate:!changed,
+      qualified_for_candidate:false,
       qualification:changed?"REQUIRES_LIVE_ROLE_BENCHMARK":"BASELINE_MODEL_UNCHANGED"};
   });
   return {schema:"debugai.three-model-benchmark-plan/v1",models:gate.models,
