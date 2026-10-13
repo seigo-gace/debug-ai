@@ -279,3 +279,14 @@ test("G3 serialized dispatch records preceding model role without extra requests
   await Promise.all([first,second]);
   assert.equal(seen.length,2);
 });
+
+test("G3 idle queue does not misattribute an already completed role",async()=>{
+  const events=[];let calls=0;
+  const ai=createAiCoreAdapter({baseUrl:"http://127.0.0.1:18080",apiKey:"test",fetchImpl:async()=>{
+    calls++;return{ok:true,status:200,text:async()=>JSON.stringify({choices:[{message:{content:'{"ok":true}'},finish_reason:"stop"}]})};
+  }});
+  await ai.call("code_scout",{user:"first"});
+  await ai.call("causal_scout",{user:"second",onProgress:event=>events.push(event)});
+  assert.equal(calls,2);
+  assert.equal(events.find(e=>e.phase==="QUEUE")?.queue_predecessor_role,null);
+});
