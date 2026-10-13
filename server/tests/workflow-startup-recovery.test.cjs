@@ -97,3 +97,49 @@ test('durable hypothesis fallback restores existing Local Reviewer result withou
   assert.equal(resumed.state,'HYPOTHESIS_APPROVED');assert.equal(resumed.external_hypothesis_review,null);
   assert.equal(resumed.local_hypothesis_review.provider,'local_reviewer');assert.equal(resumed.local_hypothesis_review.json.verdict,'PASS');assert.equal(localCalls,1);assert.equal(externalCalls,1);
 });
+
+test("G3 explicit blocked Causal Scout recovery preserves completed Code Scout after real workflow failure",async t=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),"debugai-g3-blocked-resume-")),repo=path.join(root,"repo"),runtimeRoot=path.join(root,"runtime");
+  t.after(()=>fs.rmSync(root,{recursive:true,force:true}));initializeRepo(repo);
+  const io=new FakeDurableIo(),policy=new RepoPolicy({workspaceRoot:root}),calls={},diagnoserInputs=[];
+  const normal=fakeAi(calls,diagnoserInputs);
+  let failCausal=true;
+  const aiCore={call:async(role,input)=>{
+    if(role==="causal_scout"&&failCausal){
+      failCausal=false;
+      const error=new Error("AI_CORE_TIMEOUT");
+      error.code="AI_CORE_TIMEOUT";
+      error.meta={role:"causal_scout",retryable:false,timeout_class:"DEADLINE_ABORT"};
+      throw error;
+    }
+    return normal.call(role,input);
+  }};
+  const authority=new RunAuthority({runtimeRoot,repoPolicy:policy,durableIo:io});
+  const w=createWorkflow({aiCore,authority,repoPolicy:policy,repositorySnapshot:()=>"git_fixture",externalReview:{hypothesis:async()=>({provider:"fixture",json:{verdict:"PASS"}})}});
+  const accepted=await w.startAnalysis({repo,projectId:"P",rawRequest:"G3 fixture investigation",failure:{message:"fixture failure",requirements:{preserved_behavior:["existing"],forbidden_paths:["keep.js"],required_tests:["fixture"]}},localEvidence:[]});
+  const runId=accepted.run_id;
+  let terminal;
+  for(let i=0;i<200;i++){
+    terminal=authority.loadDurable(runId);
+    if(["BLOCKED","DONE"].includes(terminal.state.job_status))break;
+    await new Promise(resolve=>setTimeout(resolve,10));
+  }
+  assert.equal(terminal.state.job_status,"BLOCKED");
+  assert.equal(terminal.manifest.workflow_cursor.step_id,"CAUSAL_SCOUT");
+  assert.equal(calls.code_scout,1);
+  const generation=terminal.state.generation;
+  await assert.rejects(w.resumeAnalysis({runId}),/RUN_NOT_RECOVERABLE:BLOCKED/);
+  const resumed=await w.resumeAnalysis({runId,recovery:{expected_generation:generation,expected_step:"CAUSAL_SCOUT",failure_code:"AI_CORE_TIMEOUT"}});
+  assert.equal(resumed.run_id,runId);
+  assert.equal(resumed.resumed,true);
+  let progressed;
+  for(let i=0;i<250;i++){
+    progressed=authority.loadDurable(runId);
+    if(["DONE","BLOCKED","FAILED"].includes(progressed.state.job_status))break;
+    await new Promise(resolve=>setTimeout(resolve,10));
+  }
+  assert.equal(calls.code_scout,1,"completed Code Scout must not rerun");
+  assert.equal(calls.causal_scout,1,"one successful Causal dispatch must follow the initial thrown timeout");
+  assert.equal(progressed.manifest.policy_refs.g3_causal_manual_recovery_used,true);
+  assert.ok(progressed.state.execution_epoch>=1);
+});

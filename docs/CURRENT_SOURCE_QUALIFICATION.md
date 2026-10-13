@@ -194,3 +194,20 @@ No main merge, Production deploy/recreate, Secret/provider/model/profile mutatio
 ## Control transport source qualification — 2026-10-07
 
 The control extension preserves the original nine MCP tools and adds four, with two Server Command HTTP routes and thin CLI delegation to existing Server Command/GitOps services. Mapping/ownership/rollback boundaries are documented in `MCP_ADAPTER.md` and the appended design history. Related fixture tests passed 28/28; canonical verification in an isolated Node 24.20.0 toolchain passed 480/480 tests with zero failures/skips and source audit `source_ready=true`. Final exact-head CI evidence belongs to PR #40 / Issue #41 and must be read back for the implementing SHA. The initial Host verify attempt stopped because no C compiler was installed; the isolated verification used the real source-bound native build without weakening its provenance checks. This extension has no live-runtime qualification: reflection, merge, deploy and Secret/Provider/Model mutation are NOT_RUN.
+
+## 2026-10-12 — G3 product handoff and bounded native resume qualification
+
+Existing PR107 source recovery engineeeadc29983dc820b47d48432ef76e4d9a6e3e486:
+canonical901/901, fail0/skip0/real TS7, same-headCI6/6. Existing code and state
+owners reused. One original real Coder source-inspection checkpoint resumes
+COMPLETE in17.798s/revision2 and restores in a fresh process29ms/zero model calls.
+No further real-model repeat for this already-proven condition. Broader six-role
+real diagnosis/repair/Strict Completion remains pending. Design§26.21–§26.22
+records cold/warm failures, marker omission, independent proof recovery,
+fail-first/negative tests, source/runtime distinctions and rollback.
+
+Latest documentation synchronization does not inherit exact-head CI automatically;
+verify its own PR head/CI before fresh normal reflection. Existing qualified
+registry9d355455 now matches installed admission and effective manager readback;
+no new grants, foreign source edits or permission bypass. Deployment/production
+completion is NOT established by this source record.

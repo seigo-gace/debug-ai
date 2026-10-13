@@ -74,7 +74,18 @@ function searchSource(repo,query,{limit=12,maxFiles=500,coverage=null}={}){
     if(hits.length>=limit){receipt.match_limit_reached=true;break;}
     let item;try{item=readText(repo,rel,{maxChars:receipt.max_content_chars});}catch{receipt.read_errors++;continue;}
     receipt.inspected_paths.push(rel);if(item.truncated)receipt.truncated_files++;
-    const idx=item.content.toLowerCase().indexOf(q);if(idx<0)continue;
+    const folded=item.content.toLowerCase(),match=folded.indexOf(q);if(match<0)continue;
+    let idx=match;
+    // Matching uses lowercase coordinates; excerpts retain original UTF-16 text.
+    // Expanding mappings (such as U+0130) require translating the hit position.
+    if(folded.length!==item.content.length){
+      let originalOffset=0,foldedOffset=0;
+      for(const character of item.content){
+        const foldedWidth=character.toLowerCase().length;
+        if(foldedOffset+foldedWidth>match){idx=originalOffset;break;}
+        originalOffset+=character.length;foldedOffset+=foldedWidth;
+      }
+    }
     hits.push({path:rel,sha256:item.sha256,excerpt:excerpt(item.content,idx),truncated:item.truncated});
   }
   receipt.discovered_files=files.length;receipt.inspected_files=receipt.inspected_paths.length;receipt.matches=hits.length;

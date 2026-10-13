@@ -10,11 +10,12 @@ function master(t){
  const registry={schema:'gace.workspace-master-internal-registry/v1',project:{owner:'seigo-gace',number:1,node_id:'PVT_kwHODOQFoM4BEJII'},master_principal:'seigo-gace',master_owners:['seigo-gace'],repositories:[f.policy]};
  const registryFile=path.join(f.root,'registry.json'),githubFile=path.join(f.root,'github.json');
  const github={login:'seigo-gace',metadata:{full_name:f.policy.repository,id:123,node_id:'R_test',owner:{login:'seigo-gace'},default_branch:'main',permissions:{admin:true}},project:{id:'PVT_kwHODOQFoM4BEJII',owner:{login:'seigo-gace'},number:1,closed:false},items:{items:[{id:'item_test',content:{repository:f.policy.repository,url:f.policy.project.control_url}}]}};
- const gh=path.join(f.root,'gh');fs.writeFileSync(gh,`#!/bin/sh\ncase "$1 $2" in\n'api user') jq -r .login '${githubFile}';;\n'api repos/'*) jq .metadata '${githubFile}';;\n'project view') jq .project '${githubFile}';;\n'project item-list') jq .items '${githubFile}';;\n*) exit 90;;\nesac\n`,{mode:0o700});
+ const ghCalls=path.join(f.root,'gh-calls');
+ const gh=path.join(f.root,'gh');fs.writeFileSync(gh,`#!/bin/sh\nprintf '%s %s\\n' "$1" "$2" >> '${ghCalls}'\ncase "$1 $2" in\n'api user') jq -r .login '${githubFile}';;\n'api repos/'*) jq .metadata '${githubFile}';;\n'api graphql') jq '. as $g | {errors:(.errors//[]),data:{node: (if (.items.items|length)>0 then .items.items[0] | {__typename: \"ProjectV2Item\",id,isArchived:(.isArchived//false),project:(.project//$g.project),content:{__typename:(.content.type//\"Issue\"),url:.content.url,repository:{nameWithOwner:.content.repository}}} else null end)}}' '${githubFile}';;\n'project view') jq .project '${githubFile}';;\n'project item-list') jq .items '${githubFile}';;\n*) exit 90;;\nesac\n`,{mode:0o700});
  const docker=path.join(f.root,'docker');fs.writeFileSync(docker,`#!/bin/sh\nif [ "$2" = config ]; then printf 'debug-ai\\nsandbox-runner\\n'; exit 0; fi\necho "$2" >> '${f.calls}'\nif [ "$1" = inspect ]; then echo 'running|healthy'; elif [ "$2" = ps ]; then echo test-container; fi\n`,{mode:0o700});
  Object.assign(f.env,{DEBUG_AI_GITOPS_GH_BIN:gh,DEBUG_AI_MASTER_REGISTRY:registryFile,DEBUG_AI_MASTER_PROJECT_ROOT:f.root});
  const sync=()=>{f.write(f.policyFile,f.policy);f.write(registryFile,registry);f.write(githubFile,github);};sync();
- return Object.assign(f,{registry,registryFile,github,githubFile,sync});
+ return Object.assign(f,{registry,registryFile,github,githubFile,ghCalls,sync});
 }
 for(const [label,change,error] of [
  ['unregistered Project repo',f=>f.github.items.items=[],'MASTER_PROJECT_REPOSITORY_UNREGISTERED'],
@@ -113,4 +114,61 @@ for(const [label,mutate,error] of [
   const f=sourceOnlyMaster(t);mutate(f);f.sync();
   const s=f.run();assert.equal(s.state,'FAIL',JSON.stringify(s));assert.equal(s.error,error);
   assert.equal(fs.existsSync(f.calls),false);
+});
+
+
+test('fresh admission reads only the registered Project item rather than unrelated board bodies',t=>{
+ const f=master(t),s=f.run();assert.equal(s.state,'PASS',s.error);
+ const reads=fs.readFileSync(f.ghCalls,'utf8');
+ assert.match(reads,/api graphql/);assert.doesNotMatch(reads,/project item-list|project view/);
+});
+for(const [label,change,error] of [
+ ['archived controlling item',f=>f.github.items.items[0].isArchived=true,'MASTER_PROJECT_REPOSITORY_UNREGISTERED'],
+ ['item in another Project',f=>f.github.items.items[0].project={...f.github.project,id:'other'},'MASTER_PROJECT_MISMATCH'],
+ ['draft item masquerading as repository control',f=>f.github.items.items[0].content.type='DraftIssue','MASTER_PROJECT_REPOSITORY_UNREGISTERED']
+])test('targeted Project identity read rejects '+label,t=>{
+ const f=master(t);change(f);f.sync();const s=f.run();assert.equal(s.state,'FAIL');assert.equal(s.error,error);assert.equal(fs.existsSync(f.calls),false);assert.equal(fs.existsSync(f.receipt),false);
+});
+function failingGraphql(f,{status=504,recover=false}={}){
+ const gh=f.env.DEBUG_AI_GITOPS_GH_BIN,count=path.join(f.root,'gateway-calls');
+ const original=fs.readFileSync(gh,'utf8');
+ const preamble=`if [ "$1 $2" = 'api graphql' ] || [ "$1 $2" = 'project view' ] || [ "$1 $2" = 'project item-list' ]; then n=0; [ ! -f '${count}' ] || n=$(cat '${count}'); n=$((n+1)); echo "$n" > '${count}'; if [ "$n" -eq 1 ] || [ '${recover}' != true ]; then printf 'FAILED_PARTIAL_RESPONSE\\n'; printf 'non-200 OK status code: ${status} Gateway failure\\n' >&2; exit 1; fi; fi\n`;
+ fs.writeFileSync(gh,original.replace('#!/bin/sh\n','#!/bin/sh\n'+preamble),{mode:0o700});return count;
+}
+test('one read-only 504 retry discards failed response and still performs all live admission gates',t=>{
+ const f=master(t),count=failingGraphql(f,{recover:true}),s=f.run();assert.equal(s.state,'PASS',s.error);assert.ok(Number(fs.readFileSync(count,'utf8'))>=2);assert.ok(s.authorization.receipt_consumed_at);
+});
+for(const status of [401,403,504])test('unavailable or denied GitHub item read never creates authority: HTTP'+status,t=>{
+ const f=master(t),count=failingGraphql(f,{status}),s=f.run();assert.equal(s.state,'FAIL');assert.equal(s.error,'MASTER_PROJECT_NOT_VERIFIED');assert.equal(Number(fs.readFileSync(count,'utf8')),status===504?2:1);assert.equal(fs.existsSync(f.calls),false);assert.equal(fs.existsSync(f.receipt),false);
+});
+
+for(const [label,change,error] of [
+ ['partial response with GraphQL errors',f=>f.github.errors=[{message:'unavailable'}],'MASTER_PROJECT_NOT_VERIFIED'],
+ ['wrong item identity',f=>f.github.items.items[0].id='other','MASTER_PROJECT_REPOSITORY_UNREGISTERED'],
+ ['wrong controlling repository',f=>f.github.items.items[0].content.repository='other/repo','MASTER_PROJECT_REPOSITORY_UNREGISTERED'],
+ ['wrong control URL',f=>f.github.items.items[0].content.url+='0','MASTER_PROJECT_REPOSITORY_UNREGISTERED'],
+ ['closed Project',f=>f.github.project.closed=true,'MASTER_PROJECT_MISMATCH'],
+ ['different Project owner',f=>f.github.project.owner.login='other','MASTER_PROJECT_MISMATCH'],
+ ['different Project number',f=>f.github.project.number=2,'MASTER_PROJECT_MISMATCH']
+])test('targeted metadata fails closed: '+label,t=>{
+ const f=master(t);change(f);f.sync();const s=f.run();assert.equal(s.state,'FAIL');assert.equal(s.error,error);assert.equal(fs.existsSync(f.calls),false);assert.equal(fs.existsSync(f.receipt),false);
+});
+function isolatedMetadataRead(t,args,{elapsed=false}={}){
+ const f=master(t),count=path.join(f.root,'read-count'),clock=path.join(f.root,'clock-count');
+ fs.writeFileSync(f.env.DEBUG_AI_GITOPS_GH_BIN,`#!/bin/sh\nn=0; [ ! -f '${count}' ] || n=$(cat '${count}'); echo $((n+1)) > '${count}'; echo 'non-200 OK status code: 504 Gateway Timeout' >&2; exit 1\n`,{mode:0o700});
+ const helper=path.resolve(__dirname,'../../scripts/host-gitops-master-internal.sh');
+ const fakeClock=elapsed?`date(){ local n=0; [ ! -f '${clock}' ] || n=$(cat '${clock}'); n=$((n+1)); echo "$n" > '${clock}'; if [ "$n" -lt 3 ]; then echo 100000; else echo 130001; fi; };`:'';
+ const result=spawnSync('bash',['-c',`source "$1"; shift; GH_BIN="$1"; shift; run_timed(){ shift; "$@"; }; ${fakeClock} master_gh "$@"`,'metadata-test',helper,f.env.DEBUG_AI_GITOPS_GH_BIN,...args],{encoding:'utf8',env:f.env});
+ return {result,calls:Number(fs.readFileSync(count,'utf8'))};
+}
+test('a gateway failure cannot reset the shared thirty-second metadata budget',t=>{
+ const {result,calls}=isolatedMetadataRead(t,['api','graphql','-f','query=query($id:ID!){node(id:$id){id}}','-f','id=item_test'],{elapsed:true});
+ assert.notEqual(result.status,0);assert.equal(calls,1);assert.equal(result.stdout,'');
+});
+for(const args of [
+ ['api','graphql','-f','query=mutation{deleteProjectV2(input:{projectId:"x"}){clientMutationId}}','-f','id=item_test'],
+ ['api','repos/owner/repo','--method','PATCH'],
+ ['api','graphql','--input','unknown.json']
+])test('non-admission command is never replayed on a gateway error: '+args.join(' '),t=>{
+ const {result,calls}=isolatedMetadataRead(t,args);assert.notEqual(result.status,0);assert.equal(calls,1);
 });

@@ -244,3 +244,49 @@ test("final JSON remains authoritative when reasoning content is separately pres
   const out=await ai.call("local_reviewer",{user:"review"});
   assert.equal(out.content,'{"verdict":"PASS"}');
 });
+
+test("G3 upstream wait heartbeat reports measured wait without dispatching another model request",async()=>{
+  const events=[];let count=0;
+  const ai=createAiCoreAdapter({baseUrl:"http://127.0.0.1:18080",apiKey:"test",observationIntervalMs:5,timeoutMs:250,fetchImpl:async()=>{
+    count++;await new Promise(resolve=>setTimeout(resolve,23));
+    return{ok:true,status:200,text:async()=>JSON.stringify({choices:[{message:{content:'{"ok":true}'},finish_reason:"stop"}]})};
+  }});
+  await ai.call("code_scout",{user:"x",onProgress:event=>events.push(event)});
+  const heartbeat=events.find(e=>e.phase==="UPSTREAM_WAIT"&&e.event_kind==="HEARTBEAT"&&e.upstream_wait_ms>0);
+  assert.ok(heartbeat,"actual upstream wait must appear in heartbeat");
+  assert.ok(heartbeat.upstream_wait_ms<=heartbeat.elapsed_ms);
+  assert.equal(count,1);
+  assert.equal(events.at(-1).phase,"SUCCEEDED");
+  assert.equal(events.at(-1).upstream_wait_ms,null);
+});
+
+test("G3 serialized dispatch records preceding model role without extra requests",async()=>{
+  const seen=[],events=[],releases=[];
+  const ai=createAiCoreAdapter({baseUrl:"http://127.0.0.1:18080",apiKey:"test",timeoutMs:500,fetchImpl:async(_url,options)=>{
+    const body=JSON.parse(options.body);seen.push(body.model);
+    if(seen.length===1)await new Promise(resolve=>releases.push(resolve));
+    return{ok:true,status:200,text:async()=>JSON.stringify({choices:[{message:{content:'{"ok":true}'},finish_reason:"stop"}]})};
+  }});
+  const first=ai.call("code_scout",{user:"A"});
+  for(let i=0;i<100&&releases.length===0;i++)await new Promise(resolve=>setTimeout(resolve,1));
+  assert.equal(releases.length,1);
+  const second=ai.call("causal_scout",{user:"B",onProgress:event=>events.push(event)});
+  await new Promise(resolve=>setTimeout(resolve,5));
+  const queued=events.find(event=>event.phase==="QUEUE"&&event.queue_predecessor_role==="code_scout");
+  assert.ok(queued,"queue must identify predecessor model role");
+  assert.equal(seen.length,1,"second model call stays queued");
+  releases[0]();
+  await Promise.all([first,second]);
+  assert.equal(seen.length,2);
+});
+
+test("G3 idle queue does not misattribute an already completed role",async()=>{
+  const events=[];let calls=0;
+  const ai=createAiCoreAdapter({baseUrl:"http://127.0.0.1:18080",apiKey:"test",fetchImpl:async()=>{
+    calls++;return{ok:true,status:200,text:async()=>JSON.stringify({choices:[{message:{content:'{"ok":true}'},finish_reason:"stop"}]})};
+  }});
+  await ai.call("code_scout",{user:"first"});
+  await ai.call("causal_scout",{user:"second",onProgress:event=>events.push(event)});
+  assert.equal(calls,2);
+  assert.equal(events.find(e=>e.phase==="QUEUE"&&Object.hasOwn(e,"queue_predecessor_role"))?.queue_predecessor_role,null);
+});

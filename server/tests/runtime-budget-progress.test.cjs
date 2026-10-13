@@ -6,6 +6,7 @@ const {getModelOutputHardCeilingForRole}=require("../control/model-profiles.js")
 const {createProgressController}=require("../control/progress-controller.js");
 const {resolveEffectiveTimeoutMs}=require("../adapters/ai-core.js");
 const {runRoleWithReadOnlyTools}=require("../control/tool-loop.js");
+const {makeToolResult}=require("../control/read-only-tool-runtime.js");
 
 test("role runtime budgets preserve model generation/context ceilings instead of legacy low caps",()=>{
   assert.equal(assertRoleRuntimeBudgets(),true);
@@ -24,4 +25,76 @@ test("tool loop stops after three successive tool rounds produce zero durable pr
   const toolRuntime={availableTools:["source.read"],execute:async()=>{throw new Error("READ_FAILED");}};let n=0;
   const aiCore={call:async()=>{n++;if(n<=3)return{content:JSON.stringify({tool_requests:[{tool:"source.read",arguments:{path:`${n}.js`}}]})};return{content:JSON.stringify({decision:"INSUFFICIENT_EVIDENCE"})};}};
   await assert.rejects(()=>runRoleWithReadOnlyTools({aiCore,role:"code_scout",user:"x",toolRuntime,maxToolRounds:3,maxToolCalls:4}),/ROLE_TOOL_NO_PROGRESS:code_scout:PROGRESS_DELTA_0/);
+});
+
+test("G3 counterexample: distinct evidence IDs alone currently reset no-progress even without verified semantic delta",()=>{
+  const progress=createProgressController({maxNoProgressRounds:1});
+  const first=progress.observe({evidenceIds:["TRE_unrelated_1"]});
+  const second=progress.observe({evidenceIds:["TRE_unrelated_2"]});
+  const third=progress.observe({evidenceIds:["TRE_unrelated_3"]});
+  assert.equal(first.progress_delta,1);
+  assert.equal(second.progress_delta,1);
+  assert.equal(third.progress_delta,1);
+  assert.equal(third.stop,false);
+  assert.equal(progress.snapshot().total_evidence_ids,3);
+  // CHARACTERIZATION ONLY: no input records claim/task relevance, so this
+  // does not satisfy G3's semantic progress acceptance or claim a runtime fix.
+});
+
+test("G3 qualified progress mode rejects fresh unrelated evidence without task-bound proof",()=>{
+  const progress=createProgressController({maxNoProgressRounds:1,requireQualifiedProgress:true,verifyQualifiedProgress:()=>false});
+  assert.equal(progress.observe({evidenceIds:["EVI_UNRELATED_1"]}).progress_delta,0);
+  const stopped=progress.observe({evidenceIds:["EVI_UNRELATED_2"],completedWorkIds:["WORK_NEW"]});
+  assert.equal(stopped.stop,true);
+  assert.equal(stopped.progress_delta,0);
+  assert.equal(progress.snapshot().total_evidence_ids,2);
+  assert.equal(progress.snapshot().total_work_ids,1);
+});
+
+test("G3 qualified progress mode accepts one verified objective and preserves restart state",()=>{
+  const progress=createProgressController({maxNoProgressRounds:1,requireQualifiedProgress:true,verifyQualifiedProgress:({id,roleEvidenceIds})=>id==="OBJECTIVE_VERIFIED_1"&&roleEvidenceIds.includes("EVI_1")});
+  const first=progress.observe({evidenceIds:["EVI_1"],qualifiedProgressIds:["OBJECTIVE_VERIFIED_1"]});
+  assert.equal(first.progress_delta,1);
+  const restored=createProgressController({maxNoProgressRounds:1,requireQualifiedProgress:true,verifyQualifiedProgress:({id,roleEvidenceIds})=>id==="OBJECTIVE_VERIFIED_1"&&roleEvidenceIds.includes("EVI_1"),initialState:progress.snapshot()});
+  assert.equal(restored.observe({evidenceIds:["EVI_2"],qualifiedProgressIds:["OBJECTIVE_VERIFIED_1"]}).progress_delta,0);
+  assert.equal(restored.observe({evidenceIds:["EVI_3"],qualifiedProgressIds:["OBJECTIVE_VERIFIED_1"]}).stop,true);
+  assert.throws(()=>createProgressController({maxNoProgressRounds:1,requireQualifiedProgress:false,initialState:progress.snapshot()}),/PROGRESS_QUALIFICATION_POLICY_MISMATCH/);
+});
+
+test("G3 qualified mode never admits unverified IDs or an absent verifier",()=>{
+  assert.throws(()=>createProgressController({requireQualifiedProgress:true}),/PROGRESS_QUALIFICATION_VERIFIER_REQUIRED/);
+  const progress=createProgressController({maxNoProgressRounds:1,requireQualifiedProgress:true,verifyQualifiedProgress:({id,roleEvidenceIds})=>id==="OBJECTIVE_A"&&roleEvidenceIds.includes("EVI_A")});
+  assert.equal(progress.observe({evidenceIds:["EVI_OTHER"],qualifiedProgressIds:["OBJECTIVE_A"]}).progress_delta,0);
+  assert.equal(progress.observe({evidenceIds:["EVI_A"],qualifiedProgressIds:["OBJECTIVE_A"]}).progress_delta,1);
+  assert.equal(progress.observe({evidenceIds:["EVI_A"],qualifiedProgressIds:["OBJECTIVE_A"]}).progress_delta,0);
+});
+
+test("G3 tool-loop opt-in only accepts a durable-hook objective verified against issued evidence",async()=>{
+  const issued=makeToolResult("source.read",{path:"a.js",sha256:"a".repeat(64),content:"source fact"});
+  let calls=0;
+  const aiCore={call:async()=>{
+    calls++;
+    return{content:JSON.stringify(calls===1?{tool_requests:[{tool:"source.read",arguments:{path:"a.js"}}]}:{decision:"HANDOFF"})};
+  }};
+  const toolRuntime={availableTools:["source.read"],execute:async()=>issued};
+  const out=await runRoleWithReadOnlyTools({
+    aiCore,role:"code_scout",user:"inspect",toolRuntime,maxToolRounds:2,maxToolCalls:2,
+    durableHooks:{onToolResult:async()=>({qualified_progress_id:"OBJECTIVE_SOURCE_FACT_VERIFIED"})},
+    progressQualification:{verify:({id,roleEvidenceIds})=>id==="OBJECTIVE_SOURCE_FACT_VERIFIED"&&roleEvidenceIds.includes(issued.evidence_id)},
+  });
+  assert.equal(out.tool_loop.progress.total_qualified_progress_ids,1);
+  assert.equal(out.tool_loop.progress.history[0].progress_delta,1);
+  assert.equal(out.tool_loop.continuation_state.progress.require_qualified_progress,true);
+});
+
+test("G3 tool-loop opt-in rejects unsupported qualified ID without resetting no-progress",async()=>{
+  const issued=makeToolResult("source.read",{path:"a.js",sha256:"b".repeat(64),content:"no task advancement"});
+  let calls=0;
+  const aiCore={call:async()=>{calls++;return{content:JSON.stringify({tool_requests:[{tool:"source.read",arguments:{path:`file_${calls}.js`}}]})};}};
+  const toolRuntime={availableTools:["source.read"],execute:async()=>issued};
+  await assert.rejects(()=>runRoleWithReadOnlyTools({
+    aiCore,role:"code_scout",user:"inspect",toolRuntime,maxToolRounds:3,maxToolCalls:6,
+    durableHooks:{onToolResult:async()=>({qualified_progress_id:"UNSUPPORTED_OBJECTIVE"})},
+    progressQualification:{verify:()=>false},
+  }),/ROLE_TOOL_NO_PROGRESS:code_scout:PROGRESS_DELTA_0/);
 });

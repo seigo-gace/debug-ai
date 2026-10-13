@@ -417,3 +417,126 @@ Unexecuted, failed, incomplete, source/runtime-unmatched, and approval-blocked i
 ## Bounded control transport extension — 2026-10-07
 
 The source extends the original nine MCP tools with four direct control tools; exact mapping and contracts are in [`MCP_ADAPTER.md`](MCP_ADAPTER.md). Two Server Command HTTP routes delegate to the existing service instance. CLI forwards service-contract JSON for Server Command and the existing GitOps request/status routes. No Host runner, queue, Service policy or runtime path is replaced. Source/fixture verification and final exact-HEAD CI are recorded in the implementing commit and PR #40 / Issue #41. Runtime reflection, merge, deploy and Secret/Provider/Model mutation are NOT_RUN for this change unit. Historical live/source records above remain bound to their recorded revisions.
+
+## 2026-10-12 — Product handoff reconciliation and G3 resume prefix
+
+Owner Codex; existing PR107/worktree `.worktrees/g3-semantic` reused. SERVER_AI16,
+Project1/Issue41, repository adopted plan/decision context, and accessible adopted
+Notion history were checked. History supplements repository authority; no old
+PENDING is treated as current source. Product goal remains the complete
+six-role evidence-grounded diagnosis→candidate→isolated verification→approved
+apply/retest→fresh review→Strict Completion with durable recovery and dogfood.
+
+| Adopted phase / responsibility | Current source/test evidence | Remaining real acceptance |
+| --- | --- | --- |
+| Phase0 authority/baseline | Project Current verified; PR103 ancestry preserved in G2/G3; historical50/60 baselines retained | New results must remain condition/SHA-bound |
+| Phase1 execution/control | Six-role contracts, RunAuthority, durable locks/checkpoints/Effect Ledger; G3 negatives; telemetry; offline canonical882/882 | Actual role-specific failure metrics/settings and native semantic outcomes |
+| Phase2 investigation/diagnosis | source tools, independently bound Evidence, existing Role/Tool Loop | Successful actual investigation/causal diagnosis; no fixture promotion |
+| Phase3 generation/verification | workflow `makePatchPacket`, bound requirement handoff, candidate snapshot/Sidecar, guarded apply/retest and bounded re-fix; existing regression tests | Real model-generated candidate and independent language-native verification |
+| Phase4 Review/Strict Completion | workflow `makeReviewPacket` and `evaluateCompletionGate(buildCompletionGateInput(...))` are CONNECTED and TESTED; all11 AND conditions retained | Real same-revision closed-loop repair and six-role/runtime dogfood |
+| Capability ownership | Existing `audit:control-plane-gaps` v2 finds26/26 skill procedures,19 requirements,0 unresolved; five non-model capabilities belong to existing core/packets | Audit detects implementation availability, not runtime quality |
+| Phase5 search/performance | Existing Search Gate shadow/candidate safety and A/B machinery available | Qualified real shadow data before activation; later one-variable experiments only |
+
+The older §20 matrix in DURABLE-CONTINUATION-DESIGN is an explicitly dated
+implementation snapshot. Its pending Packet/Strict Completion entries and11 gaps
+must not be implemented a second time. This fresh reconciliation is Source/Test
+only; no claim that every capability is runtime-qualified.
+
+Priority: remove the verified G3 changing-prefix defect; verify saved native
+progress against a finite, separately recorded probe budget; qualify actual
+independent task criteria/role outcomes; then the existing real closed-loop path.
+Do not lead with speculative model changes or full repeated benchmarks.
+See [Design§26.21](DURABLE-CONTINUATION-DESIGN.md#2621-g3-resume-prefix-and-probeproduct-budget-separation--2026-10-12-jst)
+for source decision, exact observed backend facts, unknowns and rollback.
+Fresh Host now runs bb70d06, healthy; existing mapping/branch/two control-path
+checks pass with installed policy e85e3f7d. This executor did not modify policy.
+New source ordering: focused62/62; canonical882/882 (fail0/skip0/real TS7).
+Exact new-head CI, real-model resume and reflection are pending at this source
+checkpoint. Whole-product COMPLETE=NO. Created new top-level sibling=NO.
+
+Native resume follow-up: exact576bad4 returned a complete model response in125s
+(105.275s prefill/17.661s decode,3166prompt/114completion,1361cache-hit/1805miss),
+but independent semantic acceptance rejected it; saved revision1 unchanged.
+CI at576bad4 is6/6 SUCCESS. Actual outcome remains NOT_COMPLETE. Existing evaluator
+now provides fixed failure categories through the same boolean gate, local
+RuntimeEvidence and TGserver; model content/oracle/Secret are not logged.
+
+The new diagnostic identified VERIFIED_WORK_INVALID on the same saved run;
+45s warm response16.431s, cache3165hit/1miss. Rejection remains fail-closed and
+checkpoint revision1 unchanged. Next bounded source correction clarifies COMPLETE
+marker shape and placement for all six Roles. No expected answer or weaker gate.
+
+2026-10-12 further G3 dogfood: the corrected prompt still fails; a bounded shape
+probe confirms final result lacks verified_work. Adopted Design§26.22 restores
+only omitted markers from every independently qualified, same-bound checkpoint
+obligation; supplied wrong markers/partial/stale evidence remain rejected and the
+canonical/outcome checker is unchanged. This is runtime proof recovery, not model
+self-certification. Existing guarded reflection ofb33808c was actually DENIED:
+MASTER_REGISTRY_READBACK_MISMATCH (gitops_fbd76bf8bf467f1b1a22a7fe). Effective
+systemd manager uses qualifiedfd1657f7 registry, which differs from installed
+policy; neither existing qualified snapshot matches. Default dirty registry is
+not used as a bypass. Livebb70d06 preserved, no policy/registry/environment write.
+Trusted owner reconciliation remains separate from continued source/native tests.
+
+Native gate closed at engineeeadc29: SAME run_mv3yskzt_c8b4107afe successfully
+resumes under45s in17.798s, COMPLETE/revision2; fresh native replay29ms with ZERO
+model calls. Six-role source regression901/901, fail0/skip0/real TS7; same-eeadc29
+CI6/6 PASS. Scope is one owning-source inspection; actual six-role full debugging
+and Strict Completion E2E remain PENDING, not silently qualified.
+
+Host mismatch reconciled using EXISTING source-qualified server-core PR122
+9d355455, CI3/3. Exact GitHub blob verified, entry equals already-installed
+policye85e3f7d, all other registry content unchanged. Preserved dirty server-core
+source and installed policy; created only its0600 qualified snapshot and repinned
+existing manager registry setting with effective readback/mapping/branch/path
+PASS. This is in-scope configuration alignment, not permission creation or an
+unqualified-local-source bypass. Old failed operation not replayed. A fresh
+current-SHA guarded reflection remains the next gate. Runtime pin is rechecked
+after manager restart; whole-product COMPLETE=NO.
+
+
+2026-10-12 Host metadata correction: observed real HTTP504 and verified the exact
+registered-item GraphQL read (343 bytes versus243,289 board bytes). Existing helper
+retains all admission bindings, rejects archived/draft/partial-error items, and
+limits recognized read-only gateway recovery to2 attempts in a shared30s budget.
+No policy/grant change. Source/local and read-only mapping qualification are
+separate from exact-head CI and production reflection; Runtime remains pending
+until the existing guarded lane and packaged-source readbacks pass. See
+MASTER_INTERNAL_PERSISTENT_DELEGATION.md for adopted rationale and rollback.
+
+
+2026-10-12 real-source dogfood: productionc9b2f14 source.search reproduces an
+empty original excerpt after900 U+0130 characters despite one real hit. Added
+four independent source regressions; baseline5/9pass4fail; corrected relevant
+19/19pass. Equal-length case mappings keep the existing path; expanded lowercase
+match offsets are translated to original UTF16 before excerpting. Original case,
+SHA, lowercase match semantics and search/truncation receipts remain unchanged.
+Design§26.23 records requirements, alternatives and rollback. Live actual-model
+run_mv5agtgf_96b706c70a uses the original12-file exact source closure and fixed
+3-case test, not the developer's correction. Source/local, live dogfood outcome,
+exact-headCI and Compose reflection must each be reported independently in#41/#42.
+No candidate-generated code runs against owning production source.
+
+
+2026-10-12 Causal projection qualification: actual previous real-source run blocked
+at Causal Scout600.007s upstream after249.996s queue, no result body; backend cause
+UNKNOWN. Existing local non-horizontal reproduction path now sends authenticated
+700-character projections for large initial records, keeping full admitted records
+in the existing Evidence Context for evidence.read. Literal task/requirements and
+scopes, other role/open inputs, model/budgets and approval stay unchanged. Four new
+baseline negatives fail; focused38/38 and canonical909/909pass fail0skip0. Same real
+input + saved sandbox reproduction no-model capture10120→7280user bytes (-28.1%);
+not latency/token/semantic proof. Re-read remains bounded; late undisplayed facts
+stayPARTIAL/UNKNOWN. Design§26.24 rationale/rollback; exactCI/runtime/native outcome
+belong to owning#41/#42. No unchanged600s repeat is authorized by these source facts.
+
+
+Final Causal projection consolidation: reuse existing addEvidenceToContext in the
+Tool Loop rather than altering either runtime constructor. Both runtime files
+restored to qualified880c8ee bytes; whole seven-path net diff is inside installed
+Host policy. Focused42/42, qualified-old-source baseline39/36pass3fail, stable-source
+canonical910/910fail0skip0/realTS7. Prior SIGKILL check failure retained; complete
+rerun passes without weakening it. Master requests clean checkpoint/pause; actual
+same-run resume is deferred until an explicit continuation. Source/CI/qualified
+reflection and GitHub Current/minutes are the pause checkpoint; never claim native
+recovery or whole-product completion from them.

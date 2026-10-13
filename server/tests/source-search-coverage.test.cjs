@@ -40,3 +40,33 @@ test("unreadable bounded source and compressed many-hit projections retain incom
   assert.match(compileInvocation("code_scout").system,/Zero hits do not prove repository-wide absence/);
   assert.doesNotMatch(compileInvocation("causal_scout").system,/SEARCH_COVERAGE=/);
 });
+
+test("Unicode lowercase expansion before a hit preserves the original matching excerpt",t=>{
+  const original="İ".repeat(900)+"\nUnique_Target_Marker\nend";
+  const repo=fixture(t,{"unicode.js":original}),coverage={};
+  const hits=searchSource(repo,"unique_target_marker",{coverage});
+  assert.equal(hits.length,1);assert.ok(hits[0].excerpt.includes("Unique_Target_Marker"));
+  assert.ok(original.includes(hits[0].excerpt));
+  assert.equal(hits[0].sha256,require("node:crypto").createHash("sha256").update(original).digest("hex"));
+  assert.equal(coverage.state,"COMPLETE_WITHIN_SEARCH_SCOPE");
+});
+test("astral source positions and expanding case mappings retain independent late hits",t=>{
+  const original="😀İ".repeat(500)+"Late_Needle";
+  const repo=fixture(t,{"astral.js":original});
+  const hits=searchSource(repo,"late_needle");
+  assert.equal(hits.length,1);assert.ok(hits[0].excerpt.includes("Late_Needle"));assert.ok(original.includes(hits[0].excerpt));
+});
+test("case-expanding queries preserve existing lowercase substring semantics and source case",t=>{
+  const original="İ".repeat(900)+"Original_İ_Marker";
+  const repo=fixture(t,{"folded.js":original});
+  const hits=searchSource(repo,"ORIGINAL_i\u0307_MARKER");
+  assert.equal(hits.length,1);assert.ok(hits[0].excerpt.includes("Original_İ_Marker"));assert.ok(original.includes(hits[0].excerpt));
+  assert.equal(searchSource(repo,"original_i_marker").length,0);
+});
+test("a Unicode-correct search hit still discloses source truncation",t=>{
+  const original="İ".repeat(900)+"Original_Needle"+"x".repeat(130000);
+  const repo=fixture(t,{"truncated.js":original}),coverage={};
+  const hits=searchSource(repo,"original_needle",{coverage});
+  assert.equal(hits.length,1);assert.ok(hits[0].excerpt.includes("Original_Needle"));
+  assert.equal(hits[0].truncated,true);assert.equal(coverage.state,"INCOMPLETE");assert.equal(coverage.repository_absence_proven,false);
+});

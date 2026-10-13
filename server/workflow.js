@@ -4,9 +4,9 @@ const path=require("node:path");
 const {contentHash,WorkflowStepId,StepPhase}=require("../orchestrator/durable-contracts.js");
 const {buildDownstreamInputBundle}=require("../orchestrator/role-result.js");
 const {assertPromotable}=require("./asset-promotion.js");
-const {initialInvestigationEvidence,createReadOnlyToolRuntime,assertToolResultIntegrity,readText,testInventory,blockedReadPath}=require("./control/read-only-tool-runtime.js");
+const {initialInvestigationEvidence,createReadOnlyToolRuntime,assertToolResultIntegrity,evidenceProjection,readText,testInventory,blockedReadPath}=require("./control/read-only-tool-runtime.js");
 const {runRoleWithReadOnlyTools,mergeEvidenceIds}=require("./control/tool-loop.js");
-const {parseAndValidateRoleOutput}=require("./control/role-output-validator.js");
+const {parseAndValidateRoleOutput,createRoleProgressEvaluator}=require("./control/role-output-validator.js");
 const {getRoleRuntimeBudget}=require("./control/role-runtime-budgets.js");
 const {registerEvidenceList,evidenceIds,registrySummary}=require("./control/evidence-registry.js");
 const {runResearcherContinuation}=require("./control/researcher-continuation.js");
@@ -61,6 +61,7 @@ function reviewableVerificationCheck(check){
   const item=check&&typeof check==="object"?check:{};const status=String(item.status||"").toUpperCase(),includeExcerpt=status!=="PASS";
   return {...item,stdout:reviewStreamEvidence(item.stdout,{includeExcerpt}),stderr:reviewStreamEvidence(item.stderr,{includeExcerpt})};
 }
+function causalEvidencePromptView(records){return records.map(record=>JSON.stringify(record.payload).length>1400?evidenceProjection(record,{maxChars:700}):evidencePromptView([record])[0]);}
 function evidencePromptView(records){return (Array.isArray(records)?records:[]).map(record=>{if(!record||typeof record!=="object")return record;const {integrity,...view}=record;return view;});}
 function patchPacketSource(repo,selectedPaths){
   const sourceExcerpts=[],preconditionHashes={},prohibitedPaths=[];
@@ -105,7 +106,12 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
       await logRuntime({run_id:runId,severity:payload.status==="FAIL"?"error":"info",kind:"server_command",...payload});
     }});
   }
-  async function callReadOnlyRole(role,{system,user},toolRuntime,{baseEvidenceIds=[],strictEvidenceRefs=true,continuationState=null,durableHooks=null,runId=null}={}){const adapter=runId?observeAiCalls({aiCore,runId,runtimeEvidence,onEvent:logRuntime}):aiCore;return runRoleWithReadOnlyTools({aiCore:adapter,role,system,user,toolRuntime:runId?observeToolCalls({toolRuntime,runId,runtimeEvidence,onEvent:logRuntime}):toolRuntime,baseEvidenceIds,strictEvidenceRefs,continuationState,durableHooks});}
+  async function callReadOnlyRole(role,{system,user},toolRuntime,{baseEvidenceIds=[],registeredEvidence=[],strictEvidenceRefs=true,continuationState=null,durableHooks=null,runId=null}={}){
+    const adapter=runId?observeAiCalls({aiCore,runId,runtimeEvidence,onEvent:logRuntime}):aiCore;
+    const semantic=recoveryHooks?.semanticToolCriteria?.[role];
+    const progressQualification=semantic?createRoleProgressEvaluator({...semantic,role}).toolQualification:null;
+    return runRoleWithReadOnlyTools({aiCore:adapter,role,system,user,toolRuntime:runId?observeToolCalls({toolRuntime,runId,runtimeEvidence,onEvent:logRuntime}):toolRuntime,baseEvidenceIds,registeredEvidence,strictEvidenceRefs,continuationState,durableHooks,progressQualification});
+  }
   // Opt-in bounded same-item continuation through the EXISTING Diagnoser model.
   // Kept separate from legacy analysis until live E2E acceptance is proven.
   // Six independent role consumers, all using the ONE continuation module.
@@ -120,7 +126,7 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
     return stage.result;
   }
   async function continueRoleTask({runId,role,workItemId,inputBinding,task,baseEvidenceIds=[],
-    evidenceRecords=[],maxStepsPerCall=1,maxTotalSteps=12}={}){
+    evidenceRecords=[],semanticCriteria=null,requireSemanticProgress=false,maxStepsPerCall=1,maxTotalSteps=12}={}){
     if(!CONTINUABLE_ROLES.includes(role))throw new Error("ROLE_NOT_ALLOWED");
     if(!authority?.durableEnabled?.())throw new Error("ROLE_DURABLE_AUTHORITY_REQUIRED");
     if(typeof task!=="string"||!task.trim())throw new Error("ROLE_TASK_REQUIRED");
@@ -129,25 +135,50 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
     authority.loadDurable(runId);
     const validatedRecords=validateEvidenceRecords(evidenceRecords);
     const evidence=mergeBaseEvidenceWithRecords(baseEvidenceIds,validatedRecords);
-    const boundTask=contentHash({role,task,evidence,input_binding:inputBinding});
+    const criteria=semanticCriteria??recoveryHooks?.semanticCriteria?.[workItemId]??null;
+    const semanticRequired=requireSemanticProgress||recoveryHooks?.requireSemanticProgress===true;
+    if(semanticRequired&&criteria===null)throw new Error("ROLE_PROGRESS_CRITERIA_REQUIRED");
+    const evaluator=criteria===null?null:createRoleProgressEvaluator({role,criteria,evidenceRecords:validatedRecords});
+    const boundTask=contentHash({role,task,evidence,input_binding:inputBinding,...(evaluator?{semantic_contract:evaluator.binding}:{})});
+    function validateIntermediate({progress,previousProgress,ctx}){
+      if(evaluator){try{return contentHash(evaluator.qualifyProgress({progress,previousProgress:previousProgress||ctx?.previousProgress||{}}))===contentHash(progress);}catch{return false;}}
+      return Boolean(progress&&typeof progress==="object"&&!Array.isArray(progress)&&
+        Array.isArray(progress.evidence_refs)&&progress.evidence_refs.every(id=>typeof id==="string"&&evidence.includes(id))&&
+        typeof progress.remaining_work==="string"&&progress.remaining_work.trim());
+    }
     const continueViaRole=ROLE_WORK_ITEM_ADAPTERS[role]||continueRoleWorkItem;
     return continueViaRole({authority,runId,role,workItemId,inputBinding:boundTask,maxStepsPerCall,maxTotalSteps,
       buildStepPrompt:async({step,previousProgress})=>({
-        system:`Role: ${role}. Continue ONLY the same assigned work item using a bounded JSON response. status=CONTINUE requires progress.evidence_refs and progress.remaining_work. status=COMPLETE requires the original role's full canonical output under result. status=BLOCKED requires reason. Do not invent evidence; preserve role-specific permissions. No tool execution or mutation in this opt-in interface.`,
-        user:registeredEvidenceUserPayload({task,step,previousProgress,evidence,validatedRecords})
+        // Keep fixed task/evidence/criteria ahead of changing step/progress for
+        // backend prefix reuse. Cache is never a semantic completion authority.
+        system:(evaluator?"CONTINUE requires progress.verified_work [{criterion_id,evidence_refs}] and progress.remaining_work [unmet criterion IDs]. COMPLETE requires result.verified_work for ALL fixed criteria and a canonical role result inferred from evidence. COMPLETE result.verified_work must be an array of {criterion_id,evidence_refs} objects, exactly like progress.verified_work; retain every already verified marker with its associated Evidence references inside result. Do not replace markers with criterion ID strings or put them outside result. ":"")+`Role: ${role}. Continue ONLY the same assigned work item using a bounded JSON response. status=CONTINUE requires progress.evidence_refs and progress.remaining_work. status=COMPLETE requires the original role's full canonical output under result. status=BLOCKED requires reason. Do not invent evidence; preserve role-specific permissions. No tool execution or mutation in this opt-in interface.`,
+        user:evaluator?JSON.stringify({task,registered_evidence_ids:evidence,registered_evidence:evidencePromptView(validatedRecords),criteria:evaluator.criteria.map(({id,kind,evidence_id,source_ref})=>({id,kind,evidence_id,source_ref})),step,previous_progress:{verified_work:previousProgress.verified_work||[],remaining_work:previousProgress.remaining_work||evaluator.criteria.map(c=>c.id),evidence_refs:previousProgress.evidence_refs||[]}}):registeredEvidenceUserPayload({task,step,previousProgress,evidence,validatedRecords})
       }),
-      invokeRole:async prompt=>parseJson((await callDirectRole(role,prompt)).content),
-      validateIntermediate:async({progress})=>Boolean(progress&&typeof progress==="object"&&!Array.isArray(progress)&&
-        Array.isArray(progress.evidence_refs)&&progress.evidence_refs.every(id=>typeof id==="string"&&evidence.includes(id))&&
-        typeof progress.remaining_work==="string"&&progress.remaining_work.trim()),
+      invokeRole:async(prompt,ctx)=>{
+        const output=parseJson((await callDirectRole(role,prompt,runId)).content);
+        if(evaluator&&output.status==="CONTINUE")output.progress=evaluator.qualifyProgress({progress:output.progress,previousProgress:ctx.previousProgress});
+        if(evaluator&&output.status==="COMPLETE")output.result=evaluator.restoreCompletionMarkers({result:output.result,previousProgress:ctx.previousProgress});
+        return output;
+      },
+      validateIntermediate,
       validateRoleResult:async({result})=>{
+        if(evaluator){
+          const assessment=evaluator.assessCompletion({result});
+          if(!assessment.valid){
+            const failure={schema:"debugai.role-validation/v1",role,stage:"COMPLETE",valid:false,reason:assessment.reason};
+            runtimeEvidence?.write(runId,"role_validation",failure);
+            await logRuntime({run_id:runId,severity:"warn",kind:"role_validation",...failure});
+          }
+          return assessment.valid;
+        }
         try{parseAndValidateRoleOutput(role,result,{availableEvidenceIds:evidence,strictEvidenceRefs:true});return true;}
         catch{return false;}
       }
     });
   }
   async function continueDiagnoserTask({runId,workItemId,inputBinding,task,
-    baseEvidenceIds=[],evidenceRecords=[],maxStepsPerCall=1,maxTotalSteps=12}={}){
+    baseEvidenceIds=[],evidenceRecords=[],semanticCriteria=null,requireSemanticProgress=false,maxStepsPerCall=1,maxTotalSteps=12}={}){
+    if(semanticCriteria!==null||requireSemanticProgress||recoveryHooks?.requireSemanticProgress===true||recoveryHooks?.semanticCriteria?.[workItemId])return continueRoleTask({runId,role:"diagnoser",workItemId,inputBinding,task,baseEvidenceIds,evidenceRecords,semanticCriteria,requireSemanticProgress,maxStepsPerCall,maxTotalSteps});
     if(!authority?.durableEnabled?.())throw new Error("DIAGNOSER_DURABLE_AUTHORITY_REQUIRED");
     if(typeof task!=="string"||!task.trim())throw new Error("DIAGNOSER_TASK_REQUIRED");
     if(!Array.isArray(baseEvidenceIds)||!baseEvidenceIds.every(x=>typeof x==="string"))
@@ -163,7 +194,7 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
         user:registeredEvidenceUserPayload({task,step,previousProgress,evidence,validatedRecords})
       }),
       invokeDiagnoser:async prompt=>{
-        const out=await callDirectRole("diagnoser",prompt);
+        const out=await callDirectRole("diagnoser",prompt,runId);
         return parseJson(out.content);
       },
       validateIntermediate:async({progress})=>{
@@ -180,7 +211,7 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
       }
     });
   }
-  async function callDirectRole(role,{system,user}){const b=getRoleRuntimeBudget(role);return aiCore.call(role,{system,user,maxTokens:b.max_tokens,timeoutMsOverride:b.turn_timeout_ms,deadlineAt:Date.now()+b.turn_timeout_ms});}
+  async function callDirectRole(role,{system,user},runId=null){const b=getRoleRuntimeBudget(role);const adapter=runId?observeAiCalls({aiCore,runId,runtimeEvidence,onEvent:logRuntime}):aiCore;return adapter.call(role,{system,user,maxTokens:b.max_tokens,timeoutMsOverride:b.turn_timeout_ms,deadlineAt:Date.now()+b.turn_timeout_ms});}
   function externalUnavailable(error){
     const code=String(error?.code||error?.message||"");
     return /^(?:LIVE_BLOCKED_FREE_TIER_UNVERIFIED|EXTERNAL_FREE_PROVIDERS_UNAVAILABLE|EXTERNAL_FREE_REQUEST_BUDGET_EXHAUSTED|EXTERNAL_REVIEW_CI_EGRESS_BLOCKED|EXTERNAL_REVIEW_QUOTA_[A-Z_]+|EXTERNAL_REVIEW_(?:SCHEMA|EMPTY|INCOMPLETE)|(?:GROQ|GEMINI)_(?:KEY_MISSING|NETWORK|JSON|ENVELOPE|HTTP_(?:401|403|429|5[0-9]{2})))$/.test(code);
@@ -287,7 +318,8 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
       async function scout(role,system){
         scoutStates.set(role,StepPhase.RUNNING);
         const step=role==="code_scout"?WorkflowStepId.CODE_SCOUT:WorkflowStepId.CAUSAL_SCOUT;
-        const user=JSON.stringify({task:rawRequest,failure,evidence:evidencePromptView(localRecords),initial_scope:initialScope,dap_hint:dapHint});
+        const compactCausal=role==="causal_scout"&&initialScope.mode==="LOCAL_REPRODUCTION"&&recoveryHooks?.enableHorizontalCausalScout!==true;
+        const user=JSON.stringify({task:rawRequest,failure,evidence:compactCausal?causalEvidencePromptView(localRecords):evidencePromptView(localRecords),initial_scope:initialScope,dap_hint:dapHint});
         const scoutBinding=binding?contentHash({binding,role,system,user}):null,saved=durable?loadStageRef(runId,role):null;
         if(reusableLocalStage(saved,scoutBinding)&&saved.payload.reusable===true){
           const out=saved.payload.result;parseAndValidateRoleOutput(role,JSON.stringify(out.validated_output),{availableEvidenceIds:mergeEvidenceIds(localIds,out.tool_loop?.evidence_ids||[]),strictEvidenceRefs:true});toolEvidenceRecords(out);
@@ -308,7 +340,7 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
             const result=assertHorizontalStageComplete(role,stage);
             out={content:JSON.stringify(result),validated_output:result,tool_loop:{observations:[],evidence_ids:localIds,progress:null}};
           }else{
-            out=await callReadOnlyRole(role,{system:[system,hintProtocol,"Use initial scoped source and reproduction evidence first. Request additional search only to resolve an explicit missing fact or obtain counter-evidence. PARTIAL source scope is not exhaustive coverage; retain UNKNOWNs and falsification checks."].filter(Boolean).join("\n"),user},toolRuntime,{baseEvidenceIds:localIds,runId});
+            out=await callReadOnlyRole(role,{system:[system,hintProtocol,"Use initial scoped source and reproduction evidence first. Request additional search only to resolve an explicit missing fact or obtain counter-evidence. PARTIAL source scope is not exhaustive coverage; retain UNKNOWNs and falsification checks."].filter(Boolean).join("\n"),user},toolRuntime,{baseEvidenceIds:localIds,registeredEvidence:compactCausal?localRecords:[],runId});
           }
           const output=roleOutput(out,role);toolEvidenceRecords(out);
           const reusable=(out.tool_loop?.observations||[]).every(observation=>(observation.results||[]).every(item=>["source.read","source.search","symbol.lookup","dependency.map","test.inventory"].includes(item.request?.tool)&&item.result?.status==="OK"));
@@ -385,7 +417,30 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
   async function executePrepared(prepared){const existing=activeRuns.get(prepared.runId);if(existing)return existing.promise;const promise=(async()=>{try{const result=await executeAnalysis(prepared);backgroundErrors.delete(prepared.runId);return result;}catch(error){backgroundErrors.set(prepared.runId,String(error?.code||error?.message||error));try{await recordExecutionFailure(prepared.runId,error);}catch(markError){error.recovery_mark_error=String(markError?.code||markError?.message||markError);}throw error;}finally{activeRuns.delete(prepared.runId);}})();activeRuns.set(prepared.runId,{promise,started_at:Date.now()});return promise;}
   async function runAnalysis(input={}){return executePrepared(await prepareAnalysis(input));}
   async function startAnalysis(input={}){const prepared=await prepareAnalysis(input),duplicate=activeRuns.has(prepared.runId);void executePrepared(prepared).catch(()=>{});return{schema:"debugai.run-accepted/v1",run_id:prepared.runId,state:duplicate?"ALREADY_RUNNING":"RUNNING",resumed:prepared.resuming,duplicate_resume_suppressed:duplicate};}
-  async function resumeAnalysis({runId}={}){if(typeof runId!=="string"||!runId)throw new Error("RUN_ID_REQUIRED");return startAnalysis({runId});}
+  async function resumeAnalysis({runId,recovery=null}={}){
+    if(typeof runId!=="string"||!runId)throw new Error("RUN_ID_REQUIRED");
+    if(recovery!==null){
+      if(!recovery||typeof recovery!=="object"||Array.isArray(recovery)||
+         Object.keys(recovery).sort().join("|")!=="expected_generation|expected_step|failure_code")
+        throw new Error("BLOCKED_RECOVERY_CONTRACT_INVALID");
+      if(!authority?.durableEnabled?.())throw new Error("BLOCKED_RECOVERY_DURABLE_REQUIRED");
+      const loaded=authority.loadDurable(runId),cursor=loaded.manifest.workflow_cursor;
+      if(loaded.manifest.cancellation!==null||loaded.state.job_status==="CANCELLED")throw new Error("RUN_CANCELLED");
+      if(loaded.state.job_status!=="BLOCKED"||cursor.step_id!==WorkflowStepId.CAUSAL_SCOUT||
+         cursor.step_phase!==StepPhase.BLOCKED||recovery.expected_step!=="CAUSAL_SCOUT"||
+         !Number.isInteger(recovery.expected_generation)||recovery.expected_generation!==loaded.state.generation)
+        throw new Error("BLOCKED_RECOVERY_STATE_MISMATCH");
+      const previous=loadStageRef(runId,"last_execution_failure")?.payload;
+      if(!previous||previous.code!=="AI_CORE_TIMEOUT"||recovery.failure_code!==previous.code||
+         loaded.manifest.policy_refs?.g3_causal_manual_recovery_used===true)
+        throw new Error("BLOCKED_RECOVERY_EVIDENCE_DENIED");
+      await authority.bumpDurableEpoch({runId,
+        manifestPatch:{job:{status:"RUNNING"},workflow_cursor:{step_phase:StepPhase.PENDING},
+          policy_refs:{g3_causal_manual_recovery_used:true,g3_causal_manual_recovery_from_generation:loaded.state.generation}},
+        runStatePatch:{job_status:"RUNNING"}});
+    }
+    return startAnalysis({runId});
+  }
   async function recoverStartup({awaitCompletion=false}={}){if(!authority?.durableEnabled?.())return{schema:"debugai.startup-recovery/v1",claimed:[],terminal:[],incompatible:[],completed:[]};const scan=authority.inspectDurableRuns(),claimed=[],scheduled=[];for(const item of scan.recoverable){let owned=false;try{await authority.claimRecoverableRun(item.run_id);owned=true;const prepared=await prepareAnalysis({runId:item.run_id});claimed.push(item.run_id);scheduled.push(executePrepared(prepared));}catch(error){if(owned)try{await recordExecutionFailure(item.run_id,error);}catch{}scan.incompatible.push({run_id:item.run_id,error:String(error?.code||error?.message||error)});}}const completed=awaitCompletion?await Promise.allSettled(scheduled):[];if(!awaitCompletion)for(const promise of scheduled)void promise.catch(()=>{});return{schema:"debugai.startup-recovery/v1",claimed,terminal:scan.terminal.map(x=>({run_id:x.run_id,reason:x.reason})),incompatible:scan.incompatible,completed:completed.map((x,index)=>({run_id:claimed[index],status:x.status,error:x.status==="rejected"?String(x.reason?.message||x.reason):null}))};}
   function patchRequirementInput({runId,analysis,context,task}){
     let origin=analysis?.requirement_input||null;
