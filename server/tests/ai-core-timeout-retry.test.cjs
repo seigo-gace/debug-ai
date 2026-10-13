@@ -288,5 +288,5 @@ test("G3 idle queue does not misattribute an already completed role",async()=>{
   await ai.call("code_scout",{user:"first"});
   await ai.call("causal_scout",{user:"second",onProgress:event=>events.push(event)});
   assert.equal(calls,2);
-  assert.equal(events.find(e=>e.phase==="QUEUE")?.queue_predecessor_role,null);
+  assert.equal(events.find(e=>e.phase==="QUEUE"&&Object.hasOwn(e,"queue_predecessor_role"))?.queue_predecessor_role,null);
 });
