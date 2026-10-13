@@ -80,3 +80,24 @@ test("all candidate maps keep a distinct reviewer model and unchanged patch spec
       "keep diagnostic and causal model identity aligned for this isolated comparison");
   }
 });
+
+test("read-only preflight prints machine-readable admission without claiming model quality",()=>{
+  const {CANDIDATES:singleSource,preflight,report}=require("../control/three-model-experiment-preflight.cjs");
+  const plans=report();
+  assert.deepEqual(Object.keys(plans).sort(),Object.keys(CANDIDATES).sort());
+  for(const [name,mapping] of Object.entries(CANDIDATES)){
+    assert.deepEqual(singleSource[name],mapping);
+    const result=preflight(mapping);
+    assert.equal(result.models.length,3);
+    assert.equal(result.roles.length,6);
+    assert.equal(result.reviewer_model_independent,true);
+    assert.equal(result.production_qualified,false);
+    assert.equal(result.semantic_quality,"NOT_VERIFIED");
+    assert.equal(result.runtime_memory_savings,"NOT_VERIFIED");
+    assert.deepEqual(result.changed_role_gates.map(x=>x.role).sort(),
+      Object.keys(mapping).filter(role=>mapping[role]!==ROLE_PROFILE[role]).sort());
+    assert.ok(result.changed_role_gates.every(g=>!g.qualified));
+  }
+  assert.throws(()=>preflight({...singleSource.without_granite,forgotten:"coder"}),/EXPERIMENT_ROLE_SET_MISMATCH/);
+  assert.throws(()=>preflight({...singleSource.without_granite,researcher:"missing"}),/EXPERIMENT_MODEL_SET_INVALID/);
+});
