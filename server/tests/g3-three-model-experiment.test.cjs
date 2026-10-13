@@ -52,3 +52,31 @@ test("reviewing one's own patch model fails independence boundary",()=>{
   const unsafe={...CANDIDATES.without_qwen3,patch_engineer:"granite",local_reviewer:"granite"};
   assert.equal(inspect(unsafe).reviewerIndependent,false);
 });
+
+test("each reduced plan explicitly identifies unqualified role/mode gates",()=>{
+  const expected={
+    without_qwen3:["causal_scout","diagnoser","local_reviewer"],
+    without_granite:["researcher"],
+    without_ministral:["local_reviewer"],
+  };
+  for(const [name,mapping] of Object.entries(CANDIDATES)){
+    const result=inspect(mapping);
+    assert.deepEqual(result.changedRoles.sort(),expected[name].sort());
+    assert.deepEqual(result.unqualifiedModes.sort(),expected[name].sort(),
+      "a reassignment must not become automatically model-qualified");
+    for(const role of result.changedRoles){
+      const target=MODEL_PROFILES[mapping[role]];
+      assert.equal(target.current_role_modes[role],undefined,
+        "the current v4 model profile does not contain a validated alternate role mode");
+    }
+  }
+});
+test("all candidate maps keep a distinct reviewer model and unchanged patch specialist",()=>{
+  for(const mapping of Object.values(CANDIDATES)){
+    assert.equal(mapping.patch_engineer,"coder");
+    assert.notEqual(mapping.local_reviewer,mapping.patch_engineer);
+    assert.equal(mapping.code_scout,"coder");
+    assert.equal(mapping.diagnoser===mapping.causal_scout,true,
+      "keep diagnostic and causal model identity aligned for this isolated comparison");
+  }
+});
