@@ -89,7 +89,7 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
   if(!Number.isInteger(maxTransportTimeoutAttempts)||maxTransportTimeoutAttempts<1||maxTransportTimeoutAttempts>2)throw new AiCoreError("AI_CORE_RETRY_INVALID","transport timeout attempts must be an integer between 1 and 2");
   const endpoint=new URL("/v1/chat/completions",baseUrl).toString();
   const transport=dispatcher||new Agent({headersTimeout:timeoutMs+5000,bodyTimeout:timeoutMs+5000});
-  let queueTail=Promise.resolve(),queueTailRole=null;
+  let queueTail=Promise.resolve(),queueTailRole=null,queueDepth=0;
   async function execute(role,{system="",user="",maxTokens=1024,responseFormat="json_object",temperature=0,topP=null,topK=null,selectedSkillIds=null,timeoutMsOverride=null,deadlineAt=null,toolBudgetFinalRound=null}={},runtimeMeta={}){
     const roleStartedAt=Date.now(),prepareStartedAt=Date.now();
     const cfg=ROLES[role];if(!cfg)throw new AiCoreError("ROLE_INVALID",`Unknown DebugAI role: ${role}`);
@@ -197,7 +197,7 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
     }finally{if(heartbeat)clearInterval(heartbeat);}
   }
   async function queuedExecution(role,options={},internalMeta={}){
-    let release;const queuedAt=Date.now(),turn=new Promise(resolve=>{release=resolve;}),previous=queueTail,predecessorRole=queueTailRole;queueTail=turn;queueTailRole=role;
+    let release;const queuedAt=Date.now(),turn=new Promise(resolve=>{release=resolve;}),previous=queueTail,predecessorRole=queueDepth>0?queueTailRole:null;queueTail=turn;queueTailRole=role;queueDepth++;const resolveTurn=release;let released=false;release=()=>{if(released)return;released=true;queueDepth--;if(queueDepth===0)queueTailRole=null;resolveTurn();};
     internalMeta.observe?.({phase:"QUEUE",queue_predecessor_role:predecessorRole});
     const queueTimeoutMs=options.queueTimeoutMs===null||options.queueTimeoutMs===undefined?null:Number(options.queueTimeoutMs);
     if(queueTimeoutMs!==null&&(!Number.isFinite(queueTimeoutMs)||queueTimeoutMs<=0)){previous.finally(release);throw new AiCoreError("AI_CORE_QUEUE_TIMEOUT_INVALID","queueTimeoutMs must be a positive finite number",{role,queue_timeout_ms:options.queueTimeoutMs});}
