@@ -2,12 +2,12 @@
 // Stable public registry: preserve role IDs, order, aliases and existing consumers.
 // Each role's model/profile metadata lives in its own independently replaceable module.
 const ROLES=Object.freeze({
-  code_scout:require("./role-modules/code-scout.js"),
-  causal_scout:require("./role-modules/causal-scout.js"),
-  researcher:require("./role-modules/researcher.js"),
-  diagnoser:require("./role-modules/diagnoser.js"),
-  patch_engineer:require("./role-modules/patch-engineer.js"),
-  local_reviewer:require("./role-modules/local-reviewer.js"),
+  code_scout:require("./role-modules/index.js").MODULES.code_scout.profile,
+  causal_scout:require("./role-modules/index.js").MODULES.causal_scout.profile,
+  researcher:require("./role-modules/index.js").MODULES.researcher.profile,
+  diagnoser:require("./role-modules/index.js").MODULES.diagnoser.profile,
+  patch_engineer:require("./role-modules/index.js").MODULES.patch_engineer.profile,
+  local_reviewer:require("./role-modules/index.js").MODULES.local_reviewer.profile,
 });
 const EXTERNAL_REVIEW_POINTS=Object.freeze(["hypothesis","final"]);
 function assertRoleContract(){
