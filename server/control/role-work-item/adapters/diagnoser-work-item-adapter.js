@@ -11,7 +11,7 @@ const {makeRoleWorkItemDurableStore}=require("../durable-store.js");
 async function continueDiagnoserWorkItem({
   authority,runId,workItemId,inputBinding,invokeDiagnoser,
   buildStepPrompt,validateIntermediate,validateDiagnosis,
-  maxStepsPerCall=1,maxTotalSteps=12
+  maxStepsPerCall=1,maxTotalSteps=12,signal=null
 }={}){
   if(typeof invokeDiagnoser!=="function"||typeof buildStepPrompt!=="function"||
     typeof validateIntermediate!=="function"||typeof validateDiagnosis!=="function")
@@ -32,7 +32,7 @@ async function continueDiagnoserWorkItem({
     executeStep,
     validateProgress:async args=>validateIntermediate({progress:args.progress,previousProgress:args.previousProgress,output:args.output}),
     validateCompletion:async args=>validateDiagnosis({result:args.result,previousProgress:args.previousProgress,output:args.output}),
-    maxStepsPerCall,maxTotalSteps
+    maxStepsPerCall,maxTotalSteps,signal
   });
 }
 module.exports={continueDiagnoserWorkItem};
