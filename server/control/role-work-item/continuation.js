@@ -51,8 +51,12 @@ function stateKey({runId,role,workItemId}){
 async function continueWorkItem({
   runId,role,workItemId,inputBinding,store,executeStep,
   validateProgress,validateCompletion,
-  maxStepsPerCall=1,maxTotalSteps=16,maxProgressBytes=8192
+  maxStepsPerCall=1,maxTotalSteps=16,maxProgressBytes=8192,signal=null
 }={}){
+  if(signal!=null&&(typeof signal.aborted!=="boolean"||typeof signal.addEventListener!=="function"||typeof signal.removeEventListener!=="function"))
+    throw new ContinuationError("ROLE_WORK_ITEM_SIGNAL_INVALID");
+  const assertNotCancelled=()=>{if(signal?.aborted)throw new ContinuationError("ROLE_WORK_ITEM_CANCELLED");};
+  assertNotCancelled();
   const key=stateKey({runId,role,workItemId});
   requireString(inputBinding,"INPUT_BINDING");
   if(!store||typeof store.load!=="function"||typeof store.commit!=="function")
@@ -62,6 +66,7 @@ async function continueWorkItem({
   for(const [name,value] of Object.entries({maxStepsPerCall,maxTotalSteps,maxProgressBytes}))
     if(!Number.isSafeInteger(value)||value<1)throw new ContinuationError("INVALID_LIMIT_"+name);
   let state=await store.load(key);
+  assertNotCancelled();
   if(state!==null&&state!==undefined){
     if(state.schema!=="role-work-item-continuation/v1")throw new ContinuationError("CORRUPT_CHECKPOINT");
     if(state.key!==key||state.input_binding!==inputBinding)throw new ContinuationError("INPUT_BINDING_MISMATCH");
@@ -76,8 +81,10 @@ async function continueWorkItem({
   }
   if(state.status!==STATUS.CONTINUE)return state;
   for(let i=0;i<maxStepsPerCall;i++){
+    assertNotCancelled();
     if(state.steps>=maxTotalSteps){
       const blocked={...state,revision:state.revision+1,status:STATUS.BLOCKED,reason:"TOTAL_STEP_BUDGET_EXHAUSTED"};
+      assertNotCancelled();
       await store.commit(key,state.revision,blocked);
       return blocked;
     }
@@ -87,6 +94,7 @@ async function continueWorkItem({
       runId,role,workItemId,inputBinding,step:state.steps+1,
       previousProgress:boundedJSON(state.progress,maxProgressBytes,"STORED_PROGRESS_TOO_LARGE")
     }));
+    assertNotCancelled();
     let next;
     if(output.status===STATUS.CONTINUE){
       const progress=boundedJSON(output.progress,maxProgressBytes,"PROGRESS_TOO_LARGE");
@@ -101,6 +109,7 @@ async function continueWorkItem({
     }else{
       next={...state,revision:state.revision+1,steps:state.steps+1,status:STATUS.BLOCKED,reason:String(output.reason||"ROLE_BLOCKED")};
     }
+    assertNotCancelled();
     await store.commit(key,state.revision,next);
     state=next;
     if(state.status!==STATUS.CONTINUE)return state;
