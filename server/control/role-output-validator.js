@@ -2,12 +2,12 @@
 const {validateReasoningArtifact}=require("./claim-evidence.js");
 
 const ROLE_SEMANTIC_RULES=Object.freeze({
-  code_scout:Object.freeze({expected_any:Object.freeze(["facts","claims","locations","source_facts"]),forbidden_mutation:true,forbid_confirmed_root:true}),
-  causal_scout:Object.freeze({expected_any:Object.freeze(["candidates","hypotheses","causal_chain","claims"]),forbidden_mutation:true,forbid_confirmed_root:true}),
-  researcher:Object.freeze({expected_any:Object.freeze(["research_status","selected_evidence","evidence_refs","answer","claims"]),forbidden_mutation:true,forbid_confirmed_root:true}),
-  diagnoser:Object.freeze({expected_any:Object.freeze(["hypothesis","diagnoses","confirmed_root_cause","unsupported_claims","claims"]),forbidden_mutation:true,forbid_confirmed_root:false}),
-  patch_engineer:Object.freeze({expected_any:Object.freeze(["operations","candidate_changes","patch_status","claims"]),forbidden_mutation:false,forbid_confirmed_root:false}),
-  local_reviewer:Object.freeze({expected_any:Object.freeze(["verdict","decision","review_status","claims"]),forbidden_mutation:true,forbid_confirmed_root:false}),
+  code_scout:require("../role-modules/code-scout-semantic.js"),
+  causal_scout:require("../role-modules/causal-scout-semantic.js"),
+  researcher:require("../role-modules/researcher-semantic.js"),
+  diagnoser:require("../role-modules/diagnoser-semantic.js"),
+  patch_engineer:require("../role-modules/patch-engineer-semantic.js"),
+  local_reviewer:require("../role-modules/local-reviewer-semantic.js"),
 });
 
 const RESEARCH_STATUS=new Set(["SUPPORTED","CONTRADICTORY_EVIDENCE","INSUFFICIENT_EVIDENCE"]);
