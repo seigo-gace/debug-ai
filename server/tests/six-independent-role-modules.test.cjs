@@ -32,3 +32,22 @@ test("six modules are independently addressable objects, without model duplicati
   assert.equal(ROLES.researcher.timeout_ms,600000);
   assert.equal(ROLES.diagnoser.timeout_ms,600000);
 });
+
+test("six role contracts are independently loaded and preserve stable identities",()=>{
+  const {ROLE_CONTRACTS,ROLE_KEYS,assertRoleContracts}=require("../control/role-contracts.js");
+  assert.deepEqual(Object.keys(ROLE_CONTRACTS),Object.keys(expected));
+  assert.deepEqual([...ROLE_KEYS],Object.keys(expected));
+  assert.equal(assertRoleContracts(),true);
+  const files=["code-scout","causal-scout","researcher","diagnoser","patch-engineer","local-reviewer"];
+  for(const [i,id] of Object.keys(expected).entries()){
+    const contract=require(`../role-modules/${files[i]}-contract.js`);
+    assert.strictEqual(ROLE_CONTRACTS[id],contract);
+    assert.ok(Object.isFrozen(contract));
+    assert.equal(contract.role_id,id);
+    assert.equal(contract.version,"debugai.role-contract/v2");
+  }
+  assert.equal(ROLE_CONTRACTS.patch_engineer.write_scope,"CANDIDATE_ONLY");
+  for(const id of Object.keys(expected).filter(x=>x!=="patch_engineer")){
+    assert.equal(ROLE_CONTRACTS[id].write_scope,"NONE");
+  }
+});
