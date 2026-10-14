@@ -5,7 +5,8 @@ const {contentHash,WorkflowStepId,StepPhase}=require("../orchestrator/durable-co
 const {buildDownstreamInputBundle}=require("../orchestrator/role-result.js");
 const {assertPromotable}=require("./asset-promotion.js");
 const {createReadOnlyToolRuntime,assertToolResultIntegrity,readText,testInventory,blockedReadPath}=require("./control/read-only-tool-runtime.js");
-const {runRoleWithReadOnlyTools,mergeEvidenceIds}=require("./control/tool-loop.js");
+const {mergeEvidenceIds}=require("./control/tool-loop.js");
+const {getRoleModule}=require("./role-modules/index.js");
 const {parseAndValidateRoleOutput}=require("./control/role-output-validator.js");
 const {getRoleRuntimeBudget}=require("./control/role-runtime-budgets.js");
 const {registerEvidenceList,evidenceIds,registrySummary}=require("./control/evidence-registry.js");
@@ -73,8 +74,8 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
   const activeRuns=new Map(),backgroundErrors=new Map();
   async function logRuntime(event){if(tgserver)await tgserver.log(event);}
   function makeReadOnlyToolRuntime(repoPath){if(!repoPolicy||!repoPath)return null;return createReadOnlyToolRuntime({repo:repoPath,repoPolicy,tgserver,evidenceSearch});}
-  async function callReadOnlyRole(role,{system,user},toolRuntime,{baseEvidenceIds=[],strictEvidenceRefs=true,continuationState=null,durableHooks=null}={}){return runRoleWithReadOnlyTools({aiCore,role,system,user,toolRuntime,baseEvidenceIds,strictEvidenceRefs,continuationState,durableHooks});}
-  async function callDirectRole(role,{system,user}){const b=getRoleRuntimeBudget(role);return aiCore.call(role,{system,user,maxTokens:b.max_tokens,timeoutMsOverride:b.turn_timeout_ms,deadlineAt:Date.now()+b.turn_timeout_ms});}
+  async function callReadOnlyRole(role,{system,user},toolRuntime,{baseEvidenceIds=[],strictEvidenceRefs=true,continuationState=null,durableHooks=null}={}){return getRoleModule(role).execution.invokeReadOnly({aiCore,system,user,toolRuntime,baseEvidenceIds,strictEvidenceRefs,continuationState,durableHooks});}
+  async function callDirectRole(role,{system,user}){return getRoleModule(role).execution.invokeDirect({aiCore,system,user});}
   async function getOfficialEvidence(query){if(!evidenceSearch)return{official:[],evidenceGap:false,evidenceStatus:"NOT_CONFIGURED"};try{return{official:await evidenceSearch.search({query}),evidenceGap:false,evidenceStatus:"FINAL_VALID"};}catch(e){if(e?.code==="EVIDENCE_SEARCH_NOT_FINAL")return{official:[],evidenceGap:true,evidenceStatus:String(e?.meta?.status||"NOT_FINAL")};throw e;}}
   async function prepareAnalysis({runId=null,rawRequest="",failure=null,localEvidence=[],repo=null,projectId=null}={}){
     let authRun=null,resuming=Boolean(runId),inputRecord=null,inputManifestRef=null;
