@@ -1,7 +1,7 @@
 "use strict";
 const test=require("node:test");
 const assert=require("node:assert/strict");
-const {createAiCoreAdapter,TIMEOUT_CLASS,classifyTimeoutError,isTimeoutError,normalizeRuntimeContextTokens,resolveEffectiveMaxTokens}=require("../adapters/ai-core.js");
+const {createAiCoreAdapter,TIMEOUT_CLASS,classifyTimeoutError,isTimeoutError,normalizeRuntimeContextTokens,resolveEffectiveMaxTokens,nodeProcessResourceObservation}=require("../adapters/ai-core.js");
 
 test("Undici response header timeout is classified as transport timeout",()=>{
   const cause=new Error("Headers Timeout Error");cause.code="UND_ERR_HEADERS_TIMEOUT";
@@ -289,4 +289,74 @@ test("G3 idle queue does not misattribute an already completed role",async()=>{
   await ai.call("causal_scout",{user:"second",onProgress:event=>events.push(event)});
   assert.equal(calls,2);
   assert.equal(events.find(e=>e.phase==="QUEUE"&&Object.hasOwn(e,"queue_predecessor_role"))?.queue_predecessor_role,null);
+});
+
+test("Shared-process resource observation is additive to successful terminal progress and never claims role-exclusive CPU or peak RSS",async()=>{
+  const events=[];let dispatched=0;
+  const ai=createAiCoreAdapter({baseUrl:"http://127.0.0.1:18080",apiKey:"test",fetchImpl:async()=>{
+    dispatched++;
+    return{ok:true,status:200,text:async()=>JSON.stringify({choices:[{message:{content:'{"ok":true}'},finish_reason:"stop"}]})};
+  }});
+  const out=await ai.call("code_scout",{user:"PRIVATE_PROMPT_MARKER_8f4d19a",onProgress:e=>events.push(e)});
+  assert.equal(dispatched,1);
+  assert.equal(out.content,'{"ok":true}');
+  const e=events.at(-1);
+  assert.equal(e.phase,"SUCCEEDED");
+  assert.equal(e.schema,"debugai.ai-invocation/v1");
+  assert.ok(e.telemetry?.request_bytes>0,"existing runtime telemetry is preserved");
+  const r=e.node_process_resources;
+  assert.equal(r?.scope,"SHARED_NODE_PROCESS");
+  assert.equal(r.attribution,"NOT_ROLE_EXCLUSIVE");
+  assert.ok(["UNAVAILABLE","PARTIAL_OR_COMPLETE"].includes(r.measurement_status));
+  assert.equal(r.peak_rss_bytes,null,"endpoint snapshots cannot estimate a process peak");
+  for(const k of ["process_cpu_user_us","process_cpu_system_us","rss_start_bytes","rss_end_bytes",
+    "heap_used_start_bytes","heap_used_end_bytes","external_start_bytes","external_end_bytes",
+    "array_buffers_start_bytes","array_buffers_end_bytes"])
+    assert.ok(r[k]===null||(Number.isSafeInteger(r[k])&&r[k]>=0),k+" must be measured nonnegative or UNKNOWN in sandbox");
+  assert.ok(r.rss_delta_bytes===null||Number.isFinite(r.rss_delta_bytes));
+  assert.ok(r.event_loop_utilization===null||(r.event_loop_utilization>=0&&r.event_loop_utilization<=1));
+  assert.equal(JSON.stringify(r).includes("PRIVATE_PROMPT_MARKER_8f4d19a"),false,"prompts are not included in resource records");
+});
+
+test("Shared-process resource observation accompanies failed terminal progress without retries or false completion",async()=>{
+  const events=[];let dispatched=0;
+  const ai=createAiCoreAdapter({baseUrl:"http://127.0.0.1:18080",apiKey:"test",maxTransportTimeoutAttempts:1,fetchImpl:async()=>{
+    dispatched++;throw new Error("test transport unavailable");
+  }});
+  await assert.rejects(()=>ai.call("causal_scout",{user:"case",onProgress:e=>events.push(e)}));
+  assert.equal(dispatched,1);
+  const e=events.at(-1);
+  assert.equal(e.phase,"FAILED");
+  assert.equal(e.schema,"debugai.ai-invocation/v1");
+  assert.equal(e.node_process_resources?.scope,"SHARED_NODE_PROCESS");
+  assert.equal(e.node_process_resources?.peak_rss_bytes,null);
+  assert.notEqual(e.continuation_assessment,"CONTINUE");
+});
+
+test("Non-observed invocation remains source compatible: only normal result telemetry is returned",async()=>{
+  const ai=createAiCoreAdapter({baseUrl:"http://127.0.0.1:18080",apiKey:"test",fetchImpl:async()=>
+    ({ok:true,status:200,text:async()=>JSON.stringify({choices:[{message:{content:'{"ok":true}'},finish_reason:"stop"}]})})});
+  const out=await ai.call("code_scout",{user:"normal"});
+  assert.equal(out.content,'{"ok":true}');
+  assert.equal(Object.hasOwn(out,"node_process_resources"),false);
+  assert.equal(Object.hasOwn(out.telemetry,"node_process_resources"),false);
+});
+
+test("Independent deterministic resource delta preserves signed RSS, bounded utilization and unavailable-only status",()=>{
+  const start={cpu_user_us:100,cpu_system_us:40,rss_bytes:300,heap_used_bytes:120,
+    external_bytes:90,array_buffers_bytes:8,loop_active_ms:10,loop_idle_ms:20};
+  const end={cpu_user_us:160,cpu_system_us:55,rss_bytes:280,heap_used_bytes:110,
+    external_bytes:100,array_buffers_bytes:7,loop_active_ms:12,loop_idle_ms:23};
+  const r=nodeProcessResourceObservation(start,end);
+  assert.equal(r.measurement_status,"PARTIAL_OR_COMPLETE");
+  assert.equal(r.process_cpu_user_us,60);
+  assert.equal(r.process_cpu_system_us,15);
+  assert.equal(r.rss_delta_bytes,-20,"RSS shrink is not discarded");
+  assert.equal(r.event_loop_utilization,0.4);
+  assert.equal(r.peak_rss_bytes,null);
+  const denied=nodeProcessResourceObservation({}, {});
+  assert.equal(denied.measurement_status,"UNAVAILABLE");
+  assert.equal(denied.process_cpu_user_us,null);
+  assert.equal(denied.rss_delta_bytes,null);
+  assert.equal(denied.event_loop_utilization,null);
 });

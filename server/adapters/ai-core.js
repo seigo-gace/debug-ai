@@ -1,5 +1,6 @@
 "use strict";
 const crypto=require("node:crypto");
+const {performance}=require("node:perf_hooks");
 const {Agent,fetch:undiciFetch}=require("undici");
 const {ROLES}=require("../roles.js");
 const {compileInvocation}=require("../control/invocation-compiler.js");
@@ -74,6 +75,46 @@ function runtimeControlWireUser(user,toolBudgetFinalRound){
   if(toolBudgetFinalRound===null||toolBudgetFinalRound===undefined)return String(user||"");
   if(typeof toolBudgetFinalRound!=="boolean")throw new AiCoreError("AI_CORE_TOOL_BUDGET_CONTROL_INVALID","toolBudgetFinalRound must be boolean or null");
   return `${String(user||"")}\n\nRUNTIME_CONTROL_DATA_ONLY=${JSON.stringify({tool_budget_final_round:toolBudgetFinalRound})}`;
+}
+// Source fields may be independently unavailable under sandbox seccomp/cgroup restrictions.
+// Observation remains non-authoritative and must never affect role execution.
+function sampleNodeProcessResources(){
+  let cpu=null,memory=null,loop=null;
+  try{cpu=process.cpuUsage();}catch{}
+  try{memory=process.memoryUsage();}catch{}
+  try{loop=performance.eventLoopUtilization();}catch{}
+  return {cpu_user_us:cpu?.user??null,cpu_system_us:cpu?.system??null,
+    rss_bytes:memory?.rss??null,heap_used_bytes:memory?.heapUsed??null,
+    external_bytes:memory?.external??null,array_buffers_bytes:memory?.arrayBuffers??null,
+    loop_active_ms:loop?.active??null,loop_idle_ms:loop?.idle??null};
+}
+function nodeProcessResourceObservation(start,end){
+  // Counted CPU/RSS snapshots are for the shared Node process, never exclusive to a role.
+  try{
+    const count=(n)=>Number.isSafeInteger(n)&&n>=0?n:null;
+    const delta=(a,b)=>Number.isFinite(a)&&Number.isFinite(b)&&b>=a?b-a:null;
+    const active=delta(start?.loop_active_ms,end?.loop_active_ms);
+    const idle=delta(start?.loop_idle_ms,end?.loop_idle_ms);
+    const total=active===null||idle===null?null:active+idle;
+    const cpuUser=count(delta(start?.cpu_user_us,end?.cpu_user_us));
+    const cpuSystem=count(delta(start?.cpu_system_us,end?.cpu_system_us));
+    const rssStart=count(start?.rss_bytes),rssEnd=count(end?.rss_bytes);
+    const heapStart=count(start?.heap_used_bytes),heapEnd=count(end?.heap_used_bytes);
+    const extStart=count(start?.external_bytes),extEnd=count(end?.external_bytes);
+    const bufStart=count(start?.array_buffers_bytes),bufEnd=count(end?.array_buffers_bytes);
+    const utilization=total>0?Math.max(0,Math.min(1,active/total)):null;
+    const present=[cpuUser,cpuSystem,rssStart,rssEnd,heapStart,heapEnd,extStart,extEnd,bufStart,bufEnd,utilization].some(v=>v!==null);
+    return Object.freeze({scope:"SHARED_NODE_PROCESS",attribution:"NOT_ROLE_EXCLUSIVE",
+      measurement_status:present?"PARTIAL_OR_COMPLETE":"UNAVAILABLE",
+      process_cpu_user_us:cpuUser,process_cpu_system_us:cpuSystem,
+      rss_start_bytes:rssStart,rss_end_bytes:rssEnd,
+      rss_delta_bytes:rssStart!==null&&rssEnd!==null?rssEnd-rssStart:null,
+      heap_used_start_bytes:heapStart,heap_used_end_bytes:heapEnd,
+      external_start_bytes:extStart,external_end_bytes:extEnd,
+      array_buffers_start_bytes:bufStart,array_buffers_end_bytes:bufEnd,
+      event_loop_utilization:utilization,
+      peak_rss_bytes:null}); // Two endpoint samples never establish a peak.
+  }catch{return null;} // Never convert a measurement failure into a role failure.
 }
 function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=process.env.AI_CORE_API_KEY,fetchImpl=undiciFetch,timeoutMs=600000,maxTransportTimeoutAttempts=2,maxTimeoutRetries,dispatcher,runtimeContextTokens=process.env.DEBUG_AI_CORE_CONTEXT_TOKENS??null,requireRuntimeContextQualification=false,promptCache=true,inputTokenShadow=false,inputTokenShadowRoute="router",observationIntervalMs=60000}={}){
   if(!baseUrl)throw new AiCoreError("AI_CORE_URL_REQUIRED","DEBUG_AI_CORE_URL is required");
@@ -174,6 +215,7 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
   async function queuedCall(role,options={},internalMeta={}){
     const invocationId=`inv_${crypto.randomBytes(12).toString("hex")}`;
     const invocationStartedAt=Date.now();let progress={phase:"QUEUE",dispatch_attempt:0},lastProgressAt=invocationStartedAt;
+    const resourceStart=typeof options.onProgress==="function"?sampleNodeProcessResources():null;
     const observe=(change={})=>{
       if(change.phase&&change.phase!==progress.phase)lastProgressAt=Date.now();
       progress={...progress,...change};
@@ -189,10 +231,10 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
     heartbeat?.unref?.();
     try{
       const out=await queuedExecution(role,options,{...internalMeta,observe});
-      observe({phase:"SUCCEEDED",telemetry:out.telemetry,dispatch_attempt:out.attempts});
+      observe({phase:"SUCCEEDED",telemetry:out.telemetry,dispatch_attempt:out.attempts,node_process_resources:resourceStart?nodeProcessResourceObservation(resourceStart,sampleNodeProcessResources()):null});
       return out;
     }catch(error){
-      observe({phase:"FAILED",failure_code:String(error?.code||"AI_CORE_ERROR"),timeout_class:error?.meta?.timeout_class||null,telemetry:error?.meta?.telemetry||null,dispatch_attempt:error?.meta?.attempts??progress.dispatch_attempt});
+      observe({phase:"FAILED",failure_code:String(error?.code||"AI_CORE_ERROR"),timeout_class:error?.meta?.timeout_class||null,telemetry:error?.meta?.telemetry||null,dispatch_attempt:error?.meta?.attempts??progress.dispatch_attempt,node_process_resources:resourceStart?nodeProcessResourceObservation(resourceStart,sampleNodeProcessResources()):null});
       throw error;
     }finally{if(heartbeat)clearInterval(heartbeat);}
   }
@@ -219,4 +261,4 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
   async function callPrepared(role,{system,user="",...options}={}){if(typeof system!=="string"||!system.trim())throw new AiCoreError("AI_CORE_PREPARED_SYSTEM_REQUIRED","Prepared benchmark system prompt is required",{role});return queuedCall(role,{...options,user},{preparedSystem:system});}
   return{endpoint,runtime_context_tokens:qualifiedRuntimeContext,runtime_context_qualified:qualifiedRuntimeContext!==null,prompt_cache_requested:promptCache,call,callPrepared};
 }
-module.exports={ROLE_ALIASES,TIMEOUT_CLASS,AiCoreError,classifyTimeoutError,isTimeoutError,resolveRoleTimeoutMs,resolveEffectiveTimeoutMs,normalizeRuntimeContextTokens,resolveEffectiveMaxTokens,finiteUsage,usageTelemetry,providerTimingTelemetry,prefixHash,truncationError,runtimeControlWireUser,createAiCoreAdapter};
+module.exports={ROLE_ALIASES,TIMEOUT_CLASS,AiCoreError,classifyTimeoutError,isTimeoutError,resolveRoleTimeoutMs,resolveEffectiveTimeoutMs,normalizeRuntimeContextTokens,resolveEffectiveMaxTokens,finiteUsage,usageTelemetry,providerTimingTelemetry,prefixHash,truncationError,runtimeControlWireUser,sampleNodeProcessResources,nodeProcessResourceObservation,createAiCoreAdapter};
