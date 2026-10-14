@@ -11,7 +11,7 @@ const selfMarker=path.join(jobRoot,"queue-selftest-full-job-id");
 const candidateMarker=path.join(jobRoot,"queue-selftest-candidate-job-id");
 function boundedFailureDiagnostic(result){
   const lines=`${String(result?.stdout||"")}\n${String(result?.stderr||"")}`.split(/\r?\n/);
-  const selected=lines.filter(line=>/(?:^not ok\b|ERR_|Error:|error:|EPERM|EACCES|SIGKILL|SANDBOX_|DURABLE_)/i.test(line)).slice(-80).join("\n");
+  const selected=lines.filter(line=>/(?:^not ok\b|[✖✗✘]|ERR_|Error:|error:|EPERM|EACCES|SIGKILL|SANDBOX_|DURABLE_)/i.test(line)).slice(-80).join("\n");
   return selected.replace(/[a-f0-9]{64}/gi,"<HEX64>").slice(-8000);
 }
 function parseNodeTestSummary(output){
