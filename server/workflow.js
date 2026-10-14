@@ -139,7 +139,7 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
     const semanticRequired=requireSemanticProgress||recoveryHooks?.requireSemanticProgress===true;
     if(semanticRequired&&criteria===null)throw new Error("ROLE_PROGRESS_CRITERIA_REQUIRED");
     const evaluator=criteria===null?null:createRoleProgressEvaluator({role,criteria,evidenceRecords:validatedRecords});
-    const boundTask=contentHash({role,task,evidence,input_binding:inputBinding,...(evaluator?{semantic_contract:evaluator.binding}:{})});
+    const boundTask=contentHash({role,task,evidence,input_binding:inputBinding,...(aiCore.runtime_route_binding?{core_route_binding:aiCore.runtime_route_binding}:{}),...(evaluator?{semantic_contract:evaluator.binding}:{})});
     function validateIntermediate({progress,previousProgress,ctx}){
       if(evaluator){try{return contentHash(evaluator.qualifyProgress({progress,previousProgress:previousProgress||ctx?.previousProgress||{}}))===contentHash(progress);}catch{return false;}}
       return Boolean(progress&&typeof progress==="object"&&!Array.isArray(progress)&&
@@ -288,7 +288,7 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
   async function executeAnalysis(prepared){
     const {runId,resuming,targetRepo,input,inputRecord,inputManifestRef}=prepared,{rawRequest,failure,localEvidence}=input;
     const toolRuntime=makeReadOnlyToolRuntime(targetRepo,runId),durable=Boolean(authority?.durableEnabled?.());
-    const binding=durable?localStageBinding({repo:targetRepo,repoSnapshotId:snapshotRepo(targetRepo),inputDigest:inputRecord.payload_digest,runtimeContextTokens:aiCore.runtime_context_tokens??null}):null;
+    const binding=durable?localStageBinding({repo:targetRepo,repoSnapshotId:snapshotRepo(targetRepo),inputDigest:inputRecord.payload_digest,runtimeContextTokens:aiCore.runtime_context_tokens??null,runtimeRouteBinding:aiCore.runtime_route_binding??null}):null;
     let contextStage=durable?loadStageRef(runId,"research_context"):null,context,scouts=null;
     if(contextStage&&!reusableLocalStage(contextStage,binding))contextStage=null;
     if(contextStage){
