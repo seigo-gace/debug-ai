@@ -186,7 +186,7 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
     authority.loadDurable(runId); // No implicit new run, no approval bypass.
     const validatedRecords=validateEvidenceRecords(evidenceRecords);
     const evidence=mergeBaseEvidenceWithRecords(baseEvidenceIds,validatedRecords);
-    const boundInput=contentHash({role:"diagnoser",task,evidence,input_binding:inputBinding});
+    const boundInput=contentHash({role:"diagnoser",task,evidence,input_binding:inputBinding,...(aiCore.runtime_route_binding?{core_route_binding:aiCore.runtime_route_binding}:{})});
     return continueDiagnoserWorkItem({authority,runId,workItemId,inputBinding:boundInput,
       maxStepsPerCall,maxTotalSteps,
       buildStepPrompt:async({step,previousProgress})=>({
@@ -366,7 +366,7 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
     const deterministicVerification=context.deterministic_verification,deterministicChecks=context.deterministic_checks||[],dapHint=context.dap_hint||null,hintProtocol=dapHintProtocol(dapHint),localRecords=context.local_records||[],localIds=context.local_ids||[],scoutJson=context.scout_json||[],scoutToolEvidence=context.scout_tool_evidence||[],knownKnowledge=context.known_knowledge||[],knowledgeRecords=context.knowledge_records||[],official=context.official||[],evidenceGap=Boolean(context.evidence_gap),evidenceStatus=context.evidence_status,officialRecords=context.official_records||[],researchBase=context.research_base||[];
     let research=null,researchJson=null,researchToolEvidence=[],researchContinuation=null;
     if(durable){
-      const inputBindingDigest=contentHash({run_id:runId,input_manifest_digest:inputRecord.payload_digest,research_context_digest:contextStage.record.payload_digest,repo_snapshot_id:context.repo_snapshot_id});
+      const inputBindingDigest=contentHash({run_id:runId,input_manifest_digest:inputRecord.payload_digest,research_context_digest:contextStage.record.payload_digest,repo_snapshot_id:context.repo_snapshot_id,...(aiCore.runtime_route_binding?{core_route_binding:aiCore.runtime_route_binding}:{})});
       await setCursor(runId,WorkflowStepId.RESEARCHER,StepPhase.RUNNING,{stepInputRef:contextStage.path});await logProgress(runId,WorkflowStepId.RESEARCHER,StepPhase.RUNNING);
       researchContinuation=await runResearcherContinuation({authority,runId,repoSnapshotId:context.repo_snapshot_id,inputManifestRef,inputBindingDigest,executeWorkUnit:async(args)=>{const {unit,restoredResults,roleExecutionId,attemptId}=args;await recoveryHooks?.beforeResearcherWorkUnit?.(args);
         let answer;if(unit.work_unit_id==="researcher.A")answer={payload:{localEvidence:evidencePromptView(localRecords),scouts:scoutJson,scout_tool_evidence:evidencePromptView(scoutToolEvidence)},evidence_refs:mergeEvidenceIds(localIds,scoutToolEvidence.map(x=>x.evidence_id))};
