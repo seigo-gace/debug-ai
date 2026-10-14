@@ -297,7 +297,7 @@ test("Shared-process resource observation is additive to successful terminal pro
     dispatched++;
     return{ok:true,status:200,text:async()=>JSON.stringify({choices:[{message:{content:'{"ok":true}'},finish_reason:"stop"}]})};
   }});
-  const out=await ai.call("code_scout",{user:"measure",onProgress:e=>events.push(e)});
+  const out=await ai.call("code_scout",{user:"PRIVATE_PROMPT_MARKER_8f4d19a",onProgress:e=>events.push(e)});
   assert.equal(dispatched,1);
   assert.equal(out.content,'{"ok":true}');
   const e=events.at(-1);
@@ -315,7 +315,7 @@ test("Shared-process resource observation is additive to successful terminal pro
     assert.ok(r[k]===null||(Number.isSafeInteger(r[k])&&r[k]>=0),k+" must be measured nonnegative or UNKNOWN in sandbox");
   assert.ok(r.rss_delta_bytes===null||Number.isFinite(r.rss_delta_bytes));
   assert.ok(r.event_loop_utilization===null||(r.event_loop_utilization>=0&&r.event_loop_utilization<=1));
-  assert.equal(JSON.stringify(r).includes("measure"),false,"prompts are not included in resource records");
+  assert.equal(JSON.stringify(r).includes("PRIVATE_PROMPT_MARKER_8f4d19a"),false,"prompts are not included in resource records");
 });
 
 test("Shared-process resource observation accompanies failed terminal progress without retries or false completion",async()=>{
