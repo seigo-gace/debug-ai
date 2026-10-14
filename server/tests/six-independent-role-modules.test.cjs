@@ -94,3 +94,21 @@ test("six cohesive module boundaries back every legacy registry",()=>{
   }
   assert.throws(()=>getRoleModule("unknown"),/ROLE_MODULE_NOT_FOUND/);
 });
+
+test("each role execution uses existing per-role model budget and adapter interface",async()=>{
+  const {MODULES}=require("../role-modules/index.js");
+  for(const [id,module] of Object.entries(MODULES)){
+    const calls=[];
+    const aiCore={call:async(...args)=>{calls.push(args);return {ok:true};}};
+    const result=await module.execution.invokeDirect({aiCore,system:"fixed",user:"fixed"});
+    assert.deepEqual(result,{ok:true});
+    assert.equal(calls.length,1);
+    assert.equal(calls[0][0],id);
+    assert.equal(calls[0][1].maxTokens,module.budget.max_tokens);
+    assert.equal(calls[0][1].timeoutMsOverride,module.budget.turn_timeout_ms);
+    assert.equal(typeof calls[0][1].deadlineAt,"number");
+    assert.equal(calls[0][1].system,"fixed");
+    assert.equal(calls[0][1].user,"fixed");
+    assert.equal(typeof module.execution.invokeReadOnly,"function");
+  }
+});
