@@ -1,12 +1,12 @@
 "use strict";
 
 const ROLE_RUNTIME_BUDGETS=Object.freeze({
-  code_scout:require("../role-modules/code-scout-budget.js"),
-  causal_scout:require("../role-modules/causal-scout-budget.js"),
-  researcher:require("../role-modules/researcher-budget.js"),
-  diagnoser:require("../role-modules/diagnoser-budget.js"),
-  patch_engineer:require("../role-modules/patch-engineer-budget.js"),
-  local_reviewer:require("../role-modules/local-reviewer-budget.js"),
+  code_scout:require("../role-modules/index.js").MODULES.code_scout.budget,
+  causal_scout:require("../role-modules/index.js").MODULES.causal_scout.budget,
+  researcher:require("../role-modules/index.js").MODULES.researcher.budget,
+  diagnoser:require("../role-modules/index.js").MODULES.diagnoser.budget,
+  patch_engineer:require("../role-modules/index.js").MODULES.patch_engineer.budget,
+  local_reviewer:require("../role-modules/index.js").MODULES.local_reviewer.budget,
 });
 
 function getRoleRuntimeBudget(role){
