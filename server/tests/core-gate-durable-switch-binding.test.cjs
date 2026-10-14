@@ -61,3 +61,34 @@ test("the generic six-role continuation also rejects a changed Gate route with t
   );
   assert.equal(calls,1);
 });
+
+test("all six opt-in Role Work Item callers propagate cancellation to the Core Gate and cannot persist a late Role result",async()=>{
+  for(const role of ["code_scout","causal_scout","researcher","diagnoser","patch_engineer","local_reviewer"]){
+    const auth=authority(),ctl=new AbortController();let actualSignal=null,calls=0;
+    const aiCore={runtime_route_binding:"existing-authorized-route",call:async(_role,options)=>{
+      calls++;actualSignal=options.signal;ctl.abort();
+      return response(); // upstream delivered late successful bytes after cancel
+    }};
+    const workflow=createWorkflow({authority:auth,aiCore});
+    await assert.rejects(
+      workflow.continueRoleTask({...args,runId:"cancel-"+role,role,signal:ctl.signal}),
+      e=>e.code==="ROLE_WORK_ITEM_CANCELLED",
+      "cancelled "+role+" must not become a durable Work Item"
+    );
+    assert.equal(actualSignal,ctl.signal,role+" must forward AbortSignal");
+    assert.equal(calls,1,role+" must never dispatch a retry");
+  }
+});
+
+test("dedicated Diagnoser continuation preserves cancellation boundary without forcing generic role semantics",async()=>{
+  const auth=authority(),ctl=new AbortController();let forwarded=null,calls=0;
+  const aiCore={runtime_route_binding:"existing-authorized-route",call:async(_role,options)=>{
+    calls++;forwarded=options.signal;ctl.abort();return response();
+  }};
+  await assert.rejects(
+    createWorkflow({authority:auth,aiCore}).continueDiagnoserTask({...args,runId:"cancel-diagnoser-dedicated",signal:ctl.signal}),
+    e=>e.code==="ROLE_WORK_ITEM_CANCELLED"
+  );
+  assert.equal(forwarded,ctl.signal);
+  assert.equal(calls,1);
+});
