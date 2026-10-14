@@ -78,3 +78,19 @@ test("six role budgets retain existing independent limits",()=>{
   assert.equal(ROLE_RUNTIME_BUDGETS.patch_engineer.max_tool_calls,0);
   assert.equal(ROLE_RUNTIME_BUDGETS.local_reviewer.qualification,"REAL_ROLE_BENCHMARK_PASS");
 });
+
+test("six cohesive module boundaries back every legacy registry",()=>{
+  const {MODULES,getRoleModule}=require("../role-modules/index.js");
+  const {ROLE_CONTRACTS}=require("../control/role-contracts.js");
+  const {ROLE_RUNTIME_BUDGETS}=require("../control/role-runtime-budgets.js");
+  assert.deepEqual(Object.keys(MODULES),Object.keys(expected));
+  for(const id of Object.keys(expected)){
+    const module=getRoleModule(id);
+    assert.equal(Object.isFrozen(module),true);
+    assert.strictEqual(module.profile,ROLES[id]);
+    assert.strictEqual(module.contract,ROLE_CONTRACTS[id]);
+    assert.strictEqual(module.budget,ROLE_RUNTIME_BUDGETS[id]);
+    assert.equal(Object.isFrozen(module.semantic),true);
+  }
+  assert.throws(()=>getRoleModule("unknown"),/ROLE_MODULE_NOT_FOUND/);
+});
