@@ -76,32 +76,45 @@ function runtimeControlWireUser(user,toolBudgetFinalRound){
   if(typeof toolBudgetFinalRound!=="boolean")throw new AiCoreError("AI_CORE_TOOL_BUDGET_CONTROL_INVALID","toolBudgetFinalRound must be boolean or null");
   return `${String(user||"")}\n\nRUNTIME_CONTROL_DATA_ONLY=${JSON.stringify({tool_budget_final_round:toolBudgetFinalRound})}`;
 }
-// This samples the entire DebugAI Node process, never an individual model, role or cgroup.
+// Source fields may be independently unavailable under sandbox seccomp/cgroup restrictions.
+// Observation remains non-authoritative and must never affect role execution.
 function sampleNodeProcessResources(){
-  try{
-    const cpu=process.cpuUsage(),memory=process.memoryUsage(),loop=performance.eventLoopUtilization();
-    return {cpu_user_us:cpu.user,cpu_system_us:cpu.system,rss_bytes:memory.rss,
-      heap_used_bytes:memory.heapUsed,external_bytes:memory.external,
-      array_buffers_bytes:memory.arrayBuffers,loop_active_ms:loop.active,loop_idle_ms:loop.idle};
-  }catch{return null;} // Metrics must not affect execution or terminal outcome.
+  let cpu=null,memory=null,loop=null;
+  try{cpu=process.cpuUsage();}catch{}
+  try{memory=process.memoryUsage();}catch{}
+  try{loop=performance.eventLoopUtilization();}catch{}
+  return {cpu_user_us:cpu?.user??null,cpu_system_us:cpu?.system??null,
+    rss_bytes:memory?.rss??null,heap_used_bytes:memory?.heapUsed??null,
+    external_bytes:memory?.external??null,array_buffers_bytes:memory?.arrayBuffers??null,
+    loop_active_ms:loop?.active??null,loop_idle_ms:loop?.idle??null};
 }
 function nodeProcessResourceObservation(start,end){
-  if(!start||!end)return null;
-  const count=(n)=>Number.isSafeInteger(n)&&n>=0?n:null;
-  const delta=(a,b)=>Number.isFinite(a)&&Number.isFinite(b)&&b>=a?b-a:null;
-  const active=delta(start.loop_active_ms,end.loop_active_ms);
-  const idle=delta(start.loop_idle_ms,end.loop_idle_ms);
-  const total=active===null||idle===null?null:active+idle;
-  return Object.freeze({scope:"SHARED_NODE_PROCESS",attribution:"NOT_ROLE_EXCLUSIVE",
-    process_cpu_user_us:count(delta(start.cpu_user_us,end.cpu_user_us)),
-    process_cpu_system_us:count(delta(start.cpu_system_us,end.cpu_system_us)),
-    rss_start_bytes:count(start.rss_bytes),rss_end_bytes:count(end.rss_bytes),
-    rss_delta_bytes:Number.isFinite(start.rss_bytes)&&Number.isFinite(end.rss_bytes)?end.rss_bytes-start.rss_bytes:null,
-    heap_used_start_bytes:count(start.heap_used_bytes),heap_used_end_bytes:count(end.heap_used_bytes),
-    external_start_bytes:count(start.external_bytes),external_end_bytes:count(end.external_bytes),
-    array_buffers_start_bytes:count(start.array_buffers_bytes),array_buffers_end_bytes:count(end.array_buffers_bytes),
-    event_loop_utilization:total>0?Math.max(0,Math.min(1,active/total)):null,
-    peak_rss_bytes:null}); // Two snapshots cannot establish a peak.
+  // Counted CPU/RSS snapshots are for the shared Node process, never exclusive to a role.
+  try{
+    const count=(n)=>Number.isSafeInteger(n)&&n>=0?n:null;
+    const delta=(a,b)=>Number.isFinite(a)&&Number.isFinite(b)&&b>=a?b-a:null;
+    const active=delta(start?.loop_active_ms,end?.loop_active_ms);
+    const idle=delta(start?.loop_idle_ms,end?.loop_idle_ms);
+    const total=active===null||idle===null?null:active+idle;
+    const cpuUser=count(delta(start?.cpu_user_us,end?.cpu_user_us));
+    const cpuSystem=count(delta(start?.cpu_system_us,end?.cpu_system_us));
+    const rssStart=count(start?.rss_bytes),rssEnd=count(end?.rss_bytes);
+    const heapStart=count(start?.heap_used_bytes),heapEnd=count(end?.heap_used_bytes);
+    const extStart=count(start?.external_bytes),extEnd=count(end?.external_bytes);
+    const bufStart=count(start?.array_buffers_bytes),bufEnd=count(end?.array_buffers_bytes);
+    const utilization=total>0?Math.max(0,Math.min(1,active/total)):null;
+    const present=[cpuUser,cpuSystem,rssStart,rssEnd,heapStart,heapEnd,extStart,extEnd,bufStart,bufEnd,utilization].some(v=>v!==null);
+    return Object.freeze({scope:"SHARED_NODE_PROCESS",attribution:"NOT_ROLE_EXCLUSIVE",
+      measurement_status:present?"PARTIAL_OR_COMPLETE":"UNAVAILABLE",
+      process_cpu_user_us:cpuUser,process_cpu_system_us:cpuSystem,
+      rss_start_bytes:rssStart,rss_end_bytes:rssEnd,
+      rss_delta_bytes:rssStart!==null&&rssEnd!==null?rssEnd-rssStart:null,
+      heap_used_start_bytes:heapStart,heap_used_end_bytes:heapEnd,
+      external_start_bytes:extStart,external_end_bytes:extEnd,
+      array_buffers_start_bytes:bufStart,array_buffers_end_bytes:bufEnd,
+      event_loop_utilization:utilization,
+      peak_rss_bytes:null}); // Two endpoint samples never establish a peak.
+  }catch{return null;} // Never convert a measurement failure into a role failure.
 }
 function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=process.env.AI_CORE_API_KEY,fetchImpl=undiciFetch,timeoutMs=600000,maxTransportTimeoutAttempts=2,maxTimeoutRetries,dispatcher,runtimeContextTokens=process.env.DEBUG_AI_CORE_CONTEXT_TOKENS??null,requireRuntimeContextQualification=false,promptCache=true,inputTokenShadow=false,inputTokenShadowRoute="router",observationIntervalMs=60000}={}){
   if(!baseUrl)throw new AiCoreError("AI_CORE_URL_REQUIRED","DEBUG_AI_CORE_URL is required");
@@ -248,4 +261,4 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
   async function callPrepared(role,{system,user="",...options}={}){if(typeof system!=="string"||!system.trim())throw new AiCoreError("AI_CORE_PREPARED_SYSTEM_REQUIRED","Prepared benchmark system prompt is required",{role});return queuedCall(role,{...options,user},{preparedSystem:system});}
   return{endpoint,runtime_context_tokens:qualifiedRuntimeContext,runtime_context_qualified:qualifiedRuntimeContext!==null,prompt_cache_requested:promptCache,call,callPrepared};
 }
-module.exports={ROLE_ALIASES,TIMEOUT_CLASS,AiCoreError,classifyTimeoutError,isTimeoutError,resolveRoleTimeoutMs,resolveEffectiveTimeoutMs,normalizeRuntimeContextTokens,resolveEffectiveMaxTokens,finiteUsage,usageTelemetry,providerTimingTelemetry,prefixHash,truncationError,runtimeControlWireUser,createAiCoreAdapter};
+module.exports={ROLE_ALIASES,TIMEOUT_CLASS,AiCoreError,classifyTimeoutError,isTimeoutError,resolveRoleTimeoutMs,resolveEffectiveTimeoutMs,normalizeRuntimeContextTokens,resolveEffectiveMaxTokens,finiteUsage,usageTelemetry,providerTimingTelemetry,prefixHash,truncationError,runtimeControlWireUser,sampleNodeProcessResources,nodeProcessResourceObservation,createAiCoreAdapter};
