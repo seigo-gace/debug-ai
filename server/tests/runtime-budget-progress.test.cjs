@@ -2,61 +2,99 @@
 const test=require("node:test");
 const assert=require("node:assert/strict");
 const {ROLE_RUNTIME_BUDGETS,assertRoleRuntimeBudgets}=require("../control/role-runtime-budgets.js");
+const {getModelOutputHardCeilingForRole}=require("../control/model-profiles.js");
 const {createProgressController}=require("../control/progress-controller.js");
 const {resolveEffectiveTimeoutMs}=require("../adapters/ai-core.js");
 const {runRoleWithReadOnlyTools}=require("../control/tool-loop.js");
+const {makeToolResult}=require("../control/read-only-tool-runtime.js");
 
-test("role runtime budgets retain recovered bounds and real long-role qualifications",()=>{
+test("role runtime budgets preserve model generation/context ceilings instead of legacy low caps",()=>{
   assert.equal(assertRoleRuntimeBudgets(),true);
-  assert.deepEqual([ROLE_RUNTIME_BUDGETS.code_scout.max_tokens,ROLE_RUNTIME_BUDGETS.code_scout.turn_timeout_ms],[600,600000]);
-  assert.equal(ROLE_RUNTIME_BUDGETS.code_scout.tool_loop_wall_ms,1200000);
-  assert.deepEqual([ROLE_RUNTIME_BUDGETS.causal_scout.max_tokens,ROLE_RUNTIME_BUDGETS.causal_scout.turn_timeout_ms],[600,600000]);
-  assert.equal(ROLE_RUNTIME_BUDGETS.causal_scout.tool_loop_wall_ms,1200000);
-  assert.deepEqual([ROLE_RUNTIME_BUDGETS.researcher.max_tokens,ROLE_RUNTIME_BUDGETS.researcher.turn_timeout_ms],[600,600000]);
-  assert.equal(ROLE_RUNTIME_BUDGETS.researcher.tool_loop_wall_ms,1200000);
-  assert.deepEqual([ROLE_RUNTIME_BUDGETS.diagnoser.max_tokens,ROLE_RUNTIME_BUDGETS.diagnoser.turn_timeout_ms],[800,600000]);
-  assert.equal(ROLE_RUNTIME_BUDGETS.diagnoser.tool_loop_wall_ms,1200000);
-  assert.deepEqual([ROLE_RUNTIME_BUDGETS.patch_engineer.max_tokens,ROLE_RUNTIME_BUDGETS.patch_engineer.turn_timeout_ms],[2048,360000]);
-  assert.equal(ROLE_RUNTIME_BUDGETS.local_reviewer.turn_timeout_ms,600000);
-  assert.equal(ROLE_RUNTIME_BUDGETS.local_reviewer.qualification,"REAL_ROLE_BENCHMARK_PASS");
-  assert.match(ROLE_RUNTIME_BUDGETS.local_reviewer.source,/real Local Reviewer benchmark 2026-09-27/);
+  for(const role of Object.keys(ROLE_RUNTIME_BUDGETS)){const budget=ROLE_RUNTIME_BUDGETS[role];assert.equal(budget.max_tokens,getModelOutputHardCeilingForRole(role));assert.equal(budget.output_policy,"MODEL_GENERATION_OR_CONTEXT_CEILING_THEN_RUNTIME_N_CTX_CLAMP");assert.match(budget.historical_refuted_rationale,/\[(?:REFUTED|SUPERSEDED)\]/);assert.equal(budget.max_tool_rounds,3);assert.equal(budget.max_tool_calls,8);assert.equal(budget.qualification,"SOURCE_REQUALIFICATION_REQUIRED");}
+  assert.equal(ROLE_RUNTIME_BUDGETS.code_scout.max_tokens,8192);assert.equal(ROLE_RUNTIME_BUDGETS.causal_scout.max_tokens,32768);assert.equal(ROLE_RUNTIME_BUDGETS.researcher.max_tokens,131072);assert.equal(ROLE_RUNTIME_BUDGETS.diagnoser.max_tokens,32768);assert.equal(ROLE_RUNTIME_BUDGETS.patch_engineer.max_tokens,8192);assert.equal(ROLE_RUNTIME_BUDGETS.local_reviewer.max_tokens,262144);
+  assert.equal(ROLE_RUNTIME_BUDGETS.code_scout.turn_timeout_ms,600000);assert.equal(ROLE_RUNTIME_BUDGETS.patch_engineer.turn_timeout_ms,360000);
 });
 
-test("effective timeout is bounded by role override and remaining aggregate deadline",()=>{
-  const now=1000000;
-  assert.equal(resolveEffectiveTimeoutMs("researcher",600000,{timeoutMsOverride:600000,now}),600000);
-  assert.equal(resolveEffectiveTimeoutMs("researcher",600000,{timeoutMsOverride:600000,deadlineAt:now+90000,now}),90000);
-  assert.throws(()=>resolveEffectiveTimeoutMs("researcher",600000,{timeoutMsOverride:600000,deadlineAt:now,now}),/AI Core role wall-time budget exhausted/);
+test("effective timeout is bounded by role override and remaining aggregate deadline",()=>{const now=1000000;assert.equal(resolveEffectiveTimeoutMs("researcher",600000,{timeoutMsOverride:600000,now}),600000);assert.equal(resolveEffectiveTimeoutMs("researcher",600000,{timeoutMsOverride:600000,deadlineAt:now+90000,now}),90000);assert.throws(()=>resolveEffectiveTimeoutMs("researcher",600000,{timeoutMsOverride:600000,deadlineAt:now,now}),/AI Core role wall-time budget exhausted/);});
+
+test("progress controller stops after configured consecutive rounds with zero new evidence",()=>{const p=createProgressController({maxNoProgressRounds:2});assert.equal(p.observe({evidenceIds:["E1"]}).stop,false);assert.equal(p.observe({evidenceIds:["E1"]}).stop,false);assert.equal(p.observe({evidenceIds:["E1"]}).stop,false);const stop=p.observe({evidenceIds:["E1"]});assert.equal(stop.stop,true);assert.equal(stop.decision,"HANDOFF_OR_INSUFFICIENT_EVIDENCE");assert.equal(p.snapshot().total_evidence_ids,1);});
+
+test("read-only role call separates queue wait budget from role execution budget",async()=>{let options;const aiCore={call:async(_role,o)=>{options=o;return{content:JSON.stringify({decision:"HANDOFF"}),control_plane:{selected_skill_ids:["failure-scope-reduction"]}};}};const out=await runRoleWithReadOnlyTools({aiCore,role:"code_scout",user:"x"});assert.equal(options.maxTokens,8192);assert.equal(options.timeoutMsOverride,600000);assert.equal(options.queueTimeoutMs,600000);assert.equal(options.excludeQueueFromDeadline,true);assert.ok(Number.isFinite(options.deadlineAt));assert.equal(out.validated_output.decision,"HANDOFF");});
+
+test("tool loop stops after three successive tool rounds produce zero durable progress",async()=>{
+  const toolRuntime={availableTools:["source.read"],execute:async()=>{throw new Error("READ_FAILED");}};let n=0;
+  const aiCore={call:async()=>{n++;if(n<=3)return{content:JSON.stringify({tool_requests:[{tool:"source.read",arguments:{path:`${n}.js`}}]})};return{content:JSON.stringify({decision:"INSUFFICIENT_EVIDENCE"})};}};
+  await assert.rejects(()=>runRoleWithReadOnlyTools({aiCore,role:"code_scout",user:"x",toolRuntime,maxToolRounds:3,maxToolCalls:4}),/ROLE_TOOL_NO_PROGRESS:code_scout:PROGRESS_DELTA_0/);
 });
 
-test("progress controller stops after consecutive rounds with zero new evidence",()=>{
-  const p=createProgressController({maxNoProgressRounds:1});
-  assert.equal(p.observe({evidenceIds:["E1"]}).stop,false);
-  assert.equal(p.observe({evidenceIds:["E1"]}).stop,false);
-  const stop=p.observe({evidenceIds:["E1"]});
-  assert.equal(stop.stop,true);
-  assert.equal(stop.decision,"HANDOFF_OR_INSUFFICIENT_EVIDENCE");
-  assert.equal(p.snapshot().total_evidence_ids,1);
+test("G3 counterexample: distinct evidence IDs alone currently reset no-progress even without verified semantic delta",()=>{
+  const progress=createProgressController({maxNoProgressRounds:1});
+  const first=progress.observe({evidenceIds:["TRE_unrelated_1"]});
+  const second=progress.observe({evidenceIds:["TRE_unrelated_2"]});
+  const third=progress.observe({evidenceIds:["TRE_unrelated_3"]});
+  assert.equal(first.progress_delta,1);
+  assert.equal(second.progress_delta,1);
+  assert.equal(third.progress_delta,1);
+  assert.equal(third.stop,false);
+  assert.equal(progress.snapshot().total_evidence_ids,3);
+  // CHARACTERIZATION ONLY: no input records claim/task relevance, so this
+  // does not satisfy G3's semantic progress acceptance or claim a runtime fix.
 });
 
-test("read-only role call applies recovered role token and timeout budget even without tool runtime",async()=>{
-  let options;
-  const aiCore={call:async(_role,o)=>{options=o;return{content:JSON.stringify({decision:"HANDOFF"}),control_plane:{selected_skill_ids:["failure-scope-reduction"]}};}};
-  const out=await runRoleWithReadOnlyTools({aiCore,role:"code_scout",user:"x"});
-  assert.equal(options.maxTokens,600);
-  assert.equal(options.timeoutMsOverride,600000);
-  assert.ok(Number.isFinite(options.deadlineAt));
-  assert.equal(out.validated_output.decision,"HANDOFF");
+test("G3 qualified progress mode rejects fresh unrelated evidence without task-bound proof",()=>{
+  const progress=createProgressController({maxNoProgressRounds:1,requireQualifiedProgress:true,verifyQualifiedProgress:()=>false});
+  assert.equal(progress.observe({evidenceIds:["EVI_UNRELATED_1"]}).progress_delta,0);
+  const stopped=progress.observe({evidenceIds:["EVI_UNRELATED_2"],completedWorkIds:["WORK_NEW"]});
+  assert.equal(stopped.stop,true);
+  assert.equal(stopped.progress_delta,0);
+  assert.equal(progress.snapshot().total_evidence_ids,2);
+  assert.equal(progress.snapshot().total_work_ids,1);
 });
 
-test("tool loop stops when successive tool rounds produce zero durable progress",async()=>{
-  const toolRuntime={availableTools:["source.read"],execute:async()=>{throw new Error("READ_FAILED");}};
-  let n=0;
+test("G3 qualified progress mode accepts one verified objective and preserves restart state",()=>{
+  const progress=createProgressController({maxNoProgressRounds:1,requireQualifiedProgress:true,verifyQualifiedProgress:({id,roleEvidenceIds})=>id==="OBJECTIVE_VERIFIED_1"&&roleEvidenceIds.includes("EVI_1")});
+  const first=progress.observe({evidenceIds:["EVI_1"],qualifiedProgressIds:["OBJECTIVE_VERIFIED_1"]});
+  assert.equal(first.progress_delta,1);
+  const restored=createProgressController({maxNoProgressRounds:1,requireQualifiedProgress:true,verifyQualifiedProgress:({id,roleEvidenceIds})=>id==="OBJECTIVE_VERIFIED_1"&&roleEvidenceIds.includes("EVI_1"),initialState:progress.snapshot()});
+  assert.equal(restored.observe({evidenceIds:["EVI_2"],qualifiedProgressIds:["OBJECTIVE_VERIFIED_1"]}).progress_delta,0);
+  assert.equal(restored.observe({evidenceIds:["EVI_3"],qualifiedProgressIds:["OBJECTIVE_VERIFIED_1"]}).stop,true);
+  assert.throws(()=>createProgressController({maxNoProgressRounds:1,requireQualifiedProgress:false,initialState:progress.snapshot()}),/PROGRESS_QUALIFICATION_POLICY_MISMATCH/);
+});
+
+test("G3 qualified mode never admits unverified IDs or an absent verifier",()=>{
+  assert.throws(()=>createProgressController({requireQualifiedProgress:true}),/PROGRESS_QUALIFICATION_VERIFIER_REQUIRED/);
+  const progress=createProgressController({maxNoProgressRounds:1,requireQualifiedProgress:true,verifyQualifiedProgress:({id,roleEvidenceIds})=>id==="OBJECTIVE_A"&&roleEvidenceIds.includes("EVI_A")});
+  assert.equal(progress.observe({evidenceIds:["EVI_OTHER"],qualifiedProgressIds:["OBJECTIVE_A"]}).progress_delta,0);
+  assert.equal(progress.observe({evidenceIds:["EVI_A"],qualifiedProgressIds:["OBJECTIVE_A"]}).progress_delta,1);
+  assert.equal(progress.observe({evidenceIds:["EVI_A"],qualifiedProgressIds:["OBJECTIVE_A"]}).progress_delta,0);
+});
+
+test("G3 tool-loop opt-in only accepts a durable-hook objective verified against issued evidence",async()=>{
+  const issued=makeToolResult("source.read",{path:"a.js",sha256:"a".repeat(64),content:"source fact"});
+  let calls=0;
   const aiCore={call:async()=>{
-    n++;
-    if(n===1)return{content:JSON.stringify({tool_requests:[{tool:"source.read",arguments:{path:"a.js"}}]})};
-    if(n===2)return{content:JSON.stringify({tool_requests:[{tool:"source.read",arguments:{path:"b.js"}}]})};
-    return{content:JSON.stringify({decision:"INSUFFICIENT_EVIDENCE"})};
+    calls++;
+    return{content:JSON.stringify(calls===1?{tool_requests:[{tool:"source.read",arguments:{path:"a.js"}}]}:{decision:"HANDOFF"})};
   }};
-  await assert.rejects(()=>runRoleWithReadOnlyTools({aiCore,role:"code_scout",user:"x",toolRuntime,maxToolRounds:2,maxToolCalls:4}),/ROLE_TOOL_NO_PROGRESS:code_scout:PROGRESS_DELTA_0/);
+  const toolRuntime={availableTools:["source.read"],execute:async()=>issued};
+  const out=await runRoleWithReadOnlyTools({
+    aiCore,role:"code_scout",user:"inspect",toolRuntime,maxToolRounds:2,maxToolCalls:2,
+    durableHooks:{onToolResult:async()=>({qualified_progress_id:"OBJECTIVE_SOURCE_FACT_VERIFIED"})},
+    progressQualification:{verify:({id,roleEvidenceIds})=>id==="OBJECTIVE_SOURCE_FACT_VERIFIED"&&roleEvidenceIds.includes(issued.evidence_id)},
+  });
+  assert.equal(out.tool_loop.progress.total_qualified_progress_ids,1);
+  assert.equal(out.tool_loop.progress.history[0].progress_delta,1);
+  assert.equal(out.tool_loop.continuation_state.progress.require_qualified_progress,true);
+});
+
+test("G3 tool-loop opt-in rejects unsupported qualified ID without resetting no-progress",async()=>{
+  const issued=makeToolResult("source.read",{path:"a.js",sha256:"b".repeat(64),content:"no task advancement"});
+  let calls=0;
+  const aiCore={call:async()=>{calls++;return{content:JSON.stringify({tool_requests:[{tool:"source.read",arguments:{path:`file_${calls}.js`}}]})};}};
+  const toolRuntime={availableTools:["source.read"],execute:async()=>issued};
+  await assert.rejects(()=>runRoleWithReadOnlyTools({
+    aiCore,role:"code_scout",user:"inspect",toolRuntime,maxToolRounds:3,maxToolCalls:6,
+    durableHooks:{onToolResult:async()=>({qualified_progress_id:"UNSUPPORTED_OBJECTIVE"})},
+    progressQualification:{verify:()=>false},
+  }),/ROLE_TOOL_NO_PROGRESS:code_scout:PROGRESS_DELTA_0/);
 });
