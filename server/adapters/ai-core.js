@@ -158,6 +158,7 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
     throw new AiCoreError("AI_CORE_GATE_UNCONFIGURED","Four verified Gate origins must be explicitly configured before opt-in routing");
   if(dispatchMode==="model_gates"&&inputTokenShadow)
     throw new AiCoreError("AI_CORE_GATE_SHADOW_UNQUALIFIED","Legacy input token counter cannot certify model Gate traffic");
+  const runtimeRouteBinding=dispatchMode==="model_gates"?crypto.createHash("sha256").update(JSON.stringify(qualifiedGateUrls)).digest("hex"):null;
   function endpointForRole(role){
     if(dispatchMode==="legacy"){
       if(!ROLES[role])throw new AiCoreError("ROLE_INVALID","Unknown DebugAI role");
@@ -337,6 +338,6 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
   }
   async function call(role,options={}){return queuedCall(role,options);}
   async function callPrepared(role,{system,user="",...options}={}){if(typeof system!=="string"||!system.trim())throw new AiCoreError("AI_CORE_PREPARED_SYSTEM_REQUIRED","Prepared benchmark system prompt is required",{role});return queuedCall(role,{...options,user},{preparedSystem:system});}
-  return{endpoint,dispatch_mode:dispatchMode,endpointForRole,runtime_context_tokens:qualifiedRuntimeContext,runtime_context_qualified:qualifiedRuntimeContext!==null,prompt_cache_requested:promptCache,preflightRoleGate,call,callPrepared};
+  return{endpoint,dispatch_mode:dispatchMode,runtime_route_binding:runtimeRouteBinding,endpointForRole,runtime_context_tokens:qualifiedRuntimeContext,runtime_context_qualified:qualifiedRuntimeContext!==null,prompt_cache_requested:promptCache,preflightRoleGate,call,callPrepared};
 }
 module.exports={ROLE_ALIASES,TIMEOUT_CLASS,AiCoreError,classifyTimeoutError,isTimeoutError,resolveRoleTimeoutMs,resolveEffectiveTimeoutMs,normalizeRuntimeContextTokens,resolveEffectiveMaxTokens,finiteUsage,usageTelemetry,providerTimingTelemetry,prefixHash,truncationError,runtimeControlWireUser,sampleNodeProcessResources,nodeProcessResourceObservation,createAiCoreAdapter};
