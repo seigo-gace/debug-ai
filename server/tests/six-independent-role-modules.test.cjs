@@ -64,3 +64,17 @@ test("independent role output semantic profiles retain safety boundaries",()=>{
   assert.equal(profiles[1].forbid_confirmed_root,true);
   assert.equal(profiles[2].forbid_confirmed_root,true);
 });
+
+test("six role budgets retain existing independent limits",()=>{
+  const {ROLE_RUNTIME_BUDGETS,assertRoleRuntimeBudgets}=require("../control/role-runtime-budgets.js");
+  assert.equal(assertRoleRuntimeBudgets(),true);
+  const files=["code-scout","causal-scout","researcher","diagnoser","patch-engineer","local-reviewer"];
+  for(const [i,id] of Object.keys(expected).entries()){
+    const separate=require(`../role-modules/${files[i]}-budget.js`);
+    assert.strictEqual(ROLE_RUNTIME_BUDGETS[id],separate);
+    assert.equal(Object.isFrozen(separate),true);
+  }
+  assert.equal(ROLE_RUNTIME_BUDGETS.patch_engineer.max_tokens,2048);
+  assert.equal(ROLE_RUNTIME_BUDGETS.patch_engineer.max_tool_calls,0);
+  assert.equal(ROLE_RUNTIME_BUDGETS.local_reviewer.qualification,"REAL_ROLE_BENCHMARK_PASS");
+});
