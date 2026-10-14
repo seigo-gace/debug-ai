@@ -336,8 +336,20 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
       throw new AiCoreError("AI_CORE_GATE_UNREACHABLE","Model Gate preflight transport failed",{role});
     }finally{clearTimeout(timer);}
   }
+  // Model Gate deployment uses four physical models, not six resident roles.
+  // This is authenticated identity checking only; it does not prove Stage B is live.
+  async function preflightConfiguredGates({probeTimeoutMs=3000}={}){
+    if(dispatchMode!=="model_gates")
+      throw new AiCoreError("AI_CORE_GATE_PREFLIGHT_MODE_INVALID","Model Gate startup verification is opt-in only");
+    const roles=["code_scout","causal_scout","researcher","local_reviewer"];
+    const checks=[];
+    for(const role of roles)checks.push(await preflightRoleGate(role,{probeTimeoutMs}));
+    return Object.freeze({schema:"debugai.ai-core-gates-preflight/v1",
+      models:Object.freeze(checks.map(({model})=>model)),identity:"MATCH",
+      inference_qualified:false,lifecycle_qualified:false});
+  }
   async function call(role,options={}){return queuedCall(role,options);}
   async function callPrepared(role,{system,user="",...options}={}){if(typeof system!=="string"||!system.trim())throw new AiCoreError("AI_CORE_PREPARED_SYSTEM_REQUIRED","Prepared benchmark system prompt is required",{role});return queuedCall(role,{...options,user},{preparedSystem:system});}
-  return{endpoint,dispatch_mode:dispatchMode,runtime_route_binding:runtimeRouteBinding,endpointForRole,runtime_context_tokens:qualifiedRuntimeContext,runtime_context_qualified:qualifiedRuntimeContext!==null,prompt_cache_requested:promptCache,preflightRoleGate,call,callPrepared};
+  return{endpoint,dispatch_mode:dispatchMode,runtime_route_binding:runtimeRouteBinding,endpointForRole,runtime_context_tokens:qualifiedRuntimeContext,runtime_context_qualified:qualifiedRuntimeContext!==null,prompt_cache_requested:promptCache,preflightRoleGate,preflightConfiguredGates,call,callPrepared};
 }
 module.exports={ROLE_ALIASES,TIMEOUT_CLASS,AiCoreError,classifyTimeoutError,isTimeoutError,resolveRoleTimeoutMs,resolveEffectiveTimeoutMs,normalizeRuntimeContextTokens,resolveEffectiveMaxTokens,finiteUsage,usageTelemetry,providerTimingTelemetry,prefixHash,truncationError,runtimeControlWireUser,sampleNodeProcessResources,nodeProcessResourceObservation,createAiCoreAdapter};
