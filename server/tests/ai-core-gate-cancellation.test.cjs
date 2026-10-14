@@ -4,7 +4,7 @@ const assert=require("node:assert/strict");
 const {createAiCoreAdapter,TIMEOUT_CLASS}=require("../adapters/ai-core.js");
 const urls={coder:"http://127.0.0.1:18184",qwen3:"http://127.0.0.1:18182",granite:"http://127.0.0.1:18181",ministral:"http://127.0.0.1:18183"};
 const good=()=>({ok:true,status:200,text:async()=>JSON.stringify({choices:[{message:{content:'{"ok":true}'},finish_reason:"stop"}]})});
-function adapter(fetchImpl){return createAiCoreAdapter({baseUrl:"http://127.0.0.1:18080",apiKey:"test",dispatchMode:"model_gates",modelGateBaseUrls:urls,fetchImpl,maxTransportTimeoutAttempts:3});}
+function adapter(fetchImpl){return createAiCoreAdapter({baseUrl:"http://127.0.0.1:18080",apiKey:"test",dispatchMode:"model_gates",modelGateBaseUrls:urls,fetchImpl,maxTransportTimeoutAttempts:2});}
 
 test("cancelled queued six-role work exits without dispatch; other Role work remains usable",async()=>{
   let finishFirst,firstStarted;
