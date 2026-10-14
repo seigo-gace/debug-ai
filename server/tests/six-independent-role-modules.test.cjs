@@ -1,0 +1,34 @@
+"use strict";
+const assert=require("node:assert/strict");
+const test=require("node:test");
+const {ROLES,EXTERNAL_REVIEW_POINTS,assertRoleContract}=require("../roles.js");
+const expected=Object.freeze({
+  code_scout:["code-scout","debugai/code-scout","coder//models/qwen2.5-coder-7b-instruct-q4_k_m.gguf",null],
+  causal_scout:["causal-scout","debugai/causal-scout","qwen3//models/Qwen3-8B-Q4_K_M.gguf",false],
+  researcher:["researcher","debugai/researcher","granite//models/granite-4.2-8b-Q4_K_M.gguf",false],
+  diagnoser:["diagnoser","debugai/diagnoser","qwen3//models/Qwen3-8B-Q4_K_M.gguf",true],
+  patch_engineer:["patch-engineer","debugai/patch-engineer","coder//models/qwen2.5-coder-7b-instruct-q4_k_m.gguf",null],
+  local_reviewer:["local-reviewer","debugai/local-reviewer","ministral//models/Ministral-3-8B-Reasoning-2512-Q4_K_M.gguf",null],
+});
+test("six existing role IDs preserve order and registration",()=>{
+  assert.deepEqual(Object.keys(ROLES),Object.keys(expected));
+  assert.equal(assertRoleContract(),true);
+  assert.deepEqual(EXTERNAL_REVIEW_POINTS,["hypothesis","final"]);
+});
+for(const [id,[filename,alias,backend,thinking]] of Object.entries(expected)){
+  test(`independent module preserves ${id} identity, model and thinking`,()=>{
+    const separate=require(`../role-modules/${filename}.js`);
+    assert.strictEqual(ROLES[id],separate);
+    assert.ok(Object.isFrozen(separate));
+    assert.equal(separate.alias,alias);
+    assert.equal(separate.backend_model,backend);
+    assert.equal(separate.thinking,thinking);
+    assert.equal(separate.external,false);
+  });
+}
+test("six modules are independently addressable objects, without model duplication",()=>{
+  assert.equal(new Set(Object.values(ROLES)).size,6);
+  assert.equal(new Set(Object.values(ROLES).map(x=>x.backend_model)).size,4);
+  assert.equal(ROLES.researcher.timeout_ms,600000);
+  assert.equal(ROLES.diagnoser.timeout_ms,600000);
+});
