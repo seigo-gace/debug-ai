@@ -1,7 +1,7 @@
 "use strict";
-const {runRoleWithReadOnlyTools}=require("../control/tool-loop.js");
 function bindRoleExecution(role,budget){
   async function invokeReadOnly({aiCore,system,user,toolRuntime,baseEvidenceIds=[],strictEvidenceRefs=true,continuationState=null,durableHooks=null}){
+    const {runRoleWithReadOnlyTools}=require("../control/tool-loop.js");
     return runRoleWithReadOnlyTools({aiCore,role,system,user,toolRuntime,baseEvidenceIds,strictEvidenceRefs,continuationState,durableHooks});
   }
   async function invokeDirect({aiCore,system,user}){
