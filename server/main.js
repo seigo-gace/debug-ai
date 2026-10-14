@@ -35,8 +35,19 @@ const aiCoreContextTokens=requiredEnvInt("DEBUG_AI_CORE_CONTEXT_TOKENS",{min:100
 // byte-for-byte equivalent for model dispatch when no flag is configured.
 const inputTokenShadowFlag=process.env.DEBUG_AI_CORE_INPUT_TOKEN_SHADOW||"false";
 if(inputTokenShadowFlag!=="true"&&inputTokenShadowFlag!=="false")throw new Error("DEBUG_AI_CORE_INPUT_TOKEN_SHADOW_INVALID");
+// Explicit opt-in after AI Core's exclusive Stage B traffic ownership is verified.
+// Absence preserves the current 18080 route. These URLs are not credentials or
+// a second model lifecycle owner; Gate POST still requires AI Core admission.
+const coreGateDispatchMode=process.env.DEBUG_AI_CORE_GATE_DISPATCH_MODE||"legacy";
+const coreGateUrls=coreGateDispatchMode==="model_gates"?{
+  coder:process.env.DEBUG_AI_CORE_GATE_CODER_URL,
+  qwen3:process.env.DEBUG_AI_CORE_GATE_QWEN3_URL,
+  granite:process.env.DEBUG_AI_CORE_GATE_GRANITE_URL,
+  ministral:process.env.DEBUG_AI_CORE_GATE_MINISTRAL_URL
+}:null;
 const aiCore=createAiCoreAdapter({
   runtimeContextTokens:aiCoreContextTokens,requireRuntimeContextQualification:true,
+  dispatchMode:coreGateDispatchMode,modelGateBaseUrls:coreGateUrls,
   inputTokenShadow:inputTokenShadowFlag==="true",
   inputTokenShadowRoute:process.env.DEBUG_AI_CORE_INPUT_TOKEN_SHADOW_ROUTE||"router"
 });
