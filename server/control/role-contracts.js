@@ -3,12 +3,12 @@ const {ROLES}=require("../roles.js");
 const {ROLE_CONTRACT_VERSION,COMMON}=require("./role-contract-common.js");
 const ROLE_KEYS=Object.freeze(["code_scout","causal_scout","researcher","diagnoser","patch_engineer","local_reviewer"]);
 const ROLE_CONTRACTS=Object.freeze({
-  code_scout:require("../role-modules/code-scout-contract.js"),
-  causal_scout:require("../role-modules/causal-scout-contract.js"),
-  researcher:require("../role-modules/researcher-contract.js"),
-  diagnoser:require("../role-modules/diagnoser-contract.js"),
-  patch_engineer:require("../role-modules/patch-engineer-contract.js"),
-  local_reviewer:require("../role-modules/local-reviewer-contract.js"),
+  code_scout:require("../role-modules/index.js").MODULES.code_scout.contract,
+  causal_scout:require("../role-modules/index.js").MODULES.causal_scout.contract,
+  researcher:require("../role-modules/index.js").MODULES.researcher.contract,
+  diagnoser:require("../role-modules/index.js").MODULES.diagnoser.contract,
+  patch_engineer:require("../role-modules/index.js").MODULES.patch_engineer.contract,
+  local_reviewer:require("../role-modules/index.js").MODULES.local_reviewer.contract,
 });
 function getRoleContract(roleId){const contract=ROLE_CONTRACTS[roleId];if(!contract)throw new Error(`ROLE_CONTRACT_NOT_FOUND:${roleId}`);return contract;}
 function assertRoleContracts(){
