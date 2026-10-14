@@ -2,12 +2,12 @@
 const {validateReasoningArtifact}=require("./claim-evidence.js");
 
 const ROLE_SEMANTIC_RULES=Object.freeze({
-  code_scout:require("../role-modules/code-scout-semantic.js"),
-  causal_scout:require("../role-modules/causal-scout-semantic.js"),
-  researcher:require("../role-modules/researcher-semantic.js"),
-  diagnoser:require("../role-modules/diagnoser-semantic.js"),
-  patch_engineer:require("../role-modules/patch-engineer-semantic.js"),
-  local_reviewer:require("../role-modules/local-reviewer-semantic.js"),
+  code_scout:require("../role-modules/index.js").MODULES.code_scout.semantic,
+  causal_scout:require("../role-modules/index.js").MODULES.causal_scout.semantic,
+  researcher:require("../role-modules/index.js").MODULES.researcher.semantic,
+  diagnoser:require("../role-modules/index.js").MODULES.diagnoser.semantic,
+  patch_engineer:require("../role-modules/index.js").MODULES.patch_engineer.semantic,
+  local_reviewer:require("../role-modules/index.js").MODULES.local_reviewer.semantic,
 });
 
 const RESEARCH_STATUS=new Set(["SUPPORTED","CONTRADICTORY_EVIDENCE","INSUFFICIENT_EVIDENCE"]);
