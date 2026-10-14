@@ -189,3 +189,33 @@ test("Opt-in startup identity verification fails immediately on wrong second Gat
   const legacy=createAiCoreAdapter({baseUrl:"http://127.0.0.1:18080",apiKey:"test",fetchImpl:async()=>inferenceReply()});
   await assert.rejects(()=>legacy.preflightConfiguredGates(),e=>e.code==="AI_CORE_GATE_PREFLIGHT_MODE_INVALID");
 });
+
+test("six Role calls traverse all four model Gates under simulated Core two-resident arbitration without a DebugAI model manager",async()=>{
+  // This is a consumer contract simulation, NOT real Host residency evidence.
+  const residents=[],roles=["code_scout","causal_scout","researcher","diagnoser","patch_engineer","local_reviewer"];
+  const traversed=[],snapshots=[];
+  const ai=createAiCoreAdapter({baseUrl:"http://127.0.0.1:18080",apiKey:"test",dispatchMode:"model_gates",
+    modelGateBaseUrls:urls,fetchImpl:async(url,opts)=>{
+      assert.equal(opts.method,"POST");
+      const role=roles[traversed.length];
+      const identity=expected(role);
+      assert.equal(url,urls[identity.model]+"/v1/chat/completions");
+      assert.equal(JSON.parse(opts.body).model,ROLES[role].backend_model);
+      const index=residents.indexOf(identity.model);
+      if(index>=0)residents.splice(index,1);
+      else if(residents.length>=2)residents.shift();
+      residents.push(identity.model);
+      snapshots.push([...residents]);
+      traversed.push(role);
+      return inferenceReply();
+    }});
+  for(const role of roles){
+    const result=await ai.call(role,{user:"identical model-Gate contract"});
+    assert.equal(result.content,'{"ok":true}');
+    assert.equal(result.model,ROLES[role].backend_model);
+  }
+  assert.deepEqual(traversed,roles);
+  assert.equal(new Set(snapshots.flat()).size,4,"all four physical model identities are requested");
+  assert.ok(snapshots.every(s=>s.length<=2),"mock Core, not DebugAI, enforces two residents");
+  assert.equal(ai.dispatch_mode,"model_gates");
+});
