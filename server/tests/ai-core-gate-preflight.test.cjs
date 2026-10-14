@@ -154,3 +154,38 @@ test("Gate dispatch identity is deterministic, detects endpoint changes and leav
   assert.equal(JSON.stringify(a.runtime_route_binding).includes("127.0.0.1"),false,
     "route identity is a digest, not a URL or secret");
 });
+
+test("Startup Gate verification checks each physical model once, never claims a resident or makes inference traffic",async()=>{
+  const calls=[];
+  const ai=createAiCoreAdapter({baseUrl:"http://127.0.0.1:18080",apiKey:"test",modelGateBaseUrls:urls,
+    dispatchMode:"model_gates",fetchImpl:async(url,opts)=>{
+      calls.push({url,method:opts.method});
+      const model=Object.keys(urls).find(k=>url===urls[k]+"/v1/models");
+      assert.ok(model);
+      const role=Object.keys(ROLES).find(k=>expected(k).model===model);
+      return reply(expected(role).id);
+    }});
+  const result=await ai.preflightConfiguredGates();
+  assert.equal(result.schema,"debugai.ai-core-gates-preflight/v1");
+  assert.equal(result.identity,"MATCH");
+  assert.equal(result.inference_qualified,false);
+  assert.equal(result.lifecycle_qualified,false);
+  assert.deepEqual(result.models,["coder","qwen3","granite","ministral"]);
+  assert.equal(calls.length,4);
+  assert.ok(calls.every(x=>x.method==="GET"&&x.url.endsWith("/v1/models")));
+  assert.equal(JSON.stringify(calls).includes("completions"),false);
+});
+
+test("Opt-in startup identity verification fails immediately on wrong second Gate; no other traffic is admitted",async()=>{
+  const urlsSeen=[];
+  const ai=createAiCoreAdapter({baseUrl:"http://127.0.0.1:18080",apiKey:"test",modelGateBaseUrls:urls,
+    dispatchMode:"model_gates",fetchImpl:async(url,opts)=>{
+      urlsSeen.push(url);
+      if(url===urls.qwen3+"/v1/models")return reply("/models/unrelated.gguf");
+      return reply(expected("code_scout").id);
+    }});
+  await assert.rejects(()=>ai.preflightConfiguredGates(),e=>e.code==="AI_CORE_GATE_MODEL_MISMATCH");
+  assert.deepEqual(urlsSeen,[urls.coder+"/v1/models",urls.qwen3+"/v1/models"]);
+  const legacy=createAiCoreAdapter({baseUrl:"http://127.0.0.1:18080",apiKey:"test",fetchImpl:async()=>inferenceReply()});
+  await assert.rejects(()=>legacy.preflightConfiguredGates(),e=>e.code==="AI_CORE_GATE_PREFLIGHT_MODE_INVALID");
+});
