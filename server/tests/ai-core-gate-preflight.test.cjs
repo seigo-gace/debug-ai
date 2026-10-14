@@ -138,3 +138,19 @@ test("Opt-in Gate dispatch cannot use unqualified input token shadow or missing 
   assert.throws(()=>createAiCoreAdapter({baseUrl:"http://127.0.0.1:18080",apiKey:"test",
     dispatchMode:"unsafe"}),e=>e.code==="AI_CORE_DISPATCH_MODE_INVALID");
 });
+
+test("Gate dispatch identity is deterministic, detects endpoint changes and leaves legacy resume bindings unchanged",()=>{
+  function instance(mapping,mode){
+    return createAiCoreAdapter({baseUrl:"http://127.0.0.1:18080",apiKey:"test",
+      modelGateBaseUrls:mapping,dispatchMode:mode,fetchImpl:async()=>inferenceReply()});
+  }
+  const a=instance(urls,"model_gates"),b=instance({...urls},"model_gates");
+  assert.match(a.runtime_route_binding,/^[a-f0-9]{64}$/);
+  assert.equal(a.runtime_route_binding,b.runtime_route_binding);
+  assert.notEqual(a.runtime_route_binding,instance({...urls,coder:"http://127.0.0.1:19184"},"model_gates").runtime_route_binding);
+  assert.equal(instance(urls,"legacy").runtime_route_binding,null);
+  assert.equal(a.dispatch_mode,"model_gates");
+  assert.equal(instance(urls,"legacy").dispatch_mode,"legacy");
+  assert.equal(JSON.stringify(a.runtime_route_binding).includes("127.0.0.1"),false,
+    "route identity is a digest, not a URL or secret");
+});
