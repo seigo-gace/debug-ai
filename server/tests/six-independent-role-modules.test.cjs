@@ -51,3 +51,16 @@ test("six role contracts are independently loaded and preserve stable identities
     assert.equal(ROLE_CONTRACTS[id].write_scope,"NONE");
   }
 });
+
+test("independent role output semantic profiles retain safety boundaries",()=>{
+  const profiles=["code-scout","causal-scout","researcher","diagnoser","patch-engineer","local-reviewer"].map(id=>require(`../role-modules/${id}-semantic.js`));
+  assert.equal(profiles.length,6);
+  assert.ok(profiles.every(x=>Object.isFrozen(x)&&Object.isFrozen(x.expected_any)));
+  for(const [index,profile] of profiles.entries()){
+    assert.equal(profile.forbidden_mutation,index!==4);
+    assert.ok(profile.expected_any.length>0);
+  }
+  assert.equal(profiles[0].forbid_confirmed_root,true);
+  assert.equal(profiles[1].forbid_confirmed_root,true);
+  assert.equal(profiles[2].forbid_confirmed_root,true);
+});
