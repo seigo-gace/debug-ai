@@ -77,3 +77,64 @@ test("preflight never claims two resident models or physical state from a model 
   assert.equal(Object.hasOwn(result,"model_running"),false);
   assert.equal(result.inference_qualified,false);
 });
+
+function inferenceReply(){return{ok:true,status:200,text:async()=>JSON.stringify({choices:[{message:{content:'{"ok":true}'},finish_reason:"stop"}]})};}
+
+test("Stage B opt-in routes every role to its one Core Gate without altering role backend model identities",async()=>{
+  const calls=[];
+  const ai=createAiCoreAdapter({baseUrl:"http://127.0.0.1:18080",apiKey:"test",modelGateBaseUrls:urls,
+    dispatchMode:"model_gates",fetchImpl:async(url,opts)=>{
+      const body=JSON.parse(opts.body);
+      calls.push({url,method:opts.method,body});
+      return inferenceReply();
+    }});
+  assert.equal(ai.dispatch_mode,"model_gates");
+  for(const role of Object.keys(ROLES)){
+    const out=await ai.call(role,{user:"task"});
+    assert.equal(out.content,'{"ok":true}');
+  }
+  assert.equal(calls.length,6);
+  for(let i=0;i<calls.length;i++){
+    const role=Object.keys(ROLES)[i];
+    const {model}=expected(role);
+    assert.equal(calls[i].url,urls[model]+"/v1/chat/completions");
+    assert.equal(calls[i].body.model,ROLES[role].backend_model,
+      "Role keeps original model identity in request, including model namespace");
+    assert.equal(calls[i].method,"POST");
+  }
+  assert.equal(calls.some(x=>x.url.includes(":18080/")),false,"opt-in never silently falls back to old router");
+});
+
+test("Unqualified Stage A Gate 409 is rejected without a retry or a legacy route fallback",async()=>{
+  const calls=[];
+  const ai=createAiCoreAdapter({baseUrl:"http://127.0.0.1:18080",apiKey:"test",modelGateBaseUrls:urls,
+    dispatchMode:"model_gates",fetchImpl:async(url,opts)=>{
+      calls.push({url,method:opts.method});
+      return{ok:false,status:409,text:async()=>JSON.stringify({error:{code:"OBSERVE_ONLY_NO_INFERENCE"}})};
+    }});
+  await assert.rejects(()=>ai.call("code_scout",{user:"task"}),e=>e.code==="AI_CORE_HTTP"&&e.meta?.status===409);
+  assert.deepEqual(calls,[{url:urls.coder+"/v1/chat/completions",method:"POST"}],
+    "A 409 is not a reason to bypass Core Admission through the old route");
+});
+
+test("Legacy remains the only production default even when read-only Gate urls are configured",async()=>{
+  const routes=[];
+  const ai=createAiCoreAdapter({baseUrl:"http://127.0.0.1:18080",apiKey:"test",modelGateBaseUrls:urls,
+    fetchImpl:async(url,opts)=>{routes.push({url,method:opts.method});return inferenceReply();}});
+  assert.equal(ai.dispatch_mode,"legacy");
+  for(const role of ["code_scout","causal_scout","researcher","diagnoser","patch_engineer","local_reviewer"]){
+    assert.equal(ai.endpointForRole(role),"http://127.0.0.1:18080/v1/chat/completions");
+    await ai.call(role,{user:"legacy"});
+  }
+  assert.equal(routes.length,6);
+  assert.ok(routes.every(x=>x.url==="http://127.0.0.1:18080/v1/chat/completions"&&x.method==="POST"));
+});
+
+test("Opt-in Gate dispatch cannot use unqualified input token shadow or missing Gate config",()=>{
+  assert.throws(()=>createAiCoreAdapter({baseUrl:"http://127.0.0.1:18080",apiKey:"test",
+    dispatchMode:"model_gates"}),e=>e.code==="AI_CORE_GATE_UNCONFIGURED");
+  assert.throws(()=>createAiCoreAdapter({baseUrl:"http://127.0.0.1:18080",apiKey:"test",
+    dispatchMode:"model_gates",modelGateBaseUrls:urls,inputTokenShadow:true}),e=>e.code==="AI_CORE_GATE_SHADOW_UNQUALIFIED");
+  assert.throws(()=>createAiCoreAdapter({baseUrl:"http://127.0.0.1:18080",apiKey:"test",
+    dispatchMode:"unsafe"}),e=>e.code==="AI_CORE_DISPATCH_MODE_INVALID");
+});
