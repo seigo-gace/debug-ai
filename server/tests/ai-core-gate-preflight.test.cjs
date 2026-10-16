@@ -288,7 +288,11 @@ test("real Gate error codes retain bounded upstream-reported identity for debugg
     {status:429,code:"MODEL_CONCURRENCY_LIMIT",role:"causal_scout",expectedGate:urls.qwen3},
     {status:503,code:"ORPHANED_LEASE_RECOVERY_PENDING",role:"researcher",expectedGate:urls.granite},
     {status:503,code:"MODEL_START_TIMEOUT",role:"local_reviewer",expectedGate:urls.ministral},
-    {status:502,code:"UPSTREAM_JSON_CONTRACT_INVALID",role:"diagnoser",expectedGate:urls.qwen3}
+    {status:502,code:"UPSTREAM_JSON_CONTRACT_INVALID",role:"diagnoser",expectedGate:urls.qwen3},
+    {status:502,code:"UPSTREAM_STREAM_INTERRUPTED",role:"code_scout",expectedGate:urls.coder},
+    {status:502,code:"UPSTREAM_COMPLETION_CONTRACT_INVALID",role:"researcher",expectedGate:urls.granite},
+    {status:422,code:"WRONG_MODEL_FOR_ENDPOINT",role:"causal_scout",expectedGate:urls.qwen3},
+    {status:503,code:"LEASE_JOURNAL_WRITE_FAILED",role:"local_reviewer",expectedGate:urls.ministral}
   ]){
     const observations=[],calls=[],secret="SYNTHETIC_PRIVATE_PAYLOAD_DO_NOT_LOG_64bc";
     const ai=createAiCoreAdapter({baseUrl:"http://127.0.0.1:18080",apiKey:"test",modelGateBaseUrls:urls,
