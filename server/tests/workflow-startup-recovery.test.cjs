@@ -160,10 +160,10 @@ test("blocked AI Core Unix startup error retains safe upstream identity across d
   let durable;
   for(let i=0;i<100;i++){durable=authority.loadDurable(accepted.run_id);if(durable.state.job_status==="BLOCKED")break;await new Promise(r=>setTimeout(r,10));}
   assert.equal(durable.state.job_status,"BLOCKED");
-  const path=durable.manifest.workflow_input_refs.last_execution_failure;
-  const original=io.readRecord(path).payload;
+  const recordPath=durable.manifest.workflow_input_refs.last_execution_failure;
+  const original=io.readRecord(recordPath).payload;
   const restartAuthority=new RunAuthority({runtimeRoot,repoPolicy:policy,durableIo:io});
-  const restored=restartAuthority.readDurableRecord(path,{expectedSchema:"workflow-data/v1"}).payload;
+  const restored=restartAuthority.readDurableRecord(recordPath,{expectedSchema:"workflow-data/v1"}).payload;
   assert.deepEqual(restored,original);
   assert.equal(restored.code,"AI_CORE_HTTP");
   assert.equal(restored.role,"causal_scout");
