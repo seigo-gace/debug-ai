@@ -302,7 +302,7 @@ test("Scout source.search coverage proof survives Researcher, Diagnoser and fall
       if(role==="researcher")return{content:JSON.stringify({research_status:"INSUFFICIENT_EVIDENCE",answer:"UNKNOWN",evidence_refs:[],rejected_source_refs:[],contradictions:[]})};
       if(role==="diagnoser")return{content:JSON.stringify({diagnosis_status:"HYPOTHESES_RETAINED",hypotheses:[{id:"H1",status:"HYPOTHESIS",statement:"Source branch may return an unexpected value",evidence_refs:[],counter_evidence_refs:[],falsification_condition:"Run the failing source test again"}],confirmed_root_cause:null,unsupported_claims:[]})};
       if(role==="local_reviewer"){
-        const input=JSON.parse(opts.user);
+        const input=JSON.parse(opts.user.split("\n\n")[0]);
         if(n===1){
           const search=input.evidence.find(x=>x.tool==="source.search");
           assert.ok(search,"Scout search Evidence must survive into local reviewer");
@@ -321,12 +321,12 @@ test("Scout source.search coverage proof survives Researcher, Diagnoser and fall
     assert.equal(reviewed,1);assert.equal(count.get("local_reviewer"),2);
     assert.equal(out.local_hypothesis_review.json.verdict,"FAIL");
     assert.equal(out.state,"AWAITING_EXTERNAL_HYPOTHESIS_REVIEW");
-    const searchPrompt=JSON.parse(calls.find(x=>x.role==="researcher").opts.user).scout_tool_evidence.find(x=>x.tool==="source.search");
+    const searchPrompt=JSON.parse(calls.find(x=>x.role==="researcher").opts.user.split("\n\n")[0]).scout_tool_evidence.find(x=>x.tool==="source.search");
     assert.equal(searchPrompt.schema,"debugai.tool-result/v1");
     assert.equal(searchPrompt.status,"OK");
     assert.ok(searchPrompt.integrity.search_coverage,"search coverage must remain verifiable");
     assert.match(searchPrompt.evidence_id,/^TRE_/);
-    const diagPrompt=JSON.parse(calls.find(x=>x.role==="diagnoser").opts.user).scout_tool_evidence;
+    const diagPrompt=JSON.parse(calls.find(x=>x.role==="diagnoser").opts.user.split("\n\n")[0]).scout_tool_evidence;
     assert.equal(diagPrompt.find(x=>x.tool==="source.search").evidence_id,searchPrompt.evidence_id);
     await assert.rejects(workflow.patchCandidate({runId:out.run_id,analysis:out,repo:f.repo,selectedPaths:["b.js"],task:"repair"}),/PATCH_REQUIRES_EXTERNAL_HYPOTHESIS_REVIEW_PASS/);
   }finally{f.cleanup();}
