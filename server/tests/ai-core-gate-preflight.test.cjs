@@ -262,3 +262,21 @@ test("Gate preflight and inference forbid redirects while original default path 
   await ai.call("code_scout",{user:"bounded synthetic test"});
   assert.deepEqual(calls.map(x=>[x.method,x.redirect]),[["GET","error"],["POST","error"]]);
 });
+
+
+test("Production Compose passes the explicit four-Gate opt-in without changing legacy defaults or bearer source",()=>{
+  const fs=require("node:fs"),path=require("node:path");
+  const compose=fs.readFileSync(path.join(__dirname,"..","..","compose.yaml"),"utf8");
+  for(const [container,host] of [
+    ["DEBUG_AI_CORE_GATE_DISPATCH_MODE","DEBUG_AI_CORE_GATE_DISPATCH_MODE:-legacy"],
+    ["DEBUG_AI_CORE_GATE_CODER_URL","DEBUG_AI_CORE_GATE_CODER_URL:-"],
+    ["DEBUG_AI_CORE_GATE_QWEN3_URL","DEBUG_AI_CORE_GATE_QWEN3_URL:-"],
+    ["DEBUG_AI_CORE_GATE_GRANITE_URL","DEBUG_AI_CORE_GATE_GRANITE_URL:-"],
+    ["DEBUG_AI_CORE_GATE_MINISTRAL_URL","DEBUG_AI_CORE_GATE_MINISTRAL_URL:-"],
+  ]){
+    assert.ok(compose.includes(container+": ${"+host+"}"),container+" must be forwarded by Compose");
+  }
+  assert.ok(compose.includes("AI_CORE_API_KEY: ${AI_CORE_API_KEY:?required}"),"existing bearer source must be preserved");
+  assert.ok(compose.includes("DEBUG_AI_CORE_URL: ${DEBUG_AI_CORE_URL:?required}"),"legacy route remains configured");
+  assert.ok(!compose.includes("AI_CORE_API_KEY: ${AI_CORE_API_KEY:-}"),"no blank credential fallback");
+});
