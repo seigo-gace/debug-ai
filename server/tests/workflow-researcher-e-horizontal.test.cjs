@@ -98,7 +98,7 @@ test("actual Scout/Researcher/Diagnoser/hypothesis Reviewer hooks advance only a
     code_scout:{relevant_files:[],call_path:[],contract_mismatch:null,excluded_files:[],unknowns:[]},
     causal_scout:{claims:[{type:"UNKNOWN",statement:"missing trace"}]},
     researcher:{research_status:"INSUFFICIENT_EVIDENCE",answer:"missing trace",evidence_refs:[],rejected_source_refs:[],contradictions:[],bound_version:"fixture/v1"},
-    diagnoser:{diagnosis_status:"INSUFFICIENT_EVIDENCE",hypotheses:[],confirmed_root_cause:null,unsupported_claims:["missing trace"]},
+    diagnoser:{diagnosis_status:"HYPOTHESES_RETAINED",hypotheses:[{id:"H_TRACE",status:"HYPOTHESIS",statement:"A missing runtime trace may prevent the expected source branch from being observed",evidence_refs:[],counter_evidence_refs:[],falsification_condition:"Reproduce the source branch with a present trace"}],confirmed_root_cause:null,unsupported_claims:["missing trace"]},
     local_reviewer:{verdict:"PASS",decision:"DONE",claims:[]}
   };
   const wf=()=>createWorkflow({authority:new RunAuthority({runtimeRoot:root,durableIo:io}),repositorySnapshot:()=>"fixed",
