@@ -26,4 +26,15 @@ async function continueRoleWorkItem({authority,runId,role,workItemId,inputBindin
     maxStepsPerCall,maxTotalSteps,signal
   });
 }
-module.exports={ROLES,continueRoleWorkItem};
+// Existing role ports remain dormant unless one exact runtime mode opts into all six.
+// This flag never changes model identities, resource ownership, or approval rights.
+function horizontalRoleHooksForMode(mode="legacy"){
+  if(mode==="legacy")return null;
+  if(mode!=="six_role")throw new ContinuationError("DEBUG_AI_ROLE_EXECUTION_MODE_INVALID");
+  return Object.freeze({
+    enableHorizontalCodeScout:true,enableHorizontalCausalScout:true,
+    enableHorizontalResearcher:true,enableHorizontalDiagnoser:true,
+    enableHorizontalPatchEngineer:true,enableHorizontalLocalReviewer:true
+  });
+}
+module.exports={ROLES,continueRoleWorkItem,horizontalRoleHooksForMode};
