@@ -1,12 +1,12 @@
 "use strict";
 
 const ROLE_RUNTIME_BUDGETS=Object.freeze({
-  code_scout:Object.freeze({max_tokens:600,turn_timeout_ms:600000,tool_loop_wall_ms:1200000,max_tool_rounds:2,max_tool_calls:4,source:"DebugAI real self-analysis 2026-09-29; Qwen2.5-Coder prompt processing exceeded the recovered three-minute budget"}),
-  causal_scout:Object.freeze({max_tokens:600,turn_timeout_ms:600000,tool_loop_wall_ms:1200000,max_tool_rounds:2,max_tool_calls:4,source:"DebugAI real analyze 2026-09-28; Qwen3 cold prompt processing exceeded the recovered three-minute budget"}),
-  researcher:Object.freeze({max_tokens:600,turn_timeout_ms:600000,tool_loop_wall_ms:1200000,max_tool_rounds:2,max_tool_calls:4,source:"DebugAI real analyze 2026-09-28; Granite prompt processing exceeded the recovered three-minute budget"}),
-  diagnoser:Object.freeze({max_tokens:800,turn_timeout_ms:600000,tool_loop_wall_ms:1200000,max_tool_rounds:2,max_tool_calls:4,source:"DebugAI real analyze 2026-09-28; Qwen3 thinking prompt processing exceeded the recovered four-minute budget"}),
-  patch_engineer:Object.freeze({max_tokens:2048,turn_timeout_ms:360000,tool_loop_wall_ms:null,max_tool_rounds:0,max_tool_calls:0,source:"DebugAI r25 exact authority 2026-09-24"}),
-  local_reviewer:Object.freeze({max_tokens:1024,turn_timeout_ms:600000,tool_loop_wall_ms:null,max_tool_rounds:0,max_tool_calls:0,source:"Contabo real Local Reviewer benchmark 2026-09-27; current compatibility budget retained",qualification:"REAL_ROLE_BENCHMARK_PASS"}),
+  code_scout:require("../role-modules/index.js").MODULES.code_scout.budget,
+  causal_scout:require("../role-modules/index.js").MODULES.causal_scout.budget,
+  researcher:require("../role-modules/index.js").MODULES.researcher.budget,
+  diagnoser:require("../role-modules/index.js").MODULES.diagnoser.budget,
+  patch_engineer:require("../role-modules/index.js").MODULES.patch_engineer.budget,
+  local_reviewer:require("../role-modules/index.js").MODULES.local_reviewer.budget,
 });
 
 function getRoleRuntimeBudget(role){
