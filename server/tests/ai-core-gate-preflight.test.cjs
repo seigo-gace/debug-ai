@@ -240,3 +240,25 @@ test("Model Gate HTTP failure never exposes an upstream error body or synthetic 
     assert.deepEqual(calls,[{url:urls.coder+"/v1/chat/completions",method:"POST"}]);
   }
 });
+
+
+test("Only local bound Gate origins may receive the existing AI Core bearer",()=>{
+  for(const origin of ["https://example.invalid:18184","http://127.0.0.2:18184","http://localhost:18184","http://127.0.0.1:18184/redirect"]){
+    assert.throws(()=>createAiCoreAdapter({baseUrl:"http://127.0.0.1:18080",apiKey:"test",modelGateBaseUrls:{...urls,coder:origin},
+      dispatchMode:"model_gates"}),e=>e.code==="AI_CORE_GATE_CONFIG_INVALID");
+  }
+  assert.equal(createAiCoreAdapter({baseUrl:"http://127.0.0.1:18080",apiKey:"test",modelGateBaseUrls:urls,
+    dispatchMode:"model_gates"}).endpointForRole("code_scout"),urls.coder+"/v1/chat/completions");
+});
+
+test("Gate preflight and inference forbid redirects while original default path stays unchanged",async()=>{
+  const calls=[];
+  const ai=createAiCoreAdapter({baseUrl:"http://127.0.0.1:18080",apiKey:"test",modelGateBaseUrls:urls,
+    dispatchMode:"model_gates",fetchImpl:async(url,options)=>{
+      calls.push({url,redirect:options.redirect,method:options.method});
+      return options.method==="GET"?reply(expected("code_scout").id):inferenceReply();
+    }});
+  await ai.preflightRoleGate("code_scout");
+  await ai.call("code_scout",{user:"bounded synthetic test"});
+  assert.deepEqual(calls.map(x=>[x.method,x.redirect]),[["GET","error"],["POST","error"]]);
+});
