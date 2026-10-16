@@ -35,8 +35,19 @@ const aiCoreContextTokens=requiredEnvInt("DEBUG_AI_CORE_CONTEXT_TOKENS",{min:100
 // byte-for-byte equivalent for model dispatch when no flag is configured.
 const inputTokenShadowFlag=process.env.DEBUG_AI_CORE_INPUT_TOKEN_SHADOW||"false";
 if(inputTokenShadowFlag!=="true"&&inputTokenShadowFlag!=="false")throw new Error("DEBUG_AI_CORE_INPUT_TOKEN_SHADOW_INVALID");
+// Explicit opt-in after AI Core's exclusive Stage B traffic ownership is verified.
+// Absence preserves the current 18080 route. These URLs are not credentials or
+// a second model lifecycle owner; Gate POST still requires AI Core admission.
+const coreGateDispatchMode=process.env.DEBUG_AI_CORE_GATE_DISPATCH_MODE||"legacy";
+const coreGateUrls=coreGateDispatchMode==="model_gates"?{
+  coder:process.env.DEBUG_AI_CORE_GATE_CODER_URL,
+  qwen3:process.env.DEBUG_AI_CORE_GATE_QWEN3_URL,
+  granite:process.env.DEBUG_AI_CORE_GATE_GRANITE_URL,
+  ministral:process.env.DEBUG_AI_CORE_GATE_MINISTRAL_URL
+}:null;
 const aiCore=createAiCoreAdapter({
   runtimeContextTokens:aiCoreContextTokens,requireRuntimeContextQualification:true,
+  dispatchMode:coreGateDispatchMode,modelGateBaseUrls:coreGateUrls,
   inputTokenShadow:inputTokenShadowFlag==="true",
   inputTokenShadowRoute:process.env.DEBUG_AI_CORE_INPUT_TOKEN_SHADOW_ROUTE||"router"
 });
@@ -71,5 +82,10 @@ async function finishShutdown(exitCode){try{await tgserver.shutdownLogSink(1000)
 function shutdown(signal){if(shuttingDown)return;shuttingDown=true;if(rotationTimer)clearInterval(rotationTimer);if(archiveTimer)clearTimeout(archiveTimer);server.close(()=>{void finishShutdown(0);});setTimeout(()=>{try{writerLock.close();}finally{process.exit(1);}},5000).unref();if(signal)console.error(`DebugAI shutdown: ${signal}`);}
 process.once("SIGTERM",()=>shutdown("SIGTERM"));
 process.once("SIGINT",()=>shutdown("SIGINT"));
-async function start(){rotateRuntimeEvidence();tgserver.prewarmLogSink();rotationTimer=setInterval(rotateRuntimeEvidence,runtimeEvidenceRotateMs);rotationTimer.unref();const recovery=await workflow.recoverStartup();if(recovery.claimed.length||recovery.incompatible.length){const incompatibleHist=recovery.incompatible.length?formatRetentionErrorHistogram("startup_incompatible",summarizeRetentionErrorClasses(recovery.incompatible)):"";console.log(`DebugAI startup recovery: claimed=${recovery.claimed.length} incompatible=${recovery.incompatible.length}${incompatibleHist?` ${incompatibleHist}`:""}`);}server.listen(port,host,()=>console.log(`DebugAI listening on http://${host}:${port}; ai_core_context_tokens=${aiCoreContextTokens}; runtime-cache retention_ms=${runtimeEvidenceRetentionMs} max_bytes=${runtimeEvidenceMaxBytes} rotate_ms=${runtimeEvidenceRotateMs}; retention_sweep_ms=${archiveSweepMs} retention_max_items=${archiveMaxRuns}`));scheduleArchiveSweep(archiveInitialDelayMs);}
+async function start(){
+  // Before serving opt-in Stage B traffic, fail closed if one of the four
+  // authenticated Gate model identities is missing or mismatched. This GET
+  // check is not a live resident/lease/Stage B qualification.
+  if(aiCore.dispatch_mode==="model_gates")await aiCore.preflightConfiguredGates();
+  rotateRuntimeEvidence();tgserver.prewarmLogSink();rotationTimer=setInterval(rotateRuntimeEvidence,runtimeEvidenceRotateMs);rotationTimer.unref();const recovery=await workflow.recoverStartup();if(recovery.claimed.length||recovery.incompatible.length){const incompatibleHist=recovery.incompatible.length?formatRetentionErrorHistogram("startup_incompatible",summarizeRetentionErrorClasses(recovery.incompatible)):"";console.log(`DebugAI startup recovery: claimed=${recovery.claimed.length} incompatible=${recovery.incompatible.length}${incompatibleHist?` ${incompatibleHist}`:""}`);}server.listen(port,host,()=>console.log(`DebugAI listening on http://${host}:${port}; ai_core_context_tokens=${aiCoreContextTokens}; runtime-cache retention_ms=${runtimeEvidenceRetentionMs} max_bytes=${runtimeEvidenceMaxBytes} rotate_ms=${runtimeEvidenceRotateMs}; retention_sweep_ms=${archiveSweepMs} retention_max_items=${archiveMaxRuns}`));scheduleArchiveSweep(archiveInitialDelayMs);}
 void start().catch(error=>{console.error(`DebugAI startup failed: ${String(error?.message||error)}`);try{writerLock.close();}finally{process.exitCode=1;}});

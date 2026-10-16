@@ -84,3 +84,48 @@ test("reject corrupted or unverifiable restored final checkpoint",async()=>{
   s.records.set(key,{...completed,schema:"unknown/v0"});
   await assert.rejects(continueWorkItem(args),{code:"CORRUPT_CHECKPOINT"});
 });
+
+test("cancellation before Role Work Item dispatch preserves empty checkpoint and does not execute model",async()=>{
+  const s=store(),ctrl=new AbortController();ctrl.abort();let calls=0;
+  await assert.rejects(()=>continueWorkItem({...base(s,async()=>{calls++;return{status:STATUS.CONTINUE,progress:{completed:1}};}),signal:ctrl.signal}),e=>e.code==="ROLE_WORK_ITEM_CANCELLED");
+  assert.equal(calls,0);assert.equal(s.records.size,0);
+});
+
+test("late model completion after cancellation never commits a verified Role result or moves the checkpoint",async()=>{
+  const s=store(),ctrl=new AbortController();let started;
+  const reached=new Promise(resolve=>{started=resolve;});let finish;
+  const pending=continueWorkItem({...base(s,async()=>{
+    started();
+    await new Promise(resolve=>{finish=resolve;});
+    return{status:STATUS.COMPLETE,result:{verified:true}};
+  }),signal:ctrl.signal});
+  await reached;ctrl.abort();finish();
+  await assert.rejects(pending,e=>e.code==="ROLE_WORK_ITEM_CANCELLED");
+  assert.equal(s.records.size,0,"cancelled result must never become a durable completion");
+  const resumed=await continueWorkItem(base(s,async()=>({status:STATUS.COMPLETE,result:{verified:true}})));
+  assert.equal(resumed.status,STATUS.COMPLETE,"same item can resume with original authority");
+  assert.equal(s.records.size,1);
+});
+
+test("cancellation between durable Work Item steps retains only prior validated progress",async()=>{
+  const s=store(),ctrl=new AbortController();let calls=0;
+  const req={...base(s,async()=>{
+    calls++;
+    if(calls===1)return{status:STATUS.CONTINUE,progress:{completed:1}};
+    ctrl.abort();
+    return{status:STATUS.COMPLETE,result:{verified:true}};
+  }),maxStepsPerCall:2,signal:ctrl.signal};
+  await assert.rejects(continueWorkItem(req),e=>e.code==="ROLE_WORK_ITEM_CANCELLED");
+  const only=[...s.records.values()];
+  assert.equal(only.length,1);assert.equal(only[0].steps,1);assert.equal(only[0].status,STATUS.CONTINUE);
+  assert.deepEqual(only[0].progress,{completed:1});
+  assert.equal(calls,2);
+  const resumed=await continueWorkItem({...base(s,async()=>({status:STATUS.COMPLETE,result:{verified:true}})),signal:new AbortController().signal});
+  assert.equal(resumed.status,STATUS.COMPLETE);assert.equal(resumed.steps,2);
+});
+
+test("malformed cancellation signal is rejected instead of being treated as optional",async()=>{
+  const s=store();
+  await assert.rejects(continueWorkItem({...base(s,async()=>({status:STATUS.CONTINUE,progress:{completed:1}})),signal:{aborted:false}}),e=>e.code==="ROLE_WORK_ITEM_SIGNAL_INVALID");
+  assert.equal(s.records.size,0);
+});

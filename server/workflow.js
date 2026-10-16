@@ -126,7 +126,7 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
     return stage.result;
   }
   async function continueRoleTask({runId,role,workItemId,inputBinding,task,baseEvidenceIds=[],
-    evidenceRecords=[],semanticCriteria=null,requireSemanticProgress=false,maxStepsPerCall=1,maxTotalSteps=12}={}){
+    evidenceRecords=[],semanticCriteria=null,requireSemanticProgress=false,maxStepsPerCall=1,maxTotalSteps=12,signal=null}={}){
     if(!CONTINUABLE_ROLES.includes(role))throw new Error("ROLE_NOT_ALLOWED");
     if(!authority?.durableEnabled?.())throw new Error("ROLE_DURABLE_AUTHORITY_REQUIRED");
     if(typeof task!=="string"||!task.trim())throw new Error("ROLE_TASK_REQUIRED");
@@ -139,7 +139,7 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
     const semanticRequired=requireSemanticProgress||recoveryHooks?.requireSemanticProgress===true;
     if(semanticRequired&&criteria===null)throw new Error("ROLE_PROGRESS_CRITERIA_REQUIRED");
     const evaluator=criteria===null?null:createRoleProgressEvaluator({role,criteria,evidenceRecords:validatedRecords});
-    const boundTask=contentHash({role,task,evidence,input_binding:inputBinding,...(evaluator?{semantic_contract:evaluator.binding}:{})});
+    const boundTask=contentHash({role,task,evidence,input_binding:inputBinding,...(aiCore.runtime_route_binding?{core_route_binding:aiCore.runtime_route_binding}:{}),...(evaluator?{semantic_contract:evaluator.binding}:{})});
     function validateIntermediate({progress,previousProgress,ctx}){
       if(evaluator){try{return contentHash(evaluator.qualifyProgress({progress,previousProgress:previousProgress||ctx?.previousProgress||{}}))===contentHash(progress);}catch{return false;}}
       return Boolean(progress&&typeof progress==="object"&&!Array.isArray(progress)&&
@@ -147,7 +147,7 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
         typeof progress.remaining_work==="string"&&progress.remaining_work.trim());
     }
     const continueViaRole=ROLE_WORK_ITEM_ADAPTERS[role]||continueRoleWorkItem;
-    return continueViaRole({authority,runId,role,workItemId,inputBinding:boundTask,maxStepsPerCall,maxTotalSteps,
+    return continueViaRole({authority,runId,role,workItemId,inputBinding:boundTask,maxStepsPerCall,maxTotalSteps,signal,
       buildStepPrompt:async({step,previousProgress})=>({
         // Keep fixed task/evidence/criteria ahead of changing step/progress for
         // backend prefix reuse. Cache is never a semantic completion authority.
@@ -155,7 +155,7 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
         user:evaluator?JSON.stringify({task,registered_evidence_ids:evidence,registered_evidence:evidencePromptView(validatedRecords),criteria:evaluator.criteria.map(({id,kind,evidence_id,source_ref})=>({id,kind,evidence_id,source_ref})),step,previous_progress:{verified_work:previousProgress.verified_work||[],remaining_work:previousProgress.remaining_work||evaluator.criteria.map(c=>c.id),evidence_refs:previousProgress.evidence_refs||[]}}):registeredEvidenceUserPayload({task,step,previousProgress,evidence,validatedRecords})
       }),
       invokeRole:async(prompt,ctx)=>{
-        const output=parseJson((await callDirectRole(role,prompt,runId)).content);
+        const output=parseJson((await callDirectRole(role,prompt,runId,{signal})).content);
         if(evaluator&&output.status==="CONTINUE")output.progress=evaluator.qualifyProgress({progress:output.progress,previousProgress:ctx.previousProgress});
         if(evaluator&&output.status==="COMPLETE")output.result=evaluator.restoreCompletionMarkers({result:output.result,previousProgress:ctx.previousProgress});
         return output;
@@ -177,8 +177,8 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
     });
   }
   async function continueDiagnoserTask({runId,workItemId,inputBinding,task,
-    baseEvidenceIds=[],evidenceRecords=[],semanticCriteria=null,requireSemanticProgress=false,maxStepsPerCall=1,maxTotalSteps=12}={}){
-    if(semanticCriteria!==null||requireSemanticProgress||recoveryHooks?.requireSemanticProgress===true||recoveryHooks?.semanticCriteria?.[workItemId])return continueRoleTask({runId,role:"diagnoser",workItemId,inputBinding,task,baseEvidenceIds,evidenceRecords,semanticCriteria,requireSemanticProgress,maxStepsPerCall,maxTotalSteps});
+    baseEvidenceIds=[],evidenceRecords=[],semanticCriteria=null,requireSemanticProgress=false,maxStepsPerCall=1,maxTotalSteps=12,signal=null}={}){
+    if(semanticCriteria!==null||requireSemanticProgress||recoveryHooks?.requireSemanticProgress===true||recoveryHooks?.semanticCriteria?.[workItemId])return continueRoleTask({runId,role:"diagnoser",workItemId,inputBinding,task,baseEvidenceIds,evidenceRecords,semanticCriteria,requireSemanticProgress,maxStepsPerCall,maxTotalSteps,signal});
     if(!authority?.durableEnabled?.())throw new Error("DIAGNOSER_DURABLE_AUTHORITY_REQUIRED");
     if(typeof task!=="string"||!task.trim())throw new Error("DIAGNOSER_TASK_REQUIRED");
     if(!Array.isArray(baseEvidenceIds)||!baseEvidenceIds.every(x=>typeof x==="string"))
@@ -186,15 +186,15 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
     authority.loadDurable(runId); // No implicit new run, no approval bypass.
     const validatedRecords=validateEvidenceRecords(evidenceRecords);
     const evidence=mergeBaseEvidenceWithRecords(baseEvidenceIds,validatedRecords);
-    const boundInput=contentHash({role:"diagnoser",task,evidence,input_binding:inputBinding});
+    const boundInput=contentHash({role:"diagnoser",task,evidence,input_binding:inputBinding,...(aiCore.runtime_route_binding?{core_route_binding:aiCore.runtime_route_binding}:{})});
     return continueDiagnoserWorkItem({authority,runId,workItemId,inputBinding:boundInput,
-      maxStepsPerCall,maxTotalSteps,
+      maxStepsPerCall,maxTotalSteps,signal,
       buildStepPrompt:async({step,previousProgress})=>({
         system:"Diagnoser. Investigate only the SAME diagnosis task. Each response must be a compact JSON object with status CONTINUE, COMPLETE, or BLOCKED. For CONTINUE return progress with verified evidence_refs and explicit remaining_work. For COMPLETE return result matching the existing Diagnoser canonical role contract. No unsupported evidence or hidden reasoning. No tools or mutations in this opt-in path.",
         user:registeredEvidenceUserPayload({task,step,previousProgress,evidence,validatedRecords})
       }),
       invokeDiagnoser:async prompt=>{
-        const out=await callDirectRole("diagnoser",prompt,runId);
+        const out=await callDirectRole("diagnoser",prompt,runId,{signal});
         return parseJson(out.content);
       },
       validateIntermediate:async({progress})=>{
@@ -211,7 +211,7 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
       }
     });
   }
-  async function callDirectRole(role,{system,user},runId=null){const b=getRoleRuntimeBudget(role);const adapter=runId?observeAiCalls({aiCore,runId,runtimeEvidence,onEvent:logRuntime}):aiCore;return adapter.call(role,{system,user,maxTokens:b.max_tokens,timeoutMsOverride:b.turn_timeout_ms,deadlineAt:Date.now()+b.turn_timeout_ms});}
+  async function callDirectRole(role,{system,user},runId=null,{signal=null}={}){const b=getRoleRuntimeBudget(role);const adapter=runId?observeAiCalls({aiCore,runId,runtimeEvidence,onEvent:logRuntime}):aiCore;return adapter.call(role,{system,user,maxTokens:b.max_tokens,timeoutMsOverride:b.turn_timeout_ms,deadlineAt:Date.now()+b.turn_timeout_ms,...(signal?{signal}:{})});}
   function externalUnavailable(error){
     const code=String(error?.code||error?.message||"");
     return /^(?:LIVE_BLOCKED_FREE_TIER_UNVERIFIED|EXTERNAL_FREE_PROVIDERS_UNAVAILABLE|EXTERNAL_FREE_REQUEST_BUDGET_EXHAUSTED|EXTERNAL_REVIEW_CI_EGRESS_BLOCKED|EXTERNAL_REVIEW_QUOTA_[A-Z_]+|EXTERNAL_REVIEW_(?:SCHEMA|EMPTY|INCOMPLETE)|(?:GROQ|GEMINI)_(?:KEY_MISSING|NETWORK|JSON|ENVELOPE|HTTP_(?:401|403|429|5[0-9]{2})))$/.test(code);
@@ -288,7 +288,7 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
   async function executeAnalysis(prepared){
     const {runId,resuming,targetRepo,input,inputRecord,inputManifestRef}=prepared,{rawRequest,failure,localEvidence}=input;
     const toolRuntime=makeReadOnlyToolRuntime(targetRepo,runId),durable=Boolean(authority?.durableEnabled?.());
-    const binding=durable?localStageBinding({repo:targetRepo,repoSnapshotId:snapshotRepo(targetRepo),inputDigest:inputRecord.payload_digest,runtimeContextTokens:aiCore.runtime_context_tokens??null}):null;
+    const binding=durable?localStageBinding({repo:targetRepo,repoSnapshotId:snapshotRepo(targetRepo),inputDigest:inputRecord.payload_digest,runtimeContextTokens:aiCore.runtime_context_tokens??null,runtimeRouteBinding:aiCore.runtime_route_binding??null}):null;
     let contextStage=durable?loadStageRef(runId,"research_context"):null,context,scouts=null;
     if(contextStage&&!reusableLocalStage(contextStage,binding))contextStage=null;
     if(contextStage){
@@ -366,7 +366,7 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
     const deterministicVerification=context.deterministic_verification,deterministicChecks=context.deterministic_checks||[],dapHint=context.dap_hint||null,hintProtocol=dapHintProtocol(dapHint),localRecords=context.local_records||[],localIds=context.local_ids||[],scoutJson=context.scout_json||[],scoutToolEvidence=context.scout_tool_evidence||[],knownKnowledge=context.known_knowledge||[],knowledgeRecords=context.knowledge_records||[],official=context.official||[],evidenceGap=Boolean(context.evidence_gap),evidenceStatus=context.evidence_status,officialRecords=context.official_records||[],researchBase=context.research_base||[];
     let research=null,researchJson=null,researchToolEvidence=[],researchContinuation=null;
     if(durable){
-      const inputBindingDigest=contentHash({run_id:runId,input_manifest_digest:inputRecord.payload_digest,research_context_digest:contextStage.record.payload_digest,repo_snapshot_id:context.repo_snapshot_id});
+      const inputBindingDigest=contentHash({run_id:runId,input_manifest_digest:inputRecord.payload_digest,research_context_digest:contextStage.record.payload_digest,repo_snapshot_id:context.repo_snapshot_id,...(aiCore.runtime_route_binding?{core_route_binding:aiCore.runtime_route_binding}:{})});
       await setCursor(runId,WorkflowStepId.RESEARCHER,StepPhase.RUNNING,{stepInputRef:contextStage.path});await logProgress(runId,WorkflowStepId.RESEARCHER,StepPhase.RUNNING);
       researchContinuation=await runResearcherContinuation({authority,runId,repoSnapshotId:context.repo_snapshot_id,inputManifestRef,inputBindingDigest,executeWorkUnit:async(args)=>{const {unit,restoredResults,roleExecutionId,attemptId}=args;await recoveryHooks?.beforeResearcherWorkUnit?.(args);
         let answer;if(unit.work_unit_id==="researcher.A")answer={payload:{localEvidence:evidencePromptView(localRecords),scouts:scoutJson,scout_tool_evidence:evidencePromptView(scoutToolEvidence)},evidence_refs:mergeEvidenceIds(localIds,scoutToolEvidence.map(x=>x.evidence_id))};
