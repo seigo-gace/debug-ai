@@ -199,3 +199,20 @@ test("Diagnoser retains Scout causal findings and readable tool evidence when Re
     assert.equal(out.diagnosis.hypotheses[0].statement,"Implementation branch may produce the unexpected return value");
   }finally{f.cleanup();}
 });
+
+
+test("opaque active Diagnoser IDs never consume external review quota or authorize a patch",async()=>{
+  const f=makeRepo();let reviewCalled=false;
+  try{
+    const aiCore={call:async role=>{
+      if(role==="code_scout")return{content:JSON.stringify({relevant_files:[],call_path:[],contract_mismatch:null,excluded_files:[],unknowns:["cause not yet known"]})};
+      if(role==="causal_scout")return{content:JSON.stringify({claims:[{type:"UNKNOWN",statement:"No causality established"}]})};
+      if(role==="researcher")return{content:JSON.stringify({research_status:"INSUFFICIENT_EVIDENCE",answer:"UNKNOWN",evidence_refs:[],rejected_source_refs:[],contradictions:[]})};
+      if(role==="diagnoser")return{content:JSON.stringify({diagnosis_status:"HYPOTHESES_RETAINED",hypotheses:[{id:"HYP1",status:"HYPOTHESIS",evidence_refs:[],counter_evidence_refs:[],falsification_condition:"Run a matching real reproduction"}],confirmed_root_cause:null,unsupported_claims:[]})};
+      throw Error("UNEXPECTED_ROLE:"+role);
+    }};
+    const workflow=createWorkflow({aiCore,repoPolicy:new RepoPolicy({workspaceRoot:f.workspace}),evidenceSearch:{search:async()=>[]},externalReview:{hypothesis:async()=>{reviewCalled=true;return{json:{verdict:"PASS"}};}}});
+    await assert.rejects(workflow.runAnalysis({failure:{message:"unconfirmed causal hypothesis"},repo:f.repo}),/HYPOTHESIS_REVIEW_STATEMENT_MISSING/);
+    assert.equal(reviewCalled,false,"opaque IDs must not receive simulated approval or an external reviewer invocation");
+  }finally{f.cleanup();}
+});
