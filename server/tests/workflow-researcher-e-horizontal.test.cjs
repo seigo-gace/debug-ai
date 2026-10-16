@@ -3,6 +3,7 @@ const test=require("node:test"),assert=require("node:assert/strict");
 const fs=require("node:fs"),os=require("node:os"),path=require("node:path");
 const {RunAuthority}=require("../run-authority.js");
 const {createWorkflow}=require("../workflow.js");
+const {horizontalRoleHooksForMode}=require("../control/role-work-item/adapter.js");
 class IO{
   constructor(){this.records=new Map();}
   readRecord(p,{allowMissing=false}={}){if(!this.records.has(p)){if(allowMissing)return null;throw Error("MISSING:"+p);}return structuredClone(this.records.get(p));}
@@ -72,7 +73,7 @@ test("post-apply Local Reviewer resumes without applying again, then replays no 
   };}};
   const runtimeEvidence={write:()=>{},list:(_id,{types})=>types.includes("analysis")?[{type:"analysis",payload:{evidence_gap:false}}]:[]};
   const wf=()=>createWorkflow({authority:new RunAuthority({runtimeRoot:root,durableIo:io}),patchService,runtimeEvidence,
-    repositorySnapshot:()=>revision,recoveryHooks:{enableHorizontalLocalReviewer:true},
+    repositorySnapshot:()=>revision,recoveryHooks:horizontalRoleHooksForMode("six_role"),
     externalReview:{final:async()=>{finals++;return {provider:"fixture",json:{verdict:"PASS"}};}},
     aiCore:{call:async(role,prompt)=>{
       assert.equal(role,"local_reviewer");const input=JSON.parse(prompt.user);models++;
@@ -102,7 +103,7 @@ test("actual Scout/Researcher/Diagnoser/hypothesis Reviewer hooks advance only a
     local_reviewer:{verdict:"PASS",decision:"DONE",claims:[]}
   };
   const wf=()=>createWorkflow({authority:new RunAuthority({runtimeRoot:root,durableIo:io}),repositorySnapshot:()=>"fixed",
-    recoveryHooks:{enableHorizontalCodeScout:true,enableHorizontalCausalScout:true,enableHorizontalResearcher:true,enableHorizontalDiagnoser:true,enableHorizontalLocalReviewer:true,
+    recoveryHooks:{...horizontalRoleHooksForMode("six_role"),
       beforeResearcherWorkUnit:async({runId:id,unit})=>{runId=id;units.push(unit.work_unit_id);}},
     // Only a local fixture; exercise existing fallback without external HTTP.
     externalReview:{hypothesis:async()=>{throw Object.assign(Error("GROQ_NETWORK"),{code:"GROQ_NETWORK"});}},
@@ -133,7 +134,7 @@ test("actual Patch Engineer hook creates no candidate until same-item completion
   const run=authority.start({rawRequest:"candidate fixture",repo:root});await authority.initializeDurable(run);
   for(const state of ["PARSED","CONTEXT_READY","VERIFYING","FAILED","RESOLVING"])authority.transition(run,state);
   let models=0,creates=0;
-  const wf=()=>createWorkflow({authority:new RunAuthority({runtimeRoot:root,durableIo:io}),repositorySnapshot:()=>"fixed",recoveryHooks:{enableHorizontalPatchEngineer:true},
+  const wf=()=>createWorkflow({authority:new RunAuthority({runtimeRoot:root,durableIo:io}),repositorySnapshot:()=>"fixed",recoveryHooks:horizontalRoleHooksForMode("six_role"),
     patchService:{create:({result})=>{creates++;return result;}},aiCore:{call:async(role,prompt)=>{
       assert.equal(role,"patch_engineer");models++;const input=JSON.parse(prompt.user);
       if(input.step===1)return {content:JSON.stringify({status:"CONTINUE",progress:{evidence_refs:[],remaining_work:"finish candidate"}})};
