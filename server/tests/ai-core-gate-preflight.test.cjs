@@ -296,7 +296,14 @@ test("real Gate error codes retain bounded upstream-reported identity for debugg
     {status:409,code:"BACKEND_UNIX_LISTENER_MISMATCH",role:"code_scout",expectedGate:urls.coder},
     {status:409,code:"BACKEND_UNIX_TCP_EXPOSED",role:"causal_scout",expectedGate:urls.qwen3},
     {status:409,code:"BACKEND_UNIX_VOLUME_NOT_SHARED",role:"researcher",expectedGate:urls.granite},
-    {status:409,code:"BACKEND_SLOTS_BUSY_OR_UNVERIFIED",role:"local_reviewer",expectedGate:urls.ministral}
+    {status:409,code:"BACKEND_SLOTS_BUSY_OR_UNVERIFIED",role:"local_reviewer",expectedGate:urls.ministral},
+    {status:429,code:"HANDOFF_IN_PROGRESS",role:"code_scout",expectedGate:urls.coder},
+    {status:503,code:"EVICTION_NOT_CONFIRMED",role:"causal_scout",expectedGate:urls.qwen3},
+    {status:409,code:"EXISTING_RESIDENCY_EXCEEDS_POLICY",role:"researcher",expectedGate:urls.granite},
+    {status:503,code:"ROLLBACK_RESIDENT_NOT_RUNNING",role:"local_reviewer",expectedGate:urls.ministral},
+    {status:409,code:"BACKEND_MODEL_ID_MISMATCH",role:"code_scout",expectedGate:urls.coder},
+    {status:409,code:"BACKEND_MEMORY_LIMIT_MISMATCH",role:"causal_scout",expectedGate:urls.qwen3},
+    {status:409,code:"BACKEND_CPU_LIMIT_MISMATCH",role:"researcher",expectedGate:urls.granite}
   ]){
     const observations=[],calls=[],secret="SYNTHETIC_PRIVATE_PAYLOAD_DO_NOT_LOG_64bc";
     const ai=createAiCoreAdapter({baseUrl:"http://127.0.0.1:18080",apiKey:"test",modelGateBaseUrls:urls,
