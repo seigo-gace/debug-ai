@@ -216,3 +216,28 @@ test("opaque active Diagnoser IDs never consume external review quota or authori
     assert.equal(reviewCalled,false,"opaque IDs must not receive simulated approval or an external reviewer invocation");
   }finally{f.cleanup();}
 });
+
+
+test("insufficient diagnosis or a top-level summary cannot launder an ungrounded active hypothesis into external approval",async()=>{
+  for(const diagnosis of [
+    {diagnosis_status:"INSUFFICIENT_EVIDENCE",hypotheses:[],confirmed_root_cause:null,unsupported_claims:[]},
+    {diagnosis_status:"NO_ACTIVE_HYPOTHESIS",hypotheses:[],confirmed_root_cause:null,unsupported_claims:[]},
+    {diagnosis_status:"HYPOTHESES_RETAINED",hypotheses:[{id:"HYP1",status:"HYPOTHESIS",evidence_refs:[],counter_evidence_refs:[],falsification_condition:"Reproduce the source failure"}],public_statement:"possibly different root cause",confirmed_root_cause:null,unsupported_claims:[]}
+  ]){
+    const f=makeRepo();let reviewCalled=0;
+    try{
+      const aiCore={call:async role=>{
+        if(role==="code_scout")return{content:JSON.stringify({relevant_files:[],call_path:[],contract_mismatch:null,excluded_files:[],unknowns:["unknown"]})};
+        if(role==="causal_scout")return{content:JSON.stringify({claims:[{type:"UNKNOWN",statement:"no established cause"}]})};
+        if(role==="researcher")return{content:JSON.stringify({research_status:"INSUFFICIENT_EVIDENCE",answer:"UNKNOWN",evidence_refs:[],rejected_source_refs:[],contradictions:[]})};
+        if(role==="diagnoser")return{content:JSON.stringify(diagnosis)};
+        throw Error("UNEXPECTED_ROLE:"+role);
+      }};
+      const workflow=createWorkflow({aiCore,repoPolicy:new RepoPolicy({workspaceRoot:f.workspace}),evidenceSearch:{search:async()=>[]},
+        externalReview:{hypothesis:async()=>{reviewCalled++;return{json:{verdict:"PASS"}};}}});
+      const code=diagnosis.hypotheses.length===0?"HYPOTHESIS_REVIEW_NO_ACTIVE_HYPOTHESIS":"HYPOTHESIS_REVIEW_STATEMENT_MISSING";
+      await assert.rejects(workflow.runAnalysis({failure:{message:"still unknown"},repo:f.repo}),error=>error.code===code);
+      assert.equal(reviewCalled,0,"evidence insufficiency or an unrelated summary cannot produce paid/synthetic reviewer PASS");
+    }finally{f.cleanup();}
+  }
+});
