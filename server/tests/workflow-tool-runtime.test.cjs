@@ -212,7 +212,12 @@ test("opaque active Diagnoser IDs never consume external review quota or authori
       throw Error("UNEXPECTED_ROLE:"+role);
     }};
     const workflow=createWorkflow({aiCore,repoPolicy:new RepoPolicy({workspaceRoot:f.workspace}),evidenceSearch:{search:async()=>[]},externalReview:{hypothesis:async()=>{reviewCalled=true;return{json:{verdict:"PASS"}};}}});
-    await assert.rejects(workflow.runAnalysis({failure:{message:"unconfirmed causal hypothesis"},repo:f.repo}),/HYPOTHESIS_REVIEW_STATEMENT_MISSING/);
+    const out=await workflow.runAnalysis({failure:{message:"unconfirmed causal hypothesis"},repo:f.repo});
+    assert.equal(out.state,"HYPOTHESIS_NOT_REVIEWABLE");
+    assert.equal(out.diagnosis.hypotheses[0].id,"HYP1","diagnosis must be retained as factual model output");
+    assert.equal(out.external_hypothesis_review.provider,"NOT_INVOKED");
+    assert.equal(out.external_hypothesis_review.reason,"HYPOTHESIS_REVIEW_STATEMENT_MISSING");
+    await assert.rejects(workflow.patchCandidate({runId:out.run_id,analysis:out,repo:f.repo,selectedPaths:["b.js"],task:"wrong return value"}),/PATCH_REQUIRES_EXTERNAL_HYPOTHESIS_REVIEW_PASS/);
     assert.equal(reviewCalled,false,"opaque IDs must not receive simulated approval or an external reviewer invocation");
   }finally{f.cleanup();}
 });
@@ -235,13 +240,12 @@ test("insufficient diagnosis or a top-level summary cannot launder an ungrounded
       }};
       const workflow=createWorkflow({aiCore,repoPolicy:new RepoPolicy({workspaceRoot:f.workspace}),evidenceSearch:{search:async()=>[]},
         externalReview:{hypothesis:async()=>{reviewCalled++;return{json:{verdict:"PASS"}};}}});
-      if(diagnosis.hypotheses.length===0){
-        const result=await workflow.runAnalysis({failure:{message:"still unknown"},repo:f.repo});
-        assert.equal(result.state,"HYPOTHESIS_NOT_REVIEWABLE");
-        assert.equal(result.external_hypothesis_review.provider,"NOT_INVOKED");
-        assert.equal(result.external_hypothesis_review.skipped,true);
-        assert.equal(result.external_hypothesis_review.json.verdict,"INSUFFICIENT_EVIDENCE");
-      }else await assert.rejects(workflow.runAnalysis({failure:{message:"still unknown"},repo:f.repo}),error=>error.code==="HYPOTHESIS_REVIEW_STATEMENT_MISSING");
+      const result=await workflow.runAnalysis({failure:{message:"still unknown"},repo:f.repo});
+      assert.equal(result.state,"HYPOTHESIS_NOT_REVIEWABLE");
+      assert.equal(result.external_hypothesis_review.provider,"NOT_INVOKED");
+      assert.equal(result.external_hypothesis_review.skipped,true);
+      assert.equal(result.external_hypothesis_review.json.verdict,"INSUFFICIENT_EVIDENCE");
+      assert.equal(result.external_hypothesis_review.reason,diagnosis.hypotheses.length===0?"NO_ACTIVE_REVIEWABLE_HYPOTHESIS":"HYPOTHESIS_REVIEW_STATEMENT_MISSING");
       assert.equal(reviewCalled,0,"evidence insufficiency or an unrelated summary cannot produce paid/synthetic reviewer PASS");
     }finally{f.cleanup();}
   }
