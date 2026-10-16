@@ -292,7 +292,11 @@ test("real Gate error codes retain bounded upstream-reported identity for debugg
     {status:502,code:"UPSTREAM_STREAM_INTERRUPTED",role:"code_scout",expectedGate:urls.coder},
     {status:502,code:"UPSTREAM_COMPLETION_CONTRACT_INVALID",role:"researcher",expectedGate:urls.granite},
     {status:422,code:"WRONG_MODEL_FOR_ENDPOINT",role:"causal_scout",expectedGate:urls.qwen3},
-    {status:503,code:"LEASE_JOURNAL_WRITE_FAILED",role:"local_reviewer",expectedGate:urls.ministral}
+    {status:503,code:"LEASE_JOURNAL_WRITE_FAILED",role:"local_reviewer",expectedGate:urls.ministral},
+    {status:409,code:"BACKEND_UNIX_LISTENER_MISMATCH",role:"code_scout",expectedGate:urls.coder},
+    {status:409,code:"BACKEND_UNIX_TCP_EXPOSED",role:"causal_scout",expectedGate:urls.qwen3},
+    {status:409,code:"BACKEND_UNIX_VOLUME_NOT_SHARED",role:"researcher",expectedGate:urls.granite},
+    {status:409,code:"BACKEND_SLOTS_BUSY_OR_UNVERIFIED",role:"local_reviewer",expectedGate:urls.ministral}
   ]){
     const observations=[],calls=[],secret="SYNTHETIC_PRIVATE_PAYLOAD_DO_NOT_LOG_64bc";
     const ai=createAiCoreAdapter({baseUrl:"http://127.0.0.1:18080",apiKey:"test",modelGateBaseUrls:urls,
