@@ -260,3 +260,32 @@ test("insufficient diagnosis or a top-level summary cannot launder an ungrounded
     }finally{f.cleanup();}
   }
 });
+
+test("external unavailable Local Reviewer receives admitted Scout evidence and keeps FAIL closed",async()=>{
+  const f=makeRepo(),calls=[];let codeTurns=0;
+  try{
+    const aiCore={call:async(role,opts)=>{
+      calls.push({role,opts});
+      if(role==="code_scout"&&codeTurns++===0)return{content:JSON.stringify({tool_requests:[{tool:"source.read",arguments:{path:"b.js"},reason:"inspect failing branch"}]})};
+      if(role==="code_scout")return{content:JSON.stringify({relevant_files:["b.js"],call_path:[],contract_mismatch:null,excluded_files:[],unknowns:["Runtime cause unproven"]})};
+      if(role==="causal_scout")return{content:JSON.stringify({claims:[{type:"UNKNOWN",statement:"Runtime cause needs reproduction"}]})};
+      if(role==="researcher")return{content:JSON.stringify({research_status:"INSUFFICIENT_EVIDENCE",answer:"UNKNOWN",evidence_refs:[],rejected_source_refs:[],contradictions:[]})};
+      if(role==="diagnoser")return{content:JSON.stringify({diagnosis_status:"HYPOTHESES_RETAINED",hypotheses:[{id:"H1",status:"HYPOTHESIS",statement:"Source branch may produce an unexpected return",evidence_refs:[],counter_evidence_refs:[],falsification_condition:"Re-run the original failing source test"}],confirmed_root_cause:null,unsupported_claims:[]})};
+      if(role==="local_reviewer")return{content:JSON.stringify({verdict:"FAIL",decision:"BLOCKED",claims:[]})};
+      throw Error("UNEXPECTED_ROLE:"+role);
+    }};
+    let reviewCalls=0;
+    const workflow=createWorkflow({aiCore,repoPolicy:new RepoPolicy({workspaceRoot:f.workspace}),evidenceSearch:{search:async()=>[]},
+      externalReview:{hypothesis:async()=>{reviewCalls++;const e=new Error("providers unavailable");e.code="EXTERNAL_FREE_PROVIDERS_UNAVAILABLE";throw e;}}});
+    const out=await workflow.runAnalysis({failure:{message:"unexpected return"},repo:f.repo});
+    const diag=calls.find(x=>x.role==="diagnoser"),review=calls.find(x=>x.role==="local_reviewer");
+    assert.ok(diag);assert.ok(review);assert.equal(reviewCalls,1);
+    const admitted=JSON.parse(diag.opts.user).scout_tool_evidence;
+    assert.ok(admitted.length>0);
+    const reviewInput=JSON.parse(review.opts.user);
+    assert.ok(reviewInput.evidence.some(x=>x.evidence_id===admitted[0].evidence_id),"Scout source record must reach Local Reviewer even when Researcher has no selection");
+    assert.equal(out.local_hypothesis_review.json.verdict,"FAIL");
+    assert.equal(out.state,"AWAITING_EXTERNAL_HYPOTHESIS_REVIEW");
+    await assert.rejects(workflow.patchCandidate({runId:out.run_id,analysis:out,repo:f.repo,selectedPaths:["b.js"],task:"repair"}),/PATCH_REQUIRES_EXTERNAL_HYPOTHESIS_REVIEW_PASS/);
+  }finally{f.cleanup();}
+});
