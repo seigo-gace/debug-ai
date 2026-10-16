@@ -235,8 +235,13 @@ test("insufficient diagnosis or a top-level summary cannot launder an ungrounded
       }};
       const workflow=createWorkflow({aiCore,repoPolicy:new RepoPolicy({workspaceRoot:f.workspace}),evidenceSearch:{search:async()=>[]},
         externalReview:{hypothesis:async()=>{reviewCalled++;return{json:{verdict:"PASS"}};}}});
-      const code=diagnosis.hypotheses.length===0?"HYPOTHESIS_REVIEW_NO_ACTIVE_HYPOTHESIS":"HYPOTHESIS_REVIEW_STATEMENT_MISSING";
-      await assert.rejects(workflow.runAnalysis({failure:{message:"still unknown"},repo:f.repo}),error=>error.code===code);
+      if(diagnosis.hypotheses.length===0){
+        const result=await workflow.runAnalysis({failure:{message:"still unknown"},repo:f.repo});
+        assert.equal(result.state,"HYPOTHESIS_NOT_REVIEWABLE");
+        assert.equal(result.external_hypothesis_review.provider,"NOT_INVOKED");
+        assert.equal(result.external_hypothesis_review.skipped,true);
+        assert.equal(result.external_hypothesis_review.json.verdict,"INSUFFICIENT_EVIDENCE");
+      }else await assert.rejects(workflow.runAnalysis({failure:{message:"still unknown"},repo:f.repo}),error=>error.code==="HYPOTHESIS_REVIEW_STATEMENT_MISSING");
       assert.equal(reviewCalled,0,"evidence insufficiency or an unrelated summary cannot produce paid/synthetic reviewer PASS");
     }finally{f.cleanup();}
   }
