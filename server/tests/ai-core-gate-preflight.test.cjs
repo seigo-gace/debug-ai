@@ -219,3 +219,24 @@ test("six Role calls traverse all four model Gates under simulated Core two-resi
   assert.ok(snapshots.every(s=>s.length<=2),"mock Core, not DebugAI, enforces two residents");
   assert.equal(ai.dispatch_mode,"model_gates");
 });
+
+test("Model Gate HTTP failure never exposes an upstream error body or synthetic private data",async()=>{
+  for(const status of [401,409,429,503]){
+    const privateMarker="SYNTHETIC_PRIVATE_MODEL_PROMPT_7dfa";
+    const calls=[];
+    const ai=createAiCoreAdapter({baseUrl:"http://127.0.0.1:18080",apiKey:"test",modelGateBaseUrls:urls,
+      dispatchMode:"model_gates",fetchImpl:async(url,opts)=>{
+        calls.push({url,method:opts.method});
+        return{ok:false,status,text:async()=>JSON.stringify({error:{code:"UPSTREAM_FAILURE",private:privateMarker}})};
+      }});
+    await assert.rejects(()=>ai.call("code_scout",{user:"synthetic test"}),e=>{
+      const serialized=JSON.stringify({message:e.message,code:e.code,meta:e.meta});
+      assert.equal(e.code,"AI_CORE_HTTP");
+      assert.equal(e.meta?.status,status);
+      assert.equal(serialized.includes(privateMarker),false);
+      assert.equal(Object.hasOwn(e.meta||{},"body"),false);
+      return true;
+    });
+    assert.deepEqual(calls,[{url:urls.coder+"/v1/chat/completions",method:"POST"}]);
+  }
+});
