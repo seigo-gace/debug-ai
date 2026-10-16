@@ -143,6 +143,22 @@ function normalizeGateUrls(value){
   }
   return Object.freeze(safe);
 }
+// Only previously verified AI Core Gate error identifiers are retained. Unknown or
+// untrusted response bodies stay redacted; this is reported provenance, not RCA.
+const KNOWN_CORE_GATE_ERROR_CODES=new Set([
+  "UNAUTHORIZED","BAD_REQUEST","OBSERVE_ONLY_NO_INFERENCE","GLOBAL_CONCURRENCY_LIMIT",
+  "MODEL_CONCURRENCY_LIMIT","MODEL_TRANSITION_BUSY","ADMISSION_QUEUE_BUSY",
+  "ADMISSION_QUEUE_FULL","ADMISSION_DEADLINE_EXPIRED","MODEL_START_TIMEOUT",
+  "MODEL_START_ROLLBACK_FAILED","ORPHANED_LEASE_RECOVERY_PENDING",
+  "UPSTREAM_UNAVAILABLE","UPSTREAM_HTTP_FRAMING_INVALID","UPSTREAM_JSON_CONTRACT_INVALID",
+  "SOURCE_FINGERPRINT_UNAVAILABLE","RESOURCE_READBACK_UNAVAILABLE"
+]);
+function reportedGateErrorCode(body){
+  if(typeof body!=="string"||Buffer.byteLength(body,"utf8")>1024)return null;
+  try{const value=JSON.parse(body)?.error?.code;
+    return typeof value==="string"&&KNOWN_CORE_GATE_ERROR_CODES.has(value)?value:null;
+  }catch{return null;}
+}
 function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=process.env.AI_CORE_API_KEY,fetchImpl=undiciFetch,timeoutMs=600000,maxTransportTimeoutAttempts=2,maxTimeoutRetries,dispatcher,runtimeContextTokens=process.env.DEBUG_AI_CORE_CONTEXT_TOKENS??null,requireRuntimeContextQualification=false,promptCache=true,inputTokenShadow=false,inputTokenShadowRoute="router",observationIntervalMs=60000,modelGateBaseUrls=null,dispatchMode="legacy"}={}){
   if(!baseUrl)throw new AiCoreError("AI_CORE_URL_REQUIRED","DEBUG_AI_CORE_URL is required");
   if(!apiKey)throw new AiCoreError("AI_CORE_API_KEY_REQUIRED","AI_CORE_API_KEY is required");
@@ -240,7 +256,7 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
         if(typeof text==="string")responseBytes+=Buffer.byteLength(text,"utf8");
         if(signal?.aborted)throw new AiCoreError("AI_CORE_ABORTED","DebugAI role invocation cancelled during inference",{role,timeout_class:TIMEOUT_CLASS.EXTERNAL_ABORT,attempts:attempt});
         runtimeMeta.observe?.({phase:"RESPONSE",dispatch_attempt:attempt});
-        if(!r.ok)throw new AiCoreError("AI_CORE_HTTP",`AI Core HTTP ${r.status}`,{status:r.status});
+        if(!r.ok)throw new AiCoreError("AI_CORE_HTTP",`AI Core HTTP ${r.status}`,{status:r.status,dispatch_mode:dispatchMode,upstream_reported_code:dispatchMode==="model_gates"?reportedGateErrorCode(text):null});
         const parseStartedAt=Date.now();
         try{envelope=JSON.parse(text);}catch{parseValidateMs+=Date.now()-parseStartedAt;throw new AiCoreError("AI_CORE_ENVELOPE","AI Core returned non-JSON envelope");}
         const content=envelope?.choices?.[0]?.message?.content;finishReason=envelope?.choices?.[0]?.finish_reason??null;parseValidateMs+=Date.now()-parseStartedAt;
@@ -286,7 +302,7 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
       observe({phase:"SUCCEEDED",telemetry:out.telemetry,dispatch_attempt:out.attempts,node_process_resources:resourceStart?nodeProcessResourceObservation(resourceStart,sampleNodeProcessResources()):null});
       return out;
     }catch(error){
-      observe({phase:"FAILED",failure_code:String(error?.code||"AI_CORE_ERROR"),timeout_class:error?.meta?.timeout_class||null,telemetry:error?.meta?.telemetry||null,dispatch_attempt:error?.meta?.attempts??progress.dispatch_attempt,node_process_resources:resourceStart?nodeProcessResourceObservation(resourceStart,sampleNodeProcessResources()):null});
+      observe({phase:"FAILED",failure_code:String(error?.code||"AI_CORE_ERROR"),timeout_class:error?.meta?.timeout_class||null,upstream_http_status:Number.isInteger(error?.meta?.status)?error.meta.status:null,upstream_reported_code:error?.meta?.upstream_reported_code||null,dispatch_mode:error?.meta?.dispatch_mode||dispatchMode,telemetry:error?.meta?.telemetry||null,dispatch_attempt:error?.meta?.attempts??progress.dispatch_attempt,node_process_resources:resourceStart?nodeProcessResourceObservation(resourceStart,sampleNodeProcessResources()):null});
       throw error;
     }finally{if(heartbeat)clearInterval(heartbeat);}
   }
