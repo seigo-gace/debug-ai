@@ -5,7 +5,8 @@ const {contentHash,WorkflowStepId,StepPhase}=require("../orchestrator/durable-co
 const {buildDownstreamInputBundle}=require("../orchestrator/role-result.js");
 const {assertPromotable}=require("./asset-promotion.js");
 const {initialInvestigationEvidence,createReadOnlyToolRuntime,assertToolResultIntegrity,evidenceProjection,readText,testInventory,blockedReadPath}=require("./control/read-only-tool-runtime.js");
-const {runRoleWithReadOnlyTools,mergeEvidenceIds}=require("./control/tool-loop.js");
+const {mergeEvidenceIds}=require("./control/tool-loop.js");
+const {getRoleModule}=require("./role-modules/index.js");
 const {parseAndValidateRoleOutput,createRoleProgressEvaluator}=require("./control/role-output-validator.js");
 const {getRoleRuntimeBudget}=require("./control/role-runtime-budgets.js");
 const {registerEvidenceList,evidenceIds,registrySummary}=require("./control/evidence-registry.js");
@@ -112,7 +113,7 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
     const adapter=runId?observeAiCalls({aiCore,runId,runtimeEvidence,onEvent:logRuntime}):aiCore;
     const semantic=recoveryHooks?.semanticToolCriteria?.[role];
     const progressQualification=semantic?createRoleProgressEvaluator({...semantic,role}).toolQualification:null;
-    return runRoleWithReadOnlyTools({aiCore:adapter,role,system,user,toolRuntime:runId?observeToolCalls({toolRuntime,runId,runtimeEvidence,onEvent:logRuntime}):toolRuntime,baseEvidenceIds,registeredEvidence,strictEvidenceRefs,continuationState,durableHooks,progressQualification});
+    return getRoleModule(role).execution.invokeReadOnly({aiCore:adapter,system,user,toolRuntime:runId?observeToolCalls({toolRuntime,runId,runtimeEvidence,onEvent:logRuntime}):toolRuntime,baseEvidenceIds,registeredEvidence,strictEvidenceRefs,continuationState,durableHooks,progressQualification});
   }
   // Opt-in bounded same-item continuation through the EXISTING Diagnoser model.
   // Kept separate from legacy analysis until live E2E acceptance is proven.
@@ -213,7 +214,7 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
       }
     });
   }
-  async function callDirectRole(role,{system,user},runId=null,{signal=null}={}){const b=getRoleRuntimeBudget(role);const adapter=runId?observeAiCalls({aiCore,runId,runtimeEvidence,onEvent:logRuntime}):aiCore;return adapter.call(role,{system,user,maxTokens:b.max_tokens,timeoutMsOverride:b.turn_timeout_ms,deadlineAt:Date.now()+b.turn_timeout_ms,...(signal?{signal}:{})});}
+  async function callDirectRole(role,{system,user},runId=null,{signal=null}={}){const adapter=runId?observeAiCalls({aiCore,runId,runtimeEvidence,onEvent:logRuntime}):aiCore;return getRoleModule(role).execution.invokeDirect({aiCore:adapter,system,user,signal});}
   function externalUnavailable(error){
     const code=String(error?.code||error?.message||"");
     return /^(?:LIVE_BLOCKED_FREE_TIER_UNVERIFIED|EXTERNAL_FREE_PROVIDERS_UNAVAILABLE|EXTERNAL_FREE_REQUEST_BUDGET_EXHAUSTED|EXTERNAL_REVIEW_CI_EGRESS_BLOCKED|EXTERNAL_REVIEW_QUOTA_[A-Z_]+|EXTERNAL_REVIEW_(?:SCHEMA|EMPTY|INCOMPLETE)|(?:GROQ|GEMINI)_(?:KEY_MISSING|NETWORK|JSON|ENVELOPE|HTTP_(?:401|403|429|5[0-9]{2})))$/.test(code);
