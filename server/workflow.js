@@ -65,7 +65,7 @@ function reviewableVerificationCheck(check){
   return {...item,stdout:reviewStreamEvidence(item.stdout,{includeExcerpt}),stderr:reviewStreamEvidence(item.stderr,{includeExcerpt})};
 }
 function causalEvidencePromptView(records){return records.map(record=>JSON.stringify(record.payload).length>1400?evidenceProjection(record,{maxChars:700}):evidencePromptView([record])[0]);}
-function evidencePromptView(records){return (Array.isArray(records)?records:[]).map(record=>{if(!record||typeof record!=="object")return record;const {integrity,...view}=record;return view;});}
+function evidencePromptView(records){return (Array.isArray(records)?records:[]).map(record=>{if(!record||typeof record!=="object")return record;const {integrity,...view}=record;if(record.tool==="source.search"&&integrity?.search_coverage){assertToolResultIntegrity({schema:"debugai.tool-result/v1",status:"OK",...record});return{schema:"debugai.tool-result/v1",status:"OK",...record};}return view;});}
 function patchPacketSource(repo,selectedPaths){
   const sourceExcerpts=[],preconditionHashes={},prohibitedPaths=[];
   for(const value of Array.isArray(selectedPaths)?selectedPaths:[]){
