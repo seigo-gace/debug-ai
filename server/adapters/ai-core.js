@@ -137,7 +137,7 @@ function normalizeGateUrls(value){
   for(const key of keys){
     let url;
     try{url=new URL(value[key]);}catch{throw new AiCoreError("AI_CORE_GATE_CONFIG_INVALID","Invalid model Gate URL");}
-    if(!["http:","https:"].includes(url.protocol)||url.username||url.password||url.search||url.hash||url.pathname!=="/")
+    if(url.protocol!=="http:"||url.hostname!=="127.0.0.1"||url.username||url.password||url.search||url.hash||url.pathname!=="/")
       throw new AiCoreError("AI_CORE_GATE_CONFIG_INVALID","Gate base URL must be an approved origin without credentials or path");
     safe[key]=url.origin;
   }
@@ -236,7 +236,7 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
         requestDispatched=true;
         runtimeMeta.observe?.({phase:"UPSTREAM_WAIT",dispatch_attempt:attempt,prepare_ms:prepareMs});
         const upstreamStartedAt=Date.now();let r,text;
-        try{r=await fetchImpl(endpointForRole(role),{method:"POST",headers:{authorization:`Bearer ${apiKey}`,"content-type":"application/json"},body:requestBody,signal:ctl.signal,dispatcher:transport});text=await r.text();}finally{upstreamMs+=Date.now()-upstreamStartedAt;}
+        try{r=await fetchImpl(endpointForRole(role),{method:"POST",headers:{authorization:`Bearer ${apiKey}`,"content-type":"application/json"},body:requestBody,signal:ctl.signal,dispatcher:transport,...(dispatchMode==="model_gates"?{redirect:"error"}:{})});text=await r.text();}finally{upstreamMs+=Date.now()-upstreamStartedAt;}
         if(typeof text==="string")responseBytes+=Buffer.byteLength(text,"utf8");
         if(signal?.aborted)throw new AiCoreError("AI_CORE_ABORTED","DebugAI role invocation cancelled during inference",{role,timeout_class:TIMEOUT_CLASS.EXTERNAL_ABORT,attempts:attempt});
         runtimeMeta.observe?.({phase:"RESPONSE",dispatch_attempt:attempt});
@@ -330,7 +330,7 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
     timer.unref?.();
     let response;
     try{
-      response=await fetchImpl(url,{method:"GET",headers:{Authorization:`Bearer ${apiKey}`,Accept:"application/json"},signal:ctl.signal,dispatcher:transport});
+      response=await fetchImpl(url,{method:"GET",headers:{Authorization:`Bearer ${apiKey}`,Accept:"application/json"},signal:ctl.signal,dispatcher:transport,redirect:"error"});
       if(!response||response.ok!==true||response.status!==200)
         throw new AiCoreError("AI_CORE_GATE_HTTP","Authenticated Gate model inspection failed",{status:response?.status??null,role});
       const declaredLength=Number(response.headers?.get?.("content-length"));
