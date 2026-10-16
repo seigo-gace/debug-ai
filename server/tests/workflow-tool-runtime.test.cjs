@@ -92,6 +92,15 @@ test("workflow binds bounded read-only tool runtime to the authority-approved re
       const roleCalls=calls.filter(x=>x.role===role);assert.ok(roleCalls.length>=1,role);
       for(const call of roleCalls)assert.ok(Array.isArray(call.opts.selectedSkillIds)&&call.opts.selectedSkillIds.length>=1,role);
     }
+    const researcherPrompt=calls.find(x=>x.role==="researcher").opts.system;
+    const diagnosisPrompt=calls.find(x=>x.role==="diagnoser").opts.system;
+    assert.match(researcherPrompt,/registered evidence IDs for supported conclusions/);
+    assert.match(researcherPrompt,/contradictions and evidence gaps explicit/);
+    assert.doesNotMatch(researcherPrompt,/target under 100 tokens|answer under 120 characters/);
+    assert.match(diagnosisPrompt,/current role model-profile limits/);
+    assert.match(diagnosisPrompt,/concrete causal statement, registered evidence_refs, counter_evidence_refs/);
+    assert.match(diagnosisPrompt,/observation that would disprove it/);
+    assert.doesNotMatch(diagnosisPrompt,/under 600 tokens/);
     assert.equal(calls.some(x=>x.role==="patch_engineer"||x.role==="local_reviewer"),false);
   }finally{f.cleanup();}
 });
