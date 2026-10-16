@@ -35,7 +35,7 @@ test("actual createWorkflow Diagnoser entrypoint keeps same work item and role",
   assert.equal(second.status,"BLOCKED");
   assert.equal(calls.length,2);
   assert.deepEqual(calls.map(x=>x.role),["diagnoser","diagnoser"]);
-  assert.match(calls[0].prompt.system,/For each active HYPOTHESIS/);
+  assert.match(calls[0].prompt.system,/Every active hypothesis must contain/);
   assert.match(calls[1].prompt.system,/INSUFFICIENT_EVIDENCE/);
   assert.deepEqual(JSON.parse(calls[1].prompt.user).previous_progress,{evidence_refs:["EVI_1"],remaining_work:"verify competing hypothesis",stage:1});
   await workflow.continueDiagnoserTask(args);
