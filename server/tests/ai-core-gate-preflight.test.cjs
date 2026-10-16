@@ -303,7 +303,15 @@ test("real Gate error codes retain bounded upstream-reported identity for debugg
     {status:503,code:"ROLLBACK_RESIDENT_NOT_RUNNING",role:"local_reviewer",expectedGate:urls.ministral},
     {status:409,code:"BACKEND_MODEL_ID_MISMATCH",role:"code_scout",expectedGate:urls.coder},
     {status:409,code:"BACKEND_MEMORY_LIMIT_MISMATCH",role:"causal_scout",expectedGate:urls.qwen3},
-    {status:409,code:"BACKEND_CPU_LIMIT_MISMATCH",role:"researcher",expectedGate:urls.granite}
+    {status:409,code:"BACKEND_CPU_LIMIT_MISMATCH",role:"researcher",expectedGate:urls.granite},
+    {status:409,code:"BACKEND_UNIX_SOCKET_PATH_INVALID",role:"code_scout",expectedGate:urls.coder},
+    {status:503,code:"BACKEND_UNIX_SOCKET_STAT_FAILED",role:"causal_scout",expectedGate:urls.qwen3},
+    {status:409,code:"BACKEND_UNIX_SOCKET_TYPE_UNSAFE",role:"researcher",expectedGate:urls.granite},
+    {status:503,code:"BACKEND_UNIX_SOCKET_PROBE_FAILED",role:"local_reviewer",expectedGate:urls.ministral},
+    {status:409,code:"BACKEND_UNIX_SOCKET_NOT_STALE",role:"diagnoser",expectedGate:urls.qwen3},
+    {status:409,code:"BACKEND_UNIX_CONTAINER_RESTARTED",role:"patch_engineer",expectedGate:urls.coder},
+    {status:409,code:"BACKEND_UNIX_SOCKET_CHANGED",role:"researcher",expectedGate:urls.granite},
+    {status:503,code:"BACKEND_UNIX_SOCKET_REMOVE_FAILED",role:"local_reviewer",expectedGate:urls.ministral}
   ]){
     const observations=[],calls=[],secret="SYNTHETIC_PRIVATE_PAYLOAD_DO_NOT_LOG_64bc";
     const ai=createAiCoreAdapter({baseUrl:"http://127.0.0.1:18080",apiKey:"test",modelGateBaseUrls:urls,
