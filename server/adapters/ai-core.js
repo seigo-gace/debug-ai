@@ -240,7 +240,7 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
         if(typeof text==="string")responseBytes+=Buffer.byteLength(text,"utf8");
         if(signal?.aborted)throw new AiCoreError("AI_CORE_ABORTED","DebugAI role invocation cancelled during inference",{role,timeout_class:TIMEOUT_CLASS.EXTERNAL_ABORT,attempts:attempt});
         runtimeMeta.observe?.({phase:"RESPONSE",dispatch_attempt:attempt});
-        if(!r.ok)throw new AiCoreError("AI_CORE_HTTP",`AI Core HTTP ${r.status}`,{status:r.status,body:String(text||"").slice(0,500)});
+        if(!r.ok)throw new AiCoreError("AI_CORE_HTTP",`AI Core HTTP ${r.status}`,{status:r.status});
         const parseStartedAt=Date.now();
         try{envelope=JSON.parse(text);}catch{parseValidateMs+=Date.now()-parseStartedAt;throw new AiCoreError("AI_CORE_ENVELOPE","AI Core returned non-JSON envelope");}
         const content=envelope?.choices?.[0]?.message?.content;finishReason=envelope?.choices?.[0]?.finish_reason??null;parseValidateMs+=Date.now()-parseStartedAt;
