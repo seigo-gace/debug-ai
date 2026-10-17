@@ -12,6 +12,7 @@ const {createWorkflow}=require("./workflow-observed.js");
 const {createServer}=require("./http.js");
 const {sourceGate}=require("./gates.js");
 const {createSandboxVerificationLane}=require("./control/sandbox-verification.js");
+const {horizontalRoleHooksForMode}=require("./control/role-work-item/adapter.js");
 const {createDapEvidenceLane}=require("./control/dap-evidence-runtime.js");
 const {GitOpsRequestService}=require("./control/gitops-request.js");
 const {ServerCommandRequestService}=require("./control/server-command-request.js");
@@ -39,6 +40,9 @@ if(inputTokenShadowFlag!=="true"&&inputTokenShadowFlag!=="false")throw new Error
 // Absence preserves the current 18080 route. These URLs are not credentials or
 // a second model lifecycle owner; Gate POST still requires AI Core admission.
 const coreGateDispatchMode=process.env.DEBUG_AI_CORE_GATE_DISPATCH_MODE||"legacy";
+// Horizontal continuation is opt-in; the legacy workflow remains default.
+const recoveryHooks=horizontalRoleHooksForMode(process.env.DEBUG_AI_ROLE_EXECUTION_MODE||"legacy");
+if(recoveryHooks&&coreGateDispatchMode!=="model_gates")throw new Error("DEBUG_AI_HORIZONTAL_MODEL_GATES_REQUIRED");
 const coreGateUrls=coreGateDispatchMode==="model_gates"?{
   coder:process.env.DEBUG_AI_CORE_GATE_CODER_URL,
   qwen3:process.env.DEBUG_AI_CORE_GATE_QWEN3_URL,
@@ -71,7 +75,7 @@ const externalReview=createExternalReviewAdapter();
 const patchService=new PatchService({runtimeRoot,repoPolicy});
 const gitOps=new GitOpsRequestService({repoPolicy});
 const serverCommand=new ServerCommandRequestService({repoPolicy,defaultRepo:path.join(repoPolicy.workspaceRoot,"debug-ai")});
-const workflow=createWorkflow({aiCore,externalReview,evidenceSearch,runtimeEvidence,tgserver,patchService,authority,repoPolicy,sandboxVerification,dapEvidence,serverCommand});
+const workflow=createWorkflow({aiCore,externalReview,evidenceSearch,runtimeEvidence,tgserver,patchService,authority,repoPolicy,sandboxVerification,dapEvidence,serverCommand,recoveryHooks});
 const host=process.env.DEBUG_AI_HOST||"127.0.0.1",port=Number(process.env.DEBUG_AI_PORT||8787);
 const server=createServer({workflow,gitOps,githubCommand:serverCommand,serverCommand,host,port});
 let shuttingDown=false,rotationTimer=null,archiveTimer=null,archiveSweepRunning=false;

@@ -280,3 +280,93 @@ test("Production Compose passes the explicit four-Gate opt-in without changing l
   assert.ok(compose.includes("DEBUG_AI_CORE_URL: ${DEBUG_AI_CORE_URL:?required}"),"legacy route remains configured");
   assert.ok(!compose.includes("AI_CORE_API_KEY: ${AI_CORE_API_KEY:-}"),"no blank credential fallback");
 });
+
+
+test("real Gate error codes retain bounded upstream-reported identity for debugging without assuming DebugAI caused the failure",async()=>{
+  for(const item of [
+    {status:429,code:"ADMISSION_DEADLINE_EXPIRED",role:"code_scout",expectedGate:urls.coder},
+    {status:429,code:"MODEL_CONCURRENCY_LIMIT",role:"causal_scout",expectedGate:urls.qwen3},
+    {status:503,code:"ORPHANED_LEASE_RECOVERY_PENDING",role:"researcher",expectedGate:urls.granite},
+    {status:503,code:"MODEL_START_TIMEOUT",role:"local_reviewer",expectedGate:urls.ministral},
+    {status:502,code:"UPSTREAM_JSON_CONTRACT_INVALID",role:"diagnoser",expectedGate:urls.qwen3},
+    {status:502,code:"UPSTREAM_STREAM_INTERRUPTED",role:"code_scout",expectedGate:urls.coder},
+    {status:502,code:"UPSTREAM_COMPLETION_CONTRACT_INVALID",role:"researcher",expectedGate:urls.granite},
+    {status:422,code:"WRONG_MODEL_FOR_ENDPOINT",role:"causal_scout",expectedGate:urls.qwen3},
+    {status:503,code:"LEASE_JOURNAL_WRITE_FAILED",role:"local_reviewer",expectedGate:urls.ministral},
+    {status:409,code:"BACKEND_UNIX_LISTENER_MISMATCH",role:"code_scout",expectedGate:urls.coder},
+    {status:409,code:"BACKEND_UNIX_TCP_EXPOSED",role:"causal_scout",expectedGate:urls.qwen3},
+    {status:409,code:"BACKEND_UNIX_VOLUME_NOT_SHARED",role:"researcher",expectedGate:urls.granite},
+    {status:409,code:"BACKEND_SLOTS_BUSY_OR_UNVERIFIED",role:"local_reviewer",expectedGate:urls.ministral},
+    {status:429,code:"HANDOFF_IN_PROGRESS",role:"code_scout",expectedGate:urls.coder},
+    {status:503,code:"EVICTION_NOT_CONFIRMED",role:"causal_scout",expectedGate:urls.qwen3},
+    {status:409,code:"EXISTING_RESIDENCY_EXCEEDS_POLICY",role:"researcher",expectedGate:urls.granite},
+    {status:503,code:"ROLLBACK_RESIDENT_NOT_RUNNING",role:"local_reviewer",expectedGate:urls.ministral},
+    {status:409,code:"BACKEND_MODEL_ID_MISMATCH",role:"code_scout",expectedGate:urls.coder},
+    {status:409,code:"BACKEND_MEMORY_LIMIT_MISMATCH",role:"causal_scout",expectedGate:urls.qwen3},
+    {status:409,code:"BACKEND_CPU_LIMIT_MISMATCH",role:"researcher",expectedGate:urls.granite},
+    {status:409,code:"BACKEND_UNIX_SOCKET_PATH_INVALID",role:"code_scout",expectedGate:urls.coder},
+    {status:503,code:"BACKEND_UNIX_SOCKET_STAT_FAILED",role:"causal_scout",expectedGate:urls.qwen3},
+    {status:409,code:"BACKEND_UNIX_SOCKET_TYPE_UNSAFE",role:"researcher",expectedGate:urls.granite},
+    {status:503,code:"BACKEND_UNIX_SOCKET_PROBE_FAILED",role:"local_reviewer",expectedGate:urls.ministral},
+    {status:409,code:"BACKEND_UNIX_SOCKET_NOT_STALE",role:"diagnoser",expectedGate:urls.qwen3},
+    {status:409,code:"BACKEND_UNIX_CONTAINER_RESTARTED",role:"patch_engineer",expectedGate:urls.coder},
+    {status:409,code:"BACKEND_UNIX_SOCKET_CHANGED",role:"researcher",expectedGate:urls.granite},
+    {status:503,code:"BACKEND_UNIX_SOCKET_REMOVE_FAILED",role:"local_reviewer",expectedGate:urls.ministral}
+  ]){
+    const observations=[],calls=[],secret="SYNTHETIC_PRIVATE_PAYLOAD_DO_NOT_LOG_64bc";
+    const ai=createAiCoreAdapter({baseUrl:"http://127.0.0.1:18080",apiKey:"test",modelGateBaseUrls:urls,
+      dispatchMode:"model_gates",fetchImpl:async(url,opts)=>{
+        calls.push({url,method:opts.method});
+        return{ok:false,status:item.status,text:async()=>JSON.stringify({error:{code:item.code,debug_secret:secret}})};
+      }});
+    await assert.rejects(()=>ai.call(item.role,{user:"classify core versus workflow errors",onProgress:p=>observations.push(p)}),error=>{
+      assert.equal(error.code,"AI_CORE_HTTP","stable existing generic error contract");
+      assert.equal(error.meta.status,item.status);
+      assert.equal(error.meta.dispatch_mode,"model_gates");
+      assert.equal(error.meta.upstream_reported_code,item.code);
+      assert.doesNotMatch(JSON.stringify({message:error.message,meta:error.meta}),/SYNTHETIC_PRIVATE_PAYLOAD/);
+      return true;
+    });
+    const failed=observations.findLast(p=>p.phase==="FAILED");
+    assert.equal(failed.failure_code,"AI_CORE_HTTP");
+    assert.equal(failed.upstream_http_status,item.status);
+    assert.equal(failed.upstream_reported_code,item.code);
+    assert.equal(failed.dispatch_mode,"model_gates");
+    assert.doesNotMatch(JSON.stringify(observations),/SYNTHETIC_PRIVATE_PAYLOAD/);
+    assert.deepEqual(calls,[{url:item.expectedGate+"/v1/chat/completions",method:"POST"}]);
+  }
+});
+
+test("unrecognized or malformed Gate error bodies never become trusted code or leak into durable observations",async()=>{
+  const secret="SYNTHETIC_PRIVATE_UNKNOWN_CODE_PAYLOAD_64bc";
+  for(const body of [
+    JSON.stringify({error:{code:"UNVERIFIED_"+secret}}),
+    JSON.stringify({error:{code:"MODEL_START_TIMEOUT "+secret}}),
+    "{broken",
+    JSON.stringify({error:{code:"MODEL_START_TIMEOUT",secret,large:secret.repeat(60)}})
+  ]){
+    const observations=[];
+    const ai=createAiCoreAdapter({baseUrl:"http://127.0.0.1:18080",apiKey:"test",modelGateBaseUrls:urls,
+      dispatchMode:"model_gates",fetchImpl:async()=>({ok:false,status:503,text:async()=>body})});
+    await assert.rejects(()=>ai.call("diagnoser",{user:"failure",onProgress:p=>observations.push(p)}),error=>{
+      assert.equal(error.code,"AI_CORE_HTTP");
+      assert.equal(error.meta.status,503);
+      assert.equal(error.meta.upstream_reported_code,null);
+      assert.doesNotMatch(JSON.stringify(error.meta),/SYNTHETIC_PRIVATE/);
+      return true;
+    });
+    assert.equal(observations.findLast(p=>p.phase==="FAILED").upstream_reported_code,null);
+    assert.doesNotMatch(JSON.stringify(observations),/SYNTHETIC_PRIVATE/);
+  }
+});
+
+test("legacy router 429 does not pretend an authenticated model-specific Core Gate reported its code",async()=>{
+  const ai=createAiCoreAdapter({baseUrl:"http://127.0.0.1:18080",apiKey:"test",
+    fetchImpl:async()=>({ok:false,status:429,text:async()=>JSON.stringify({error:{code:"MODEL_CONCURRENCY_LIMIT"}})})});
+  await assert.rejects(()=>ai.call("code_scout",{user:"legacy transport"}),error=>{
+    assert.equal(error.code,"AI_CORE_HTTP");
+    assert.equal(error.meta.dispatch_mode,"legacy");
+    assert.equal(error.meta.upstream_reported_code,null);
+    return true;
+  });
+});

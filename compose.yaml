@@ -58,6 +58,8 @@ services:
       DEBUG_AI_CORE_CONTEXT_TOKENS: ${DEBUG_AI_CORE_CONTEXT_TOKENS:?required}
       # Stage B explicit opt-in; legacy 18080 remains the default.
       DEBUG_AI_CORE_GATE_DISPATCH_MODE: ${DEBUG_AI_CORE_GATE_DISPATCH_MODE:-legacy}
+      # Explicit six-role durable continuation (off until real model acceptance).
+      DEBUG_AI_ROLE_EXECUTION_MODE: ${DEBUG_AI_ROLE_EXECUTION_MODE:-legacy}
       DEBUG_AI_CORE_GATE_CODER_URL: ${DEBUG_AI_CORE_GATE_CODER_URL:-}
       DEBUG_AI_CORE_GATE_QWEN3_URL: ${DEBUG_AI_CORE_GATE_QWEN3_URL:-}
       DEBUG_AI_CORE_GATE_GRANITE_URL: ${DEBUG_AI_CORE_GATE_GRANITE_URL:-}

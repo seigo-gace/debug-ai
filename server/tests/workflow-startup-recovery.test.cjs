@@ -143,3 +143,34 @@ test("G3 explicit blocked Causal Scout recovery preserves completed Code Scout a
   assert.equal(progressed.manifest.policy_refs.g3_causal_manual_recovery_used,true);
   assert.ok(progressed.state.execution_epoch>=1);
 });
+
+test("blocked AI Core Unix startup error retains safe upstream identity across durable restart",async t=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),"debugai-core-error-durable-")),repo=path.join(root,"repo"),runtimeRoot=path.join(root,"runtime");
+  t.after(()=>fs.rmSync(root,{recursive:true,force:true}));initializeRepo(repo);
+  const io=new FakeDurableIo(),policy=new RepoPolicy({workspaceRoot:root}),authority=new RunAuthority({runtimeRoot,repoPolicy:policy,durableIo:io}),events=[],secret="NEVER_PERSIST_PRIVATE_GATE_BODY";
+  const aiCore={call:async role=>{
+    if(role==="causal_scout"){
+      const e=Object.assign(Error("AI Core HTTP 503"),{code:"AI_CORE_HTTP",meta:{role,retryable:false,status:503,dispatch_mode:"model_gates",upstream_reported_code:"BACKEND_UNIX_SOCKET_PROBE_FAILED",private_body:secret}});
+      throw e;
+    }
+    return{content:JSON.stringify({relevant_files:[],call_path:[],contract_mismatch:null,excluded_files:[],unknowns:[]})};
+  }};
+  const wf=createWorkflow({aiCore,authority,repoPolicy:policy,repositorySnapshot:()=>"git_fixture",runtimeEvidence:{write:(runId,type,payload)=>events.push({runId,type,payload})}});
+  const accepted=await wf.startAnalysis({repo,projectId:"P",rawRequest:"diagnose Unix socket failure",failure:{message:"Gate start failed"}});
+  let durable;
+  for(let i=0;i<100;i++){durable=authority.loadDurable(accepted.run_id);if(durable.state.job_status==="BLOCKED")break;await new Promise(r=>setTimeout(r,10));}
+  assert.equal(durable.state.job_status,"BLOCKED");
+  const recordPath=durable.manifest.workflow_input_refs.last_execution_failure;
+  const original=io.readRecord(recordPath).payload;
+  const restartAuthority=new RunAuthority({runtimeRoot,repoPolicy:policy,durableIo:io});
+  const restored=restartAuthority.readDurableRecord(recordPath,{expectedSchema:"workflow-data/v1"}).payload;
+  assert.deepEqual(restored,original);
+  assert.equal(restored.code,"AI_CORE_HTTP");
+  assert.equal(restored.role,"causal_scout");
+  assert.equal(restored.upstream_http_status,503);
+  assert.equal(restored.upstream_reported_code,"BACKEND_UNIX_SOCKET_PROBE_FAILED");
+  assert.equal(restored.dispatch_mode,"model_gates");
+  assert.equal(events.find(e=>e.type==="execution_failure")?.payload.upstream_reported_code,restored.upstream_reported_code);
+  assert.doesNotMatch(JSON.stringify({restored,events}),/NEVER_PERSIST_PRIVATE_GATE_BODY/);
+  await assert.rejects(wf.resumeAnalysis({runId:accepted.run_id}),/RUN_NOT_RECOVERABLE:BLOCKED/);
+});
