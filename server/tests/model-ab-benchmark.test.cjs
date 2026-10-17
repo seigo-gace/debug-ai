@@ -134,3 +134,58 @@ test("model-specific A/B qualification refuses coerced fractional or absent scor
   }
   assert.deepEqual(validateScored("diagnoser","holdout","candidate",{score:0,max_score:7}),{score:0,max_score:7});
 });
+
+test("real model A/B caller uses the four production Gate origins for all six roles",async()=>{
+  const seen=[],gate={
+    coder:"http://127.0.0.1:18184",
+    qwen3:"http://127.0.0.1:18182",
+    granite:"http://127.0.0.1:18181",
+    ministral:"http://127.0.0.1:18183"
+  },ports={code_scout:18184,causal_scout:18182,researcher:18181,diagnoser:18182,patch_engineer:18184,local_reviewer:18183};
+  const caller=makeAiCoreCaller({
+    dispatchMode:"model_gates",modelGateBaseUrls:gate,
+    baseUrl:"http://127.0.0.1:18080",apiKey:"fake_key",runtimeContextTokens:8192,
+    dispatcher:{},fetchImpl:async(url,options)=>{
+      seen.push({url,options,body:JSON.parse(options.body)});
+      return new Response(JSON.stringify({choices:[{finish_reason:"stop",message:{content:"{}"}}],usage:{prompt_tokens:2,completion_tokens:3,total_tokens:5}}),{status:200});
+    }
+  });
+  assert.equal(caller.dispatch_mode,"model_gates");
+  for(const role of Object.keys(ports)){
+    const config=qualifyConfigForRuntime(role,baselineConfig(role),8192).config;
+    await caller({role,config,system:"system",user:"case"});
+  }
+  assert.deepEqual(seen.map(x=>x.url),Object.values(ports).map(p=>"http://127.0.0.1:"+p+"/v1/chat/completions"));
+  for(const x of seen){
+    assert.equal(x.options.redirect,"error");
+    assert.equal(x.options.headers.authorization,"Bearer fake_key");
+    assert.ok(x.body.model.includes("//models/"));
+    assert.ok(!x.url.includes("18080"));
+  }
+  assert.deepEqual(seen.map(x=>x.body.chat_template_kwargs?.enable_thinking??null),[null,false,false,true,null,null]);
+});
+
+test("model_gates benchmark denies missing and forged origins without legacy fallback",()=>{
+  const base={dispatchMode:"model_gates",baseUrl:"http://127.0.0.1:18080",apiKey:"test",runtimeContextTokens:8192,dispatcher:{},fetchImpl:async()=>{throw Error("MUST_NOT_DISPATCH");}};
+  assert.throws(()=>makeAiCoreCaller({...base,modelGateBaseUrls:null}),/AI_CORE_GATE_CONFIG_INVALID/);
+  assert.throws(()=>makeAiCoreCaller({...base,modelGateBaseUrls:{coder:"http://127.0.0.1:18184"}}),/AI_CORE_GATE_CONFIG_INVALID/);
+  assert.throws(()=>makeAiCoreCaller({...base,modelGateBaseUrls:{coder:"http://example.invalid:18184",qwen3:"http://127.0.0.1:18182",granite:"http://127.0.0.1:18181",ministral:"http://127.0.0.1:18183"}}),/AI_CORE_GATE_CONFIG_INVALID/);
+  assert.throws(()=>makeAiCoreCaller({...base,dispatchMode:"unverified"}),/MODEL_AB_DISPATCH_MODE_INVALID/);
+});
+
+test("model Gate benchmark HTTP errors redact private upstream response body",async()=>{
+  const caller=makeAiCoreCaller({
+    dispatchMode:"model_gates",modelGateBaseUrls:{
+      coder:"http://127.0.0.1:18184",qwen3:"http://127.0.0.1:18182",
+      granite:"http://127.0.0.1:18181",ministral:"http://127.0.0.1:18183"
+    },baseUrl:"http://127.0.0.1:18080",apiKey:"fake",dispatcher:{},
+    runtimeContextTokens:8192,
+    fetchImpl:async()=>new Response("SENSITIVE_BACKEND_PRIVATE_DIAGNOSTIC",{status:503})
+  });
+  await assert.rejects(()=>caller({role:"researcher",config:baselineConfig("researcher"),system:"system",user:"case"}),error=>{
+    assert.equal(error.code,"AI_CORE_HTTP");
+    assert.equal(error.message,"AI_CORE_HTTP_503");
+    assert.ok(!JSON.stringify(error).includes("SENSITIVE_BACKEND_PRIVATE_DIAGNOSTIC"));
+    return true;
+  });
+});
