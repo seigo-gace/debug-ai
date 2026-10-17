@@ -167,9 +167,9 @@ test("real model A/B caller uses the four production Gate origins for all six ro
 
 test("model_gates benchmark denies missing and forged origins without legacy fallback",()=>{
   const base={dispatchMode:"model_gates",baseUrl:"http://127.0.0.1:18080",apiKey:"test",runtimeContextTokens:8192,dispatcher:{},fetchImpl:async()=>{throw Error("MUST_NOT_DISPATCH");}};
-  assert.throws(()=>makeAiCoreCaller({...base,modelGateBaseUrls:null}),/AI_CORE_GATE_CONFIG_INVALID/);
-  assert.throws(()=>makeAiCoreCaller({...base,modelGateBaseUrls:{coder:"http://127.0.0.1:18184"}}),/AI_CORE_GATE_CONFIG_INVALID/);
-  assert.throws(()=>makeAiCoreCaller({...base,modelGateBaseUrls:{coder:"http://example.invalid:18184",qwen3:"http://127.0.0.1:18182",granite:"http://127.0.0.1:18181",ministral:"http://127.0.0.1:18183"}}),/AI_CORE_GATE_CONFIG_INVALID/);
+  assert.throws(()=>makeAiCoreCaller({...base,modelGateBaseUrls:null}),error=>error?.code==="AI_CORE_GATE_CONFIG_INVALID");
+  assert.throws(()=>makeAiCoreCaller({...base,modelGateBaseUrls:{coder:"http://127.0.0.1:18184"}}),error=>error?.code==="AI_CORE_GATE_CONFIG_INVALID");
+  assert.throws(()=>makeAiCoreCaller({...base,modelGateBaseUrls:{coder:"http://example.invalid:18184",qwen3:"http://127.0.0.1:18182",granite:"http://127.0.0.1:18181",ministral:"http://127.0.0.1:18183"}}),error=>error?.code==="AI_CORE_GATE_CONFIG_INVALID");
   assert.throws(()=>makeAiCoreCaller({...base,dispatchMode:"unverified"}),/MODEL_AB_DISPATCH_MODE_INVALID/);
 });
 
