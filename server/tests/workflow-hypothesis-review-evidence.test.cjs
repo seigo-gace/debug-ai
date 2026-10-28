@@ -1,7 +1,7 @@
 "use strict";
 const test=require("node:test");
 const assert=require("node:assert/strict");
-const {publicHypothesisReviewEvidence}=require("../workflow.js");
+const {publicHypothesisReviewEvidence,makePublicHypothesisReviewPayload}=require("../workflow.js");
 const {registerEvidenceList}=require("../control/evidence-registry.js");
 const {assertPublicOpaque}=require("../adapters/external-review.js");
 const {makeToolResult}=require("../control/read-only-tool-runtime.js");
@@ -77,4 +77,34 @@ test("forged role tool evidence cannot be promoted to an external review referen
     diagnosisJson:{hypotheses:[{status:"HYPOTHESIS",evidence_refs:["TRE_FORGED"]}]},
     diagnosisToolEvidence:[forged]
   }),/TOOL_RESULT_EVIDENCE_ID_MISMATCH/);
+});
+
+test("real workflow reviewer payload counts exactly registered local and role tool evidence",()=>{
+  const local=registerEvidenceList("LOCAL_RUNTIME",[{kind:"initial_source",value:{path:"src/a.js",sha256:"fixture"}}]);
+  const tool=makeToolResult("source.read",{path:"src/a.js",content:"secret local content"});
+  const payload=makePublicHypothesisReviewPayload({
+    diagnosisJson:{diagnosis_status:"HYPOTHESES_RETAINED",hypotheses:[{id:"H1",status:"HYPOTHESIS",
+      statement:"Mismatch in offset mapping",evidence_refs:[local[0].evidence_id,tool.evidence_id]}]},
+    rawLocalEvidence:[],localRecords:local,scoutToolEvidence:[tool],
+    deterministicVerification:{status:"FINAL_INVALID",checks:[{executed:true,status:"FAIL"}]},
+    evidenceGap:true,evidenceStatus:"REJECTED"
+  });
+  assert.equal(payload.local_evidence_count,1,"caller empty does not erase runtime-registered local evidence");
+  assert.equal(payload.caller_local_evidence_count,0);
+  assert.equal(payload.evidence_count,2,"a repeated result must not inflate counts");
+  assert.deepEqual(payload.registered_evidence.tool_refs,[tool.evidence_id]);
+  assert.deepEqual(payload.registered_evidence.hypothesis_support_refs,[local[0].evidence_id,tool.evidence_id]);
+  assert.equal(payload.evidence_gap_scope,"official_evidence_search");
+  assert.equal(payload.deterministic_reproduction.failed_count,1);
+  assert.equal(assertPublicOpaque({privacy:{privacy_class:"PUBLIC",sanitized:true,opaque_evidence:true},hypothesis:payload}),true);
+  assert.doesNotMatch(JSON.stringify(payload),/secret local content|src\/a.js/);
+});
+
+test("review not applicable never exports fabricated diagnosis statement",()=>{
+  const payload=makePublicHypothesisReviewPayload({
+    diagnosisJson:{diagnosis_status:"INSUFFICIENT_EVIDENCE",hypotheses:[]},notApplicable:true
+  });
+  assert.equal(payload.statement,null);
+  assert.equal(payload.evidence_count,0);
+  assert.equal(payload.local_evidence_count,0);
 });
