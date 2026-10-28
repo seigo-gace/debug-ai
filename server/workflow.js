@@ -4,7 +4,7 @@ const path=require("node:path");
 const {contentHash,WorkflowStepId,StepPhase}=require("../orchestrator/durable-contracts.js");
 const {buildDownstreamInputBundle}=require("../orchestrator/role-result.js");
 const {assertPromotable}=require("./asset-promotion.js");
-const {initialInvestigationEvidence,createReadOnlyToolRuntime,assertToolResultIntegrity,evidenceProjection,readText,testInventory,blockedReadPath}=require("./control/read-only-tool-runtime.js");
+const {initialInvestigationEvidence,createReadOnlyToolRuntime,assertToolResultIntegrity,evidenceProjection,readText,testInventory,localDependencyMap,blockedReadPath}=require("./control/read-only-tool-runtime.js");
 const {mergeEvidenceIds}=require("./control/tool-loop.js");
 const {getRoleModule}=require("./role-modules/index.js");
 const {parseAndValidateRoleOutput,createRoleProgressEvaluator}=require("./control/role-output-validator.js");
@@ -85,6 +85,41 @@ function makePublicHypothesisReviewPayload({diagnosisJson,rawLocalEvidence=[],lo
     caller_local_evidence_count:localPublic.length,local_evidence:localPublic,
     ...proof,evidence_gap:evidenceGap,evidence_status:evidenceStatus,
     evidence_gap_scope:evidenceGap?"official_evidence_search":null};
+}
+/**
+ * Inspect only the first-hop, unambiguous local implementation candidates of
+ * an already inventoried test. The existing dependency.map owns path/symlink
+ * admission. A lexical candidate is evidence of source content, not proof of
+ * a call edge or the cause of the failing test.
+ */
+function addBoundedTestDependencyEvidence(repo,initial,{maxCandidates=2}={}){
+  const prior=Array.isArray(initial?.records)?initial.records:[],known=new Set(prior.filter(r=>r?.kind==="initial_source").map(r=>r.value?.path));
+  const candidates=[],unavailable=[];
+  for(const entry of prior){
+    const testPath=entry?.value?.path;
+    if(entry?.kind!=="initial_source"||typeof testPath!=="string"||!/(?:^|\/)(?:[^/]+[.-](?:test|spec)\.[cm]?[jt]sx?|test_[^/]+\.py)$/.test(testPath))continue;
+    // Only actual local, single-candidate direct imports are eligible. Neither
+    // transitive closure nor missing-directory negatives are implied.
+    const dependency=localDependencyMap(repo,testPath);
+    for(const item of dependency.local_candidates||[]){
+      if(candidates.length>=maxCandidates)break;
+      const rel=item?.path;
+      if(item?.status!=="SINGLE_LOCAL_CANDIDATE"||typeof rel!=="string"||known.has(rel))continue;
+      known.add(rel);
+      try{const source=readText(repo,rel,{maxChars:2400});
+        if(source.sha256!==item.sha256)throw new Error("INITIAL_DEPENDENCY_SOURCE_CHANGED");
+        candidates.push({kind:"initial_dependency_candidate",value:source,from_test:testPath,edge_status:"LEXICAL_SINGLE_CANDIDATE"});
+      }catch(error){
+        unavailable.push({path:rel,reason:String(error?.message||"DEPENDENCY_UNAVAILABLE").split(":")[0]});
+      }
+    }
+    if(candidates.length>=maxCandidates)break;
+  }
+  if(!candidates.length&&!unavailable.length)return initial;
+  return{records:[...prior,...candidates],scope:{...initial.scope,
+    dependency_candidate_paths:candidates.map(x=>x.value.path),
+    dependency_unavailable:unavailable,
+    dependency_coverage:"PARTIAL_HEURISTIC_NOT_CALL_PROOF"}};
 }
 function dapFailureChecks(failure,deterministicChecks){
   const checks=Array.isArray(deterministicChecks)?deterministicChecks:[];
@@ -348,7 +383,8 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
       const deterministicChecks=Array.isArray(deterministicVerification?.checks)?deterministicVerification.checks:[];
       if(deterministicChecks.length)runtimeEvidence?.write(runId,"deterministic_verification",{status:deterministicVerification.status,checks:deterministicChecks});
       let dapHint=null;if(dapEvidence&&targetRepo){const candidate=await dapEvidence.collect({repo:targetRepo,checks:dapFailureChecks(failure,deterministicChecks),task:String(rawRequest||failure?.message||failure?.summary||""),variableNames:Array.isArray(failure?.variable_names)?failure.variable_names:[]});dapHint=activeDapHint(candidate);if(dapHint){runtimeEvidence?.write(runId,"dap_hint",dapHint);await logRuntime({run_id:runId,severity:dapHint.status==="PASS"?"info":"warn",kind:"dap_hint",authority:"HINT_ONLY",local_only:true,status:dapHint.status,reason:dapHint.reason,target:dapHint.target||null});}}
-      const initial=targetRepo?initialInvestigationEvidence(targetRepo,{request:rawRequest||failure?.message,failure,checks:deterministicChecks}):{records:[],scope:{mode:"OPEN_INVESTIGATION",coverage:"PARTIAL"}};
+      const rawInitial=targetRepo?initialInvestigationEvidence(targetRepo,{request:rawRequest||failure?.message,failure,checks:deterministicChecks}):{records:[],scope:{mode:"OPEN_INVESTIGATION",coverage:"PARTIAL"}};
+      const initial=targetRepo?addBoundedTestDependencyEvidence(targetRepo,rawInitial):rawInitial;
       const hintProtocol=dapHintProtocol(dapHint),localRecords=registerEvidenceList("LOCAL_RUNTIME",[...(Array.isArray(localEvidence)?localEvidence:[]),...deterministicChecks.map(reviewableVerificationCheck),...initial.records]),localIds=evidenceIds(localRecords);
       const initialScope={...initial.scope,repository_revision:durable?snapshotRepo(targetRepo):null,known_evidence_ids:localIds};
       runtimeEvidence?.write(runId,"failure",failure);await logRuntime({run_id:runId,severity:"error",kind:"failure",failure});if(deterministicChecks.length)await logRuntime({run_id:runId,severity:deterministicChecks.some(x=>x.status==="FAIL")?"warn":"info",kind:"deterministic_verification",status:deterministicVerification.status,check_count:deterministicChecks.length,failed:deterministicChecks.filter(x=>x.status==="FAIL").length});
@@ -852,4 +888,4 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
   async function searchKnowledge(query,opts={}){if(!tgserver)throw new Error("TGSERVER_ADAPTER_REQUIRED");return tgserver.search(query,opts);}
   return{continueRoleTask,continueDiagnoserTask,runAnalysis,startAnalysis,resumeAnalysis,recoverStartup,patchCandidate,startCodegenBenchmark,codegenBenchmarkStatus,startInvestigationBenchmark,investigationBenchmarkStatus,startModelAbBenchmark,modelAbBenchmarkStatus,approveAndVerify,verifyReadOnly,status,inspect,promote,searchKnowledge};
 }
-module.exports={createWorkflow,parseJson,roleOutput,toolEvidenceRecords,toolAudit,pickDiagnosisStatement,publicLocalEvidence,publicHypothesisReviewEvidence,makePublicHypothesisReviewPayload,dapFailureChecks,activeDapHint,dapHintProtocol,reviewStreamEvidence,reviewableVerificationCheck,evidencePromptView,repositorySnapshotId};
+module.exports={createWorkflow,parseJson,roleOutput,toolEvidenceRecords,toolAudit,pickDiagnosisStatement,publicLocalEvidence,publicHypothesisReviewEvidence,makePublicHypothesisReviewPayload,addBoundedTestDependencyEvidence,dapFailureChecks,activeDapHint,dapHintProtocol,reviewStreamEvidence,reviewableVerificationCheck,evidencePromptView,repositorySnapshotId};
