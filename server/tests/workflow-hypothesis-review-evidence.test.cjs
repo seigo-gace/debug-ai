@@ -4,6 +4,7 @@ const assert=require("node:assert/strict");
 const {publicHypothesisReviewEvidence}=require("../workflow.js");
 const {registerEvidenceList}=require("../control/evidence-registry.js");
 const {assertPublicOpaque}=require("../adapters/external-review.js");
+const {makeToolResult}=require("../control/read-only-tool-runtime.js");
 
 test("external hypothesis review receives registered evidence IDs and real deterministic counts, never private source",()=>{
   const rawPath="/home/admin1/private-secret-file.js";
@@ -43,10 +44,37 @@ test("review evidence preserves no-data status rather than fabricating a passing
     diagnosisJson:{diagnosis_status:"INSUFFICIENT_EVIDENCE",hypotheses:[]}
   });
   assert.deepEqual(payload.registered_evidence,{
-    local_refs:[],knowledge_refs:[],official_refs:[],
+    local_refs:[],knowledge_refs:[],official_refs:[],tool_refs:[],
     hypothesis_support_refs:[],hypothesis_counter_refs:[]
   });
   assert.deepEqual(payload.deterministic_reproduction,{
     status:"NOT_CONFIGURED",check_count:0,executed_count:0,passed_count:0,failed_count:0,timed_out_count:0
   });
+});
+
+test("verified role tool evidence remains reviewable without leaking tool output",()=>{
+  const tool=makeToolResult("source.read",{path:"/home/admin1/hidden.js",content:"private source text"});
+  const payload=publicHypothesisReviewEvidence({
+    diagnosisJson:{diagnosis_status:"HYPOTHESES_RETAINED",hypotheses:[{
+      id:"H1",status:"HYPOTHESIS",statement:"offset mismatch",evidence_refs:[tool.evidence_id],
+      counter_evidence_refs:["TRE_UNVERIFIED"]
+    }]},
+    scoutToolEvidence:[tool],researchToolEvidence:[tool],diagnosisToolEvidence:[]
+  });
+  assert.deepEqual(payload.registered_evidence.tool_refs,[tool.evidence_id]);
+  assert.deepEqual(payload.registered_evidence.hypothesis_support_refs,[tool.evidence_id]);
+  assert.deepEqual(payload.registered_evidence.hypothesis_counter_refs,[]);
+  const reviewed={privacy:{privacy_class:"PUBLIC",sanitized:true,opaque_evidence:true},
+    hypothesis:{statement:"offset mismatch",...payload}};
+  assert.equal(assertPublicOpaque(reviewed),true);
+  assert.doesNotMatch(JSON.stringify(reviewed),/hidden|private source|home/);
+});
+
+test("forged role tool evidence cannot be promoted to an external review reference",()=>{
+  const tool=makeToolResult("source.read",{path:"original.js",content:"safe"});
+  const forged={...tool,evidence_id:"TRE_FORGED"};
+  assert.throws(()=>publicHypothesisReviewEvidence({
+    diagnosisJson:{hypotheses:[{status:"HYPOTHESIS",evidence_refs:["TRE_FORGED"]}]},
+    diagnosisToolEvidence:[forged]
+  }),/TOOL_RESULT_EVIDENCE_ID_MISMATCH/);
 });
