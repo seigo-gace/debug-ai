@@ -143,6 +143,39 @@ function normalizeGateUrls(value){
   }
   return Object.freeze(safe);
 }
+// Only previously verified AI Core Gate error identifiers are retained. Unknown or
+// untrusted response bodies stay redacted; this is reported provenance, not RCA.
+const KNOWN_CORE_GATE_ERROR_CODES=new Set([
+  "UNAUTHORIZED","BAD_REQUEST","OBSERVE_ONLY_NO_INFERENCE","GLOBAL_CONCURRENCY_LIMIT",
+  "MODEL_CONCURRENCY_LIMIT","MODEL_TRANSITION_BUSY","ADMISSION_QUEUE_BUSY",
+  "ADMISSION_QUEUE_FULL","ADMISSION_DEADLINE_EXPIRED","MODEL_START_TIMEOUT",
+  "MODEL_START_ROLLBACK_FAILED","ORPHANED_LEASE_RECOVERY_PENDING",
+  "UPSTREAM_UNAVAILABLE","UPSTREAM_HTTP_FRAMING_INVALID","UPSTREAM_JSON_CONTRACT_INVALID",
+  "UPSTREAM_COMPLETION_CONTRACT_INVALID","UPSTREAM_RESPONSE_TOO_LARGE",
+  "UPSTREAM_STREAM_CONTRACT_INVALID","UPSTREAM_STREAM_INTERRUPTED","UPSTREAM_STREAM_TOO_LARGE",
+  "UPSTREAM_STREAM_AFTER_DONE","UPSTREAM_STREAM_INCOMPLETE",
+  "WRONG_MODEL_FOR_ENDPOINT","UNKNOWN_MODEL","ALL_RESIDENT_MODELS_LEASED",
+  "HANDOFF_MODEL_LEASED","LEASE_JOURNAL_CORRUPT","LEASE_JOURNAL_WRITE_FAILED",
+  // Exact AI Core PR #3 Unix-backend migration admission/stop diagnostics (HTTP provenance only).
+  "BACKEND_UNIX_LISTENER_MISMATCH","BACKEND_UNIX_TCP_EXPOSED",
+  "BACKEND_UNIX_VOLUME_NOT_SHARED","BACKEND_SLOTS_BUSY_OR_UNVERIFIED",
+  // Confirmed AI Core Coordinator model lease/physical recovery failure codes.
+  "HANDOFF_IN_PROGRESS","EVICTION_NOT_CONFIRMED","EXISTING_RESIDENCY_EXCEEDS_POLICY",
+  "ROLLBACK_RESIDENT_NOT_RUNNING","BACKEND_MODEL_ID_MISMATCH",
+  "BACKEND_MEMORY_LIMIT_MISMATCH","BACKEND_CPU_LIMIT_MISMATCH",
+  // AI Core private-socket start() fail-closed provenance, reachable by model lease.
+  "BACKEND_UNIX_SOCKET_PATH_INVALID","BACKEND_UNIX_SOCKET_STAT_FAILED",
+  "BACKEND_UNIX_SOCKET_TYPE_UNSAFE","BACKEND_UNIX_SOCKET_PROBE_FAILED",
+  "BACKEND_UNIX_SOCKET_NOT_STALE","BACKEND_UNIX_CONTAINER_RESTARTED",
+  "BACKEND_UNIX_SOCKET_CHANGED","BACKEND_UNIX_SOCKET_REMOVE_FAILED",
+  "SOURCE_FINGERPRINT_UNAVAILABLE","RESOURCE_READBACK_UNAVAILABLE"
+]);
+function reportedGateErrorCode(body){
+  if(typeof body!=="string"||Buffer.byteLength(body,"utf8")>1024)return null;
+  try{const value=JSON.parse(body)?.error?.code;
+    return typeof value==="string"&&KNOWN_CORE_GATE_ERROR_CODES.has(value)?value:null;
+  }catch{return null;}
+}
 function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=process.env.AI_CORE_API_KEY,fetchImpl=undiciFetch,timeoutMs=600000,maxTransportTimeoutAttempts=2,maxTimeoutRetries,dispatcher,runtimeContextTokens=process.env.DEBUG_AI_CORE_CONTEXT_TOKENS??null,requireRuntimeContextQualification=false,promptCache=true,inputTokenShadow=false,inputTokenShadowRoute="router",observationIntervalMs=60000,modelGateBaseUrls=null,dispatchMode="legacy"}={}){
   if(!baseUrl)throw new AiCoreError("AI_CORE_URL_REQUIRED","DEBUG_AI_CORE_URL is required");
   if(!apiKey)throw new AiCoreError("AI_CORE_API_KEY_REQUIRED","AI_CORE_API_KEY is required");
@@ -240,7 +273,7 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
         if(typeof text==="string")responseBytes+=Buffer.byteLength(text,"utf8");
         if(signal?.aborted)throw new AiCoreError("AI_CORE_ABORTED","DebugAI role invocation cancelled during inference",{role,timeout_class:TIMEOUT_CLASS.EXTERNAL_ABORT,attempts:attempt});
         runtimeMeta.observe?.({phase:"RESPONSE",dispatch_attempt:attempt});
-        if(!r.ok)throw new AiCoreError("AI_CORE_HTTP",`AI Core HTTP ${r.status}`,{status:r.status});
+        if(!r.ok)throw new AiCoreError("AI_CORE_HTTP",`AI Core HTTP ${r.status}`,{status:r.status,dispatch_mode:dispatchMode,upstream_reported_code:dispatchMode==="model_gates"?reportedGateErrorCode(text):null});
         const parseStartedAt=Date.now();
         try{envelope=JSON.parse(text);}catch{parseValidateMs+=Date.now()-parseStartedAt;throw new AiCoreError("AI_CORE_ENVELOPE","AI Core returned non-JSON envelope");}
         const content=envelope?.choices?.[0]?.message?.content;finishReason=envelope?.choices?.[0]?.finish_reason??null;parseValidateMs+=Date.now()-parseStartedAt;
@@ -286,7 +319,7 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
       observe({phase:"SUCCEEDED",telemetry:out.telemetry,dispatch_attempt:out.attempts,node_process_resources:resourceStart?nodeProcessResourceObservation(resourceStart,sampleNodeProcessResources()):null});
       return out;
     }catch(error){
-      observe({phase:"FAILED",failure_code:String(error?.code||"AI_CORE_ERROR"),timeout_class:error?.meta?.timeout_class||null,telemetry:error?.meta?.telemetry||null,dispatch_attempt:error?.meta?.attempts??progress.dispatch_attempt,node_process_resources:resourceStart?nodeProcessResourceObservation(resourceStart,sampleNodeProcessResources()):null});
+      observe({phase:"FAILED",failure_code:String(error?.code||"AI_CORE_ERROR"),timeout_class:error?.meta?.timeout_class||null,upstream_http_status:Number.isInteger(error?.meta?.status)?error.meta.status:null,upstream_reported_code:error?.meta?.upstream_reported_code||null,dispatch_mode:error?.meta?.dispatch_mode||dispatchMode,telemetry:error?.meta?.telemetry||null,dispatch_attempt:error?.meta?.attempts??progress.dispatch_attempt,node_process_resources:resourceStart?nodeProcessResourceObservation(resourceStart,sampleNodeProcessResources()):null});
       throw error;
     }finally{if(heartbeat)clearInterval(heartbeat);}
   }
@@ -371,4 +404,4 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
   async function callPrepared(role,{system,user="",...options}={}){if(typeof system!=="string"||!system.trim())throw new AiCoreError("AI_CORE_PREPARED_SYSTEM_REQUIRED","Prepared benchmark system prompt is required",{role});return queuedCall(role,{...options,user},{preparedSystem:system});}
   return{endpoint,dispatch_mode:dispatchMode,runtime_route_binding:runtimeRouteBinding,endpointForRole,runtime_context_tokens:qualifiedRuntimeContext,runtime_context_qualified:qualifiedRuntimeContext!==null,prompt_cache_requested:promptCache,preflightRoleGate,preflightConfiguredGates,call,callPrepared};
 }
-module.exports={ROLE_ALIASES,TIMEOUT_CLASS,AiCoreError,classifyTimeoutError,isTimeoutError,resolveRoleTimeoutMs,resolveEffectiveTimeoutMs,normalizeRuntimeContextTokens,resolveEffectiveMaxTokens,finiteUsage,usageTelemetry,providerTimingTelemetry,prefixHash,truncationError,runtimeControlWireUser,sampleNodeProcessResources,nodeProcessResourceObservation,createAiCoreAdapter};
+module.exports={ROLE_ALIASES,TIMEOUT_CLASS,AiCoreError,classifyTimeoutError,isTimeoutError,resolveRoleTimeoutMs,resolveEffectiveTimeoutMs,normalizeRuntimeContextTokens,resolveEffectiveMaxTokens,finiteUsage,usageTelemetry,providerTimingTelemetry,prefixHash,truncationError,runtimeControlWireUser,sampleNodeProcessResources,nodeProcessResourceObservation,expectedGateForRole,normalizeGateUrls,createAiCoreAdapter};

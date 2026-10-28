@@ -9,7 +9,7 @@ const {RepoPolicy}=require("../repo-policy.js");
 const {RunAuthority}=require("../run-authority.js");
 const {RuntimeEvidenceStore}=require("../runtime-evidence.js");
 const {createReadOnlyToolRuntime}=require("../control/read-only-tool-runtime.js");
-const {wrapAuthorityForRunObservation}=require("../control/run-observation-context.js");
+const {wrapAuthorityForRunObservation,observeAiCalls}=require("../control/run-observation-context.js");
 const {createRunObservationProvider}=require("../control/run-observation-provider.js");
 const {createWorkflow}=require("../workflow-observed.js");
 
@@ -76,3 +76,36 @@ test("observed workflow binds generated run before causal runtime observation to
 });
 
 test("production entrypoint composes observed workflow instead of bypassing current-run binding",()=>{const source=fs.readFileSync(path.join(__dirname,"..","main.js"),"utf8");assert.match(source,/require\("\.\/workflow-observed\.js"\)/);});
+
+
+test("AI Core Gate errors remain attributable in durable run events without disclosing provider bodies",async()=>{
+  const written=[],secret="INTERNAL_PRIVATE_DIAGNOSTIC_DO_NOT_LOG";
+  const upstream=Object.assign(new Error("AI Core HTTP 502"),{code:"AI_CORE_HTTP",meta:{status:502,upstream_reported_code:"UPSTREAM_STREAM_INTERRUPTED",dispatch_mode:"model_gates",private_body:secret}});
+  const observed=observeAiCalls({aiCore:{call:async(_role,options)=>{
+    options.onProgress({phase:"FAILED",failure_code:"AI_CORE_HTTP",upstream_http_status:502,upstream_reported_code:"UPSTREAM_STREAM_INTERRUPTED",dispatch_mode:"model_gates"});
+    throw upstream;
+  }},runId:"run_core_attribution",runtimeEvidence:{write:(id,type,payload)=>written.push({id,type,payload})}});
+  await assert.rejects(observed.call("code_scout",{user:"inspect source"}),error=>error===upstream);
+  const terminal=written.filter(r=>r.payload.phase==="FAILED").at(-1);
+  assert.equal(terminal.id,"run_core_attribution");
+  assert.equal(terminal.type,"ai_invocation");
+  assert.equal(terminal.payload.failure_code,"AI_CORE_HTTP");
+  assert.equal(terminal.payload.upstream_http_status,502);
+  assert.equal(terminal.payload.upstream_reported_code,"UPSTREAM_STREAM_INTERRUPTED");
+  assert.equal(terminal.payload.dispatch_mode,"model_gates");
+  assert.doesNotMatch(JSON.stringify(written),/INTERNAL_PRIVATE_DIAGNOSTIC/);
+});
+
+test("Run observation refuses arbitrary upstream error text and invalid HTTP status",async()=>{
+  const written=[];
+  const observed=observeAiCalls({aiCore:{call:async(_role,options)=>{
+    options.onProgress({phase:"FAILED",upstream_http_status:200,upstream_reported_code:"SECRET_LONG_FIELD_".repeat(10),dispatch_mode:"forged",debug_secret:"do-not-record"});
+    throw Object.assign(Error("transport failed"),{code:"AI_CORE_HTTP",meta:{status:200,upstream_reported_code:"not accepted",dispatch_mode:"forged",private_body:"do-not-record"}});
+  }},runId:"run_negative",runtimeEvidence:{write:(_id,_type,payload)=>written.push(payload)}});
+  await assert.rejects(observed.call("researcher",{user:"read local evidence"}),/transport failed/);
+  const terminal=written.filter(r=>r.phase==="FAILED").at(-1);
+  assert.equal(terminal.upstream_http_status,null);
+  assert.equal(terminal.upstream_reported_code,null);
+  assert.equal(terminal.dispatch_mode,null);
+  assert.doesNotMatch(JSON.stringify(written),/do-not-record|SECRET_LONG_FIELD/);
+});

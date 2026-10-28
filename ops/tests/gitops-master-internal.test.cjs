@@ -172,3 +172,79 @@ for(const args of [
 ])test('non-admission command is never replayed on a gateway error: '+args.join(' '),t=>{
  const {result,calls}=isolatedMetadataRead(t,args);assert.notEqual(result.status,0);assert.equal(calls,1);
 });
+
+
+test('combined Master registry permits only the explicitly registered deploy action and verified Compose',t=>{
+ const f=master(t);
+ f.policy.allowed_operations=['deploy','host.command','reflect'];
+ f.policy.allowed_scopes=['debugai.compose.reflect','gace.source.reflect'];
+ f.sync();
+ const out=f.run();
+ assert.equal(out.state,'PASS',out.error);
+ assert.equal(out.action,'deploy');
+ assert.equal(out.authorization.runtime_target,'debugai.compose');
+ assert.ok(fs.existsSync(f.receipt+'.used'));
+});
+test('combined Master registry cannot skip Compose digest verification',t=>{
+ const f=master(t);
+ f.policy.allowed_operations=['deploy','host.command','reflect'];
+ f.policy.allowed_scopes=['debugai.compose.reflect','gace.source.reflect'];
+ f.policy.runtime_target.compose_digest='0'.repeat(64);
+ f.sync();
+ const out=f.run();
+ assert.equal(out.state,'FAIL',JSON.stringify(out));
+ assert.equal(out.error,'MASTER_RUNTIME_MAPPING_MISMATCH');
+ assert.equal(fs.existsSync(f.calls),false);
+});
+test('combined Master registry allows an explicitly scoped source reflect without turning it into deploy',t=>{
+ const f=sourceOnlyMaster(t);
+ const compose=path.join(f.repo,'compose.yaml');
+ f.policy.allowed_operations=['deploy','host.command','reflect'];
+ f.policy.allowed_scopes=['debugai.compose.reflect','gace.source.reflect'];
+ f.policy.runtime_target={id:'debugai.compose',compose_file:'compose.yaml',compose_digest:crypto.createHash('sha256').update(fs.readFileSync(compose)).digest('hex'),
+   services:['debug-ai','sandbox-runner'],health_service:'debug-ai',health_url:'http://127.0.0.1:8787/health'};
+ f.request.delegation.runtime_target='debugai.compose';
+ f.sync();
+ const out=f.run();
+ assert.equal(out.state,'PASS',out.error);
+ assert.equal(out.action,'reflect');
+ assert.equal(out.result.runtime_restarted,false);
+ assert.equal(out.result.active_checkout_verified,true);
+ assert.doesNotMatch(fs.readFileSync(f.calls,'utf8'),/docker/);
+});
+test('combined Master registry fails closed on cross-action scope substitution',t=>{
+ const f=master(t);
+ f.policy.allowed_operations=['deploy','host.command','reflect'];
+ f.policy.allowed_scopes=['debugai.compose.reflect','gace.source.reflect'];
+ f.request.delegation.scope='gace.source.reflect';
+ f.sync();
+ const out=f.run();
+ assert.equal(out.state,'FAIL',JSON.stringify(out));
+ assert.equal(out.error,'MASTER_SCOPE_FORBIDDEN');
+ assert.equal(fs.existsSync(f.calls),false);
+});
+test('combined Master registry never admits host.command as a GitOps runner action',t=>{
+ const f=master(t);
+ f.policy.allowed_operations=['deploy','host.command','reflect'];
+ f.policy.allowed_scopes=['debugai.compose.reflect','gace.source.reflect'];
+ f.request.action='host.command';
+ f.sync();
+ const out=f.run();
+ assert.equal(out.state,'FAIL',JSON.stringify(out));
+ assert.equal(out.error,'REQUEST_ACTION_INVALID');
+ assert.equal(fs.existsSync(f.calls),false);
+});
+test('unregistered combined operation and wrong scope ordering are rejected',t=>{
+ for(const variant of ['unregistered_operation','wrong_scope_order']){
+  const f=master(t);
+  f.policy.allowed_operations=['deploy','host.command','reflect'];
+  f.policy.allowed_scopes=['debugai.compose.reflect','gace.source.reflect'];
+  if(variant==='unregistered_operation')f.policy.allowed_operations.push('publish');
+  if(variant==='wrong_scope_order')f.policy.allowed_scopes.reverse();
+  f.sync();
+  const out=f.run();
+  assert.equal(out.state,'FAIL',JSON.stringify(out));
+  assert.equal(out.error,'MASTER_OPERATION_POLICY_INVALID');
+  assert.equal(fs.existsSync(f.calls),false);
+ }
+});

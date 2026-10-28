@@ -58,8 +58,12 @@ master_verify_mapping() {
       ((($e.server_project_path|startswith($root+"/")) and ($e.server_project_path|ltrimstr($root+"/")|test("^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$"))) or ($e.server_project_path=="/home/admin1/server-core")|not) or
       $e.repo!="/workspace/debug-ai" then "MASTER_MAPPING_INVALID"
     elif ($e.allowed_branches|type)!="array" or ($e.allowed_branches|length)<1 or any($e.allowed_branches[]; type!="string" or (test("^[A-Za-z0-9._/-]{1,160}$")|not) or startswith("-") or contains("..") or contains("@{")) then "MASTER_BRANCH_POLICY_INVALID"
-    elif ($e.allowed_operations!=["deploy"] and $e.allowed_operations!=["reflect"]) or
+    elif ($e.allowed_operations!=["deploy"] and $e.allowed_operations!=["reflect"] and
+          $e.allowed_operations!=["deploy","host.command","reflect"]) or
+      ($e.allowed_operations==["deploy"] and $e.allowed_scopes!=["debugai.compose.reflect"]) or
       ($e.allowed_operations==["reflect"] and $e.allowed_scopes!=["gace.source.reflect"]) or
+      ($e.allowed_operations==["deploy","host.command","reflect"] and
+          $e.allowed_scopes!=["debugai.compose.reflect","gace.source.reflect"]) or
       ($e.allowed_scopes|type)!="array" or ($e.allowed_scopes|length)<1 or any($e.allowed_scopes[]; type!="string" or (test("^[a-z][a-z0-9_.-]{1,80}$")|not)) then "MASTER_OPERATION_POLICY_INVALID"
     elif $e.effects!={destructive:false,persistent_data:false,secrets:false,provider_model:false,public_exposure:false} or $e.allow_production!=true then "MASTER_PROTECTED_EFFECT_FORBIDDEN"
     elif ($e.enabled|type)!="boolean" or ($e.revoked|type)!="boolean" or $e.request_identity!="debugai.authenticated-control" or ($e.audit_identity|type)!="string" or ($e.audit_identity|length)<1 then "MASTER_REGISTRY_ENTRY_INVALID"
@@ -82,7 +86,7 @@ master_verify_mapping() {
   [ "$remote" = "$("$JQ_BIN" -r '.remote' "$entry")" ] || fail MASTER_SERVER_MAPPING_MISMATCH || return 1
   # Registered source-only targets must not be forced through Docker Compose.
   # The same signed GitHub/Project/Host-root checks still apply below.
-  if "$JQ_BIN" -e '.allowed_operations==["deploy"]' "$entry" >/dev/null; then
+  if "$JQ_BIN" -e '.allowed_operations|index("deploy")!=null' "$entry" >/dev/null; then
     compose="$path/compose.yaml"
     [ -f "$compose" ] && [ ! -L "$compose" ] || fail MASTER_RUNTIME_MAPPING_NOT_VERIFIED || return 1
     digest="$(delegation_digest "$compose")"
@@ -121,8 +125,11 @@ validate_master_internal() {
     elif (.delegation.mode!=null and .delegation.mode!="MASTER_INTERNAL_PERSISTENT") then "MASTER_REQUEST_MODE_INVALID"
     elif (.delegation.mode!=null and .delegation.repository!=$p.repository) or .repo!=$p.repo then "MASTER_REQUEST_REPOSITORY_MISMATCH"
     elif ($p.allowed_branches|index($r.branch))==null then "MASTER_BRANCH_FORBIDDEN"
-    elif ($p.allowed_operations|index($r.action))==null then "MASTER_OPERATION_FORBIDDEN"
-    elif ($p.allowed_scopes|index($r.delegation.scope))==null then "MASTER_SCOPE_FORBIDDEN"
+    elif ($r.action!="deploy" and $r.action!="reflect") or
+         ($p.allowed_operations|index($r.action))==null then "MASTER_OPERATION_FORBIDDEN"
+    elif ($r.action=="deploy" and $r.delegation.scope!="debugai.compose.reflect") or
+         ($r.action=="reflect" and $r.delegation.scope!="gace.source.reflect") or
+         ($p.allowed_scopes|index($r.delegation.scope))==null then "MASTER_SCOPE_FORBIDDEN"
     elif .delegation.mode!=null and .delegation.runtime_target!=$p.runtime_target.id then "MASTER_RUNTIME_TARGET_FORBIDDEN"
     elif .delegation.effects!=$p.effects or .delegation.production!=true then "MASTER_PROTECTED_EFFECT_FORBIDDEN"
     elif .delegation.operation_id!=.id then "DELEGATION_OPERATION_ID_MISMATCH"
@@ -137,7 +144,7 @@ master_resolve_target() {
   REPO="$("$JQ_BIN" -r '.server_project_path' "$delegation_policy")"
   REMOTE="$("$JQ_BIN" -r '.remote' "$delegation_policy")"
   BRANCH="$("$JQ_BIN" -r '.branch' "$1")"
-  if "$JQ_BIN" -e '.allowed_operations==["deploy"]' "$delegation_policy" >/dev/null; then
+  if "$JQ_BIN" -e '.allowed_operations|index("deploy")!=null' "$delegation_policy" >/dev/null; then
     mapfile -t master_services < <("$JQ_BIN" -r '.runtime_target.services[]' "$delegation_policy")
     master_health_service="$("$JQ_BIN" -r '.runtime_target.health_service' "$delegation_policy")"
     master_health_url="$("$JQ_BIN" -r '.runtime_target.health_url' "$delegation_policy")"
