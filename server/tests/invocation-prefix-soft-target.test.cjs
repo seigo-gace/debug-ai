@@ -16,7 +16,8 @@ test("shared invariant policy has identical leading bytes for every role, with v
  for(const role of roles){
   for(const task of ["source contract version","failure runtime trace regression"]){
    const x=compileInvocation(role,{task,extraSystem:"Different task detail",outputEnvelope:WORK_ITEM_ENVELOPE});
-   assert.ok(x.system.startsWith(common));assert.ok(x.system.includes("ROLE="+role));
+   assert.ok(x.system.startsWith("TOP_LEVEL_PROTOCOL="));assert.ok(x.system.slice(x.system.indexOf("\n")+1).startsWith(common));
+   assert.ok(compileInvocation(role,{task}).system.startsWith(common));assert.ok(x.system.includes("ROLE="+role));
    assert.ok(x.system.includes("TOP_LEVEL_PROTOCOL="));
    assert.ok(x.system.includes("TASK_SPECIFIC_POLICY=Different task detail"));
    assert.match(x.system,/model output is not evidence/);
