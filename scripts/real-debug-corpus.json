@@ -159,7 +159,8 @@
       "holdout_checks": [
         "assert.equal(api('xxxy','xx'),'xy')",
         "assert.equal(api('foofoo','foo'),'foo')",
-        "assert.equal(api('a','z'),'a')"
+        "assert.equal(api('a','z'),'a')",
+        "assert.equal(api('zabc','abc'),'zabc')"
       ],
       "oracle": {
         "cause": "replace removes substring anywhere",
@@ -787,7 +788,8 @@
       ],
       "holdout_checks": [
         "assert.deepEqual(api([{id:'z',ts:1,v:1},{id:'z',ts:1,v:2},{id:'a',ts:1}]),[{id:'a',ts:1},{id:'z',ts:1,v:2}])",
-        "assert.deepEqual(api([]),[])"
+        "assert.deepEqual(api([]),[])",
+        "assert.deepEqual(api([{id:'p',ts:7},{id:'q',ts:2},{id:'p',ts:1}]),[{id:'q',ts:2},{id:'p',ts:7}])"
       ],
       "oracle": {
         "cause": "arrival order overrides event timestamp",
@@ -894,7 +896,7 @@
         "assert.deepEqual(api(['START','FAIL'],1),{state:'RETRY',n:1})"
       ],
       "holdout_checks": [
-        "assert.deepEqual(api(['START','FAIL','RETRY','SUCCESS'],1),{state:'DONE',n:1})",
+        "assert.doesNotThrow(()=>assert.deepEqual(api(['START','FAIL','RETRY','SUCCESS'],1),{state:'DONE',n:1}))",
         "assert.deepEqual(api(['START','FAIL'],0),{state:'FAILED',n:1})",
         "assert.throws(()=>api(['SUCCESS'],1),/invalid/)"
       ],
