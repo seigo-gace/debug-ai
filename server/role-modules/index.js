@@ -7,6 +7,7 @@ const {ROLE_CONTRACTS}=require("../control/role-contracts.js");
 const {ROLE_SEMANTIC_RULES}=require("../control/role-output-validator.js");
 const {getRoleRuntimeBudget}=require("../control/role-runtime-budgets.js");
 const {runRoleWithReadOnlyTools}=require("../control/tool-loop.js");
+const {WORK_ITEM_ENVELOPE}=require("../control/invocation-compiler.js");
 
 function roleModule(role){
   const profile=ROLES[role],contract=ROLE_CONTRACTS[role],semantic=ROLE_SEMANTIC_RULES[role];
@@ -15,10 +16,14 @@ function roleModule(role){
   const execution=Object.freeze({
     // Keep the current verified Tool, Evidence, Skill, progress and budget owner.
     invokeReadOnly:options=>runRoleWithReadOnlyTools({...options,role}),
-    // Preserve the existing direct-call deadline, signal and effective budget.
+    // Existing adapter owns the single slot. Queue time must not consume the
+    // separately qualified turn allowance; their sum is bounded by the existing
+    // role wall budget. No additional dispatch slot or output allowance.
     invokeDirect:({aiCore,system,user,signal=null})=>aiCore.call(role,{
       system,user,maxTokens:budget.max_tokens,timeoutMsOverride:budget.turn_timeout_ms,
-      deadlineAt:Date.now()+budget.turn_timeout_ms,...(signal?{signal}:{})
+      outputEnvelope:WORK_ITEM_ENVELOPE,
+      queueTimeoutMs:Math.max(1,budget.tool_loop_wall_ms-budget.turn_timeout_ms),
+      excludeQueueFromDeadline:true,deadlineAt:Date.now()+budget.turn_timeout_ms,...(signal?{signal}:{})
     }),
   });
   return Object.freeze({role_id:role,profile,contract,semantic,budget,execution});
