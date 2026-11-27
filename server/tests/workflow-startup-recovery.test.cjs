@@ -181,6 +181,7 @@ test("adaptive route executes isolated candidate before reviewer, keeps it unrel
   fs.mkdirSync(repo);fs.writeFileSync(path.join(repo,"value.cjs"),"module.exports=x=>x>10;\n");
   fs.writeFileSync(path.join(repo,"check.cjs"),"const assert=require('node:assert/strict');const f=require('./value.cjs');assert.equal(f(10),true);\n");
   fs.writeFileSync(path.join(repo,"package.json"),JSON.stringify({scripts:{test:"node check.cjs"}}));
+  fs.mkdirSync(runtimeRoot,{mode:0o700});
   const policy=new RepoPolicy({workspaceRoot:root}),authority=new RunAuthority({runtimeRoot,repoPolicy:policy,durableIo:new FakeDurableIo()});
   const patchService=new PatchService({runtimeRoot,repoPolicy:policy}),runtimeEvidence=new RuntimeEvidenceStore(runtimeRoot),events=[];
   const rawRequest="Correct inclusive numeric boundary",requirements={requested_behavior:["At threshold 10 return true."],forbidden_paths:["check.cjs","package.json"],required_tests:["npm test"]};
