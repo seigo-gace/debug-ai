@@ -201,3 +201,40 @@ test("real durable canonical ordering does not invalidate the same structured ro
   const next=await wf().continueRoleTask({...args,task:JSON.stringify({a:{b:3,y:2},z:1})});assert.equal(next.status,"COMPLETE");assert.equal(calls.length,2);assert.deepEqual(calls[0].task,calls[1].task);
   await assert.rejects(wf().continueRoleTask({...args,task:JSON.stringify({a:{b:4,y:2},z:1})}),{code:"INPUT_BINDING_MISMATCH"});assert.equal(calls.length,2);
 });
+
+test("native six-role investigation retains real admitted source and evidence reads instead of tool-less continuation",async t=>{
+  const {RepoPolicy}=require("../repo-policy.js");
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),"native-investigation-tools-")),repo=path.join(root,"repo"),runtimeRoot=path.join(root,"runtime");
+  fs.mkdirSync(repo);fs.writeFileSync(path.join(repo,"a.js"),"module.exports=()=>require('./hidden.js')();\n");
+  fs.writeFileSync(path.join(repo,"hidden.js"),"module.exports=()=>37; // ACTUAL_HIDDEN_SOURCE\n");
+  t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+  const repoPolicy=new RepoPolicy({workspaceRoot:root}),io=new IO(),counts={},seen={};
+  const authority=new RunAuthority({runtimeRoot,repoPolicy,durableIo:io});
+  const wf=createWorkflow({authority,repoPolicy,recoveryHooks:horizontalRoleHooksForMode("six_role"),
+    aiCore:{call:async(role,prompt)=>{
+      counts[role]=(counts[role]||0)+1;
+      if(role==="code_scout"||role==="diagnoser"){
+        assert.match(prompt.system,/RUNTIME_TOOLS=.*source\.read/);
+        if(counts[role]===1)return {content:JSON.stringify({tool_requests:[{tool:"source.read",arguments:{path:"hidden.js"},reason:"inspect actual implementation"}]})};
+        assert.match(prompt.user,/ACTUAL_HIDDEN_SOURCE/);
+        const ref=prompt.user.match(/TRE_[a-f0-9]+/)[0];seen[role]=ref;
+        if(role==="code_scout")return {content:JSON.stringify({relevant_files:["a.js","hidden.js"],call_path:["a.js -> hidden.js"],contract_mismatch:null,excluded_files:[],unknowns:[]})};
+        return {content:JSON.stringify({diagnosis_status:"INSUFFICIENT_EVIDENCE",hypotheses:[],confirmed_root_cause:null,unsupported_claims:["fixture has no independently established cause"]})};
+      }
+      if(role==="causal_scout"){assert.match(prompt.system,/RUNTIME_TOOLS=.*evidence\.read/);return {content:JSON.stringify({claims:[]})};}
+      if(role==="researcher"){
+        assert.match(prompt.system,/RUNTIME_TOOLS=/);
+        assert.match(prompt.user,/ACTUAL_HIDDEN_SOURCE/);
+        assert.ok(prompt.user.includes(seen.code_scout));
+        return {content:JSON.stringify({research_status:"INSUFFICIENT_EVIDENCE",answer:"source reviewed",evidence_refs:[],rejected_source_refs:[],contradictions:[],bound_version:null})};
+      }
+      throw Error("UNEXPECTED_ROLE:"+role);
+    }}});
+  const result=await wf.runAnalysis({repo,rawRequest:"Investigate source call path from a.js",failure:{message:"source behavior mismatch",source_paths:["a.js"]}});
+  assert.equal(counts.code_scout,2);assert.equal(counts.diagnoser,2);
+  assert.deepEqual(result.tool_audit.code_scout.tools,["source.read"]);
+  assert.deepEqual(result.tool_audit.diagnoser.tools,["source.read"]);
+  assert.ok(result.evidence_registry.tool_evidence_ids.includes(seen.code_scout));
+  assert.equal(result.state,"HYPOTHESIS_NOT_REVIEWABLE");
+  assert.equal(fs.readFileSync(path.join(repo,"hidden.js"),"utf8"),"module.exports=()=>37; // ACTUAL_HIDDEN_SOURCE\n");
+});
