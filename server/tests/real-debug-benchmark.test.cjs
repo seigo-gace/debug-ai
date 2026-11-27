@@ -27,3 +27,12 @@ test("fixture readback rejects tampering and symlink",t=>{
 test("blocked and not-run cases cannot inflate functional repair precision",()=>{
  const x=b.makeSummary([{id:"L1-01",level:1,state:"DONE",repair_pass:true,review_pass:false,diagnosis:{},cause_accuracy:"UNREVIEWED"},{id:"L2-01",level:2,state:"BLOCKED",repair_pass:false}],50);assert.equal(x.total,50);assert.equal(x.completed,2);assert.equal(x.repair_pass,1);assert.equal(x.blocked,1);assert.equal(x.review_pass,0);assert.equal(x.unreviewed_diagnoses,1);
 });
+
+test("repeated identical blocked cases pause the suite without changing repair scoring",()=>{
+ const blocked={state:"BLOCKED",error_code:"HYPOTHESIS_REVIEW_NOT_PASS",repair_pass:false};
+ assert.equal(b.repeatedBlockedCode([blocked,blocked]),null);
+ assert.equal(b.repeatedBlockedCode([blocked,blocked,blocked]),blocked.error_code);
+ assert.equal(b.repeatedBlockedCode([blocked,{...blocked,error_code:"AI_CORE_TIMEOUT"},blocked]),null);
+ assert.equal(b.repeatedBlockedCode([blocked,blocked,{state:"FAILED",error_code:blocked.error_code}]),null);
+ assert.equal(b.repeatedBlockedCode([blocked,blocked,{state:"DONE",repair_pass:true}]),null);
+});
