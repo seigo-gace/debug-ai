@@ -145,7 +145,8 @@ function createExternalReviewAdapter({groqKey=process.env.GROQ_API_KEY,geminiKey
       if(!recoverable(primaryError)||!geminiKey)throw primaryError;
       try{
         const fallback=await qualified("gemini");
-        return secondOpinion&&fallback.json.verdict==="PASS"?{...fallback,json:{verdict:"PENDING",reason:"SECOND_OPINION_UNAVAILABLE"}}:fallback;
+        const primary_error={code:primaryError.code,status:primaryError.meta?.status||null};
+        return secondOpinion&&fallback.json.verdict==="PASS"?{...fallback,primary_error,json:{verdict:"PENDING",reason:"SECOND_OPINION_UNAVAILABLE"}}:{...fallback,primary_error};
       }
       catch(secondaryError){
         if(!recoverable(secondaryError))throw secondaryError;
