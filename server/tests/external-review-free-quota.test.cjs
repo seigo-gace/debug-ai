@@ -134,7 +134,8 @@ test('upstream exhausted headers or token bound overrun disable further requests
 test('HTTP200 incomplete finish states and explicit pending second opinion never qualify PASS',async()=>{
  for(const reason of ['length','content_filter','tool_calls',null]){
  let calls=0;const a=createExternalReviewAdapter(mockOptions({groqKey:'g',geminiKey:'',fetchImpl:async()=>{calls++;return new Response(JSON.stringify({choices:[{finish_reason:reason,message:{content:'{"verdict":"PASS"}'}}]}));}}));
- await assert.rejects(()=>a.final(payload),/INCOMPLETE/);assert.equal(calls,2);
+ const expected=reason==='length'?/TRUNCATED/:reason==='content_filter'?/CONTENT_FILTER/:/INCOMPLETE/;
+ await assert.rejects(()=>a.final(payload),expected);assert.equal(calls,reason==='length'||reason==='content_filter'?1:2);
  }
  let calls=0;const a=createExternalReviewAdapter(mockOptions({fetchImpl:async()=>reply(++calls===1?'{"verdict":"PASS"}':'{"verdict":"PENDING"}')}));
  assert.equal((await a.final(payload,{secondOpinion:true})).json.verdict,'PENDING');
