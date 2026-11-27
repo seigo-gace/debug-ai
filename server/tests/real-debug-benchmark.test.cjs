@@ -1,0 +1,29 @@
+"use strict";
+const test=require("node:test"),assert=require("node:assert/strict"),fs=require("node:fs"),os=require("node:os"),path=require("node:path");
+const b=require("../control/real-debug-benchmark.js"),s=require("../../scripts/real-debug-suite.cjs");
+test("real suite requires actual sandbox assertions and completion receipt",()=>{
+ const c=s.select("L1-01"),check={check_type:"UNIT",executed:true,status:"PASS",exit_code:0,timed_out:false,sandbox:{backend:"sidecar+landlock+seccomp"},stdout:s.marker(c.public_checks)};
+ assert.equal(b.measuredTest({checks:[check]},c.public_checks),true);
+ for(const delta of [{stdout:""},{executed:false},{timed_out:true},{sandbox:{backend:"fake"}},{exit_code:1}])assert.equal(b.measuredTest({checks:[{...check,...delta}]},c.public_checks),false);
+ assert.equal(b.measuredTest({checks:[{...check,status:"FAIL",exit_code:1,stderr:"AssertionError"}]},c.public_checks,{red:true}),true);
+ assert.equal(b.measuredTest({checks:[{...check,status:"FAIL",exit_code:1,stderr:"MODULE_NOT_FOUND"}]},c.public_checks,{red:true}),false);
+});
+test("fixed corpus and isolated public request cannot disclose private oracle",()=>{
+ assert.equal(b.selectCases().length,50);assert.deepEqual(b.selectCases(["L5-01","L1-01"]),["L1-01","L5-01"]);assert.throws(()=>b.selectCases(["L1-01","L1-01"]));
+ const c=s.select("L1-01"),r=b.requestFor(c,"/workspace/debug-ai/.verification/fixture"),p=s.payload(c);
+ assert.equal(JSON.stringify(r).includes(c.oracle.cause),false);
+ assert.equal(JSON.stringify(p).includes(c.oracle.reference_files["src/index.cjs"]),false);
+ assert.equal(JSON.stringify(p).includes(s.marker(c.holdout_checks)),false);
+});
+test("independent grade material only accepts existing source replacement",()=>{
+ const c=s.select("L1-01"),g=b.gradePayload(c,[{type:"replace",path:"src/index.cjs",content_utf8:"module.exports=(v,n)=>v>=n;"}]);
+ assert.match(g["reproduce.cjs"],/DEBUGAI_ORACLE_COMPLETE/);assert.ok(g["reproduce.cjs"].includes(s.marker(c.holdout_checks)));
+ assert.throws(()=>b.gradePayload(c,[{type:"replace",path:"reproduce.cjs",content_utf8:""}]));
+ assert.throws(()=>b.gradePayload(c,[{type:"create",path:"src/new.cjs",content_utf8:""}]));
+});
+test("fixture readback rejects tampering and symlink",t=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),"debug-fixture-")),repo=path.join(root,"case");t.after(()=>fs.rmSync(root,{recursive:true,force:true}));const p=s.payload(s.select("L1-01"));s.writeNew(repo,p);assert.equal(b.exactFixture(repo,p),true);fs.writeFileSync(path.join(repo,"src/index.cjs"),"bad");assert.throws(()=>b.exactFixture(repo,p));fs.writeFileSync(path.join(repo,"src/index.cjs"),p["src/index.cjs"]);fs.symlinkSync("/outside",path.join(repo,"alias"));assert.throws(()=>b.exactFixture(repo,p),/SYMLINK/);
+});
+test("blocked and not-run cases cannot inflate functional repair precision",()=>{
+ const x=b.makeSummary([{id:"L1-01",level:1,state:"DONE",repair_pass:true,review_pass:false,diagnosis:{},cause_accuracy:"UNREVIEWED"},{id:"L2-01",level:2,state:"BLOCKED",repair_pass:false}],50);assert.equal(x.total,50);assert.equal(x.completed,2);assert.equal(x.repair_pass,1);assert.equal(x.blocked,1);assert.equal(x.review_pass,0);assert.equal(x.unreviewed_diagnoses,1);
+});
