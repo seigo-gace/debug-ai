@@ -63,12 +63,17 @@ function createExternalReviewAdapter({groqKey=process.env.GROQ_API_KEY,geminiKey
     // Master confirmed existing keys are FREE-only/billing-disabled. Runtime enforces
     // local budgets; it does not fabricate an account audit or require a new certificate.
     const qualification=transport==="mock"?validateQualification(qualificationReader(),provider,{...cfg,now}):null;
+    const outputBudget=provider==="groq"?2048:kind==="final"?900:650;
+    const parameters=provider==="groq"?{
+      max_completion_tokens:outputBudget,reasoning_effort:"low",include_reasoning:false,
+      response_format:{type:"json_schema",json_schema:{name:"review_verdict",strict:true,schema:{type:"object",properties:{verdict:{type:"string",enum:["PASS","FAIL","PENDING"]},reason:{type:"string"}},required:["verdict","reason"],additionalProperties:false}}}
+    }:{max_tokens:outputBudget,reasoning_effort:"low",response_format:{type:"json_object"}};
     const body=JSON.stringify({model:cfg.model,messages:[
-      {role:"system",content:`Independent ${kind} reviewer. Return exactly one JSON object. Required decision field: verdict, and verdict must be exactly PASS, FAIL, or PENDING.${correction?" The previous response violated this contract. Correct the format; include no commentary, code fence, or extra JSON object.":""}`},
+      {role:"system",content:`Independent ${kind} reviewer. Return exactly one JSON object. Required fields: verdict (exactly PASS, FAIL, or PENDING) and reason (brief evidence-grounded explanation).${correction?" The previous response violated this contract. Correct the format; include no commentary, code fence, or extra JSON object.":""}`},
       {role:"user",content:JSON.stringify(payload)}
-    ],max_tokens:kind==="final"?900:650,stream:false});
+    ],...parameters,stream:false});
     // UTF-8 byte upper bound + conservative framing overhead + full output budget; no refunds.
-    const tokens=Buffer.byteLength(body,"utf8")+1024+(kind==="final"?900:650);
+    const tokens=Buffer.byteLength(body,"utf8")+1024+outputBudget;
     charge();
     if(transport==="live")quota.reserveLocalDispatch(provider,tokens,cfg.key);
     else quota.reserveDispatch(provider,tokens,qualification);
@@ -102,7 +107,10 @@ function createExternalReviewAdapter({groqKey=process.env.GROQ_API_KEY,geminiKey
     let envelope;
     try{const text=await response.text();if(Buffer.byteLength(text)>65536)throw Error();envelope=JSON.parse(text);}
     catch{throw new ExternalReviewError(`${provider.toUpperCase()}_ENVELOPE`,{provider});}
-    if(envelope?.choices?.[0]?.finish_reason!=="stop")throw new ExternalReviewError("EXTERNAL_REVIEW_INCOMPLETE",{provider});
+    const finish=envelope?.choices?.[0]?.finish_reason;
+    if(finish==="length")throw new ExternalReviewError("EXTERNAL_REVIEW_TRUNCATED",{provider});
+    if(finish==="content_filter")throw new ExternalReviewError("EXTERNAL_REVIEW_CONTENT_FILTER",{provider});
+    if(finish!=="stop")throw new ExternalReviewError("EXTERNAL_REVIEW_INCOMPLETE",{provider});
     if(envelope.usage?.total_tokens!==undefined&&(!Number.isSafeInteger(envelope.usage.total_tokens)||envelope.usage.total_tokens>tokens)){
       quota.blockProvider(provider,"TOKEN_BOUND_EXCEEDED");throw new ExternalReviewError("EXTERNAL_REVIEW_TOKEN_BOUND_EXCEEDED",{provider});
     }
@@ -118,7 +126,7 @@ function createExternalReviewAdapter({groqKey=process.env.GROQ_API_KEY,geminiKey
   }
   function recoverable(error){
     const status=Number(error?.meta?.status||0);
-    return error?.code==="LIVE_BLOCKED_FREE_TIER_UNVERIFIED"||/EXTERNAL_REVIEW_QUOTA_(?:MINUTE|HOUR|DAY|MONTH|TOKENS|REMAINING)_EXHAUSTED/.test(error?.code||"")||error?.code==="EXTERNAL_REVIEW_QUOTA_ACCOUNT_BLOCKED"||error?.code==="EXTERNAL_REVIEW_TOKEN_BOUND_EXCEEDED"||schemaFault(error)||/_(?:NETWORK|TIMEOUT)$/.test(String(error?.code||""))||[400,401,403,404,429].includes(status)||(status>=500&&status<=599);
+    return error?.code==="LIVE_BLOCKED_FREE_TIER_UNVERIFIED"||/EXTERNAL_REVIEW_QUOTA_(?:MINUTE|HOUR|DAY|MONTH|TOKENS|REMAINING)_EXHAUSTED/.test(error?.code||"")||error?.code==="EXTERNAL_REVIEW_QUOTA_ACCOUNT_BLOCKED"||["EXTERNAL_REVIEW_TOKEN_BOUND_EXCEEDED","EXTERNAL_REVIEW_TRUNCATED"].includes(error?.code)||schemaFault(error)||/_(?:NETWORK|TIMEOUT)$/.test(String(error?.code||""))||[400,401,403,404,429].includes(status)||(status>=500&&status<=599);
   }
   async function review(kind,payload,{secondOpinion=false}={}){
     assertPublicOpaque(payload);
