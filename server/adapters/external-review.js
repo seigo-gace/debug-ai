@@ -23,6 +23,28 @@ function normalizeVerdict(json,provider){
   }
   return {...json,verdict};
 }
+// Never shorten a provider-declared cooldown. Unknown reset data remains conservative.
+function parseResetDuration(raw){
+  if(typeof raw!=="string"||!raw||! /^(?:\d+(?:\.\d+)?(?:ms|d|h|m|s))+$/.test(raw))return null;
+  const unit={d:86400000,h:3600000,m:60000,s:1000,ms:1};
+  let total=0;
+  for(const [,value,suffix] of raw.matchAll(/(\d+(?:\.\d+)?)(ms|d|h|m|s)/g))total+=Number(value)*unit[suffix];
+  return Number.isSafeInteger(Math.ceil(total))?Math.ceil(total):null;
+}
+function rateLimitCooldown(headers,provider,status,exhausted,now){
+  const retry=headers?.get?.("retry-after");
+  const retryMs=typeof retry==="string"&&/^\d+$/.test(retry)?Number(retry)*1000:null;
+  const waits=[];
+  if(Number.isSafeInteger(retryMs))waits.push(retryMs);
+  for(const kind of exhausted){
+    const reset=provider==="groq"?parseResetDuration(headers?.get?.("x-ratelimit-reset-"+kind)):null;
+    if(reset!==null)waits.push(reset);
+    else if(!Number.isSafeInteger(retryMs))waits.push(86400000);
+  }
+  if(status===429&&!waits.length)waits.push(86400000);
+  const delay=Math.max(1000,...waits);
+  return now+delay;
+}
 function createExternalReviewAdapter({groqKey=process.env.GROQ_API_KEY,geminiKey=process.env.GEMINI_API_KEY,fetchImpl=globalThis.fetch,groqUrl=process.env.DEBUG_AI_GROQ_URL||PROVIDERS.groq.url,geminiUrl=process.env.DEBUG_AI_GEMINI_URL||PROVIDERS.gemini.url,groqModel=PROVIDERS.groq.model,geminiModel=PROVIDERS.gemini.model,ledgerRoot=defaultQuotaRoot(),nowFn=()=>Date.now(),transport="live",qualificationReader}={}){
   if(transport!=="live"&&transport!=="mock")throw new ExternalReviewError("EXTERNAL_REVIEW_TRANSPORT_INVALID");
   if(transport==="mock"&&(!qualificationReader||fetchImpl===globalThis.fetch||/\[native code\]/.test(String(fetchImpl))))throw new ExternalReviewError("EXTERNAL_REVIEW_MOCK_TRANSPORT_REQUIRED");
@@ -67,12 +89,14 @@ function createExternalReviewAdapter({groqKey=process.env.GROQ_API_KEY,geminiKey
       const timeout=error?.name==="TimeoutError"||error?.name==="AbortError"||error?.code==="ETIMEDOUT";
       throw new ExternalReviewError(`${provider.toUpperCase()}_${timeout?"TIMEOUT":"NETWORK"}`,{provider});
     }
-    const cooldown=()=>{const raw=response.headers?.get?.("retry-after");const seconds=typeof raw==="string"&&/^\d+$/.test(raw)?Number(raw):null;return {until:nowFn()+Math.max(60_000,Number.isSafeInteger(seconds)?seconds*1000:86_400_000)};};
-    if(response.status===429)quota.blockProvider(provider,"HTTP_429",transport==="live"?cooldown():{});
+    const exhausted=["requests","tokens"].filter(kind=>{
+      const raw=response.headers?.get?.("x-ratelimit-remaining-"+kind);
+      return raw!==null&&raw!==undefined&&(!/^\d+$/.test(raw)||Number(raw)===0);
+    });
     if(response.status===401||response.status===403)quota.blockProvider(provider,`HTTP_${response.status}`);
-    for(const header of ["x-ratelimit-remaining-requests","x-ratelimit-remaining-tokens"]){
-      const raw=response.headers?.get?.(header);
-      if(raw!==null&&raw!==undefined&&(raw===""||!/^\d+$/.test(raw)||Number(raw)===0))quota.blockProvider(provider,"UPSTREAM_REMAINING_UNSAFE",transport==="live"?cooldown():{});
+    else if(response.status===429||exhausted.length){
+      const until=rateLimitCooldown(response.headers,provider,response.status,exhausted,nowFn());
+      quota.blockProvider(provider,response.status===429?"HTTP_429":"UPSTREAM_REMAINING_UNSAFE",transport==="live"?{until}:{});
     }
     if(!response.ok)throw new ExternalReviewError(`${provider.toUpperCase()}_HTTP_${response.status}`,{provider,status:response.status});
     let envelope;
@@ -94,7 +118,7 @@ function createExternalReviewAdapter({groqKey=process.env.GROQ_API_KEY,geminiKey
   }
   function recoverable(error){
     const status=Number(error?.meta?.status||0);
-    return error?.code==="LIVE_BLOCKED_FREE_TIER_UNVERIFIED"||/EXTERNAL_REVIEW_QUOTA_(?:MINUTE|HOUR|DAY|MONTH|TOKENS|REMAINING)_EXHAUSTED/.test(error?.code||"")||error?.code==="EXTERNAL_REVIEW_QUOTA_ACCOUNT_BLOCKED"||schemaFault(error)||/_(?:NETWORK|TIMEOUT)$/.test(String(error?.code||""))||[400,401,403,404,429].includes(status)||(status>=500&&status<=599);
+    return error?.code==="LIVE_BLOCKED_FREE_TIER_UNVERIFIED"||/EXTERNAL_REVIEW_QUOTA_(?:MINUTE|HOUR|DAY|MONTH|TOKENS|REMAINING)_EXHAUSTED/.test(error?.code||"")||error?.code==="EXTERNAL_REVIEW_QUOTA_ACCOUNT_BLOCKED"||error?.code==="EXTERNAL_REVIEW_TOKEN_BOUND_EXCEEDED"||schemaFault(error)||/_(?:NETWORK|TIMEOUT)$/.test(String(error?.code||""))||[400,401,403,404,429].includes(status)||(status>=500&&status<=599);
   }
   async function review(kind,payload,{secondOpinion=false}={}){
     assertPublicOpaque(payload);
@@ -143,4 +167,4 @@ function createExternalReviewAdapter({groqKey=process.env.GROQ_API_KEY,geminiKey
   }
   return{hypothesis:(p,o)=>review("hypothesis",p,o),final:(p,o)=>review("final",p,o)};
 }
-module.exports={ExternalReviewError,assertPublicOpaque,normalizeVerdict,createExternalReviewAdapter};
+module.exports={ExternalReviewError,assertPublicOpaque,normalizeVerdict,parseResetDuration,rateLimitCooldown,createExternalReviewAdapter};
