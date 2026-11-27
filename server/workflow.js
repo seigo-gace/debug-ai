@@ -295,7 +295,7 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
   async function callDirectRole(role,{system,user},runId=null,{signal=null}={}){const adapter=runId?observeAiCalls({aiCore,runId,runtimeEvidence,onEvent:logRuntime}):aiCore;return getRoleModule(role).execution.invokeDirect({aiCore:adapter,system,user,signal});}
   function externalUnavailable(error){
     const code=String(error?.code||error?.message||"");
-    return /^(?:LIVE_BLOCKED_FREE_TIER_UNVERIFIED|EXTERNAL_FREE_PROVIDERS_UNAVAILABLE|EXTERNAL_FREE_REQUEST_BUDGET_EXHAUSTED|EXTERNAL_REVIEW_CI_EGRESS_BLOCKED|EXTERNAL_REVIEW_QUOTA_[A-Z_]+|EXTERNAL_REVIEW_(?:SCHEMA|EMPTY|INCOMPLETE)|(?:GROQ|GEMINI)_(?:KEY_MISSING|NETWORK|TIMEOUT|JSON|ENVELOPE|HTTP_(?:400|401|403|404|429|5[0-9]{2})))$/.test(code);
+    return /^(?:LIVE_BLOCKED_FREE_TIER_UNVERIFIED|EXTERNAL_FREE_PROVIDERS_UNAVAILABLE|EXTERNAL_FREE_REQUEST_BUDGET_EXHAUSTED|EXTERNAL_REVIEW_CI_EGRESS_BLOCKED|EXTERNAL_REVIEW_QUOTA_[A-Z_]+|EXTERNAL_REVIEW_(?:SCHEMA|EMPTY|INCOMPLETE|TRUNCATED|TOKEN_BOUND_EXCEEDED)|(?:GROQ|GEMINI)_(?:KEY_MISSING|NETWORK|TIMEOUT|JSON|ENVELOPE|HTTP_(?:400|401|403|404|429|5[0-9]{2})))$/.test(code);
   }
   async function reviewWithLocalFallback(kind,payload,localReview){
     // Omitted hypothesis integration retains the legacy awaiting-review contract.
