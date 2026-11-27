@@ -6,7 +6,7 @@ const os=require("node:os");
 const path=require("node:path");
 const crypto=require("node:crypto");
 const {createExternalReviewQuotaLedger,PROVIDERS,QUALIFICATION_SCHEMA,LIVE_CAPS}=require("../adapters/external-review-quota.js");
-const {createExternalReviewAdapter}=require("../adapters/external-review.js");
+const {createExternalReviewAdapter,parseResetDuration,rateLimitCooldown}=require("../adapters/external-review.js");
 function tempRoot(t){
   const root=fs.mkdtempSync(path.join(os.tmpdir(),"debugai-review-recovery-"));
   t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
@@ -75,4 +75,14 @@ test("both configured providers failing retains separate classified causes witho
     assert.doesNotMatch(JSON.stringify(e),/confidential transport detail/);
     return true;
   });
+});
+
+test("provider reset is parsed and combined without shortening the longer cooldown",()=>{
+  assert.equal(parseResetDuration("2m59.56s"),179560);
+  assert.equal(parseResetDuration("1h2m3s"),3723000);
+  assert.equal(parseResetDuration("malformed"),null);
+  const h=new Headers({"x-ratelimit-reset-requests":"1h","x-ratelimit-reset-tokens":"7.66s","retry-after":"30"});
+  assert.equal(rateLimitCooldown(h,"groq",429,["requests","tokens"],fixedNow),fixedNow+3600000);
+  assert.equal(rateLimitCooldown(h,"groq",200,["tokens"],fixedNow),fixedNow+30000);
+  assert.equal(rateLimitCooldown(new Headers(),"groq",429,[],fixedNow),fixedNow+86400000);
 });
