@@ -146,3 +146,46 @@ test("actual Patch Engineer hook creates no candidate until same-item completion
   assert.equal(models,2);assert.equal(creates,1);
   assert.equal(authority.load(run.run_id).state,"WAITING_APPROVAL");
 });
+
+test("same-run Scout continuation preserves exact observed input across changing test and DAP observations",async t=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),"scout-frozen-input-"));
+  t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+  const repo=path.join(root,"repo"),runtimeRoot=path.join(root,"runtime");fs.mkdirSync(repo);
+  fs.writeFileSync(path.join(repo,"a.js"),"module.exports=1;\n");
+  const io=new IO(),calls=[],events=[];let collections=0,hints=0;
+  const hooks={enableHorizontalCodeScout:true,enableHorizontalCausalScout:true};
+  const wf=()=>createWorkflow({authority:new RunAuthority({runtimeRoot,durableIo:io}),repositorySnapshot:()=>"fixed",recoveryHooks:hooks,
+    runtimeEvidence:{write:(_id,type,payload)=>{events.push({type,payload});}},
+    sandboxVerification:{collect:async()=>({status:"FAIL",checks:[{status:"FAIL",executed:true,check_type:"UNIT",stderr:"fixture failure",duration_ms:++collections}]})},
+    dapEvidence:{collect:async()=>({authority:"HINT_ONLY",local_only:true,status:"PASS",observed_at:++hints,records:[]})},
+    aiCore:{call:async(role,prompt)=>{
+      const input=JSON.parse(prompt.user);calls.push({role,input});
+      if(role==="code_scout"){
+        if(input.step===1)return {content:JSON.stringify({status:"CONTINUE",progress:{evidence_refs:input.registered_evidence_ids,remaining_work:"finish source localization"}})};
+        return {content:JSON.stringify({status:"COMPLETE",result:{relevant_files:["a.js"],call_path:[],contract_mismatch:null,excluded_files:[],unknowns:[]}})};
+      }
+      if(role==="causal_scout")return {content:JSON.stringify({status:"COMPLETE",result:{claims:[{type:"UNKNOWN",statement:"fixture cause unknown"}]}})};
+      if(role==="researcher")return {content:JSON.stringify({research_status:"INSUFFICIENT_EVIDENCE",answer:"fixture",evidence_refs:[],rejected_source_refs:[],contradictions:[],bound_version:"fixture/v1"})};
+      return {content:JSON.stringify({diagnosis_status:"INSUFFICIENT_EVIDENCE",hypotheses:[],confirmed_root_cause:null,unsupported_claims:["fixture"]})};
+    }}});
+  const first=wf();await assert.rejects(first.runAnalysis({repo,rawRequest:"investigate fixture",failure:{message:"fixture failure",source_paths:["a.js"]}}),{code:"CODE_SCOUT_WORK_ITEM_CONTINUE_PENDING"});
+  const authority=new RunAuthority({runtimeRoot,durableIo:io}),runId=authority.listRunIds()[0];
+  assert.ok(authority.loadDurable(runId).manifest.workflow_input_refs.scout_input_context);
+  await wf().runAnalysis({runId});
+  const code=calls.filter(x=>x.role==="code_scout"),causal=calls.filter(x=>x.role==="causal_scout");
+  assert.equal(collections,1);assert.equal(hints,1);assert.equal(code.length,2);assert.equal(causal.length,1);
+  assert.equal(code[1].input.step,2);
+  for(const field of ["task","registered_evidence_ids","registered_evidence"])assert.deepEqual(code[1].input[field],code[0].input[field]);
+  assert.ok(events.some(e=>e.type==="stage_reuse"&&e.payload.stage==="scout_input_context"&&e.payload.new_execution===false));
+});
+test("frozen Scout input cannot be used after actual source change",async t=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),"scout-frozen-source-"));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+  const repo=path.join(root,"repo"),runtimeRoot=path.join(root,"runtime");fs.mkdirSync(repo);
+  const file=path.join(repo,"a.js");fs.writeFileSync(file,"module.exports=1;\n");const io=new IO();let calls=0;
+  const wf=()=>createWorkflow({authority:new RunAuthority({runtimeRoot,durableIo:io}),repositorySnapshot:()=>"fixed",recoveryHooks:{enableHorizontalCodeScout:true,enableHorizontalCausalScout:true},
+    aiCore:{call:async()=>{calls++;return {content:JSON.stringify({status:"CONTINUE",progress:{evidence_refs:[],remaining_work:"next"}})};}}});
+  await assert.rejects(wf().runAnalysis({repo,rawRequest:"investigate fixture",failure:{message:"fixture failure",source_paths:["a.js"]}}),{code:"CODE_SCOUT_WORK_ITEM_CONTINUE_PENDING"});
+  const runId=new RunAuthority({runtimeRoot,durableIo:io}).listRunIds()[0];fs.writeFileSync(file,"module.exports=2;\n");
+  await assert.rejects(wf().runAnalysis({runId}),/SCOUT_INPUT_CONTEXT_BINDING_MISMATCH/);
+  assert.equal(calls,2,"changed source must never dispatch a continuation");
+});

@@ -371,22 +371,50 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
       context=contextStage.payload;const currentSnapshot=snapshotRepo(targetRepo);if(currentSnapshot!==context.repo_snapshot_id)throw new Error("DURABLE_REPO_SNAPSHOT_MISMATCH");
     }else{
       if(durable)await setCursor(runId,WorkflowStepId.DETERMINISTIC_VERIFY,StepPhase.RUNNING,{stepInputRef:inputManifestRef});await logProgress(runId,WorkflowStepId.DETERMINISTIC_VERIFY,StepPhase.RUNNING);
+      // A horizontal work item is bound to the exact historical input, not a
+      // newly collected observation on each continuation. Keep one immutable
+      // input context per run, using the existing durable stage authority.
+      // This is not a fresh test receipt or a cross-run cache.
+      const horizontalScouts=durable&&(recoveryHooks?.enableHorizontalCodeScout===true||recoveryHooks?.enableHorizontalCausalScout===true);
+      const frozenScoutInput=horizontalScouts?loadStageRef(runId,"scout_input_context"):null;
+      if(frozenScoutInput&&(!binding||frozenScoutInput.payload.reuse_binding!==binding||frozenScoutInput.payload.initial_scope?.repository_revision!==snapshotRepo(targetRepo)))
+        throw new Error("SCOUT_INPUT_CONTEXT_BINDING_MISMATCH");
+      let deterministicVerification,deterministicChecks,dapHint,localRecords,localIds,initialScope;
+      if(frozenScoutInput){
+        const p=frozenScoutInput.payload;
+        deterministicVerification=p.deterministic_verification;
+        deterministicChecks=Array.isArray(deterministicVerification?.checks)?deterministicVerification.checks:[];
+        dapHint=p.dap_hint;localRecords=validateEvidenceRecords(p.local_records);localIds=evidenceIds(localRecords);initialScope=p.initial_scope;
+        if(contentHash(initialScope.known_evidence_ids)!==contentHash(localIds))throw new Error("SCOUT_INPUT_CONTEXT_EVIDENCE_MISMATCH");
+        runtimeEvidence?.write(runId,"stage_reuse",{stage:"scout_input_context",saved_at:p.saved_at,execution:"SAME_WORK_ITEM_HISTORICAL_INPUT",new_execution:false});
+      }else{
       const reproductionStage=durable?loadStageRef(runId,"deterministic_reproduction"):null;
       const reuseReproduction=reusableLocalStage(reproductionStage,binding);
-      const deterministicVerification=reuseReproduction?reproductionStage.payload.result:sandboxVerification&&targetRepo?await sandboxVerification.collect(targetRepo):{status:"NOT_CONFIGURED",checks:[]};
+      deterministicVerification=reuseReproduction?reproductionStage.payload.result:sandboxVerification&&targetRepo?await sandboxVerification.collect(targetRepo):{status:"NOT_CONFIGURED",checks:[]};
       if(reuseReproduction)runtimeEvidence?.write(runId,"stage_reuse",{stage:"deterministic_reproduction",saved_at:reproductionStage.payload.saved_at,execution:"PREVIOUS_RUN_ATTEMPT",new_execution:false});
       // Reuse prior local failing reproduction observations, never passing checks
       // as present verification. Final retests still require fresh execution.
       const reproductionChecks=deterministicVerification.checks||[];
       const sourceOnlyReproduction=reproductionChecks.length>0&&reproductionChecks.some(check=>check.status==="FAIL")&&reproductionChecks.every(check=>check.executed===true&&!check.timed_out&&["PASS","FAIL"].includes(check.status)&&check.sandbox?.backend==="sidecar+landlock+seccomp"&&String(check.sandbox?.network||"").startsWith("CONTAINER_NETWORK_NONE"));
       if(durable&&!reuseReproduction&&binding&&sourceOnlyReproduction)await saveStage(runId,"deterministic_reproduction",{reuse_binding:binding,saved_at:Date.now(),result:deterministicVerification},WorkflowStepId.CODE_SCOUT);
-      const deterministicChecks=Array.isArray(deterministicVerification?.checks)?deterministicVerification.checks:[];
+      deterministicChecks=Array.isArray(deterministicVerification?.checks)?deterministicVerification.checks:[];
       if(deterministicChecks.length)runtimeEvidence?.write(runId,"deterministic_verification",{status:deterministicVerification.status,checks:deterministicChecks});
-      let dapHint=null;if(dapEvidence&&targetRepo){const candidate=await dapEvidence.collect({repo:targetRepo,checks:dapFailureChecks(failure,deterministicChecks),task:String(rawRequest||failure?.message||failure?.summary||""),variableNames:Array.isArray(failure?.variable_names)?failure.variable_names:[]});dapHint=activeDapHint(candidate);if(dapHint){runtimeEvidence?.write(runId,"dap_hint",dapHint);await logRuntime({run_id:runId,severity:dapHint.status==="PASS"?"info":"warn",kind:"dap_hint",authority:"HINT_ONLY",local_only:true,status:dapHint.status,reason:dapHint.reason,target:dapHint.target||null});}}
+      dapHint=null;if(dapEvidence&&targetRepo){const candidate=await dapEvidence.collect({repo:targetRepo,checks:dapFailureChecks(failure,deterministicChecks),task:String(rawRequest||failure?.message||failure?.summary||""),variableNames:Array.isArray(failure?.variable_names)?failure.variable_names:[]});dapHint=activeDapHint(candidate);if(dapHint){runtimeEvidence?.write(runId,"dap_hint",dapHint);await logRuntime({run_id:runId,severity:dapHint.status==="PASS"?"info":"warn",kind:"dap_hint",authority:"HINT_ONLY",local_only:true,status:dapHint.status,reason:dapHint.reason,target:dapHint.target||null});}}
       const rawInitial=targetRepo?initialInvestigationEvidence(targetRepo,{request:rawRequest||failure?.message,failure,checks:deterministicChecks}):{records:[],scope:{mode:"OPEN_INVESTIGATION",coverage:"PARTIAL"}};
       const initial=targetRepo?addBoundedTestDependencyEvidence(targetRepo,rawInitial):rawInitial;
-      const hintProtocol=dapHintProtocol(dapHint),localRecords=registerEvidenceList("LOCAL_RUNTIME",[...(Array.isArray(localEvidence)?localEvidence:[]),...deterministicChecks.map(reviewableVerificationCheck),...initial.records]),localIds=evidenceIds(localRecords);
-      const initialScope={...initial.scope,repository_revision:durable?snapshotRepo(targetRepo):null,known_evidence_ids:localIds};
+      localRecords=registerEvidenceList("LOCAL_RUNTIME",[...(Array.isArray(localEvidence)?localEvidence:[]),...deterministicChecks.map(reviewableVerificationCheck),...initial.records]);localIds=evidenceIds(localRecords);
+      initialScope={...initial.scope,repository_revision:durable?snapshotRepo(targetRepo):null,known_evidence_ids:localIds};
+      if(horizontalScouts&&binding){
+        const saved=await saveStage(runId,"scout_input_context",{reuse_binding:binding,saved_at:Date.now(),deterministic_verification:deterministicVerification,dap_hint:dapHint,local_records:localRecords,initial_scope:initialScope},WorkflowStepId.CODE_SCOUT);
+        // First dispatch must use the same canonical serialized representation
+        // as any later continuation (including existing secret scrubbing).
+        const p=saved.payload;deterministicVerification=p.deterministic_verification;
+        deterministicChecks=Array.isArray(deterministicVerification?.checks)?deterministicVerification.checks:[];
+        dapHint=p.dap_hint;localRecords=validateEvidenceRecords(p.local_records);localIds=evidenceIds(localRecords);initialScope=p.initial_scope;
+        if(contentHash(initialScope.known_evidence_ids)!==contentHash(localIds))throw new Error("SCOUT_INPUT_CONTEXT_EVIDENCE_MISMATCH");
+      }
+      }
+      const hintProtocol=dapHintProtocol(dapHint);
       runtimeEvidence?.write(runId,"failure",failure);await logRuntime({run_id:runId,severity:"error",kind:"failure",failure});if(deterministicChecks.length)await logRuntime({run_id:runId,severity:deterministicChecks.some(x=>x.status==="FAIL")?"warn":"info",kind:"deterministic_verification",status:deterministicVerification.status,check_count:deterministicChecks.length,failed:deterministicChecks.filter(x=>x.status==="FAIL").length});
       const query=String(failure?.message||failure?.summary||rawRequest||"debug failure");
       await logProgress(runId,"SCOUTS",StepPhase.RUNNING);
