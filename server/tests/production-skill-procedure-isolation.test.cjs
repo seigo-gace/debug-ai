@@ -57,3 +57,13 @@ test("P1-D Python boundary skill is selected only for Python Patch Engineer/Revi
  const scout=compileInvocation("code_scout",{task:"inspect src/count_active.py"});
  assert.equal(scout.selected_skill_ids.includes("python-edge-semantics"),false);
 });
+
+
+test("candidate and diagnosis instructions match actual runtime handoff and candidate operation contracts",()=>{
+ const patch=compileInvocation("patch_engineer",{task:"fix an existing file"});
+ assert.doesNotMatch(patch.system,/write=\{type:"write"/);
+ assert.match(patch.system,/replace=\{type:"replace",path,old,new\}/);
+ const diagnosis=compileInvocation("diagnoser",{task:"reproduce failing unit test"});
+ assert.match(diagnosis.system,/use statement for the concrete causal explanation/);
+ assert.match(diagnosis.system,/observation that contradicts the hypothesis/);
+});

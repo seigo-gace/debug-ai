@@ -108,3 +108,17 @@ test("review not applicable never exports fabricated diagnosis statement",()=>{
   assert.equal(payload.evidence_count,0);
   assert.equal(payload.local_evidence_count,0);
 });
+
+
+test("observed causal_statement diagnosis is handed to hypothesis review rather than skipped",()=>{
+  const local=registerEvidenceList("LOCAL_RUNTIME",[{kind:"initial_source",value:{path:"src/index.cjs",sha256:"fixture"}}]);
+  const output=makePublicHypothesisReviewPayload({
+    diagnosisJson:{diagnosis_status:"HYPOTHESES_RETAINED",hypotheses:[{
+      id:"HYP_001",status:"HYPOTHESIS",causal_statement:"The function incorrectly accesses the array one index past its end.",
+      evidence_refs:[local[0].evidence_id],counter_evidence_refs:[],falsification_condition:"Observe the current implementation returning the final element for a nonempty array."
+    }]},localRecords:local
+  });
+  assert.equal(output.statement,"The function incorrectly accesses the array one index past its end.");
+  assert.deepEqual(output.registered_evidence.hypothesis_support_refs,[local[0].evidence_id]);
+  assert.doesNotMatch(JSON.stringify(output),/src\/index.cjs/);
+});

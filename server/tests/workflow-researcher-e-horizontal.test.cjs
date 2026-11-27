@@ -238,3 +238,23 @@ test("native six-role investigation retains real admitted source and evidence re
   assert.equal(result.state,"HYPOTHESIS_NOT_REVIEWABLE");
   assert.equal(fs.readFileSync(path.join(repo,"hidden.js"),"utf8"),"module.exports=()=>37; // ACTUAL_HIDDEN_SOURCE\n");
 });
+
+test("native candidate generation with six-role mode uses actual candidate contract without tool-less CONTINUE envelope",async t=>{
+  const {RepoPolicy}=require("../repo-policy.js");
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),"native-candidate-contract-")),repo=path.join(root,"repo"),runtimeRoot=path.join(root,"runtime");
+  fs.mkdirSync(repo);fs.writeFileSync(path.join(repo,"a.js"),"module.exports=()=>0;\n");
+  t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+  const repoPolicy=new RepoPolicy({workspaceRoot:root}),authority=new RunAuthority({runtimeRoot,repoPolicy,durableIo:new IO()});
+  const run=authority.start({rawRequest:"fix fixture",repo});await authority.initializeDurable(run);
+  for(const state of ["PARSED","CONTEXT_READY","VERIFYING","FAILED","RESOLVING"])authority.transition(run,state);
+  let calls=0,created=0;
+  const wf=createWorkflow({authority,repoPolicy,recoveryHooks:horizontalRoleHooksForMode("six_role"),
+    patchService:{create:({result})=>{created++;return result;}},aiCore:{call:async(role,prompt)=>{
+      calls++;assert.equal(role,"patch_engineer");assert.match(prompt.system,/RUNTIME_TOOLS=/);
+      return {content:JSON.stringify({operations:[{type:"replace",path:"a.js",old:"()=>0",new:"()=>1"}],summary:"fixture candidate"})};
+    }}});
+  const result=await wf.patchCandidate({runId:run.run_id,repo,selectedPaths:["a.js"],context:{},task:"fix fixture",analysis:{diagnosis:{},external_hypothesis_review:{json:{verdict:"PASS"}},evidence_registry:{evidence_ids:[]}}});
+  assert.equal(result.candidate.operations[0].new,"()=>1");assert.equal(calls,1);assert.equal(created,1);
+  assert.equal(fs.readFileSync(path.join(repo,"a.js"),"utf8"),"module.exports=()=>0;\n");
+  assert.equal(authority.load(run.run_id).state,"WAITING_APPROVAL");
+});
