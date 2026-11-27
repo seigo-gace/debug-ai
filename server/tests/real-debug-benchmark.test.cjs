@@ -36,3 +36,19 @@ test("repeated identical blocked cases pause the suite without changing repair s
  assert.equal(b.repeatedBlockedCode([blocked,blocked,{state:"FAILED",error_code:blocked.error_code}]),null);
  assert.equal(b.repeatedBlockedCode([blocked,blocked,{state:"DONE",repair_pass:true}]),null);
 });
+
+test("interrupted benchmark child is held only for its exact saved owner and may be explicitly resumed",async()=>{
+ const bid="realdebug_"+"a".repeat(32),runId="run_fixture",caseId="L1-01";
+ const checkpoint={schema:b.SCHEMA,benchmark_id:bid,state:"RUNNING",case_ids:[caseId,"L1-02"],current:{run_id:runId,case_id:caseId,phase:"ANALYSIS"},results:[]};
+ const item={run_id:runId,state:{job_status:"RUNNING",project_id:"debugai-real-debug-"+caseId,project_dir:"/workspace/debug-ai/.verification/real-debug/"+bid+"/"+caseId},manifest:{policy_refs:{}}};
+ let cp=checkpoint;const changes=[];
+ const runtimeEvidence={list:(id)=>id===bid?[{payload:cp}]:[],write:(id,type,payload)=>{assert.equal(id,bid);assert.equal(type,"real_debug_benchmark");cp=payload;}};
+ const authority={bumpDurableEpoch:async args=>{changes.push(args);item.state.job_status=args.runStatePatch.job_status;item.manifest.policy_refs=args.manifestPatch.policy_refs;}};
+ assert.equal(b.benchmarkRunOwner({...item,run_id:"other"},runtimeEvidence),null);
+ assert.equal(b.benchmarkRunOwner({...item,state:{...item.state,project_dir:"/workspace/other"}},runtimeEvidence),null);
+ const held=await b.holdInterruptedBenchmarkRun({item,authority,runtimeEvidence,now:()=>123});
+ assert.equal(held.run_id,runId);assert.equal(cp.state,"PAUSED");assert.equal(cp.current.run_id,runId);assert.equal(cp.results.length,0);
+ assert.equal(changes.length,1);assert.equal(b.isHeldBenchmarkRun(item,runtimeEvidence),true);
+ await b.holdInterruptedBenchmarkRun({item,authority,runtimeEvidence,now:()=>124});
+ assert.equal(changes.length,1,"restart must not advance a held run again");
+});
