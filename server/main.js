@@ -79,7 +79,7 @@ const externalReview=createExternalReviewAdapter();
 const patchService=new PatchService({runtimeRoot,repoPolicy});
 const gitOps=new GitOpsRequestService({repoPolicy});
 const serverCommand=new ServerCommandRequestService({repoPolicy,defaultRepo:path.join(repoPolicy.workspaceRoot,"debug-ai")});
-const workflow=createWorkflow({aiCore,externalReview,evidenceSearch,runtimeEvidence,tgserver,patchService,authority,repoPolicy,sandboxVerification,dapEvidence,serverCommand,recoveryHooks,adaptiveLocalDiagnosis});
+const workflow=createWorkflow({aiCore,externalReview,evidenceSearch,runtimeEvidence,tgserver,patchService,authority,repoPolicy,sandboxVerification,dapEvidence,adaptiveLocalDiagnosis,serverCommand,recoveryHooks});
 const host=process.env.DEBUG_AI_HOST||"127.0.0.1",port=Number(process.env.DEBUG_AI_PORT||8787);
 const server=createServer({workflow,gitOps,githubCommand:serverCommand,serverCommand,host,port});
 let shuttingDown=false,rotationTimer=null,archiveTimer=null,archiveSweepRunning=false;

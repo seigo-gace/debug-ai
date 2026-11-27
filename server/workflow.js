@@ -537,14 +537,27 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
             const sourceId=admission.source_evidence_id,failedId=admission.failed_evidence_id;
             const valid=value.diagnosis_status==="HYPOTHESES_RETAINED"&&!analysisReviewBlockReason(value)&&active.length===1&&active[0].evidence_refs?.includes(sourceId)&&active[0].evidence_refs?.includes(failedId)&&Array.isArray(value.unsupported_claims)&&value.unsupported_claims.length===0;
             outcome={...outcome,diagnosis:value,tool_evidence:tools,tool_audit:toolAudit(direct)};
-            if(valid){
-              const evidence=[...localRecords,...canonicalToolEvidence(tools)],refs=mergeEvidenceIds(localIds,tools.map(x=>x.evidence_id));
-              const review=roleOutput(await callReadOnlyRole("local_reviewer",{system:"REVIEW_PHASE=HYPOTHESIS\nIndependently review the direct local diagnosis from the actual source, reproduction and counter-evidence. Reject unresolved competing causes, insufficient causal evidence or invalid falsification conditions. PASS means candidate investigation only, never application or completed repair. JSON only.",user:JSON.stringify({diagnosis:value,evidence:evidencePromptView(evidence),initial_scope:initialScope})},toolRuntime,{baseEvidenceIds:refs,registeredEvidence:evidence,runId}),"local_reviewer");
-              outcome.local_review={provider:"local_reviewer",review_kind:"hypothesis",external_status:"NOT_REQUESTED_LOCAL_CANDIDATE",json:review};
-              const supported=id=>Array.isArray(review.claims)&&review.claims.some(c=>["FACT","INFERENCE"].includes(c.type)&&c.evidence_refs?.includes(id));
-              if(review.verdict==="PASS"&&review.decision==="DONE"&&supported(sourceId)&&supported(failedId)){
-                outcome.accepted=true;outcome.state="INDEPENDENTLY_REVIEWED_LOCAL_DIAGNOSIS";outcome.dispositions=acceptedLocalDiagnosisDispositions(admission);
-              }
+            if(valid&&patchService?.persistCandidate&&sandboxVerification?.collectCandidate){
+              // Candidate generation is not application or approval. The early
+              // candidate is kept out of the PatchService release directory.
+              const refs=mergeEvidenceIds(localIds,tools.map(x=>x.evidence_id)),selectedPaths=[...failure.source_paths];
+              const requestContext={requirements:failure.requirements};
+              const analysisInput={diagnosis:value,requirement_input:{raw_request:rawRequest,specification:failure.requirements},deterministic_verification:deterministicVerification,evidence_registry:{evidence_ids:localIds,tool_evidence_ids:tools.map(x=>x.evidence_id)}};
+              const early=await generateIsolatedCandidate({runId,analysis:analysisInput,repo:targetRepo,selectedPaths,context:requestContext,task:rawRequest,persist:false,stage:"debug-adaptive-isolated"});
+              const verification=early.candidateVerification;
+              const green=verification.status==="FINAL_VALID"&&verification.checks?.length>0&&verification.checks.every(c=>c.executed===true&&c.status==="PASS"&&!c.timed_out)&&verification.checks.some(c=>c.check_type==="UNIT");
+              outcome.candidate_verification={status:verification.status,candidate_id:early.candidate.id,candidate_hash:early.candidate.candidate_hash};
+              if(green){
+                const verifiedRecords=registerEvidenceList("LOCAL_RUNTIME",verification.checks.map(reviewableVerificationCheck)),verifiedIds=evidenceIds(verifiedRecords);
+                const evidence=[...localRecords,...canonicalToolEvidence(tools),...verifiedRecords],allRefs=mergeEvidenceIds(refs,verifiedIds);
+                const review=roleOutput(await callReadOnlyRole("local_reviewer",{system:"REVIEW_PHASE=HYPOTHESIS\nIndependently review the direct diagnosis and the exact isolated candidate against original source, reproduction, counter-evidence, candidate diff and executed checks. PASS means this cause and candidate are sufficiently supported for candidate release, not application or completed repair. Reject material missing evidence or weakened tests. JSON only.",user:JSON.stringify({diagnosis:value,evidence:evidencePromptView(evidence),initial_scope:initialScope,candidate:{id:early.candidate.id,hash:early.candidate.candidate_hash,diff:early.candidate.diff},verification:{status:verification.status,evidence_refs:verifiedIds}})},toolRuntime,{baseEvidenceIds:allRefs,registeredEvidence:evidence,runId}),"local_reviewer");
+                outcome.local_review={provider:"local_reviewer",review_kind:"hypothesis_and_isolated_candidate",external_status:"NOT_REQUESTED_LOCAL_CANDIDATE",json:review};
+                const supported=id=>Array.isArray(review.claims)&&review.claims.some(c=>["FACT","INFERENCE"].includes(c.type)&&c.evidence_refs?.includes(id));
+                if(review.verdict==="PASS"&&review.decision==="DONE"&&supported(sourceId)&&supported(failedId)&&verifiedIds.some(supported)){
+                  outcome.accepted=true;outcome.state="INDEPENDENTLY_REVIEWED_LOCAL_DIAGNOSIS";outcome.dispositions=acceptedLocalDiagnosisDispositions(admission);
+                  outcome.early_candidate={...early,requirement_input_digest:contentHash(scrub(patchRequirementInput({runId,analysis:analysisInput,context:requestContext,task:rawRequest})))};
+                }
+              }else outcome.state="ISOLATED_CANDIDATE_NOT_GREEN";
             }
             await logProgress(runId,WorkflowStepId.DIAGNOSER,StepPhase.DONE);
           }
@@ -777,9 +790,7 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
     runtimeEvidence?.write(runId,"candidate_verification",result);
     return result;
   }
-  async function patchCandidate({runId,analysis,repo,selectedPaths,context,task}){
-    const verdict=analysis?.external_hypothesis_review?.json?.verdict||analysis?.local_hypothesis_review?.json?.verdict||analysis?.external_review?.verdict;
-    if(verdict!=="PASS")throw new Error("PATCH_REQUIRES_EXTERNAL_HYPOTHESIS_REVIEW_PASS");
+  async function generateIsolatedCandidate({runId,analysis,repo,selectedPaths,context,task,persist=true,stage="debug-repair"}){
     const targetRepo=repoPolicy?repoPolicy.assertRepo(repo):repo,source=patchPacketSource(targetRepo,selectedPaths),inventory=verificationInventory(targetRepo),refs=patchPacketEvidenceRefs(analysis);
     const patchPacket=makePatchPacket({runId,diagnosisRef:`diagnosis_${contentHash(analysis?.diagnosis||{})}`,repositoryRevision:snapshotRepo(targetRepo),paths:selectedPaths,sourceExcerpts:source.sourceExcerpts,preconditionHashes:source.preconditionHashes,reproductionSummary:{status:String(analysis?.deterministic_verification?.status||"UNKNOWN"),checks:analysis?.deterministic_verification?.checks||[]},testInventory:inventory.checks,invariants:[{name:"candidate-only-patch-engineer",status:"PASS"},{name:"explicit-approval-required",status:"PASS"}],prohibitedPaths:source.prohibitedPaths,evidenceRefs:refs,requirementInput:patchRequirementInput({runId,analysis,context,task})});
     runtimeEvidence?.write(runId,"patch_packet",patchPacket);
@@ -798,8 +809,30 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
     const candidateResult=roleOutput(out,"patch_engineer");
     assertPatchRequirements(patchPacket,{operations:candidateResult.operations||[],repositoryRevision:snapshotRepo(targetRepo),sourceHashes:patchPacketSource(targetRepo,selectedPaths).preconditionHashes,availableEvidenceIds:patchPacketEvidenceRefs(analysis)});
     const patchEngineerRuntime={telemetry:out?.tool_loop?.telemetry||out?.tool_loop?.progress?.runtime_telemetry||null,selected_skill_ids:[...(out?.tool_loop?.selected_skill_ids||out?.control_plane?.selected_skill_ids||[])]};
-    const candidate=patchService?patchService.create({repo:targetRepo,selectedPaths,task,result:candidateResult,patchPacket}):{...candidateResult,requirement_binding:patchPacket};
-    let candidateVerification=await verifyCandidateBeforeApproval(runId,candidate);
+    const candidate=patchService?patchService.create({repo:targetRepo,selectedPaths,task,result:candidateResult,patchPacket,persist,stage}):{...candidateResult,requirement_binding:patchPacket};
+    const candidateVerification=await verifyCandidateBeforeApproval(runId,candidate);
+    return {targetRepo,refs,patchPacket,patchEngineerRuntime,candidate,candidateVerification};
+  }
+  async function patchCandidate({runId,analysis,repo,selectedPaths,context,task}){
+    const verdict=analysis?.external_hypothesis_review?.json?.verdict||analysis?.local_hypothesis_review?.json?.verdict||analysis?.external_review?.verdict;
+    if(verdict!=="PASS")throw new Error("PATCH_REQUIRES_EXTERNAL_HYPOTHESIS_REVIEW_PASS");
+    let generated;
+    const staged=authority?.durableEnabled?.()?loadStageRef(runId,"adaptive_local_outcome")?.payload:null;
+    if(staged?.accepted===true&&staged.early_candidate){
+      const early=staged.early_candidate,packet=early.patchPacket;
+      const targetRepo=repoPolicy?repoPolicy.assertRepo(repo):repo;
+      const samePaths=contentHash([...selectedPaths].sort())===contentHash([...packet.payload.paths].sort());
+      const sameInput=contentHash(scrub(patchRequirementInput({runId,analysis,context,task})))===early.requirement_input_digest;
+      if(targetRepo!==early.candidate.repo||!samePaths||!sameInput||contentHash(analysis.diagnosis)!==contentHash(staged.diagnosis)||snapshotRepo(targetRepo)!==packet.payload.repository_revision)throw new Error("ADAPTIVE_CANDIDATE_RELEASE_INPUT_MISMATCH");
+      if(staged.local_review?.json?.verdict!=="PASS"||early.candidateVerification.status!=="FINAL_VALID"||early.candidateVerification.patch_candidate_id!==early.candidate.id||early.candidateVerification.patch_candidate_hash!==early.candidate.candidate_hash)throw new Error("ADAPTIVE_CANDIDATE_RELEASE_NOT_APPROVED");
+      assertPatchRequirements(packet,{operations:early.candidate.operations,repositoryRevision:snapshotRepo(targetRepo),sourceHashes:patchPacketSource(targetRepo,selectedPaths).preconditionHashes,availableEvidenceIds:patchPacketEvidenceRefs(analysis)});
+      const candidate=patchService.persistCandidate(early.candidate);
+      generated={...early,targetRepo,candidate,refs:patchPacketEvidenceRefs(analysis)};
+      runtimeEvidence?.write(runId,"adaptive_candidate_release",{candidate_id:candidate.id,candidate_hash:candidate.candidate_hash,packet_digest:packet.packet_digest,new_model_execution:false});
+    }else generated=await generateIsolatedCandidate({runId,analysis,repo,selectedPaths,context,task});
+    const {targetRepo,refs,patchPacket,patchEngineerRuntime,candidate}=generated;
+    let candidateVerification=generated.candidateVerification;
+
     let finalCandidate=candidate,preapprovalRefix=null;
     if(candidateVerification.status==="FINAL_INVALID"&&candidateVerification.checks?.some(c=>c.status==="FAIL"&&c.executed===true)&&runtimeEvidence?.list&&runtimeEvidence?.write&&patchService?.create&&typeof externalReview?.hypothesis==="function"){
       if(runtimeEvidence.list(runId,{types:["preapproval_refix_attempt"],limit:128}).length===0){
