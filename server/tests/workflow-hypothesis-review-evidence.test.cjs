@@ -122,3 +122,18 @@ test("observed causal_statement diagnosis is handed to hypothesis review rather 
   assert.deepEqual(output.registered_evidence.hypothesis_support_refs,[local[0].evidence_id]);
   assert.doesNotMatch(JSON.stringify(output),/src\/index.cjs/);
 });
+
+test("downstream role can reread full authenticated upstream tool evidence after bounded projection",()=>{
+  const {canonicalToolEvidence,downstreamToolEvidenceView}=require("../workflow.js");
+  const {createEvidenceContext,addEvidenceToContext,contextEvidenceRecord}=require("../control/read-only-tool-runtime.js");
+  const source=makeToolResult("source.read",{path:"src/index.cjs",content:"x".repeat(3200)+"TAIL_EVIDENCE"});
+  const raw={evidence_id:source.evidence_id,tool:source.tool,data:source.data,integrity:source.integrity};
+  const view=downstreamToolEvidenceView([raw],true);
+  assert.doesNotMatch(JSON.stringify(view),/TAIL_EVIDENCE/);
+  assert.match(JSON.stringify(view),new RegExp(source.evidence_id));
+  assert.match(JSON.stringify(downstreamToolEvidenceView([raw],false)),/TAIL_EVIDENCE/);
+  const context=createEvidenceContext({user:JSON.stringify({evidence:view}),baseEvidenceIds:[source.evidence_id]});
+  addEvidenceToContext(context,canonicalToolEvidence([raw]),{allowedEvidenceIds:[source.evidence_id]});
+  assert.match(contextEvidenceRecord(context,source.evidence_id).payload.content,/TAIL_EVIDENCE/);
+  assert.throws(()=>canonicalToolEvidence([{...raw,data:{...raw.data,content:"changed"}}]),/HASH_MISMATCH/);
+});
