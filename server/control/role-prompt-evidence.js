@@ -47,7 +47,7 @@ function deduplicateRoleEvidence(user,baseEvidenceIds){
     });
   }
   if(!count)return unchanged;
-  obj.evidence_reference_policy="A registered_evidence_ref points to the identical complete record supplied earlier in this input. Resolve it using that record; this is lossless deduplication, not absent evidence.";
+  obj.evidence_reference_policy="A registered_evidence_ref points to the identical complete record supplied elsewhere in this input. Resolve it using that record; this is lossless deduplication, not absent evidence.";
   const compact=JSON.stringify(obj),bytes=Buffer.byteLength(compact,"utf8");
   return bytes<unchanged.baseline_bytes?{...unchanged,user:compact,candidate_bytes:bytes,deduplicated_records:count}:unchanged;
 }
