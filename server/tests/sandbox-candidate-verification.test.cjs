@@ -239,3 +239,27 @@ test("approved request cannot apply a preapproval-failed exact candidate identit
  assert.equal(applyCalls,0);
  assert.deepEqual(writes,[{run:runId,type:"approval_denied",payload:{reason:"PREAPPROVAL_FAILED_CANDIDATE_APPLY_DENIED",candidate_id:candidateId,candidate_hash:candidateHash}}]);
 });
+
+test("failed candidate syntax prerequisite records unexecuted checks instead of running expensive checks",async t=>{
+ const f=fixture(t),requests=[];
+ const lane=createSandboxVerificationLane({jobRoot:path.join(f.root,"jobs"),wait:async({jobId})=>{
+  const request=JSON.parse(fs.readFileSync(path.join(f.root,"jobs","jobs",jobId,"request.json")));requests.push(request);
+  return {schema:"debugai.sandbox-result/v1",job_id:jobId,action:request.action,pass:false,code:1,snapshot:request.source_snapshot,candidate_snapshot:request.candidate_snapshot,candidate_construction:"MATERIALIZED_VERIFIED"};
+ }});
+ const result=await lane.collectCandidate(f.candidate);
+ assert.equal(result.status,"FINAL_INVALID");assert.deepEqual(requests.map(x=>x.action),["node.check"]);
+ assert.equal(result.checks.length,1);assert.equal(result.checks[0].check_type,"SYNTAX");
+ assert.equal(result.pending_checks.length,3);assert.ok(result.pending_checks.every(x=>x.status==="NOT_RUN"));
+});
+test("a concrete isolated syntax failure first invokes only Patch Engineer again",async t=>{
+ const f=fixture(t),{createWorkflow}=require("../workflow.js"),{PatchService}=require("../patch-service.js"),records=[],roles=[];
+ const service=new PatchService({runtimeRoot:path.join(f.root,"runtime")});
+ const evidence={write:(run,type,payload)=>records.push({type,payload}),list:(_run,{types})=>records.filter(x=>types.includes(x.type))};
+ let n=0;
+ const wf=createWorkflow({patchService:service,runtimeEvidence:evidence,sandboxVerification:{collectCandidate:async c=>{
+  n++;return {status:n===1?"FINAL_INVALID":"FINAL_VALID",checks:[{kind:"deterministic_sandbox_check",check_type:"SYNTAX",status:n===1?"FAIL":"PASS",executed:true,timed_out:false,stderr:n===1?"SyntaxError: Unexpected end of input":"",sandbox:{backend:"sidecar+landlock+seccomp"},patch_candidate_id:c.id,patch_candidate_hash:c.candidate_hash}]};
+ }},aiCore:{call:async role=>{roles.push(role);return{content:JSON.stringify({operations:[{type:"replace",path:"value.js",old:"module.exports=1;",new:roles.length===1?"module.exports=(":"module.exports=2;"}]})};}}});
+ const result=await wf.patchCandidate({runId:"syntax_retry",analysis:{diagnosis:{public_statement:"value"},external_hypothesis_review:{json:{verdict:"PASS"}},evidence_registry:{evidence_ids:[]}},repo:f.repo,selectedPaths:["value.js"],task:"repair value"});
+ assert.deepEqual(roles,["patch_engineer","patch_engineer"]);assert.equal(n,2);assert.equal(result.syntax_refix.result_status,"FINAL_VALID");assert.equal(result.candidate_verification.status,"FINAL_VALID");
+ assert.equal(fs.readFileSync(path.join(f.repo,"value.js"),"utf8"),"module.exports=1;\n");
+});

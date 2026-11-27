@@ -104,7 +104,12 @@ function createSandboxVerificationLane({jobRoot=process.env.DEBUG_AI_SANDBOX_JOB
       // Revalidate the owning source after the check; a stale result cannot qualify it.
       isolatedOperations(patchCandidate);
       if(snapshotInventory(patchCandidate.repo,{requiredPaths:["package.json"]}).digest!==baselineDigest)throw new Error("SANDBOX_CANDIDATE_SOURCE_CHANGED_DURING_CHECK");
-      out.push(toEvidence(result,check));
+      const evidence=toEvidence(result,check);out.push(evidence);
+      if(check.check_type==="SYNTAX"&&evidence.status==="FAIL"){
+        // A failed syntax prerequisite cannot produce a qualified candidate.
+        // Save the remaining inventory as NOT_RUN rather than claiming success.
+        return {status:"FINAL_INVALID",checks:out,pending_checks:checks.slice(out.length).map(c=>({name:"sandbox:"+c.script,check_type:c.check_type,status:"NOT_RUN",reason:"SYNTAX_PREREQUISITE_FAILED"})),patch_candidate_id:patchCandidate.id,patch_candidate_hash:patchCandidate.candidate_hash,semantic_verification:"UNKNOWN"};
+      }
     }
     return {status:out.some(x=>x.status!=="PASS")?"FINAL_INVALID":"FINAL_VALID",checks:out,patch_candidate_id:patchCandidate.id,patch_candidate_hash:patchCandidate.candidate_hash,semantic_verification:"UNKNOWN"};
   }

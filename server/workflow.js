@@ -805,6 +805,28 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
     runtimeEvidence?.write(runId,"candidate_verification",result);
     return result;
   }
+  async function repairIsolatedSyntax({runId,analysis,selectedPaths,task,generated,persist=true,stage="debug-repair"}){
+    const {targetRepo,refs,patchPacket,candidate,candidateVerification}=generated;
+    if(candidateVerification.status!=="FINAL_INVALID"||!runtimeEvidence?.list||!runtimeEvidence?.write||!patchService?.create)return generated;
+    const failures=(candidateVerification.checks||[]).filter(c=>c.status==="FAIL");
+    if(!failures.length||failures.some(c=>c.check_type!=="SYNTAX"||c.executed!==true||c.timed_out||c.sandbox?.backend!=="sidecar+landlock+seccomp"||c.patch_candidate_id!==candidate.id||c.patch_candidate_hash!==candidate.candidate_hash))return generated;
+    const prior=runtimeEvidence.list(runId,{types:["syntax_refix_attempt"],limit:128});
+    if(prior.length)return generated;
+    const records=registerEvidenceList("LOCAL_RUNTIME",failures.map(reviewableVerificationCheck)),failedIds=evidenceIds(records),admitted=mergeEvidenceIds(refs,failedIds);
+    runtimeEvidence.write(runId,"syntax_refix_attempt",{candidate_id:candidate.id,candidate_hash:candidate.candidate_hash,evidence_ids:failedIds,attempt:1});
+    const out=await callReadOnlyRole("patch_engineer",{system:"Repair the concrete syntax defect in the prior isolated candidate only. Preserve the original causal hypothesis, source scope, and requirement contract; do not weaken any test. Produce a complete replacement candidate against the original source. JSON only, never apply.",user:JSON.stringify({patch_packet:patchPacket,diagnosis:analysis.diagnosis,previous_candidate:{id:candidate.id,hash:candidate.candidate_hash,diff:candidate.diff},failed_checks:evidencePromptView(records)})},makeReadOnlyToolRuntime(targetRepo,runId),{baseEvidenceIds:admitted,registeredEvidence:records,strictEvidenceRefs:true,runId});
+    const result=roleOutput(out,"patch_engineer");
+    assertPatchRequirements(patchPacket,{operations:result.operations||[],repositoryRevision:snapshotRepo(targetRepo),sourceHashes:patchPacketSource(targetRepo,selectedPaths).preconditionHashes,availableEvidenceIds:admitted});
+    const next=patchService.create({repo:targetRepo,selectedPaths,task,result,patchPacket,persist,stage});
+    if(next.candidate_hash===candidate.candidate_hash){
+      runtimeEvidence.write(runId,"syntax_refix_result",{status:"NO_CANDIDATE_DELTA",candidate_id:candidate.id});
+      return generated;
+    }
+    const checked=await verifyCandidateBeforeApproval(runId,next);
+    const retry={attempt:1,previous_candidate_id:candidate.id,candidate_id:next.id,failed_evidence_ids:failedIds,result_status:checked.status};
+    runtimeEvidence.write(runId,"syntax_refix_result",retry);
+    return {...generated,candidate:next,candidateVerification:checked,syntax_refix:retry};
+  }
   async function generateIsolatedCandidate({runId,analysis,repo,selectedPaths,context,task,persist=true,stage="debug-repair"}){
     const targetRepo=repoPolicy?repoPolicy.assertRepo(repo):repo,source=patchPacketSource(targetRepo,selectedPaths),inventory=verificationInventory(targetRepo),refs=patchPacketEvidenceRefs(analysis);
     const patchPacket=makePatchPacket({runId,diagnosisRef:`diagnosis_${contentHash(analysis?.diagnosis||{})}`,repositoryRevision:snapshotRepo(targetRepo),paths:selectedPaths,sourceExcerpts:source.sourceExcerpts,preconditionHashes:source.preconditionHashes,reproductionSummary:{status:String(analysis?.deterministic_verification?.status||"UNKNOWN"),checks:analysis?.deterministic_verification?.checks||[]},testInventory:inventory.checks,invariants:[{name:"candidate-only-patch-engineer",status:"PASS"},{name:"explicit-approval-required",status:"PASS"}],prohibitedPaths:source.prohibitedPaths,evidenceRefs:refs,requirementInput:patchRequirementInput({runId,analysis,context,task})});
@@ -826,7 +848,7 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
     const patchEngineerRuntime={telemetry:out?.tool_loop?.telemetry||out?.tool_loop?.progress?.runtime_telemetry||null,selected_skill_ids:[...(out?.tool_loop?.selected_skill_ids||out?.control_plane?.selected_skill_ids||[])]};
     const candidate=patchService?patchService.create({repo:targetRepo,selectedPaths,task,result:candidateResult,patchPacket,persist,stage}):{...candidateResult,requirement_binding:patchPacket};
     const candidateVerification=await verifyCandidateBeforeApproval(runId,candidate);
-    return {targetRepo,refs,patchPacket,patchEngineerRuntime,candidate,candidateVerification};
+    return repairIsolatedSyntax({runId,analysis,selectedPaths,task,persist,stage,generated:{targetRepo,refs,patchPacket,patchEngineerRuntime,candidate,candidateVerification}});
   }
   async function patchCandidate({runId,analysis,repo,selectedPaths,context,task}){
     const verdict=analysis?.external_hypothesis_review?.json?.verdict||analysis?.local_hypothesis_review?.json?.verdict||analysis?.external_review?.verdict;
@@ -874,7 +896,7 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
     if(authority){let run=authority.load(runId);run=authority.transition(run,"PATCH_READY");authority.transition(run,"WAITING_APPROVAL");}
     runtimeEvidence?.write(runId,"patch_candidate",{id:finalCandidate.id,diff_hash:finalCandidate.diff_hash,summary:finalCandidate.summary,patch_packet_digest:patchPacket.packet_digest,patch_engineer_runtime:patchEngineerRuntime,preapproval_refix:preapprovalRefix});
     await logRuntime({run_id:runId,severity:"info",kind:"patch_candidate",candidate_id:finalCandidate.id,diff_hash:finalCandidate.diff_hash,patch_packet_digest:patchPacket.packet_digest,summary:finalCandidate.summary,state:"WAITING_APPROVAL"});
-    return{run_id:runId,state:"WAITING_APPROVAL",candidate:finalCandidate,patch_packet:{schema:patchPacket.schema,packet_digest:patchPacket.packet_digest},patch_engineer_runtime:patchEngineerRuntime,candidate_verification:candidateVerification,preapproval_refix:preapprovalRefix};
+    return{run_id:runId,state:"WAITING_APPROVAL",candidate:finalCandidate,patch_packet:{schema:patchPacket.schema,packet_digest:patchPacket.packet_digest},patch_engineer_runtime:patchEngineerRuntime,candidate_verification:candidateVerification,syntax_refix:generated.syntax_refix||null,preapproval_refix:preapprovalRefix};
   }
 
   function automaticRefixAttemptCount(runId){
