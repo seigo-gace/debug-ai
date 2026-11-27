@@ -40,13 +40,20 @@ function localDiagnosisAdmission({scope,failure,records=[],checks=[],repositoryR
   if(configured.length!==1||configured[0].name!=="test"||configured[0].command!=="node "+tests[0])return deny("UNSUPPORTED_TEST_INVENTORY");
   const failing=checks.filter(c=>c.check_type==="UNIT"&&c.executed===true&&c.status==="FAIL"&&c.timed_out===false&&c.sandbox?.backend==="sidecar+landlock+seccomp"&&String(c.sandbox?.network||"").startsWith("CONTAINER_NETWORK_NONE")&&Number.isInteger(c.exit_code)&&c.exit_code!==0);
   if(failing.length!==1||checks.some(c=>c.executed!==true||c.timed_out||!["PASS","FAIL"].includes(c.status)||c.status==="FAIL"&&c!==failing[0]))return deny("EXECUTED_LOCAL_REPRODUCTION_REQUIRED");
+  // A crash, missing executable or timeout is not a demonstrated assertion
+  // mismatch. Keep those failures on the normal investigation route.
+  if(!/\b(?:AssertionError|ERR_ASSERTION)\b/.test(String(failing[0].stderr||"")))return deny("ASSERTION_MISMATCH_NOT_PROVEN");
   const failed=local.filter(r=>r.payload?.kind==="deterministic_sandbox_check"&&r.payload.check_type==="UNIT"&&r.payload.executed===true&&r.payload.status==="FAIL"&&r.payload.sandbox?.job_id===failing[0].sandbox?.job_id&&Boolean(failing[0].sandbox?.job_id));
   if(failed.length!==1)return deny("REPRODUCTION_EVIDENCE_NOT_BOUND");
   // Lexical scope restriction is not proof of exhaustive semantic coverage.
   // Dynamic/ambiguous inputs use the full normal workflow instead.
   const source=sourceRecords.find(r=>r.payload.value.path===sources[0]),test=sourceRecords.find(r=>r.payload.value.path===tests[0]);
   const sourceText=source.payload.value.content,testText=test.payload.value.content;
-  if(/\b(?:require|import|eval|Function|process|globalThis|fetch|WebSocket|setTimeout|setInterval)\b/.test(sourceText)||/\b(?:eval|Function|process|globalThis|fetch|WebSocket|setTimeout|setInterval|import)\b/.test(testText))return deny("DEPENDENCY_OR_DYNAMIC_EXECUTION_UNKNOWN");
+  // Node test runners commonly assign process.exitCode on assertion failure.
+  // Only literal assignments are excluded from the lexical screening; any
+  // other process access still falls back to full investigation.
+  const screenedTest=testText.replace(/\bprocess\.exitCode\s*=\s*[01]\s*;?/g,"");
+  if(/\b(?:require|import|eval|Function|process|globalThis|fetch|WebSocket|setTimeout|setInterval)\b/.test(sourceText)||/\b(?:eval|Function|process|globalThis|fetch|WebSocket|setTimeout|setInterval|import)\b/.test(screenedTest))return deny("DEPENDENCY_OR_DYNAMIC_EXECUTION_UNKNOWN");
   const path=require("node:path").posix;
   const requires=[...testText.matchAll(/\brequire\s*\(\s*(['"])([^'"]+)\1\s*\)/g)].map(m=>m[2]);
   const exactSource=x=>x.startsWith(".")&&path.normalize(path.join(path.dirname(tests[0]),x))===sources[0];

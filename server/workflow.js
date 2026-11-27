@@ -196,9 +196,24 @@ function reviewStreamEvidence(value,{includeExcerpt=false,maxExcerptChars=1200}=
   const text=String(value||"");
   return {bytes:Buffer.byteLength(text,"utf8"),sha256:crypto.createHash("sha256").update(text).digest("hex"),excerpt:includeExcerpt?text.slice(-maxExcerptChars):null};
 }
+function observedAssertionFields(text){
+  const source=String(text||"");
+  const matches=[...source.matchAll(/(?:^|\n)\s*(?:AssertionError(?:\s+\[ERR_ASSERTION\])?|Error \[ERR_ASSERTION\]):[^\r\n]*/g)];
+  // Do not infer an expected/actual pair from multiple assertions or arbitrary
+  // log prose. Original streams and content digests remain authoritative.
+  if(matches.length!==1)return null;
+  const tail=source.slice(matches[0].index);
+  const observed={kind:"ASSERTION_ERROR",authority:"PARSED_LOG_NOT_CAUSAL_PROOF"};
+  for(const name of ["actual","expected","operator"]){
+    const rows=[...tail.matchAll(new RegExp("^\\s*"+name+":\\s*([^\\r\\n]{1,160}),?\\s*$","gm"))];
+    if(rows.length===1)observed[name+"_text"]=rows[0][1].trim().replace(/,$/,"");
+  }
+  return observed;
+}
 function reviewableVerificationCheck(check){
   const item=check&&typeof check==="object"?check:{};const status=String(item.status||"").toUpperCase(),includeExcerpt=status!=="PASS";
-  return {...item,stdout:reviewStreamEvidence(item.stdout,{includeExcerpt}),stderr:reviewStreamEvidence(item.stderr,{includeExcerpt})};
+  const assertion=includeExcerpt?observedAssertionFields(item.stderr):null;
+  return {...item,stdout:reviewStreamEvidence(item.stdout,{includeExcerpt}),stderr:reviewStreamEvidence(item.stderr,{includeExcerpt}),...(assertion?{observed_assertion:assertion}:{})};
 }
 function promptJsonBytes(value){return Buffer.byteLength(JSON.stringify(value),"utf8");}
 function smallerEvidencePromptView(record,body){
@@ -1163,4 +1178,4 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
   async function searchKnowledge(query,opts={}){if(!tgserver)throw new Error("TGSERVER_ADAPTER_REQUIRED");return tgserver.search(query,opts);}
   return{continueRoleTask,continueDiagnoserTask,runAnalysis,startAnalysis,resumeAnalysis,recoverStartup,patchCandidate,startCodegenBenchmark,codegenBenchmarkStatus,startInvestigationBenchmark,investigationBenchmarkStatus,startModelAbBenchmark,modelAbBenchmarkStatus,approveAndVerify,verifyReadOnly,status,inspect,promote,searchKnowledge};
 }
-module.exports={hypothesisFeedback,activeHypothesisMaterial,boundedHypothesisFeedback,createWorkflow,parseJson,roleOutput,toolEvidenceRecords,toolAudit,pickDiagnosisStatement,publicLocalEvidence,publicHypothesisReviewEvidence,makePublicHypothesisReviewPayload,addBoundedTestDependencyEvidence,dapFailureChecks,activeDapHint,dapHintProtocol,reviewStreamEvidence,reviewableVerificationCheck,evidencePromptView,canonicalToolEvidence,downstreamToolEvidenceView,causalEvidencePromptView,localEvidenceProjectionShadow,repositorySnapshotId};
+module.exports={observedAssertionFields,hypothesisFeedback,activeHypothesisMaterial,boundedHypothesisFeedback,createWorkflow,parseJson,roleOutput,toolEvidenceRecords,toolAudit,pickDiagnosisStatement,publicLocalEvidence,publicHypothesisReviewEvidence,makePublicHypothesisReviewPayload,addBoundedTestDependencyEvidence,dapFailureChecks,activeDapHint,dapHintProtocol,reviewStreamEvidence,reviewableVerificationCheck,evidencePromptView,canonicalToolEvidence,downstreamToolEvidenceView,causalEvidencePromptView,localEvidenceProjectionShadow,repositorySnapshotId};
