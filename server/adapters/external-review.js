@@ -62,9 +62,10 @@ function createExternalReviewAdapter({groqKey=process.env.GROQ_API_KEY,geminiKey
         headers:{authorization:`Bearer ${cfg.key}`,"content-type":"application/json"},
         body,redirect:"error",signal:AbortSignal.timeout(30_000)
       });
-    }catch{
-      // Never embed transport exception text: URL/key fragments must not enter logs.
-      throw new ExternalReviewError(`${provider.toUpperCase()}_NETWORK`,{provider});
+    }catch(error){
+      // Only retain the classified error, never the transport exception text or URL/key fragments.
+      const timeout=error?.name==="TimeoutError"||error?.name==="AbortError"||error?.code==="ETIMEDOUT";
+      throw new ExternalReviewError(`${provider.toUpperCase()}_${timeout?"TIMEOUT":"NETWORK"}`,{provider});
     }
     const cooldown=()=>{const raw=response.headers?.get?.("retry-after");const seconds=typeof raw==="string"&&/^\d+$/.test(raw)?Number(raw):null;return {until:nowFn()+Math.max(60_000,Number.isSafeInteger(seconds)?seconds*1000:86_400_000)};};
     if(response.status===429)quota.blockProvider(provider,"HTTP_429",transport==="live"?cooldown():{});
@@ -93,7 +94,7 @@ function createExternalReviewAdapter({groqKey=process.env.GROQ_API_KEY,geminiKey
   }
   function recoverable(error){
     const status=Number(error?.meta?.status||0);
-    return error?.code==="LIVE_BLOCKED_FREE_TIER_UNVERIFIED"||/EXTERNAL_REVIEW_QUOTA_(?:MINUTE|HOUR|DAY|MONTH|TOKENS|REMAINING)_EXHAUSTED/.test(error?.code||"")||error?.code==="EXTERNAL_REVIEW_QUOTA_ACCOUNT_BLOCKED"||schemaFault(error)||String(error?.code||"").endsWith("_NETWORK")||status===429||status>=500;
+    return error?.code==="LIVE_BLOCKED_FREE_TIER_UNVERIFIED"||/EXTERNAL_REVIEW_QUOTA_(?:MINUTE|HOUR|DAY|MONTH|TOKENS|REMAINING)_EXHAUSTED/.test(error?.code||"")||error?.code==="EXTERNAL_REVIEW_QUOTA_ACCOUNT_BLOCKED"||schemaFault(error)||/_(?:NETWORK|TIMEOUT)$/.test(String(error?.code||""))||[400,401,403,404,429].includes(status)||(status>=500&&status<=599);
   }
   async function review(kind,payload,{secondOpinion=false}={}){
     assertPublicOpaque(payload);
