@@ -203,7 +203,7 @@ function reportedGateErrorCode(body){
     return typeof value==="string"&&KNOWN_CORE_GATE_ERROR_CODES.has(value)?value:null;
   }catch{return null;}
 }
-function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=process.env.AI_CORE_API_KEY,fetchImpl=undiciFetch,timeoutMs=600000,maxTransportTimeoutAttempts=2,maxTimeoutRetries,dispatcher,runtimeContextTokens=process.env.DEBUG_AI_CORE_CONTEXT_TOKENS??null,requireRuntimeContextQualification=false,promptCache=true,inputTokenShadow=false,inputTokenShadowRoute="router",observationIntervalMs=60000,modelGateBaseUrls=null,dispatchMode="legacy"}={}){
+function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=process.env.AI_CORE_API_KEY,fetchImpl=undiciFetch,timeoutMs=600000,maxTransportTimeoutAttempts=2,maxTimeoutRetries,dispatcher,runtimeContextTokens=process.env.DEBUG_AI_CORE_CONTEXT_TOKENS??null,requireRuntimeContextQualification=false,promptCache=true,inputTokenShadow=false,inputTokenShadowRoute="router",observationIntervalMs=60000,modelGateBaseUrls=null,dispatchMode="legacy",scoutPairDispatch=false}={}){
   if(!baseUrl)throw new AiCoreError("AI_CORE_URL_REQUIRED","DEBUG_AI_CORE_URL is required");
   if(!apiKey)throw new AiCoreError("AI_CORE_API_KEY_REQUIRED","AI_CORE_API_KEY is required");
   if(typeof fetchImpl!=="function")throw new AiCoreError("FETCH_REQUIRED","fetch implementation is required");
@@ -218,7 +218,10 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
     throw new AiCoreError("AI_CORE_GATE_UNCONFIGURED","Four verified Gate origins must be explicitly configured before opt-in routing");
   if(dispatchMode==="model_gates"&&inputTokenShadow)
     throw new AiCoreError("AI_CORE_GATE_SHADOW_UNQUALIFIED","Legacy input token counter cannot certify model Gate traffic");
-  const runtimeRouteBinding=dispatchMode==="model_gates"?crypto.createHash("sha256").update(JSON.stringify(qualifiedGateUrls)).digest("hex"):null;
+  if(typeof scoutPairDispatch!=="boolean"||(scoutPairDispatch&&dispatchMode!=="model_gates"))throw new AiCoreError("AI_CORE_SCOUT_PAIR_MODE_INVALID","Scout pair comparison requires authenticated per-model Gates");
+  // Candidate B is explicit opt-in for isolated comparison; keep existing
+  // baseline binding and serial default unchanged.
+  const runtimeRouteBinding=dispatchMode==="model_gates"?crypto.createHash("sha256").update(JSON.stringify(scoutPairDispatch?{gates:qualifiedGateUrls,dispatch:"SCOUT_PAIR_COMPARISON"}:qualifiedGateUrls)).digest("hex"):null;
   function endpointForRole(role){
     if(dispatchMode==="legacy"){
       if(!ROLES[role])throw new AiCoreError("ROLE_INVALID","Unknown DebugAI role");
@@ -234,7 +237,27 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
   if(!Number.isInteger(maxTransportTimeoutAttempts)||maxTransportTimeoutAttempts<1||maxTransportTimeoutAttempts>2)throw new AiCoreError("AI_CORE_RETRY_INVALID","transport timeout attempts must be an integer between 1 and 2");
   const endpoint=new URL("/v1/chat/completions",baseUrl).toString();
   const transport=dispatcher||new Agent({headersTimeout:timeoutMs+5000,bodyTimeout:timeoutMs+5000});
-  let queueTail=Promise.resolve(),queueTailRole=null,queueDepth=0;
+  let queueTail=Promise.resolve(),queueTailRole=null,queueDepth=0,openScoutPair=null;
+  function reserveDispatch(role,options){
+    const batch=typeof options.scoutBatchId==="string"&&options.scoutBatchId.length>0&&options.scoutBatchId.length<=128?options.scoutBatchId:null;
+    const eligible=scoutPairDispatch&&batch!==null&&["code_scout","causal_scout"].includes(role);
+    const peer=eligible&&openScoutPair?.batch===batch&&openScoutPair.role!==role?openScoutPair:null;
+    let resolveTurn;const turn=new Promise(resolve=>{resolveTurn=resolve;});
+    const previous=peer?peer.previous:queueTail,predecessorRole=peer?peer.predecessorRole:queueDepth>0?queueTailRole:null;
+    // The next work item still waits for BOTH Scouts to settle. A new batch,
+    // same physical model, or other role cannot join a pair.
+    const pair=eligible&&!peer?{batch,role,previous,predecessorRole}:null;
+    queueTail=peer?Promise.all([queueTail,turn]).then(()=>undefined):turn;
+    openScoutPair=pair;queueTailRole=role;queueDepth++;
+    let released=false;
+    function release(){
+      if(released)return;released=true;
+      if(openScoutPair===pair)openScoutPair=null;
+      queueDepth--;if(queueDepth===0)queueTailRole=null;
+      resolveTurn();
+    }
+    return {previous,predecessorRole,release};
+  }
   async function execute(role,{system="",user="",maxTokens=1024,responseFormat="json_object",temperature=0,topP=null,topK=null,selectedSkillIds=null,timeoutMsOverride=null,deadlineAt=null,toolBudgetFinalRound=null,signal=null,outputEnvelope=null}={},runtimeMeta={}){
     const roleStartedAt=Date.now(),prepareStartedAt=Date.now();
     if(signal?.aborted)throw new AiCoreError("AI_CORE_ABORTED","DebugAI role invocation cancelled before dispatch",{role,timeout_class:TIMEOUT_CLASS.EXTERNAL_ABORT,attempts:0});
@@ -365,7 +388,7 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
   async function queuedExecution(role,options={},internalMeta={}){
     if(options.signal!=null&&(typeof options.signal.aborted!=="boolean"||typeof options.signal.addEventListener!=="function"||typeof options.signal.removeEventListener!=="function"))
       throw new AiCoreError("AI_CORE_SIGNAL_INVALID","signal must be an AbortSignal",{role});
-    let release;const queuedAt=Date.now(),turn=new Promise(resolve=>{release=resolve;}),previous=queueTail,predecessorRole=queueDepth>0?queueTailRole:null;queueTail=turn;queueTailRole=role;queueDepth++;const resolveTurn=release;let released=false;release=()=>{if(released)return;released=true;queueDepth--;if(queueDepth===0)queueTailRole=null;resolveTurn();};
+    const queuedAt=Date.now(),{previous,predecessorRole,release}=reserveDispatch(role,options);
     internalMeta.observe?.({phase:"QUEUE",queue_predecessor_role:predecessorRole});
     const queueTimeoutMs=options.queueTimeoutMs===null||options.queueTimeoutMs===undefined?null:Number(options.queueTimeoutMs);
     if(queueTimeoutMs!==null&&(!Number.isFinite(queueTimeoutMs)||queueTimeoutMs<=0)){previous.finally(release);throw new AiCoreError("AI_CORE_QUEUE_TIMEOUT_INVALID","queueTimeoutMs must be a positive finite number",{role,queue_timeout_ms:options.queueTimeoutMs});}
@@ -441,6 +464,6 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
   }
   async function call(role,options={}){return queuedCall(role,options);}
   async function callPrepared(role,{system,user="",...options}={}){if(typeof system!=="string"||!system.trim())throw new AiCoreError("AI_CORE_PREPARED_SYSTEM_REQUIRED","Prepared benchmark system prompt is required",{role});return queuedCall(role,{...options,user},{preparedSystem:system});}
-  return{endpoint,dispatch_mode:dispatchMode,runtime_route_binding:runtimeRouteBinding,endpointForRole,runtime_context_tokens:qualifiedRuntimeContext,runtime_context_qualified:qualifiedRuntimeContext!==null,prompt_cache_requested:promptCache,preflightRoleGate,preflightConfiguredGates,call,callPrepared};
+  return{endpoint,dispatch_mode:dispatchMode,scout_pair_dispatch:scoutPairDispatch,runtime_route_binding:runtimeRouteBinding,endpointForRole,runtime_context_tokens:qualifiedRuntimeContext,runtime_context_qualified:qualifiedRuntimeContext!==null,prompt_cache_requested:promptCache,preflightRoleGate,preflightConfiguredGates,call,callPrepared};
 }
 module.exports={ROLE_ALIASES,TIMEOUT_CLASS,AiCoreError,classifyTimeoutError,isTimeoutError,resolveRoleTimeoutMs,resolveEffectiveTimeoutMs,normalizeRuntimeContextTokens,resolveEffectiveMaxTokens,finiteUsage,usageTelemetry,providerTimingTelemetry,prefixHash,truncationError,runtimeControlWireUser,sampleNodeProcessResources,nodeProcessResourceObservation,expectedGateForRole,normalizeGateUrls,resolveSkillBenchmarkEndpoint,createAiCoreAdapter};

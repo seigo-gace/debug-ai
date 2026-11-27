@@ -68,7 +68,7 @@ function observeAiCalls({aiCore,runId,runtimeEvidence,onEvent=null}={}){
         }
         persist({phase:"ROLE_START"});
         try{
-          const out=await target.call(role,{...options,onProgress:event=>{persist(event);options.onProgress?.(event);}});
+          const out=await target.call(role,{...options,...(["code_scout","causal_scout"].includes(role)?{scoutBatchId:runId}:{}),onProgress:event=>{persist(event);options.onProgress?.(event);}});
           persist({phase:"SUCCEEDED",telemetry:out.telemetry,dispatch_attempt:out.attempts,continuation_assessment:"TERMINAL"});
           return out;
         }catch(error){
