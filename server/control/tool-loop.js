@@ -104,6 +104,8 @@ function compactResearchInventory(user,role,selected,registeredEvidence,baseEvid
   return {user:compact,baseline_bytes:unchanged.baseline_bytes,candidate_bytes:bytes,projected_records:count};
 }
 
+const {deduplicateRoleEvidence}=require("./role-prompt-evidence.js");
+
 async function runRoleWithReadOnlyTools({aiCore,role,system="",user="",toolRuntime=null,maxToolRounds=null,maxToolCalls=null,baseEvidenceIds=[],registeredEvidence=[],strictEvidenceRefs=false,continuationState=null,durableHooks=null,progressQualification=null,thinkingOverride=null}={}){
   if(!Array.isArray(registeredEvidence))throw new Error("ROLE_REGISTERED_EVIDENCE_INVALID");
   if(progressQualification!==null&&(typeof progressQualification!=="object"||typeof progressQualification.verify!=="function"))throw new Error("ROLE_PROGRESS_QUALIFICATION_INVALID");
@@ -131,7 +133,9 @@ async function runRoleWithReadOnlyTools({aiCore,role,system="",user="",toolRunti
   }
   const selected=availableForSelection(role,toolRuntime,user),protocol=toolProtocol(selected.tools),deadlineAt=Date.now()+(budget.tool_loop_wall_ms||budget.turn_timeout_ms),progress=createProgressController({maxNoProgressRounds:2,initialState:resume.progress,requireQualifiedProgress:progressQualification!==null,verifyQualifiedProgress:progressQualification?.verify||null,qualificationBinding:progressQualification?.binding??null});
   const promptView=compactResearchInventory(user,role,selected,registeredEvidence,baseEvidenceIds);
-  const {user:baseUser,...promptViewMetrics}=promptView;
+  const {user:inventoryUser,...promptViewMetrics}=promptView;
+  const dedup=registeredEvidence.length?deduplicateRoleEvidence(inventoryUser,baseEvidenceIds):{user:inventoryUser,baseline_bytes:Buffer.byteLength(inventoryUser,"utf8"),candidate_bytes:Buffer.byteLength(inventoryUser,"utf8"),deduplicated_records:0};
+  const {user:baseUser,...dedupMetrics}=dedup;
   let currentUser=withObservations(baseUser,resume.observations),totalCalls=resume.total_calls;
   const observations=resume.observations,seenToolCalls=new Set(resume.seen_tool_fingerprints),completedWorkIds=new Set(resume.completed_work_ids),completedEffectIds=new Set(resume.completed_effect_ids),llmTelemetry=[],inMemoryToolResults=new Map(),qualifiedProgressIds=new Set();
   let last=null,toolWallMs=0,toolCallsExecutedCurrent=0,toolCallsReusedCurrent=0;
@@ -152,7 +156,7 @@ async function runRoleWithReadOnlyTools({aiCore,role,system="",user="",toolRunti
     if(!requests.length){
       const toolEvidenceIds=collectEvidenceIds(observations),available=mergeEvidenceIds(baseEvidenceIds,toolEvidenceIds),validated=parseAndValidateRoleOutput(role,last.content,{availableEvidenceIds:available,strictEvidenceRefs});
       if(progressQualification?.validateFinal&&progressQualification.validateFinal({result:validated})!==true)throw new Error(`ROLE_COMPLETION_NOT_QUALIFIED:${role}`);
-      const state=continuationSnapshot({roundsCompleted:round,totalCalls,observations,seenToolCalls,progress,completedWorkIds,completedEffectIds}),telemetry={...summarizeAiTelemetry(llmTelemetry,{toolWallMs,toolCallsExecutedCurrent,toolCallsReusedCurrent}),initial_inventory_prompt_view:promptViewMetrics};
+      const state=continuationSnapshot({roundsCompleted:round,totalCalls,observations,seenToolCalls,progress,completedWorkIds,completedEffectIds}),telemetry={...summarizeAiTelemetry(llmTelemetry,{toolWallMs,toolCallsExecutedCurrent,toolCallsReusedCurrent}),initial_inventory_prompt_view:promptViewMetrics,initial_evidence_dedup:dedupMetrics};
       return {...last,validated_output:validated,tool_loop:{rounds:round,total_calls:totalCalls,observations,evidence_ids:available,tool_evidence_ids:toolEvidenceIds,base_evidence_ids:mergeEvidenceIds(baseEvidenceIds),progress:{...progress.snapshot(),runtime_telemetry:telemetry},parse_status:"FINAL",selected_skill_ids:[...selected.skillIds],continuation_state:state,telemetry}};
     }
     if(finalRound)throw new Error(`ROLE_TOOL_LOOP_LIVELOCK:${role}`);
