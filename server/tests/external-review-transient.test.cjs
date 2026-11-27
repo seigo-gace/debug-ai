@@ -32,7 +32,7 @@ test('Gemini 503 preserves Groq non-PASS result without aborting analysis',async
   assert.deepEqual(out.second_opinion_error,{code:'GEMINI_HTTP_503',status:503,transient:true});
 });
 
-test('Gemini auth failure remains hard failure',async()=>{
+test('Gemini auth failure retains the Groq FAIL and records the unavailable second opinion',async()=>{
   let calls=0;
   const a=createExternalReviewAdapter({
     groqKey:'g',
@@ -43,7 +43,11 @@ test('Gemini auth failure remains hard failure',async()=>{
       return new Response('unauthorized',{status:401});
     }
   });
-  await assert.rejects(()=>a.hypothesis(payload),e=>e?.code==='GEMINI_HTTP_401');
+  const result=await a.hypothesis(payload);
+  assert.equal(result.json.verdict,'FAIL');
+  assert.equal(result.second_opinion,null);
+  assert.equal(result.second_opinion_error.code,'GEMINI_HTTP_401');
+  assert.equal(calls,2);
 });
 
 function reply(status,body){
@@ -93,8 +97,8 @@ test("both free review providers unavailable fails closed, not PASS",async()=>{
 });
 test("Groq authentication failure is not hidden by Gemini fallback",async()=>{
   const calls=[];const adapter=createExternalReviewAdapter({groqKey:"g",geminiKey:"m",fetchImpl:async(url)=>{calls.push(url);return reply(401,"");}});
-  await assert.rejects(()=>adapter.final(payload),e=>e?.code==="GROQ_HTTP_401");
-  assert.equal(calls.length,1);
+  await assert.rejects(()=>adapter.final(payload),e=>e?.code==="EXTERNAL_FREE_PROVIDERS_UNAVAILABLE"&&e.meta.primary_code==="GROQ_HTTP_401"&&e.meta.secondary_code==="GEMINI_HTTP_401");
+  assert.equal(calls.length,2);
 });
 
 test("free reviewer attempt budget includes invalid responses and rejects exhausted routes",async()=>{
