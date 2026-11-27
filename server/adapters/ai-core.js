@@ -187,6 +187,16 @@ const KNOWN_CORE_GATE_ERROR_CODES=new Set([
 ]);
 // Only coordinator admission rejections; never retry arbitrary HTTP errors or unknown outcomes.
 const RETRYABLE_GATE_ADMISSION_CODES=new Set(["MODEL_CONCURRENCY_LIMIT","GLOBAL_CONCURRENCY_LIMIT","MODEL_TRANSITION_BUSY","ADMISSION_QUEUE_BUSY"]);
+// Diagnostic identity alone is not authorization to retry. The Gate's own
+// admission rejection is exactly {error:{code}}; arbitrary upstream metadata
+// or a malformed envelope cannot establish that inference never started.
+function confirmedGateAdmissionRejection(body,code){
+  if(!RETRYABLE_GATE_ADMISSION_CODES.has(code))return false;
+  try{const value=JSON.parse(body);
+    return value&&typeof value==="object"&&!Array.isArray(value)&&Object.keys(value).length===1&&
+      value.error&&typeof value.error==="object"&&!Array.isArray(value.error)&&Object.keys(value.error).length===1&&value.error.code===code;
+  }catch{return false;}
+}
 function reportedGateErrorCode(body){
   if(typeof body!=="string"||Buffer.byteLength(body,"utf8")>1024)return null;
   try{const value=JSON.parse(body)?.error?.code;
@@ -297,7 +307,7 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
         runtimeMeta.observe?.({phase:"RESPONSE",dispatch_attempt:attempt});
         if(!r.ok){
           const gateCode=dispatchMode==="model_gates"?reportedGateErrorCode(text):null;
-          if(r.status===429&&RETRYABLE_GATE_ADMISSION_CODES.has(gateCode)&&admissionRetryDeadlineAt===null&&attempt<maxTransportTimeoutAttempts&&attemptNow+effectiveTimeoutMs-Date.now()>1000){
+          if(r.status===429&&confirmedGateAdmissionRejection(text,gateCode)&&admissionRetryDeadlineAt===null&&attempt<maxTransportTimeoutAttempts&&attemptNow+effectiveTimeoutMs-Date.now()>1000){
             admissionRetryDeadlineAt=attemptNow+effectiveTimeoutMs;
             continue;
           }

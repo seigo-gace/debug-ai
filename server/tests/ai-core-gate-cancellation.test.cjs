@@ -87,3 +87,8 @@ test("legacy and configured one-attempt paths do not retry a concurrency-shaped 
     await assert.rejects(ai.call("code_scout",{user:"no replay"}),e=>e.code==="AI_CORE_HTTP");assert.equal(sends,1);
   }
 });
+
+test("reported diagnostic code with additional upstream fields is not proof of pre-inference rejection",async()=>{
+  let sends=0;const ai=adapter(async()=>{sends++;return {ok:false,status:429,text:async()=>JSON.stringify({error:{code:"MODEL_CONCURRENCY_LIMIT",detail:"unknown upstream outcome"}})};});
+  await assert.rejects(ai.call("code_scout",{user:"preserve diagnostics only"}),e=>e.code==="AI_CORE_HTTP"&&e.meta.upstream_reported_code==="MODEL_CONCURRENCY_LIMIT");assert.equal(sends,1);
+});
