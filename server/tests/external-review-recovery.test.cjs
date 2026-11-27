@@ -60,6 +60,7 @@ for(const failure of [400,401,403,404,429,503,"TIMEOUT"]){
     const r=await a.hypothesis(payload);
     assert.equal(r.provider,"gemini");
     assert.equal(r.json.verdict,"PASS");
+    assert.equal(r.primary_error.code,failure==="TIMEOUT"?"GROQ_TIMEOUT":"GROQ_HTTP_"+failure);
     assert.deepEqual(dispatched,[PROVIDERS.groq.url,PROVIDERS.gemini.url]);
   });
 }
@@ -85,4 +86,34 @@ test("provider reset is parsed and combined without shortening the longer cooldo
   assert.equal(rateLimitCooldown(h,"groq",429,["requests","tokens"],fixedNow),fixedNow+3600000);
   assert.equal(rateLimitCooldown(h,"groq",200,["tokens"],fixedNow),fixedNow+30000);
   assert.equal(rateLimitCooldown(new Headers(),"groq",429,[],fixedNow),fixedNow+86400000);
+});
+
+test("structured request uses provider-specific completion budget and reasoning settings",async t=>{
+  const requests=[];
+  const a=adapter(t,async (url,options)=>{
+    requests.push(JSON.parse(options.body));
+    if(url===PROVIDERS.groq.url)return new Response("",{status:400});
+    return pass();
+  });
+  assert.equal((await a.hypothesis(payload)).json.verdict,"PASS");
+  assert.equal(requests[0].max_completion_tokens,2048);
+  assert.equal(requests[0].max_tokens,undefined);
+  assert.equal(requests[0].reasoning_effort,"low");
+  assert.equal(requests[0].include_reasoning,false);
+  assert.equal(requests[0].response_format.type,"json_schema");
+  assert.equal(requests[1].max_tokens,650);
+  assert.equal(requests[1].reasoning_effort,"low");
+  assert.equal(requests[1].response_format.type,"json_object");
+});
+test("truncated review does not retry the same output budget or accept a partial verdict",async t=>{
+  const requests=[];
+  const a=adapter(t,async url=>{
+    requests.push(url);
+    if(url===PROVIDERS.groq.url)return new Response(JSON.stringify({choices:[{finish_reason:"length",message:{content:'{"verdict":"PASS"}'}}]}),{status:200});
+    return pass();
+  });
+  const result=await a.hypothesis(payload);
+  assert.equal(result.provider,"gemini");
+  assert.equal(result.primary_error.code,"EXTERNAL_REVIEW_TRUNCATED");
+  assert.deepEqual(requests,[PROVIDERS.groq.url,PROVIDERS.gemini.url]);
 });
