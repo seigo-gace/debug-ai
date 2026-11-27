@@ -185,6 +185,8 @@ const KNOWN_CORE_GATE_ERROR_CODES=new Set([
   "BACKEND_UNIX_SOCKET_CHANGED","BACKEND_UNIX_SOCKET_REMOVE_FAILED",
   "SOURCE_FINGERPRINT_UNAVAILABLE","RESOURCE_READBACK_UNAVAILABLE"
 ]);
+// Only coordinator admission rejections; never retry arbitrary HTTP errors or unknown outcomes.
+const RETRYABLE_GATE_ADMISSION_CODES=new Set(["MODEL_CONCURRENCY_LIMIT","GLOBAL_CONCURRENCY_LIMIT","MODEL_TRANSITION_BUSY","ADMISSION_QUEUE_BUSY"]);
 function reportedGateErrorCode(body){
   if(typeof body!=="string"||Buffer.byteLength(body,"utf8")>1024)return null;
   try{const value=JSON.parse(body)?.error?.code;
@@ -264,7 +266,7 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
       inputShadow=Object.freeze({...assessInputReservation({inputTokens:counted,contextTokens:qualifiedRuntimeContext,outputTokens:effectiveMaxTokens}),counter_route:target?.route||"ROUTE_NOT_ADMITTED",counter_http_status:counterStatus});
       runtimeMeta.observe?.({phase:"INPUT_TOKEN_SHADOW",input_token_shadow:inputShadow});
     }
-    let upstreamMs=0,responseBytes=0,parseValidateMs=0;
+    let upstreamMs=0,responseBytes=0,parseValidateMs=0,admissionRetryDeadlineAt=null,admissionWaitRequestedMs=0;
     for(let attempt=1;attempt<=maxTransportTimeoutAttempts;attempt++){
       const ctl=new AbortController();let deadlineTriggered=false;
       let timer=null,externalAbortListener=null;
@@ -273,7 +275,12 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
         // A transport retry must not restart the absolute role deadline.
         // Recompute the remaining time after the previous attempt and fail
         // before making another request if the shared budget is exhausted.
-        effectiveTimeoutMs=resolveEffectiveTimeoutMs(role,timeoutMs,{timeoutMsOverride,deadlineAt,now:Date.now()});
+        const attemptNow=Date.now();
+        const attemptDeadline=admissionRetryDeadlineAt===null?deadlineAt:Math.min(Number.isFinite(deadlineAt)?deadlineAt:Infinity,admissionRetryDeadlineAt);
+        effectiveTimeoutMs=resolveEffectiveTimeoutMs(role,timeoutMs,{timeoutMsOverride,deadlineAt:attemptDeadline,now:attemptNow});
+        // Only a positively identified pre-inference rejection may use the existing
+        // Gate's bounded admission queue. Preserve the original attempt deadline.
+        admissionWaitRequestedMs=admissionRetryDeadlineAt===null?0:Math.min(30000,Math.max(0,Math.floor(effectiveTimeoutMs)-1000));
         timer=setTimeout(()=>{deadlineTriggered=true;ctl.abort();},effectiveTimeoutMs);
         if(signal){
           externalAbortListener=()=>ctl.abort();
@@ -284,18 +291,25 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
         requestDispatched=true;
         runtimeMeta.observe?.({phase:"UPSTREAM_WAIT",dispatch_attempt:attempt,prepare_ms:prepareMs});
         const upstreamStartedAt=Date.now();let r,text;
-        try{r=await fetchImpl(endpointForRole(role),{method:"POST",headers:{authorization:`Bearer ${apiKey}`,"content-type":"application/json"},body:requestBody,signal:ctl.signal,dispatcher:transport,...(dispatchMode==="model_gates"?{redirect:"error"}:{})});text=await r.text();}finally{upstreamMs+=Date.now()-upstreamStartedAt;}
+        try{r=await fetchImpl(endpointForRole(role),{method:"POST",headers:{authorization:`Bearer ${apiKey}`,"content-type":"application/json",...(admissionWaitRequestedMs>0?{"X-AI-Core-Wait-Ms":String(admissionWaitRequestedMs),"X-AI-Core-Client":"debug-ai"}:{})},body:requestBody,signal:ctl.signal,dispatcher:transport,...(dispatchMode==="model_gates"?{redirect:"error"}:{})});text=await r.text();}finally{upstreamMs+=Date.now()-upstreamStartedAt;}
         if(typeof text==="string")responseBytes+=Buffer.byteLength(text,"utf8");
         if(signal?.aborted)throw new AiCoreError("AI_CORE_ABORTED","DebugAI role invocation cancelled during inference",{role,timeout_class:TIMEOUT_CLASS.EXTERNAL_ABORT,attempts:attempt});
         runtimeMeta.observe?.({phase:"RESPONSE",dispatch_attempt:attempt});
-        if(!r.ok)throw new AiCoreError("AI_CORE_HTTP",`AI Core HTTP ${r.status}`,{status:r.status,dispatch_mode:dispatchMode,upstream_reported_code:dispatchMode==="model_gates"?reportedGateErrorCode(text):null});
+        if(!r.ok){
+          const gateCode=dispatchMode==="model_gates"?reportedGateErrorCode(text):null;
+          if(r.status===429&&RETRYABLE_GATE_ADMISSION_CODES.has(gateCode)&&admissionRetryDeadlineAt===null&&attempt<maxTransportTimeoutAttempts&&attemptNow+effectiveTimeoutMs-Date.now()>1000){
+            admissionRetryDeadlineAt=attemptNow+effectiveTimeoutMs;
+            continue;
+          }
+          throw new AiCoreError("AI_CORE_HTTP",`AI Core HTTP ${r.status}`,{status:r.status,dispatch_mode:dispatchMode,upstream_reported_code:gateCode,admission_wait_requested_ms:admissionWaitRequestedMs});
+        }
         const parseStartedAt=Date.now();
         try{envelope=JSON.parse(text);}catch{parseValidateMs+=Date.now()-parseStartedAt;throw new AiCoreError("AI_CORE_ENVELOPE","AI Core returned non-JSON envelope");}
         const content=envelope?.choices?.[0]?.message?.content;finishReason=envelope?.choices?.[0]?.finish_reason??null;parseValidateMs+=Date.now()-parseStartedAt;
         const telemetry=makeTelemetry({queueWaitMs:runtimeMeta.queueWaitMs,prepareMs,upstreamMs,parseValidateMs,roleStartedAt,requestBytes:requestBytesPerAttempt*attempt,responseBytes,attempts:attempt,envelope,finishReason,prefix:compiledPrefixHash});
         if(String(finishReason||"").toLowerCase()==="length")throw truncationError(role,cfg,{maxTokens:effectiveMaxTokens,finishReason,content,envelope,telemetry});
         if(typeof content!=="string"||!content.trim()){const reasoningOnly=typeof envelope?.choices?.[0]?.message?.reasoning_content==="string"&&envelope.choices[0].message.reasoning_content.trim().length>0;throw new AiCoreError(reasoningOnly?"AI_CORE_REASONING_ONLY":"AI_CORE_EMPTY",reasoningOnly?"AI Core returned reasoning without final content":"AI Core returned empty content",{role,model:cfg.backend_model,finish_reason:finishReason,reasoning_content_present:reasoningOnly,telemetry});}
-        return {provider:"llama-swap",role,alias:cfg.alias,model:cfg.backend_model,thinking:cfg.thinking,content,raw:envelope,attempts:attempt,telemetry,control_plane:{selected_skill_ids:invocation?[...invocation.selected_skill_ids]:[...(selectedSkillIds||[])],skill_selection_mode:invocation?invocation.skill_selection_mode:"PRECOMPILED_MEASUREMENT",role_contract_version:invocation?invocation.role_contract_version:null,output_schema:invocation?invocation.output_schema:null,guardrail_profile:invocation?invocation.guardrail_profile:null,effective_timeout_ms:effectiveTimeoutMs,max_tokens:effectiveMaxTokens,requested_max_tokens:tokenBudget.requested_max_tokens,model_output_hard_ceiling_tokens:tokenBudget.model_output_hard_ceiling_tokens,runtime_context_tokens:tokenBudget.runtime_context_tokens,runtime_output_ceiling_tokens:tokenBudget.runtime_output_ceiling_tokens,runtime_context_qualified:tokenBudget.runtime_context_qualified,context_limited:tokenBudget.context_limited,prompt_cache_requested:promptCache,...(inputTokenShadow?{input_token_shadow:inputShadow}:{}),tool_budget_final_round:toolBudgetFinalRound===true,prefix_hash:compiledPrefixHash}};
+        return {provider:"llama-swap",role,alias:cfg.alias,model:cfg.backend_model,thinking:cfg.thinking,content,raw:envelope,attempts:attempt,telemetry,control_plane:{selected_skill_ids:invocation?[...invocation.selected_skill_ids]:[...(selectedSkillIds||[])],skill_selection_mode:invocation?invocation.skill_selection_mode:"PRECOMPILED_MEASUREMENT",role_contract_version:invocation?invocation.role_contract_version:null,output_schema:invocation?invocation.output_schema:null,guardrail_profile:invocation?invocation.guardrail_profile:null,effective_timeout_ms:effectiveTimeoutMs,admission_wait_requested_ms:admissionWaitRequestedMs,max_tokens:effectiveMaxTokens,requested_max_tokens:tokenBudget.requested_max_tokens,model_output_hard_ceiling_tokens:tokenBudget.model_output_hard_ceiling_tokens,runtime_context_tokens:tokenBudget.runtime_context_tokens,runtime_output_ceiling_tokens:tokenBudget.runtime_output_ceiling_tokens,runtime_context_qualified:tokenBudget.runtime_context_qualified,context_limited:tokenBudget.context_limited,prompt_cache_requested:promptCache,...(inputTokenShadow?{input_token_shadow:inputShadow}:{}),tool_budget_final_round:toolBudgetFinalRound===true,prefix_hash:compiledPrefixHash}};
       }catch(e){
         const timeoutClass=signal?.aborted?TIMEOUT_CLASS.EXTERNAL_ABORT:classifyTimeoutError(e,{deadlineTriggered});
         const attemptsStarted=requestDispatched?attempt:attempt-1;
