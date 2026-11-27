@@ -16,3 +16,5 @@ test("different record content, arbitrary user strings, unrelated arrays, criter
  assert.deepEqual(p.task.localEvidence.registered_evidence_refs,["EVI_2","EVI_1","EVI_2"]);assert.deepEqual(p.task.official,task.official);assert.deepEqual(p.task.data,task.data);assert.deepEqual(p.task.unknown,task.unknown);assert.deepEqual(p.criteria,[{id:"criterion1",evidence_id:"EVI_1"}]);
  const raw=make(task,false);assert.equal(raw.task,JSON.stringify(task));assert.deepEqual(raw.registered_evidence,views);
 });
+
+test("same evidence ID with differing provenance metadata cannot be ambiguously referenced",()=>{const other={...views[0],source_ref:"different"};const p=projectRolePrompt({task:JSON.stringify({evidence:[other]}),step:1,previousProgress:{},evidence:["EVI_1"],views:[views[0],other],structuredTask:true});assert.deepEqual(p.task.evidence,[other]);assert.deepEqual(p.registered_evidence,[views[0],other]);});
