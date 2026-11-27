@@ -1,3 +1,7 @@
+## 2026-11-27 — Skill benchmark dispatch parity (Source change; runtime not qualified)
+
+All six existing Skill ON/OFF clients now select the configured production-style AI Core model Gate in `model_gates` mode using the existing origin validation and role mapping; legacy remains explicit. Missing/invalid Gate configuration never falls back to the legacy router. Redirects are rejected and HTTP error bodies are not retained. The existing resumable benchmark fingerprint binds the effective dispatch configuration as well as source and runtime context, so incompatible historical measurements cannot be silently reused. This implements the existing measurement contract (Design §18, §27.8); no model, role, sampling, Skill, token budget, runtime or provider setting changes. New deterministic regression tests cover six roles, invalid origins, error redaction and checkpoint mismatch. This is not evidence of actual inference, measured quality gain, deployment or six-role E2E.
+
 
 ## AI Core model Gate Stage B (opt-in, not yet production qualified)
 

@@ -143,6 +143,21 @@ function normalizeGateUrls(value){
   }
   return Object.freeze(safe);
 }
+// Measurement-only Skill clients must select the same Gate as production.
+function resolveSkillBenchmarkEndpoint(role,{baseUrl=process.env.DEBUG_AI_CORE_URL,dispatchMode=process.env.DEBUG_AI_CORE_GATE_DISPATCH_MODE||"legacy",modelGateBaseUrls=null}={}){
+  if(dispatchMode==="legacy"){
+    if(!baseUrl)throw new Error("AI_CORE_URL_REQUIRED");
+    return new URL("/v1/chat/completions",baseUrl).toString();
+  }
+  if(dispatchMode!=="model_gates")throw new Error("SKILL_BENCHMARK_DISPATCH_MODE_INVALID");
+  const origins=normalizeGateUrls(modelGateBaseUrls??{
+    coder:process.env.DEBUG_AI_CORE_GATE_CODER_URL,
+    qwen3:process.env.DEBUG_AI_CORE_GATE_QWEN3_URL,
+    granite:process.env.DEBUG_AI_CORE_GATE_GRANITE_URL,
+    ministral:process.env.DEBUG_AI_CORE_GATE_MINISTRAL_URL
+  });
+  return new URL("/v1/chat/completions",origins[expectedGateForRole(role).model]).toString();
+}
 // Only previously verified AI Core Gate error identifiers are retained. Unknown or
 // untrusted response bodies stay redacted; this is reported provenance, not RCA.
 const KNOWN_CORE_GATE_ERROR_CODES=new Set([
@@ -404,4 +419,4 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
   async function callPrepared(role,{system,user="",...options}={}){if(typeof system!=="string"||!system.trim())throw new AiCoreError("AI_CORE_PREPARED_SYSTEM_REQUIRED","Prepared benchmark system prompt is required",{role});return queuedCall(role,{...options,user},{preparedSystem:system});}
   return{endpoint,dispatch_mode:dispatchMode,runtime_route_binding:runtimeRouteBinding,endpointForRole,runtime_context_tokens:qualifiedRuntimeContext,runtime_context_qualified:qualifiedRuntimeContext!==null,prompt_cache_requested:promptCache,preflightRoleGate,preflightConfiguredGates,call,callPrepared};
 }
-module.exports={ROLE_ALIASES,TIMEOUT_CLASS,AiCoreError,classifyTimeoutError,isTimeoutError,resolveRoleTimeoutMs,resolveEffectiveTimeoutMs,normalizeRuntimeContextTokens,resolveEffectiveMaxTokens,finiteUsage,usageTelemetry,providerTimingTelemetry,prefixHash,truncationError,runtimeControlWireUser,sampleNodeProcessResources,nodeProcessResourceObservation,expectedGateForRole,normalizeGateUrls,createAiCoreAdapter};
+module.exports={ROLE_ALIASES,TIMEOUT_CLASS,AiCoreError,classifyTimeoutError,isTimeoutError,resolveRoleTimeoutMs,resolveEffectiveTimeoutMs,normalizeRuntimeContextTokens,resolveEffectiveMaxTokens,finiteUsage,usageTelemetry,providerTimingTelemetry,prefixHash,truncationError,runtimeControlWireUser,sampleNodeProcessResources,nodeProcessResourceObservation,expectedGateForRole,normalizeGateUrls,resolveSkillBenchmarkEndpoint,createAiCoreAdapter};

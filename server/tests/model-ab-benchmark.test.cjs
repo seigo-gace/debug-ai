@@ -189,3 +189,45 @@ test("model Gate benchmark HTTP errors redact private upstream response body",as
     return true;
   });
 });
+
+// All six standalone Skill ON/OFF clients must measure the actual model route.
+const skillClients={
+  code_scout:require("../control/code-scout-skill-effect-benchmark.js").defaultClient,
+  causal_scout:require("../control/causal-scout-skill-effect-benchmark.js").defaultClient,
+  researcher:require("../control/researcher-skill-effect-benchmark.js").defaultClient,
+  diagnoser:require("../control/diagnoser-skill-effect-benchmark.js").defaultClient,
+  patch_engineer:require("../control/patch-engineer-skill-effect-benchmark.js").defaultClient,
+  local_reviewer:require("../control/skill-effect-benchmark.js").defaultClient
+};
+const skillGateUrls={coder:"http://127.0.0.1:18184",qwen3:"http://127.0.0.1:18182",granite:"http://127.0.0.1:18181",ministral:"http://127.0.0.1:18183"};
+for(const [role,makeClient] of Object.entries(skillClients)){
+  test("Skill benchmark Gate mapping and legacy compatibility: "+role,async()=>{
+    const calls=[],opts={apiKey:"fixture",runtimeContextTokens:8192,fetchImpl:async(url,options)=>{
+      calls.push({url:String(url),options,body:JSON.parse(options.body)});
+      return new Response(JSON.stringify({choices:[{finish_reason:"stop",message:{content:"{}"}}]}),{status:200});
+    }};
+    const gate=makeClient({...opts,dispatchMode:"model_gates",modelGateBaseUrls:skillGateUrls});
+    await gate({system:"fixture system",user:"fixture user"});
+    const model=ROLES[role].backend_model.split("/")[0];
+    assert.equal(calls[0].url,skillGateUrls[model]+"/v1/chat/completions");
+    assert.equal(calls[0].body.model,ROLES[role].backend_model);
+    assert.equal(calls[0].body.chat_template_kwargs.enable_thinking,ROLES[role].thinking);
+    assert.equal(calls[0].options.redirect,"error");
+    assert.equal(gate.dispatch_mode,"model_gates");
+    const legacy=makeClient({...opts,dispatchMode:"legacy",baseUrl:"http://127.0.0.1:18080"});
+    await legacy({system:"fixture system",user:"fixture user"});
+    assert.equal(calls[1].url,"http://127.0.0.1:18080/v1/chat/completions");
+    assert.deepEqual(calls[0].body,calls[1].body);
+  });
+  test("Skill benchmark rejects invalid Gate without fallback and redacts errors: "+role,async()=>{
+    let calls=0;
+    const opts={dispatchMode:"model_gates",baseUrl:"http://127.0.0.1:18080",apiKey:"fixture",runtimeContextTokens:8192,fetchImpl:async()=>{calls++;return new Response("PRIVATE_BACKEND_MARKER",{status:503});}};
+    assert.throws(()=>makeClient({...opts,modelGateBaseUrls:{coder:skillGateUrls.coder}}),e=>e.code==="AI_CORE_GATE_CONFIG_INVALID");
+    assert.throws(()=>makeClient({...opts,modelGateBaseUrls:{...skillGateUrls,granite:"https://example.invalid"}}),e=>e.code==="AI_CORE_GATE_CONFIG_INVALID");
+    assert.throws(()=>makeClient({...opts,dispatchMode:"invalid"}),/SKILL_BENCHMARK_DISPATCH_MODE_INVALID/);
+    assert.equal(calls,0);
+    const caller=makeClient({...opts,modelGateBaseUrls:skillGateUrls});
+    await assert.rejects(caller({system:"fixture",user:"fixture"}),e=>e.code==="AI_CORE_HTTP"&&e.status===503&&!e.message.includes("PRIVATE_BACKEND_MARKER"));
+    assert.equal(calls,1);
+  });
+}

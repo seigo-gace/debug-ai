@@ -1,6 +1,6 @@
 "use strict";
 const test=require("node:test"),assert=require("node:assert/strict"),fs=require("node:fs"),os=require("node:os"),path=require("node:path");
-const {ROLE_ORDER}=require("../control/skill-effect-suite.js"),{run,load,SOURCE_FINGERPRINT_FILES,runtimeContextIdentity,fingerprint}=require("../control/resumable-skill-effect-suite.js");
+const {ROLE_ORDER}=require("../control/skill-effect-suite.js"),{run,load,SOURCE_FINGERPRINT_FILES,runtimeContextIdentity,routeIdentity,fingerprint}=require("../control/resumable-skill-effect-suite.js");
 function tmp(){return path.join(fs.mkdtempSync(path.join(os.tmpdir(),"debugai-rse-")),"cp.json")}
 function all(calls,opt={}){return Object.fromEntries(ROLE_ORDER.map(r=>{let failed=false,mod={SCHEMA:`test.${r}/v1`,CASES:[{id:"c1",input:{x:r}}],parseJson:JSON.parse,scoreCase(_c,v){return{score:v.mode==="on"?1:0,max_score:1}}};return[r,{mod,build:()=>({off:"OFF",on:"ON",selected_skill_ids:["s"]}),call:async({mode})=>{calls.push(`${r}:${mode}`);if(opt[r]?.failOnce===mode&&!failed){failed=true;throw Error("AI_CORE_TIMEOUT")}return{content:JSON.stringify({mode})}}}]}))}
 function silent(){}
@@ -40,4 +40,18 @@ test("unknown numeric truncation fields remain null",async()=>{
   adapters.diagnoser.call=async()=>{const e=Error("AI_CORE_OUTPUT_TRUNCATED");e.benchmark_metadata={role:"diagnoser",max_tokens:1536,finish_reason:"length",completion_tokens:NaN,content_chars:-1};throw e};
   await run({checkpointPath:p,fp:"unknown-metadata",emit:silent,heartbeatMs:60000,adapters});
   assert.deepEqual(load(p,"unknown-metadata").roles.diagnoser.cases.c1.off.error_metadata,{role:"diagnoser",max_tokens:1536,finish_reason:"length",completion_tokens:null,content_chars:null});
+});
+
+test("checkpoint cannot reuse results across different benchmark dispatch routes",async()=>{
+  const old=routeIdentity({DEBUG_AI_CORE_GATE_DISPATCH_MODE:"legacy",DEBUG_AI_CORE_URL:"http://127.0.0.1:18080"});
+  const env={DEBUG_AI_CORE_GATE_DISPATCH_MODE:"model_gates",DEBUG_AI_CORE_GATE_CODER_URL:"http://127.0.0.1:18184",DEBUG_AI_CORE_GATE_QWEN3_URL:"http://127.0.0.1:18182",DEBUG_AI_CORE_GATE_GRANITE_URL:"http://127.0.0.1:18181",DEBUG_AI_CORE_GATE_MINISTRAL_URL:"http://127.0.0.1:18183"};
+  const gate=routeIdentity(env),changed=routeIdentity({...env,DEBUG_AI_CORE_GATE_CODER_URL:"http://127.0.0.1:18185"});
+  assert.notEqual(old,gate);assert.notEqual(gate,changed);
+  assert.equal(routeIdentity({...env,AI_CORE_API_KEY:"fixture-secret"}),gate);
+  const files=[require.resolve("../control/model-profiles.js")],context=runtimeContextIdentity(8192);
+  const cp=tmp(),calls=[];
+  await run({checkpointPath:cp,fp:fingerprint(files,context,old),emit:silent,adapters:all(calls)});
+  const retry=[];
+  await assert.rejects(run({checkpointPath:cp,fp:fingerprint(files,context,gate),emit:silent,adapters:all(retry)}),/SKILL_CHECKPOINT_SOURCE_MISMATCH/);
+  assert.deepEqual(retry,[]);
 });
