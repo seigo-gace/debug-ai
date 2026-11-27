@@ -1,3 +1,7 @@
+## 2026-11-27 — Selected-source boundary and real run blocker (source correction)
+
+Live run `run_mwyk50r3_a94e384027` stopped before model invocation: durable job BLOCKED / DETERMINISTIC_VERIFY / DURABLE_REPO_SNAPSHOT_UNAVAILABLE (three attempts). Runtime probe identified Git ENOENT and the fallback rejected a protected external symlink inside parent-owned workspace material. The existing .gitignore/.dockerignore identify .worktrees and .verification as outside the selected product tree. One shared root-scope definition now binds tree fallback, source search/direct reads/dependency candidates, sandbox snapshots/candidate paths and patch path resolution. Neither excluded root is traversed; direct/aliased access to those roots is rejected by source and patch paths. Ordinary selected-source byte changes and out-of-tree symlink failures remain enforced. Scoped search coverage explicitly identifies excluded roots and does not prove repository-wide absence. Existing clean Git identity, sandbox integrity and approval boundaries remain unchanged. This source change is not proof of live runtime success or improved model accuracy. Evidence: https://github.com/G-ACE-inc/server-core/issues/351#issuecomment-7211576461 and https://github.com/G-ACE-inc/server-core/issues/351#issuecomment-7211630357.
+
 # DebugAI Current Source Qualification
 
 ## 2026-11-27 — Skill benchmark dispatch parity (Source change; runtime not qualified)

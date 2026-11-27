@@ -11,6 +11,7 @@ const {getSkill}=require("./skill-registry.js");
 const {assertToolAdmission}=require("./tool-risk.js");
 const {makeEvidenceRecord,assertEvidenceRecord}=require("./evidence-registry.js");
 const {makeEvidenceProjection}=require("./evidence-projection.js");
+const {PARENT_OWNED_SOURCE_ROOTS,isParentOwnedSourcePath}=require("../../orchestrator/source-scope.js");
 
 const SEARCH_EXT=/\.(?:[cm]?[jt]sx?|json|md|py|go|rs|java|kt|kts|cs|cpp|cc|c|h|hpp|rb|php|swift|vue|svelte|toml|ya?ml|css|scss|html)$/i;
 const TS_JS_EXT=/\.(?:[cm]?[jt]sx?)$/i;
@@ -31,7 +32,8 @@ function normalizeRel(value){
   return rel;
 }
 function blockedReadPath(rel){
-  const p=normalizeRel(rel).toLowerCase();
+  const normalized=normalizeRel(rel);if(isParentOwnedSourcePath(normalized))return true;
+  const p=normalized.toLowerCase();
   return p===".git"||p.startsWith(".git/")||p.includes("/.git/")||p==="secrets"||p.startsWith("secrets/")||p.includes("/secrets/")||/(^|\/)\.env($|\.)/.test(p)||/\.(pem|key|p12|pfx)$/.test(p);
 }
 function resolveSafeFile(repo,rel){
@@ -57,7 +59,7 @@ function walkFiles(repo,{maxFiles=500,coverage=null}={}){
     entries.sort((a,b)=>a.name.localeCompare(b.name));
     for(const e of entries){
       if(out.length>=maxFiles)break;
-      if(e.isDirectory()){if(SKIP_DIRS.has(e.name))continue;stack.push(path.join(dir,e.name));continue;}
+      if(e.isDirectory()){const rel=path.relative(repo,path.join(dir,e.name)).replace(/\\/g,"/");if(SKIP_DIRS.has(e.name)||isParentOwnedSourcePath(rel))continue;stack.push(path.join(dir,e.name));continue;}
       if(!e.isFile())continue;
       const rel=path.relative(repo,path.join(dir,e.name)).replace(/\\/g,"/");if(blockedReadPath(rel)||!SEARCH_EXT.test(rel))continue;out.push(rel);
     }
@@ -68,7 +70,7 @@ function walkFiles(repo,{maxFiles=500,coverage=null}={}){
 function excerpt(text,index,limit=900){const start=Math.max(0,index-250),end=Math.min(text.length,start+limit);return text.slice(start,end);}
 function searchSource(repo,query,{limit=12,maxFiles=500,coverage=null}={}){
   const q=String(query||"").trim().toLowerCase();if(q.length<2)throw new Error("SOURCE_SEARCH_QUERY_REQUIRED");const hits=[];
-  const receipt={schema:"debugai.source-search-coverage/v1",state:"INCOMPLETE",scope:"SEARCHABLE_REGULAR_FILES_ONLY",repository_absence_proven:false,query:q,max_files:maxFiles,match_limit:limit,max_content_chars:128000,file_limit_reached:false,match_limit_reached:false,directory_errors:0,read_errors:0,truncated_files:0,inspected_paths:[],excluded_directories:[...SKIP_DIRS],search_extensions:SEARCH_EXT.source};
+  const receipt={schema:"debugai.source-search-coverage/v1",state:"INCOMPLETE",scope:"SEARCHABLE_REGULAR_FILES_ONLY",repository_absence_proven:false,query:q,max_files:maxFiles,match_limit:limit,max_content_chars:128000,file_limit_reached:false,match_limit_reached:false,directory_errors:0,read_errors:0,truncated_files:0,inspected_paths:[],excluded_directories:[...SKIP_DIRS],excluded_root_directories:[...PARENT_OWNED_SOURCE_ROOTS],search_extensions:SEARCH_EXT.source};
   const files=walkFiles(repo,{maxFiles,coverage:receipt});
   for(const rel of files){
     if(hits.length>=limit){receipt.match_limit_reached=true;break;}

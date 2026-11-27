@@ -4,6 +4,7 @@ const path=require("node:path");
 const cp=require("node:child_process");
 const crypto=require("node:crypto");
 const {packageManager}=require("../../orchestrator/verify-core.js");
+const {isParentOwnedSourcePath}=require("../../orchestrator/source-scope.js");
 
 const ACTIONS=new Set(["node.check","package.lint","package.typecheck","package.test","package.build"]);
 const SCRIPT_BY_ACTION=Object.freeze({"package.lint":"lint","package.typecheck":"typecheck","package.test":"test","package.build":"build"});
@@ -34,7 +35,7 @@ function snapshotInventory(source,{maxFiles=8000,maxBytes=256*1024*1024,required
       // POSIX filenames that alias normalized paths are unsupported as well.
       if(name.includes("\\"))throw new Error("SANDBOX_PATH_INVALID");
       const full=path.join(dir,name),stat=fs.lstatSync(full),type=stat.isSymbolicLink()?"symlink":stat.isDirectory()?"directory":stat.isFile()?"file":"special";
-      const reason=protectedRel(rel)?"PROTECTED":name===".git"||SKIP_DIRS.has(name)&&type==="directory"?"POLICY_EXCLUDED":type==="symlink"?"SYMLINK_UNSUPPORTED":type==="special"?"TYPE_UNSUPPORTED":null;
+      const reason=protectedRel(rel)?"PROTECTED":isParentOwnedSourcePath(rel)||name===".git"||SKIP_DIRS.has(name)&&type==="directory"?"POLICY_EXCLUDED":type==="symlink"?"SYMLINK_UNSUPPORTED":type==="special"?"TYPE_UNSUPPORTED":null;
       if(reason){exclusions.push({path:rel,type,reason,...(type==="symlink"?{target_sha256:snapshotHash(fs.readlinkSync(full))}:{})});continue;}
       const executable_mode=stat.mode&0o111;
       if(type==="directory"){entries.push({path:rel,type,executable_mode});walk(full,rel);continue;}
@@ -94,7 +95,7 @@ function copySnapshot(source,destination,options={}){
 const CANDIDATE_ACTIONS=new Set(["create","replace","delete"]);
 function candidateScopePath(value){
   const rel=snapshotPath(value);
-  if(rel.split("/").some(x=>SKIP_DIRS.has(x)||x===".git")||protectedRel(rel))throw new Error("SANDBOX_CANDIDATE_PATH_FORBIDDEN");
+  if(isParentOwnedSourcePath(rel)||rel.split("/").some(x=>SKIP_DIRS.has(x)||x===".git")||protectedRel(rel))throw new Error("SANDBOX_CANDIDATE_PATH_FORBIDDEN");
   return rel;
 }
 function snapshotDelta(baseline,candidate){
