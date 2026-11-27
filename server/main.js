@@ -49,7 +49,11 @@ const coreGateUrls=coreGateDispatchMode==="model_gates"?{
   granite:process.env.DEBUG_AI_CORE_GATE_GRANITE_URL,
   ministral:process.env.DEBUG_AI_CORE_GATE_MINISTRAL_URL
 }:null;
+const adaptiveFlag=process.env.DEBUG_AI_ADAPTIVE_LOCAL_DIAGNOSIS||"false",scoutPairFlag=process.env.DEBUG_AI_SCOUT_PAIR_COMPARISON||"false";
+if(![adaptiveFlag,scoutPairFlag].every(v=>["true","false"].includes(v)))throw new Error("DEBUG_AI_PERFORMANCE_MODE_INVALID");
+const adaptiveLocalDiagnosis=adaptiveFlag==="true";
 const aiCore=createAiCoreAdapter({
+  adaptiveLocalDiagnosis,scoutPairDispatch:scoutPairFlag==="true",
   runtimeContextTokens:aiCoreContextTokens,requireRuntimeContextQualification:true,
   dispatchMode:coreGateDispatchMode,modelGateBaseUrls:coreGateUrls,
   inputTokenShadow:inputTokenShadowFlag==="true",
@@ -75,7 +79,7 @@ const externalReview=createExternalReviewAdapter();
 const patchService=new PatchService({runtimeRoot,repoPolicy});
 const gitOps=new GitOpsRequestService({repoPolicy});
 const serverCommand=new ServerCommandRequestService({repoPolicy,defaultRepo:path.join(repoPolicy.workspaceRoot,"debug-ai")});
-const workflow=createWorkflow({aiCore,externalReview,evidenceSearch,runtimeEvidence,tgserver,patchService,authority,repoPolicy,sandboxVerification,dapEvidence,serverCommand,recoveryHooks});
+const workflow=createWorkflow({aiCore,externalReview,evidenceSearch,runtimeEvidence,tgserver,patchService,authority,repoPolicy,sandboxVerification,dapEvidence,serverCommand,recoveryHooks,adaptiveLocalDiagnosis});
 const host=process.env.DEBUG_AI_HOST||"127.0.0.1",port=Number(process.env.DEBUG_AI_PORT||8787);
 const server=createServer({workflow,gitOps,githubCommand:serverCommand,serverCommand,host,port});
 let shuttingDown=false,rotationTimer=null,archiveTimer=null,archiveSweepRunning=false;
