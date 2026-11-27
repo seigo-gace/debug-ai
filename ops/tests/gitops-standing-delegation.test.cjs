@@ -27,6 +27,8 @@ test('real Bash/jq delegated deploy issues, binds, consumes and audits receipt, 
 for(const [label,mutation,error] of [
  ['reuse','true','DELEGATION_RECEIPT_REUSED'],
  ['expired receipt',f=>`jq '.expires_at=1' '${f.receipt}' > '${f.root}/r'; cat '${f.root}/r' > '${f.receipt}'`,'DELEGATION_RECEIPT_EXPIRED'],
+ ['future-issued receipt',f=>`jq '.issued_at+=1' '${f.receipt}' > '${f.root}/r'; cat '${f.root}/r' > '${f.receipt}'`,'DELEGATION_RECEIPT_EXPIRED'],
+ ['clock reaches expiry',f=>`jq -r '.expires_at' '${f.receipt}' > '${f.clock}'`,'DELEGATION_REQUEST_EXPIRED'],
  ['target change',f=>`echo '${'d'.repeat(40)}' > '${f.root}/changed-head'`,'DELEGATION_TARGET_STATE_CHANGED'],
  ['policy change',f=>`jq '.audit_identity="changed"' '${f.policyFile}' > '${f.root}/p'; cat '${f.root}/p' > '${f.policyFile}'`,'DELEGATION_TARGET_STATE_CHANGED'],
  ['revoked after issuance',f=>`jq '.revoked=true' '${f.policyFile}' > '${f.root}/p'; cat '${f.root}/p' > '${f.policyFile}'`,'DELEGATION_REVOKED'],

@@ -111,7 +111,7 @@ test("fixed entry and byte limits fail closed",()=>{
 test("parent-owned worktrees and verification material do not affect the selected source revision",t=>{
   const f=makeTree();t.after(f.cleanup);
   const baseline=treeSnapshot(f.root);
-  for(const name of [".worktrees",".verification"]){
+  for(const name of [".worktrees",".verification",".debugai-input"]){
     const dir=path.join(f.root,name);fs.mkdirSync(dir);fs.mkdirSync(path.join(dir,"branch"));
     fs.writeFileSync(path.join(dir,"branch","other.js"),"unrelated revision");
     fs.symlinkSync("/outside/fixture/config",path.join(dir,"branch",".env"));
