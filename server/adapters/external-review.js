@@ -69,7 +69,7 @@ function createExternalReviewAdapter({groqKey=process.env.GROQ_API_KEY,geminiKey
       response_format:{type:"json_schema",json_schema:{name:"review_verdict",strict:true,schema:{type:"object",properties:{verdict:{type:"string",enum:["PASS","FAIL","PENDING"]},reason:{type:"string"}},required:["verdict","reason"],additionalProperties:false}}}
     }:{max_tokens:outputBudget,reasoning_effort:"low",response_format:{type:"json_object"}};
     const body=JSON.stringify({model:cfg.model,messages:[
-      {role:"system",content:`Independent ${kind} reviewer. Return exactly one JSON object. Required fields: verdict (exactly PASS, FAIL, or PENDING) and reason (brief evidence-grounded explanation).${correction?" The previous response violated this contract. Correct the format; include no commentary, code fence, or extra JSON object.":""}`},
+      {role:"system",content:`Independent ${kind} reviewer. Return exactly one JSON object. Required decision field: verdict, and verdict must be exactly PASS, FAIL, or PENDING. Include reason: a brief evidence-grounded explanation.${correction?" The previous response violated this contract. Correct the format; include no commentary, code fence, or extra JSON object.":""}`},
       {role:"user",content:JSON.stringify(payload)}
     ],...parameters,stream:false});
     // UTF-8 byte upper bound + conservative framing overhead + full output budget; no refunds.
