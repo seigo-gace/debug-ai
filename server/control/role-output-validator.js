@@ -53,6 +53,8 @@ function validateRequiredRoleShape(role,value){
   if(typeof value.decision!=="string"||!value.decision.trim())throw new Error(`ROLE_REVIEW_DECISION_REQUIRED:${role}`);
   if(!DECISIONS.has(value.decision.trim().toUpperCase()))throw new Error(`ROLE_REVIEW_DECISION_INVALID:${role}:${String(value.decision)}`);
   if(!Array.isArray(value.claims))throw new Error(`ROLE_OUTPUT_CLAIMS_ARRAY_REQUIRED:${role}`);
+  const verdict=value.verdict.trim().toUpperCase(),decision=value.decision.trim().toUpperCase();
+  if(["PASS","APPROVED","ACCEPTED"].includes(verdict)&&!["DONE","HANDOFF"].includes(decision))throw new Error(`ROLE_REVIEW_VERDICT_DECISION_CONFLICT:${role}`);
 }
 function hasNonEmpty(value,key){
   if(!Object.prototype.hasOwnProperty.call(value,key))return false;
