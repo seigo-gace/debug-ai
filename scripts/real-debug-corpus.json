@@ -1,0 +1,1288 @@
+{
+  "schema": "debugai.real-debug-corpus/v1",
+  "version": "2026-11-27.1",
+  "cases": [
+    {
+      "id": "L1-01",
+      "level": 1,
+      "title": "Inclusive threshold",
+      "contract": "Return true for values at or above limit.",
+      "files": {
+        "src/index.cjs": "module.exports=(v,n)=>v>n;"
+      },
+      "public_checks": [
+        "assert.equal(api(5,5),true)"
+      ],
+      "holdout_checks": [
+        "assert.equal(api(-3,-3),true)",
+        "assert.equal(api(4,5),false)",
+        "assert.equal(api(6,5),true)"
+      ],
+      "oracle": {
+        "cause": "strict comparison excludes equality",
+        "changed_path": "src/index.cjs",
+        "reference_files": {
+          "src/index.cjs": "module.exports=(v,n)=>v>=n;"
+        }
+      }
+    },
+    {
+      "id": "L1-02",
+      "level": 1,
+      "title": "Last item",
+      "contract": "Return last item, undefined for empty array.",
+      "files": {
+        "src/index.cjs": "module.exports=a=>a[a.length];"
+      },
+      "public_checks": [
+        "assert.equal(api([2,4]),4)"
+      ],
+      "holdout_checks": [
+        "assert.equal(api([9]),9)",
+        "assert.equal(api([]),undefined)",
+        "assert.equal(api([0,false]),false)"
+      ],
+      "oracle": {
+        "cause": "index is length rather than length minus one",
+        "changed_path": "src/index.cjs",
+        "reference_files": {
+          "src/index.cjs": "module.exports=a=>a[a.length-1];"
+        }
+      }
+    },
+    {
+      "id": "L1-03",
+      "level": 1,
+      "title": "Zero default",
+      "contract": "Use fallback only for null or undefined; preserve all other values.",
+      "files": {
+        "src/index.cjs": "module.exports=(v,d)=>v||d;"
+      },
+      "public_checks": [
+        "assert.equal(api(0,7),0)"
+      ],
+      "holdout_checks": [
+        "assert.equal(api(false,true),false)",
+        "assert.equal(api('', 'x'),'')",
+        "assert.equal(api(null,5),5)"
+      ],
+      "oracle": {
+        "cause": "truthiness conflates falsy and missing",
+        "changed_path": "src/index.cjs",
+        "reference_files": {
+          "src/index.cjs": "module.exports=(v,d)=>v??d;"
+        }
+      }
+    },
+    {
+      "id": "L1-04",
+      "level": 1,
+      "title": "Numerical ordering",
+      "contract": "Return ascending numeric copy without mutating input.",
+      "files": {
+        "src/index.cjs": "module.exports=a=>[...a].sort();"
+      },
+      "public_checks": [
+        "assert.deepEqual(api([10,2]),[2,10])"
+      ],
+      "holdout_checks": [
+        "const a=[30,-2,4];assert.deepEqual(api(a),[-2,4,30]);assert.deepEqual(a,[30,-2,4])",
+        "assert.deepEqual(api([100,9,9]),[9,9,100])"
+      ],
+      "oracle": {
+        "cause": "default sort compares strings",
+        "changed_path": "src/index.cjs",
+        "reference_files": {
+          "src/index.cjs": "module.exports=a=>[...a].sort((x,y)=>x-y);"
+        }
+      }
+    },
+    {
+      "id": "L1-05",
+      "level": 1,
+      "title": "Sum",
+      "contract": "Sum all numbers, zero for empty array.",
+      "files": {
+        "src/index.cjs": "module.exports=a=>a.reduce((s,x)=>s+x,1);"
+      },
+      "public_checks": [
+        "assert.equal(api([1,2]),3)"
+      ],
+      "holdout_checks": [
+        "assert.equal(api([]),0)",
+        "assert.equal(api([-5,5]),0)",
+        "assert.equal(api([8]),8)"
+      ],
+      "oracle": {
+        "cause": "wrong additive identity",
+        "changed_path": "src/index.cjs",
+        "reference_files": {
+          "src/index.cjs": "module.exports=a=>a.reduce((s,x)=>s+x,0);"
+        }
+      }
+    },
+    {
+      "id": "L1-06",
+      "level": 1,
+      "title": "Unit conversion",
+      "contract": "Convert minutes to seconds.",
+      "files": {
+        "src/index.cjs": "module.exports=n=>n*100;"
+      },
+      "public_checks": [
+        "assert.equal(api(2),120)"
+      ],
+      "holdout_checks": [
+        "assert.equal(api(0.5),30)",
+        "assert.equal(api(7),420)",
+        "assert.equal(api(0),0)"
+      ],
+      "oracle": {
+        "cause": "wrong conversion factor",
+        "changed_path": "src/index.cjs",
+        "reference_files": {
+          "src/index.cjs": "module.exports=n=>n*60;"
+        }
+      }
+    },
+    {
+      "id": "L1-07",
+      "level": 1,
+      "title": "Prefix removal",
+      "contract": "Remove one leading prefix only; otherwise return unchanged.",
+      "files": {
+        "src/index.cjs": "module.exports=(s,p)=>s.replace(p,'');"
+      },
+      "public_checks": [
+        "assert.equal(api('abc-def','def'),'abc-def')"
+      ],
+      "holdout_checks": [
+        "assert.equal(api('xxxy','xx'),'xy')",
+        "assert.equal(api('foofoo','foo'),'foo')",
+        "assert.equal(api('a','z'),'a')"
+      ],
+      "oracle": {
+        "cause": "replace removes substring anywhere",
+        "changed_path": "src/index.cjs",
+        "reference_files": {
+          "src/index.cjs": "module.exports=(s,p)=>s.startsWith(p)?s.slice(p.length):s;"
+        }
+      }
+    },
+    {
+      "id": "L1-08",
+      "level": 1,
+      "title": "Clamp",
+      "contract": "Clamp a number within inclusive low and high.",
+      "files": {
+        "src/index.cjs": "module.exports=(v,l,h)=>Math.min(l,Math.max(h,v));"
+      },
+      "public_checks": [
+        "assert.equal(api(5,0,10),5)"
+      ],
+      "holdout_checks": [
+        "assert.equal(api(-9,-3,2),-3)",
+        "assert.equal(api(15,0,10),10)",
+        "assert.equal(api(4,4,4),4)"
+      ],
+      "oracle": {
+        "cause": "min and max bounds reversed",
+        "changed_path": "src/index.cjs",
+        "reference_files": {
+          "src/index.cjs": "module.exports=(v,l,h)=>Math.max(l,Math.min(h,v));"
+        }
+      }
+    },
+    {
+      "id": "L1-09",
+      "level": 1,
+      "title": "Average",
+      "contract": "Return arithmetic mean of a nonempty numeric array.",
+      "files": {
+        "src/index.cjs": "module.exports=a=>a.reduce((s,x)=>s+x,0)/(a.length+1);"
+      },
+      "public_checks": [
+        "assert.equal(api([2,4]),3)"
+      ],
+      "holdout_checks": [
+        "assert.equal(api([6]),6)",
+        "assert.equal(api([-3,3]),0)",
+        "assert.equal(api([2,3,7]),4)"
+      ],
+      "oracle": {
+        "cause": "denominator off by one",
+        "changed_path": "src/index.cjs",
+        "reference_files": {
+          "src/index.cjs": "module.exports=a=>a.reduce((s,x)=>s+x,0)/a.length;"
+        }
+      }
+    },
+    {
+      "id": "L1-10",
+      "level": 1,
+      "title": "Membership index",
+      "contract": "Return true if array contains the exact value.",
+      "files": {
+        "src/index.cjs": "module.exports=(a,x)=>a.indexOf(x)>0;"
+      },
+      "public_checks": [
+        "assert.equal(api(['x','y'],'x'),true)"
+      ],
+      "holdout_checks": [
+        "assert.equal(api([0],0),true)",
+        "assert.equal(api([1,2],3),false)",
+        "assert.equal(api([1,2],2),true)"
+      ],
+      "oracle": {
+        "cause": "zero index rejected",
+        "changed_path": "src/index.cjs",
+        "reference_files": {
+          "src/index.cjs": "module.exports=(a,x)=>a.indexOf(x)>=0;"
+        }
+      }
+    },
+    {
+      "id": "L2-01",
+      "level": 2,
+      "title": "Zero-length slice",
+      "contract": "Return last n elements; n=0 returns empty, never mutate.",
+      "files": {
+        "src/index.cjs": "module.exports=(a,n)=>a.slice(-n);"
+      },
+      "public_checks": [
+        "assert.deepEqual(api([1,2],0),[])"
+      ],
+      "holdout_checks": [
+        "assert.deepEqual(api([5,6,7],0),[])",
+        "assert.deepEqual(api([1,2],8),[1,2])",
+        "assert.deepEqual(api([1,2],1),[2])"
+      ],
+      "oracle": {
+        "cause": "negative zero slice starts at zero",
+        "changed_path": "src/index.cjs",
+        "reference_files": {
+          "src/index.cjs": "module.exports=(a,n)=>n===0?[]:a.slice(-n);"
+        }
+      }
+    },
+    {
+      "id": "L2-02",
+      "level": 2,
+      "title": "Shared object accumulator",
+      "contract": "Group objects by category with separate arrays; preserve order.",
+      "files": {
+        "src/index.cjs": "module.exports=a=>{const o={},g=[];for(const x of a){(o[x.k]??=g).push(x.v)}return o};"
+      },
+      "public_checks": [
+        "assert.deepEqual(api([{k:'a',v:1},{k:'b',v:2}]),{a:[1],b:[2]})"
+      ],
+      "holdout_checks": [
+        "assert.deepEqual(api([{k:'x',v:1},{k:'y',v:4},{k:'x',v:2}]),{x:[1,2],y:[4]})",
+        "assert.deepEqual(api([]),{})"
+      ],
+      "oracle": {
+        "cause": "all groups share one array",
+        "changed_path": "src/index.cjs",
+        "reference_files": {
+          "src/index.cjs": "module.exports=a=>{const o={};for(const x of a){(o[x.k]??=[]).push(x.v)}return o};"
+        }
+      }
+    },
+    {
+      "id": "L2-03",
+      "level": 2,
+      "title": "Unicode code points",
+      "contract": "Reverse Unicode code points (not grapheme clusters).",
+      "files": {
+        "src/index.cjs": "module.exports=s=>s.split('').reverse().join('');"
+      },
+      "public_checks": [
+        "assert.equal(api('A😀'),'😀A')"
+      ],
+      "holdout_checks": [
+        "assert.equal(api('𐐀B😀'),'😀B𐐀')",
+        "assert.equal(api('abc'),'cba')",
+        "assert.equal(api(''),'')"
+      ],
+      "oracle": {
+        "cause": "UTF-16 units split surrogate pairs",
+        "changed_path": "src/index.cjs",
+        "reference_files": {
+          "src/index.cjs": "module.exports=s=>Array.from(s).reverse().join('');"
+        }
+      }
+    },
+    {
+      "id": "L2-04",
+      "level": 2,
+      "title": "Duplicate identifier",
+      "contract": "Keep first record for each id, in original order.",
+      "files": {
+        "src/index.cjs": "module.exports=a=>Array.from(new Map(a.map(x=>[x.id,x])).values());"
+      },
+      "public_checks": [
+        "assert.deepEqual(api([{id:1,v:'a'},{id:1,v:'b'}]),[{id:1,v:'a'}])"
+      ],
+      "holdout_checks": [
+        "assert.deepEqual(api([{id:2,v:4},{id:1,v:5},{id:2,v:6}]),[{id:2,v:4},{id:1,v:5}])",
+        "assert.deepEqual(api([]),[])"
+      ],
+      "oracle": {
+        "cause": "Map constructor retains last value",
+        "changed_path": "src/index.cjs",
+        "reference_files": {
+          "src/index.cjs": "module.exports=a=>{const m=new Map();for(const x of a)if(!m.has(x.id))m.set(x.id,x);return [...m.values()]};"
+        }
+      }
+    },
+    {
+      "id": "L2-05",
+      "level": 2,
+      "title": "Non-mutating merge",
+      "contract": "Return merged sorted array while preserving both inputs.",
+      "files": {
+        "src/index.cjs": "module.exports=(a,b)=>{a.push(...b);return a.sort((x,y)=>x-y)};"
+      },
+      "public_checks": [
+        "const a=[2],b=[1];assert.deepEqual(api(a,b),[1,2]);assert.deepEqual(a,[2])"
+      ],
+      "holdout_checks": [
+        "const a=[5,2],b=[4];assert.deepEqual(api(a,b),[2,4,5]);assert.deepEqual(a,[5,2]);assert.deepEqual(b,[4])",
+        "assert.deepEqual(api([],[]),[])"
+      ],
+      "oracle": {
+        "cause": "mutates caller's array",
+        "changed_path": "src/index.cjs",
+        "reference_files": {
+          "src/index.cjs": "module.exports=(a,b)=>[...a,...b].sort((x,y)=>x-y);"
+        }
+      }
+    },
+    {
+      "id": "L2-06",
+      "level": 2,
+      "title": "CSV quoting",
+      "contract": "Quote fields containing comma, quote or CR/LF; double embedded quotes.",
+      "files": {
+        "src/index.cjs": "module.exports=s=>/[\",\\r\\n]/.test(s)?'\"'+s+'\"':s;"
+      },
+      "public_checks": [
+        "assert.equal(api('a\"b'),'\"a\"\"b\"')"
+      ],
+      "holdout_checks": [
+        "assert.equal(api('\"x\"'),'\"\"\"x\"\"\"')",
+        "assert.equal(api('a,b'),'\"a,b\"')",
+        "assert.equal(api('plain'),'plain')"
+      ],
+      "oracle": {
+        "cause": "quotes not escaped",
+        "changed_path": "src/index.cjs",
+        "reference_files": {
+          "src/index.cjs": "module.exports=s=>/[\",\\r\\n]/.test(s)?'\"'+s.replace(/\"/g,'\"\"')+'\"':s;"
+        }
+      }
+    },
+    {
+      "id": "L2-07",
+      "level": 2,
+      "title": "Window boundary",
+      "contract": "Count t with now-window < t <= now.",
+      "files": {
+        "src/index.cjs": "module.exports=(a,now,w)=>a.filter(t=>t>=now-w&&t<=now).length;"
+      },
+      "public_checks": [
+        "assert.equal(api([0,5,10],10,10),2)"
+      ],
+      "holdout_checks": [
+        "assert.equal(api([20,21,25,26],25,5),2)",
+        "assert.equal(api([2,3],1,5),0)"
+      ],
+      "oracle": {
+        "cause": "lower boundary inclusive",
+        "changed_path": "src/index.cjs",
+        "reference_files": {
+          "src/index.cjs": "module.exports=(a,now,w)=>a.filter(t=>t>now-w&&t<=now).length;"
+        }
+      }
+    },
+    {
+      "id": "L2-08",
+      "level": 2,
+      "title": "Deep copy",
+      "contract": "Return a deep copy of JSON-compatible object.",
+      "files": {
+        "src/index.cjs": "module.exports=o=>({...o});"
+      },
+      "public_checks": [
+        "const a={x:{y:1}};const b=api(a);b.x.y=2;assert.equal(a.x.y,1)"
+      ],
+      "holdout_checks": [
+        "const a={x:[{v:5}]};api(a).x[0].v=6;assert.equal(a.x[0].v,5)",
+        "assert.deepEqual(api({a:null}),{a:null})"
+      ],
+      "oracle": {
+        "cause": "spread creates shallow copy",
+        "changed_path": "src/index.cjs",
+        "reference_files": {
+          "src/index.cjs": "module.exports=o=>JSON.parse(JSON.stringify(o));"
+        }
+      }
+    },
+    {
+      "id": "L2-09",
+      "level": 2,
+      "title": "Stable ties",
+      "contract": "Sort by score descending, ties preserve input order.",
+      "files": {
+        "src/index.cjs": "module.exports=a=>[...a].sort((x,y)=>y.score-x.score||x.id.localeCompare(y.id));"
+      },
+      "public_checks": [
+        "assert.deepEqual(api([{id:'z',score:1},{id:'a',score:1}]).map(x=>x.id),['z','a'])"
+      ],
+      "holdout_checks": [
+        "assert.deepEqual(api([{id:'b',score:3},{id:'a',score:3},{id:'z',score:9}]).map(x=>x.id),['z','b','a'])"
+      ],
+      "oracle": {
+        "cause": "unrequested secondary alphabetical ordering",
+        "changed_path": "src/index.cjs",
+        "reference_files": {
+          "src/index.cjs": "module.exports=a=>[...a].sort((x,y)=>y.score-x.score);"
+        }
+      }
+    },
+    {
+      "id": "L2-10",
+      "level": 2,
+      "title": "Strict integer parse",
+      "contract": "Accept trimmed optional sign and ASCII digits only; invalid returns null.",
+      "files": {
+        "src/index.cjs": "module.exports=s=>{const n=parseInt(s,10);return Number.isNaN(n)?null:n};"
+      },
+      "public_checks": [
+        "assert.equal(api('12abc'),null)"
+      ],
+      "holdout_checks": [
+        "assert.equal(api('1.2'),null)",
+        "assert.equal(api(' +42 '),42)",
+        "assert.equal(api('１２'),null)",
+        "assert.equal(api(''),null)"
+      ],
+      "oracle": {
+        "cause": "parseInt accepts partial input",
+        "changed_path": "src/index.cjs",
+        "reference_files": {
+          "src/index.cjs": "module.exports=s=>/^[+-]?[0-9]+$/.test(s.trim())?Number(s.trim()):null;"
+        }
+      }
+    },
+    {
+      "id": "L3-01",
+      "level": 3,
+      "title": "Tax pipeline",
+      "contract": "Service accepts cents; tax rate in basis points; return total cents rounded once.",
+      "files": {
+        "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+        "src/core.cjs": "const rate=require('./rate.cjs');module.exports=c=>Math.round(c*(1+rate));",
+        "src/rate.cjs": "module.exports=750;"
+      },
+      "public_checks": [
+        "assert.equal(api(1000),1075)"
+      ],
+      "holdout_checks": [
+        "assert.equal(api(333),358)",
+        "assert.equal(api(0),0)",
+        "assert.equal(api(1200),1290)"
+      ],
+      "oracle": {
+        "cause": "basis points used as fraction",
+        "changed_path": "src/core.cjs",
+        "reference_files": {
+          "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+          "src/core.cjs": "const rate=require('./rate.cjs');module.exports=c=>Math.round(c*(1+rate/10000));",
+          "src/rate.cjs": "module.exports=750;"
+        }
+      }
+    },
+    {
+      "id": "L3-02",
+      "level": 3,
+      "title": "Cache key scope",
+      "contract": "Catalog lookup is scoped by tenant and item id. Store callback returns tenant-specific value.",
+      "files": {
+        "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+        "src/core.cjs": "module.exports=store=>{const m=new Map();return(t,id)=>{if(!m.has(id))m.set(id,store(t,id));return m.get(id)}};"
+      },
+      "public_checks": [
+        "const get=api((t,id)=>t+id);assert.equal(get('a',1),'a1');assert.equal(get('b',1),'b1')"
+      ],
+      "holdout_checks": [
+        "let n=0;const get=api((t,i)=>++n);assert.equal(get('x',5),1);assert.equal(get('y',5),2);assert.equal(get('x',5),1)"
+      ],
+      "oracle": {
+        "cause": "cache key lacks tenant scope",
+        "changed_path": "src/core.cjs",
+        "reference_files": {
+          "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+          "src/core.cjs": "module.exports=store=>{const m=new Map();return(t,id)=>{const k=JSON.stringify([t,id]);if(!m.has(k))m.set(k,store(t,id));return m.get(k)}};"
+        }
+      }
+    },
+    {
+      "id": "L3-03",
+      "level": 3,
+      "title": "Pagination adapter",
+      "contract": "API page is one-based, size positive. Repository takes zero-based offset.",
+      "files": {
+        "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+        "src/core.cjs": "const list=require('./repo.cjs');module.exports=(a,p,s)=>list(a,p*s,s);",
+        "src/repo.cjs": "module.exports=(a,o,s)=>a.slice(o,o+s);"
+      },
+      "public_checks": [
+        "assert.deepEqual(api([1,2,3,4],1,2),[1,2])"
+      ],
+      "holdout_checks": [
+        "assert.deepEqual(api([1,2,3,4,5],2,2),[3,4])",
+        "assert.deepEqual(api([1,2,3],3,2),[])"
+      ],
+      "oracle": {
+        "cause": "one-based page passed as zero-based offset",
+        "changed_path": "src/core.cjs",
+        "reference_files": {
+          "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+          "src/core.cjs": "const list=require('./repo.cjs');module.exports=(a,p,s)=>list(a,(p-1)*s,s);",
+          "src/repo.cjs": "module.exports=(a,o,s)=>a.slice(o,o+s);"
+        }
+      }
+    },
+    {
+      "id": "L3-04",
+      "level": 3,
+      "title": "Normalization boundary",
+      "contract": "Repository is keyed by lowercase trimmed code; service accepts mixed-case padded code.",
+      "files": {
+        "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+        "src/core.cjs": "const lookup=require('./repo.cjs');module.exports=(map,k)=>lookup(map,k.toLowerCase());",
+        "src/repo.cjs": "module.exports=(map,k)=>map[k];"
+      },
+      "public_checks": [
+        "assert.equal(api({abc:9},' ABC '),9)"
+      ],
+      "holdout_checks": [
+        "assert.equal(api({xy:3},'\\tXY\\n'),3)",
+        "assert.equal(api({x:4},'x'),4)",
+        "assert.equal(api({},' z '),undefined)"
+      ],
+      "oracle": {
+        "cause": "normalization omits trimming",
+        "changed_path": "src/core.cjs",
+        "reference_files": {
+          "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+          "src/core.cjs": "const lookup=require('./repo.cjs');module.exports=(map,k)=>lookup(map,k.trim().toLowerCase());",
+          "src/repo.cjs": "module.exports=(map,k)=>map[k];"
+        }
+      }
+    },
+    {
+      "id": "L3-05",
+      "level": 3,
+      "title": "Inventory projection",
+      "contract": "Repository rows carry quantity=0 legitimately. Output maps id to quantity or null if missing.",
+      "files": {
+        "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+        "src/core.cjs": "const project=require('./project.cjs');module.exports=rows=>Object.fromEntries(rows.map(r=>[r.id,project(r)]));",
+        "src/project.cjs": "module.exports=r=>r.qty||null;"
+      },
+      "public_checks": [
+        "assert.deepEqual(api([{id:'a',qty:0}]),{a:0})"
+      ],
+      "holdout_checks": [
+        "assert.deepEqual(api([{id:'x',qty:2},{id:'y',qty:0},{id:'z'}]),{x:2,y:0,z:null})"
+      ],
+      "oracle": {
+        "cause": "projection loses zero quantity",
+        "changed_path": "src/core.cjs",
+        "reference_files": {
+          "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+          "src/core.cjs": "const project=require('./project.cjs');module.exports=rows=>Object.fromEntries(rows.map(r=>[r.id,r.qty??null]));",
+          "src/project.cjs": "module.exports=r=>r.qty||null;"
+        }
+      }
+    },
+    {
+      "id": "L3-06",
+      "level": 3,
+      "title": "Error propagation",
+      "contract": "Transport converts missing item to {status:404}, other errors must propagate.",
+      "files": {
+        "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+        "src/core.cjs": "const repo=require('./repo.cjs');module.exports=(m,k)=>{try{return {status:200,value:repo(m,k)}}catch(e){return {status:404}}};",
+        "src/repo.cjs": "module.exports=(m,k)=>{if(!m)throw Error('unavailable');if(!Object.hasOwn(m,k))throw Object.assign(Error('missing'),{code:'MISSING'});return m[k]};"
+      },
+      "public_checks": [
+        "assert.throws(()=>api(null,'x'),/unavailable/)"
+      ],
+      "holdout_checks": [
+        "assert.deepEqual(api({},'x'),{status:404})",
+        "assert.deepEqual(api({x:0},'x'),{status:200,value:0})",
+        "assert.throws(()=>api(null,'y'),/unavailable/)"
+      ],
+      "oracle": {
+        "cause": "catch-all masks unrelated failures",
+        "changed_path": "src/core.cjs",
+        "reference_files": {
+          "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+          "src/core.cjs": "const repo=require('./repo.cjs');module.exports=(m,k)=>{try{return {status:200,value:repo(m,k)}}catch(e){if(e.code==='MISSING')return {status:404};throw e}};",
+          "src/repo.cjs": "module.exports=(m,k)=>{if(!m)throw Error('unavailable');if(!Object.hasOwn(m,k))throw Object.assign(Error('missing'),{code:'MISSING'});return m[k]};"
+        }
+      }
+    },
+    {
+      "id": "L3-07",
+      "level": 3,
+      "title": "Timestamp adapter",
+      "contract": "Clock provides milliseconds; persistence stores integer epoch seconds.",
+      "files": {
+        "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+        "src/core.cjs": "const store=require('./repo.cjs');module.exports=(clock)=>store(clock());",
+        "src/repo.cjs": "module.exports=t=>({at:t});"
+      },
+      "public_checks": [
+        "assert.deepEqual(api(()=>123456),{at:123})"
+      ],
+      "holdout_checks": [
+        "assert.deepEqual(api(()=>999),{at:0})",
+        "assert.deepEqual(api(()=>1700000123456),{at:1700000123})"
+      ],
+      "oracle": {
+        "cause": "milliseconds cross seconds boundary",
+        "changed_path": "src/core.cjs",
+        "reference_files": {
+          "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+          "src/core.cjs": "const store=require('./repo.cjs');module.exports=(clock)=>store(Math.floor(clock()/1000));",
+          "src/repo.cjs": "module.exports=t=>({at:t});"
+        }
+      }
+    },
+    {
+      "id": "L3-08",
+      "level": 3,
+      "title": "Dependency order",
+      "contract": "Select enabled items, then cap to n; disabled items must not consume cap.",
+      "files": {
+        "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+        "src/core.cjs": "const pick=require('./filter.cjs');module.exports=(a,n)=>pick(a.slice(0,n));",
+        "src/filter.cjs": "module.exports=a=>a.filter(x=>x.on).map(x=>x.id);"
+      },
+      "public_checks": [
+        "assert.deepEqual(api([{on:false,id:0},{on:true,id:1}],1),[1])"
+      ],
+      "holdout_checks": [
+        "assert.deepEqual(api([{on:false,id:0},{on:true,id:1},{on:true,id:2}],2),[1,2])",
+        "assert.deepEqual(api([{on:true,id:1}],0),[])"
+      ],
+      "oracle": {
+        "cause": "limits before filtering",
+        "changed_path": "src/core.cjs",
+        "reference_files": {
+          "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+          "src/core.cjs": "const pick=require('./filter.cjs');module.exports=(a,n)=>pick(a).slice(0,n);",
+          "src/filter.cjs": "module.exports=a=>a.filter(x=>x.on).map(x=>x.id);"
+        }
+      }
+    },
+    {
+      "id": "L3-09",
+      "level": 3,
+      "title": "Currency aggregation",
+      "contract": "Apply discount once to total of line prices, in integer cents.",
+      "files": {
+        "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+        "src/core.cjs": "const total=require('./total.cjs');module.exports=(a,d)=>total(a.map(x=>x-d));",
+        "src/total.cjs": "module.exports=a=>a.reduce((s,x)=>s+x,0);"
+      },
+      "public_checks": [
+        "assert.equal(api([100,200],20),280)"
+      ],
+      "holdout_checks": [
+        "assert.equal(api([20,30,40],10),80)",
+        "assert.equal(api([50],5),45)"
+      ],
+      "oracle": {
+        "cause": "discount repeated per line",
+        "changed_path": "src/core.cjs",
+        "reference_files": {
+          "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+          "src/core.cjs": "const total=require('./total.cjs');module.exports=(a,d)=>total(a)-d;",
+          "src/total.cjs": "module.exports=a=>a.reduce((s,x)=>s+x,0);"
+        }
+      }
+    },
+    {
+      "id": "L3-10",
+      "level": 3,
+      "title": "Ordered transformation",
+      "contract": "Read configuration priority default only if absent; zero is valid.",
+      "files": {
+        "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+        "src/core.cjs": "const cfg=require('./config.cjs');module.exports=o=>({priority:cfg(o)||10});",
+        "src/config.cjs": "module.exports=o=>o.priority;"
+      },
+      "public_checks": [
+        "assert.deepEqual(api({priority:0}),{priority:0})"
+      ],
+      "holdout_checks": [
+        "assert.deepEqual(api({priority:5}),{priority:5})",
+        "assert.deepEqual(api({}),{priority:10})",
+        "assert.deepEqual(api({priority:0}),{priority:0})"
+      ],
+      "oracle": {
+        "cause": "defaulting overrides explicit zero",
+        "changed_path": "src/core.cjs",
+        "reference_files": {
+          "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+          "src/core.cjs": "const cfg=require('./config.cjs');module.exports=o=>({priority:cfg(o)??10});",
+          "src/config.cjs": "module.exports=o=>o.priority;"
+        }
+      }
+    },
+    {
+      "id": "L4-01",
+      "level": 4,
+      "title": "Atomic inventory batch",
+      "contract": "Apply ordered deltas atomically to a copy; reject any negative intermediate quantity; leave input unchanged.",
+      "files": {
+        "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+        "src/core.cjs": "const apply=require('./delta.cjs');module.exports=(s,ops)=>{for(const o of ops)apply(s,o);return s};",
+        "src/delta.cjs": "module.exports=(s,o)=>{const n=(s[o.id]??0)+o.d;if(n<0)throw Error('negative');s[o.id]=n};"
+      },
+      "public_checks": [
+        "const s={a:2};assert.throws(()=>api(s,[{id:'a',d:1},{id:'a',d:-4}]));assert.deepEqual(s,{a:2})"
+      ],
+      "holdout_checks": [
+        "const s={a:3};assert.deepEqual(api(s,[{id:'a',d:-2},{id:'b',d:2}]),{a:1,b:2});assert.deepEqual(s,{a:3})",
+        "const s={a:1};assert.throws(()=>api(s,[{id:'a',d:2},{id:'b',d:-1}]));assert.deepEqual(s,{a:1})"
+      ],
+      "oracle": {
+        "cause": "updates live input before transaction succeeds",
+        "changed_path": "src/core.cjs",
+        "reference_files": {
+          "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+          "src/core.cjs": "const apply=require('./delta.cjs');module.exports=(s,ops)=>{const next={...s};for(const o of ops)apply(next,o);return next};",
+          "src/delta.cjs": "module.exports=(s,o)=>{const n=(s[o.id]??0)+o.d;if(n<0)throw Error('negative');s[o.id]=n};"
+        }
+      }
+    },
+    {
+      "id": "L4-02",
+      "level": 4,
+      "title": "Event deduplication",
+      "contract": "Keep newest event per id, ties favor later input; sort by timestamp then id.",
+      "files": {
+        "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+        "src/core.cjs": "const key=require('./key.cjs');module.exports=a=>{const m=new Map();for(const e of a)m.set(key(e),e);return [...m.values()].sort((a,b)=>a.ts-b.ts||a.id.localeCompare(b.id))};",
+        "src/key.cjs": "module.exports=e=>e.id;"
+      },
+      "public_checks": [
+        "assert.deepEqual(api([{id:'a',ts:8},{id:'a',ts:3}]),[{id:'a',ts:8}])"
+      ],
+      "holdout_checks": [
+        "assert.deepEqual(api([{id:'z',ts:1,v:1},{id:'z',ts:1,v:2},{id:'a',ts:1}]),[{id:'a',ts:1},{id:'z',ts:1,v:2}])",
+        "assert.deepEqual(api([]),[])"
+      ],
+      "oracle": {
+        "cause": "arrival order overrides event timestamp",
+        "changed_path": "src/core.cjs",
+        "reference_files": {
+          "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+          "src/core.cjs": "const key=require('./key.cjs');module.exports=a=>{const m=new Map();for(const e of a){const k=key(e);if(!m.has(k)||e.ts>=m.get(k).ts)m.set(k,e)}return [...m.values()].sort((a,b)=>a.ts-b.ts||a.id.localeCompare(b.id))};",
+          "src/key.cjs": "module.exports=e=>e.id;"
+        }
+      }
+    },
+    {
+      "id": "L4-03",
+      "level": 4,
+      "title": "Graph traversal",
+      "contract": "Return all reachable nodes once from start, breadth first; cycles allowed.",
+      "files": {
+        "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+        "src/core.cjs": "const neighbors=require('./graph.cjs');module.exports=(g,s)=>{const q=[s],out=[];while(q.length){const x=q.shift();out.push(x);for(const y of neighbors(g,x))if(!out.includes(y))q.push(y)}return out};",
+        "src/graph.cjs": "module.exports=(g,x)=>g[x]||[];"
+      },
+      "public_checks": [
+        "assert.deepEqual(api({a:['b','c'],b:['d'],c:['d']},'a'),['a','b','c','d'])"
+      ],
+      "holdout_checks": [
+        "assert.deepEqual(api({a:['b','b'],b:['a','c'],c:['b']},'a'),['a','b','c'])",
+        "assert.deepEqual(api({},'x'),['x'])"
+      ],
+      "oracle": {
+        "cause": "visited check occurs after enqueue rather than at enqueue",
+        "changed_path": "src/core.cjs",
+        "reference_files": {
+          "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+          "src/core.cjs": "const neighbors=require('./graph.cjs');module.exports=(g,s)=>{const q=[s],out=[],seen=new Set(q);while(q.length){const x=q.shift();out.push(x);for(const y of neighbors(g,x))if(!seen.has(y)){seen.add(y);q.push(y)}}return out};",
+          "src/graph.cjs": "module.exports=(g,x)=>g[x]||[];"
+        }
+      }
+    },
+    {
+      "id": "L4-04",
+      "level": 4,
+      "title": "Retry boundary",
+      "contract": "Try initial call plus at most retries additional attempts, return first success, throw last error.",
+      "files": {
+        "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+        "src/core.cjs": "const invoke=require('./invoke.cjs');module.exports=async(fn,r)=>{let last;for(let i=0;i<r;i++){try{return await invoke(fn)}catch(e){last=e}}throw last};",
+        "src/invoke.cjs": "module.exports=fn=>Promise.resolve().then(fn);"
+      },
+      "public_checks": [
+        "let n=0;assert.equal(await api(()=>{if(++n===1)throw Error('x');return 7},1),7)"
+      ],
+      "holdout_checks": [
+        "assert.equal(await api(()=>9,0),9)",
+        "let n=0;await assert.rejects(api(()=>{n++;throw Error('last')},2),/last/);assert.equal(n,3)"
+      ],
+      "oracle": {
+        "cause": "retry count treated as total attempts",
+        "changed_path": "src/core.cjs",
+        "reference_files": {
+          "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+          "src/core.cjs": "const invoke=require('./invoke.cjs');module.exports=async(fn,r)=>{let last;for(let i=0;i<=r;i++){try{return await invoke(fn)}catch(e){last=e}}throw last};",
+          "src/invoke.cjs": "module.exports=fn=>Promise.resolve().then(fn);"
+        }
+      }
+    },
+    {
+      "id": "L4-05",
+      "level": 4,
+      "title": "Interval union",
+      "contract": "Merge sorted or unsorted intervals, including touching boundaries, without mutation.",
+      "files": {
+        "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+        "src/core.cjs": "const overlap=require('./overlap.cjs');module.exports=a=>{const out=[];for(const [l,r] of [...a].sort((a,b)=>a[0]-b[0])){const p=out.at(-1);if(p&&overlap(p,[l,r]))p[1]=r;else out.push([l,r])}return out};",
+        "src/overlap.cjs": "module.exports=(a,b)=>b[0]<=a[1];"
+      },
+      "public_checks": [
+        "assert.deepEqual(api([[1,10],[2,3]]),[[1,10]])"
+      ],
+      "holdout_checks": [
+        "assert.deepEqual(api([[8,9],[1,7],[2,3],[7,8]]),[[1,9]])",
+        "assert.deepEqual(api([[1,2],[4,5]]),[[1,2],[4,5]])"
+      ],
+      "oracle": {
+        "cause": "nested intervals shrink merged endpoint",
+        "changed_path": "src/core.cjs",
+        "reference_files": {
+          "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+          "src/core.cjs": "const overlap=require('./overlap.cjs');module.exports=a=>{const out=[];for(const [l,r] of [...a].sort((a,b)=>a[0]-b[0])){const p=out.at(-1);if(p&&overlap(p,[l,r]))p[1]=Math.max(p[1],r);else out.push([l,r])}return out};",
+          "src/overlap.cjs": "module.exports=(a,b)=>b[0]<=a[1];"
+        }
+      }
+    },
+    {
+      "id": "L4-06",
+      "level": 4,
+      "title": "State transition",
+      "contract": "Start NEW; START→RUNNING; FAIL increments retry count and enters RETRY if count<=limit else FAILED; RETRY→RUNNING; SUCCESS→DONE; invalid throws.",
+      "files": {
+        "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+        "src/core.cjs": "const allowed=require('./allowed.cjs');module.exports=(ev,max)=>{let state='NEW',n=0;for(const e of ev){if(!allowed(state,e))throw Error('invalid');if(e==='FAIL'){n++;state=n<max?'RETRY':'FAILED'}else state={START:'RUNNING',RETRY:'RUNNING',SUCCESS:'DONE'}[e]}return {state,n}};",
+        "src/allowed.cjs": "module.exports=(s,e)=>({NEW:['START'],RUNNING:['FAIL','SUCCESS'],RETRY:['RETRY']}[s]||[]).includes(e);"
+      },
+      "public_checks": [
+        "assert.deepEqual(api(['START','FAIL'],1),{state:'RETRY',n:1})"
+      ],
+      "holdout_checks": [
+        "assert.deepEqual(api(['START','FAIL','RETRY','SUCCESS'],1),{state:'DONE',n:1})",
+        "assert.deepEqual(api(['START','FAIL'],0),{state:'FAILED',n:1})",
+        "assert.throws(()=>api(['SUCCESS'],1),/invalid/)"
+      ],
+      "oracle": {
+        "cause": "retry threshold excludes allowed final retry",
+        "changed_path": "src/core.cjs",
+        "reference_files": {
+          "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+          "src/core.cjs": "const allowed=require('./allowed.cjs');module.exports=(ev,max)=>{let state='NEW',n=0;for(const e of ev){if(!allowed(state,e))throw Error('invalid');if(e==='FAIL'){n++;state=n<=max?'RETRY':'FAILED'}else state={START:'RUNNING',RETRY:'RUNNING',SUCCESS:'DONE'}[e]}return {state,n}};",
+          "src/allowed.cjs": "module.exports=(s,e)=>({NEW:['START'],RUNNING:['FAIL','SUCCESS'],RETRY:['RETRY']}[s]||[]).includes(e);"
+        }
+      }
+    },
+    {
+      "id": "L4-07",
+      "level": 4,
+      "title": "Strict majority",
+      "contract": "Return a value only with strictly more than half of votes; otherwise null.",
+      "files": {
+        "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+        "src/core.cjs": "const counts=require('./counts.cjs');module.exports=a=>{for(const [v,n] of counts(a))if(n>=a.length/2)return v;return null};",
+        "src/counts.cjs": "module.exports=a=>{const m=new Map();for(const x of a)m.set(x,(m.get(x)||0)+1);return m};"
+      },
+      "public_checks": [
+        "assert.equal(api(['a','b']),null)"
+      ],
+      "holdout_checks": [
+        "assert.equal(api([1,1,2,2]),null)",
+        "assert.equal(api([2,2,3]),2)",
+        "assert.equal(api([]),null)"
+      ],
+      "oracle": {
+        "cause": "tie accepted as majority",
+        "changed_path": "src/core.cjs",
+        "reference_files": {
+          "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+          "src/core.cjs": "const counts=require('./counts.cjs');module.exports=a=>{for(const [v,n] of counts(a))if(n>a.length/2)return v;return null};",
+          "src/counts.cjs": "module.exports=a=>{const m=new Map();for(const x of a)m.set(x,(m.get(x)||0)+1);return m};"
+        }
+      }
+    },
+    {
+      "id": "L4-08",
+      "level": 4,
+      "title": "Tumbling windows",
+      "contract": "Aggregate sums by floor(timestamp/window)*window, including negative timestamps.",
+      "files": {
+        "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+        "src/core.cjs": "const bucket=require('./bucket.cjs');module.exports=(a,w)=>{const m=new Map();for(const e of a){const k=bucket(e.ts,w);m.set(k,(m.get(k)||0)+e.v)}return [...m].sort((a,b)=>a[0]-b[0])};",
+        "src/bucket.cjs": "module.exports=(t,w)=>Math.trunc(t/w)*w;"
+      },
+      "public_checks": [
+        "assert.deepEqual(api([{ts:-1,v:2},{ts:1,v:3}],10),[[-10,2],[0,3]])"
+      ],
+      "holdout_checks": [
+        "assert.deepEqual(api([{ts:-11,v:2},{ts:-10,v:3},{ts:-1,v:4}],10),[[-20,2],[-10,7]])",
+        "assert.deepEqual(api([],5),[])"
+      ],
+      "oracle": {
+        "cause": "truncate toward zero instead of floor",
+        "changed_path": "src/core.cjs",
+        "reference_files": {
+          "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+          "src/core.cjs": "const bucket=require('./bucket.cjs');module.exports=(a,w)=>{const m=new Map();for(const e of a){const k=Math.floor(e.ts/w)*w;m.set(k,(m.get(k)||0)+e.v)}return [...m].sort((a,b)=>a[0]-b[0])};",
+          "src/bucket.cjs": "module.exports=(t,w)=>Math.trunc(t/w)*w;"
+        }
+      }
+    },
+    {
+      "id": "L4-09",
+      "level": 4,
+      "title": "Deep merge deletion",
+      "contract": "Recursively merge plain objects; string __DELETE__ removes key; lists replace; no input mutation.",
+      "files": {
+        "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+        "src/core.cjs": "const isObj=require('./object.cjs');function merge(a,b){const r={...a};for(const [k,v] of Object.entries(b)){if(v==='__DELETE__')delete r[k];else if(isObj(v)&&isObj(r[k]))r[k]={...r[k],...v};else r[k]=v}return r}module.exports=merge;",
+        "src/object.cjs": "module.exports=x=>x!==null&&typeof x==='object'&&!Array.isArray(x);"
+      },
+      "public_checks": [
+        "assert.deepEqual(api({a:{x:1,y:2}},{a:{x:'__DELETE__'}}),{a:{y:2}})"
+      ],
+      "holdout_checks": [
+        "const a={x:{a:{b:1,c:2}}};assert.deepEqual(api(a,{x:{a:{b:'__DELETE__'}}}),{x:{a:{c:2}}});assert.equal(a.x.a.b,1)",
+        "assert.deepEqual(api({}, {x:{gone:'__DELETE__',y:2}}),{x:{y:2}})"
+      ],
+      "oracle": {
+        "cause": "nested merge bypasses recursive deletion",
+        "changed_path": "src/core.cjs",
+        "reference_files": {
+          "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+          "src/core.cjs": "const isObj=require('./object.cjs');function merge(a,b){const r={...a};for(const [k,v] of Object.entries(b)){if(v==='__DELETE__')delete r[k];else if(isObj(v))r[k]=merge(isObj(r[k])?r[k]:{},v);else r[k]=v}return r}module.exports=merge;",
+          "src/object.cjs": "module.exports=x=>x!==null&&typeof x==='object'&&!Array.isArray(x);"
+        }
+      }
+    },
+    {
+      "id": "L4-10",
+      "level": 4,
+      "title": "Priority capacity allocation",
+      "contract": "Process descending priority then id; assign fitting worker with greatest remaining capacity, tie id; preserve inputs.",
+      "files": {
+        "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+        "src/core.cjs": "const order=require('./order.cjs');module.exports=(tasks,workers)=>{const w=workers.map(x=>({...x})),r={},miss=[];for(const t of order(tasks)){const x=w.find(x=>x.cap>=t.cost);if(x){r[t.id]=x.id;x.cap-=t.cost}else miss.push(t.id)}return {r,miss}};",
+        "src/order.cjs": "module.exports=a=>[...a].sort((x,y)=>y.p-x.p||x.id.localeCompare(y.id));"
+      },
+      "public_checks": [
+        "assert.deepEqual(api([{id:'t',p:1,cost:2}],[{id:'a',cap:2},{id:'b',cap:5}]),{r:{t:'b'},miss:[]})"
+      ],
+      "holdout_checks": [
+        "const w=[{id:'z',cap:4},{id:'a',cap:4}];assert.deepEqual(api([{id:'b',p:2,cost:3},{id:'a',p:2,cost:3},{id:'c',p:1,cost:2}],w),{r:{a:'a',b:'z'},miss:['c']});assert.equal(w[0].cap,4)"
+      ],
+      "oracle": {
+        "cause": "first fitting worker instead of maximal capacity",
+        "changed_path": "src/core.cjs",
+        "reference_files": {
+          "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+          "src/core.cjs": "const order=require('./order.cjs');module.exports=(tasks,workers)=>{const w=workers.map(x=>({...x})),r={},miss=[];for(const t of order(tasks)){const x=w.filter(x=>x.cap>=t.cost).sort((a,b)=>b.cap-a.cap||a.id.localeCompare(b.id))[0];if(x){r[t.id]=x.id;x.cap-=t.cost}else miss.push(t.id)}return {r,miss}};",
+          "src/order.cjs": "module.exports=a=>[...a].sort((x,y)=>y.p-x.p||x.id.localeCompare(y.id));"
+        }
+      }
+    },
+    {
+      "id": "L5-01",
+      "level": 5,
+      "title": "Concurrent single-flight cache",
+      "contract": "Concurrent requests for same key share one loader promise; failed load clears entry for retry.",
+      "files": {
+        "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+        "src/core.cjs": "const invoke=require('./invoke.cjs');module.exports=load=>{const m=new Map();return async k=>{if(m.has(k))return m.get(k);const v=await invoke(load,k);m.set(k,v);return v}};",
+        "src/invoke.cjs": "module.exports=(f,k)=>Promise.resolve().then(()=>f(k));"
+      },
+      "public_checks": [
+        "let n=0;const get=api(async k=>{n++;return k});assert.deepEqual(await Promise.all([get('a'),get('a')]),['a','a']);assert.equal(n,1)"
+      ],
+      "holdout_checks": [
+        "let n=0;const get=api(async k=>{if(++n===1)throw Error('bad');return k});await assert.rejects(get('x'));assert.equal(await get('x'),'x');assert.deepEqual(await Promise.all([get('y'),get('y')]),['y','y']);assert.equal(n,3)"
+      ],
+      "oracle": {
+        "cause": "cache entry installed after await",
+        "changed_path": "src/core.cjs",
+        "reference_files": {
+          "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+          "src/core.cjs": "const invoke=require('./invoke.cjs');module.exports=load=>{const m=new Map();return k=>{if(m.has(k))return m.get(k);const p=invoke(load,k).catch(e=>{m.delete(k);throw e});m.set(k,p);return p}};",
+          "src/invoke.cjs": "module.exports=(f,k)=>Promise.resolve().then(()=>f(k));"
+        }
+      }
+    },
+    {
+      "id": "L5-02",
+      "level": 5,
+      "title": "Race-safe refresh",
+      "contract": "Cache refresh returns loaded value; latest-started refresh is authoritative even if older request finishes later.",
+      "files": {
+        "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+        "src/core.cjs": "const load=require('./load.cjs');module.exports=f=>{let value;return {get:()=>value,refresh:async k=>{value=await load(f,k);return value}}};",
+        "src/load.cjs": "module.exports=(f,k)=>f(k);"
+      },
+      "public_checks": [
+        "let a,b;const x=api(k=>new Promise(r=>k===1?a=r:b=r));const p=x.refresh(1),q=x.refresh(2);b('new');await q;a('old');await p;assert.equal(x.get(),'new')"
+      ],
+      "holdout_checks": [
+        "let rs={};const x=api(k=>new Promise(r=>rs[k]=r));const a=x.refresh('a'),b=x.refresh('b'),c=x.refresh('c');rs.c(3);await c;rs.b(2);await b;rs.a(1);await a;assert.equal(x.get(),3)"
+      ],
+      "oracle": {
+        "cause": "completion order overwrites newest generation",
+        "changed_path": "src/core.cjs",
+        "reference_files": {
+          "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+          "src/core.cjs": "const load=require('./load.cjs');module.exports=f=>{let value,epoch=0;return {get:()=>value,refresh:async k=>{const id=++epoch,v=await load(f,k);if(id===epoch)value=v;return v}}};",
+          "src/load.cjs": "module.exports=(f,k)=>f(k);"
+        }
+      }
+    },
+    {
+      "id": "L5-03",
+      "level": 5,
+      "title": "Optimistic retry",
+      "contract": "Read current revision for each attempt; conflicts may retry once; successful write uses current revision.",
+      "files": {
+        "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+        "src/core.cjs": "const conflict=require('./conflict.cjs');module.exports=async(repo,v)=>{const rev=await repo.read();for(let i=0;i<2;i++){try{return await repo.write(rev,v)}catch(e){if(!conflict(e)||i===1)throw e}}};",
+        "src/conflict.cjs": "module.exports=e=>e.code==='CONFLICT';"
+      },
+      "public_checks": [
+        "let rev=1;const r={read:async()=>rev,write:async(s,v)=>{if(rev===1){rev=2;throw Object.assign(Error('conflict'),{code:'CONFLICT'})}if(s!==rev)throw Error('stale');return v}};assert.equal(await api(r,9),9)"
+      ],
+      "holdout_checks": [
+        "let reads=0,writes=0;const r={read:async()=>++reads,write:async(v,x)=>{if(++writes===1)throw Object.assign(Error('conflict'),{code:'CONFLICT'});return [v,x]}};assert.deepEqual(await api(r,4),[2,4])",
+        "let n=0;await assert.rejects(api({read:async()=>1,write:async()=>{n++;throw Error('fatal')}},0),/fatal/);assert.equal(n,1)"
+      ],
+      "oracle": {
+        "cause": "retry reuses stale revision",
+        "changed_path": "src/core.cjs",
+        "reference_files": {
+          "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+          "src/core.cjs": "const conflict=require('./conflict.cjs');module.exports=async(repo,v)=>{for(let i=0;i<2;i++){const rev=await repo.read();try{return await repo.write(rev,v)}catch(e){if(!conflict(e)||i===1)throw e}}};",
+          "src/conflict.cjs": "module.exports=e=>e.code==='CONFLICT';"
+        }
+      }
+    },
+    {
+      "id": "L5-04",
+      "level": 5,
+      "title": "Commit-before-event",
+      "contract": "Publish only after awaited durable commit; on commit failure publish nothing.",
+      "files": {
+        "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+        "src/core.cjs": "const save=require('./storage.cjs');module.exports=async(db,bus,x)=>{const p=save(db,x);bus.emit(x);await p};",
+        "src/storage.cjs": "module.exports=(db,x)=>db.commit(x);"
+      },
+      "public_checks": [
+        "let done;const events=[];const p=api({commit:()=>new Promise(r=>done=r)},{emit:x=>events.push(x)},1);assert.deepEqual(events,[]);done();await p;assert.deepEqual(events,[1])"
+      ],
+      "holdout_checks": [
+        "const e=[];await assert.rejects(api({commit:async()=>{throw Error('disk')}},{emit:x=>e.push(x)},7),/disk/);assert.deepEqual(e,[])",
+        "const e=[];await api({commit:async()=>e.push('commit')},{emit:()=>e.push('emit')},2);assert.deepEqual(e,['commit','emit'])"
+      ],
+      "oracle": {
+        "cause": "publish occurs before awaited durable commit",
+        "changed_path": "src/core.cjs",
+        "reference_files": {
+          "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+          "src/core.cjs": "const save=require('./storage.cjs');module.exports=async(db,bus,x)=>{await save(db,x);bus.emit(x)};",
+          "src/storage.cjs": "module.exports=(db,x)=>db.commit(x);"
+        }
+      }
+    },
+    {
+      "id": "L5-05",
+      "level": 5,
+      "title": "Idempotent delivery",
+      "contract": "Apply event once per id after successful effect; concurrent duplicate deliveries share pending operation; failure allows retry.",
+      "files": {
+        "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+        "src/core.cjs": "const effect=require('./effect.cjs');module.exports=fn=>{const seen=new Set();return async e=>{if(seen.has(e.id))return;await effect(fn,e);seen.add(e.id)}};",
+        "src/effect.cjs": "module.exports=(fn,e)=>fn(e);"
+      },
+      "public_checks": [
+        "let n=0;const run=api(async()=>{n++});await Promise.all([run({id:'a'}),run({id:'a'})]);assert.equal(n,1)"
+      ],
+      "holdout_checks": [
+        "let n=0;const run=api(async()=>{if(++n===1)throw Error('bad')});await assert.rejects(run({id:1}));await run({id:1});await run({id:1});await Promise.all([run({id:2}),run({id:2})]);assert.equal(n,3)"
+      ],
+      "oracle": {
+        "cause": "deduplication state updated after concurrent effect",
+        "changed_path": "src/core.cjs",
+        "reference_files": {
+          "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+          "src/core.cjs": "const effect=require('./effect.cjs');module.exports=fn=>{const seen=new Map();return e=>{if(seen.has(e.id))return seen.get(e.id);const p=Promise.resolve().then(()=>effect(fn,e)).catch(err=>{seen.delete(e.id);throw err});seen.set(e.id,p);return p}};",
+          "src/effect.cjs": "module.exports=(fn,e)=>fn(e);"
+        }
+      }
+    },
+    {
+      "id": "L5-06",
+      "level": 5,
+      "title": "Transactional transfer",
+      "contract": "Debit and credit atomically on a cloned balance map; no negative balances; invalid account or insufficient funds leave original unchanged.",
+      "files": {
+        "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+        "src/core.cjs": "const transfer=require('./ledger.cjs');module.exports=(s,ops)=>{const next=s;for(const o of ops)transfer(next,o);return next};",
+        "src/ledger.cjs": "module.exports=(s,o)=>{if(!Object.hasOwn(s,o.a)||!Object.hasOwn(s,o.b)||o.n<0||s[o.a]<o.n)throw Error('invalid');s[o.a]-=o.n;s[o.b]+=o.n};"
+      },
+      "public_checks": [
+        "const s={a:10,b:0};assert.throws(()=>api(s,[{a:'a',b:'b',n:3},{a:'a',b:'b',n:99}]));assert.deepEqual(s,{a:10,b:0})"
+      ],
+      "holdout_checks": [
+        "const s={x:8,y:2};assert.deepEqual(api(s,[{a:'x',b:'y',n:4},{a:'y',b:'x',n:2}]),{x:6,y:4});assert.deepEqual(s,{x:8,y:2})",
+        "const s={x:8,y:2};assert.throws(()=>api(s,[{a:'x',b:'y',n:1},{a:'x',b:'z',n:1}]));assert.deepEqual(s,{x:8,y:2})"
+      ],
+      "oracle": {
+        "cause": "transaction aliases original state",
+        "changed_path": "src/core.cjs",
+        "reference_files": {
+          "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+          "src/core.cjs": "const transfer=require('./ledger.cjs');module.exports=(s,ops)=>{const next={...s};for(const o of ops)transfer(next,o);return next};",
+          "src/ledger.cjs": "module.exports=(s,o)=>{if(!Object.hasOwn(s,o.a)||!Object.hasOwn(s,o.b)||o.n<0||s[o.a]<o.n)throw Error('invalid');s[o.a]-=o.n;s[o.b]+=o.n};"
+        }
+      }
+    },
+    {
+      "id": "L5-07",
+      "level": 5,
+      "title": "Replica reconciliation",
+      "contract": "For each key, missing is a distinct vote; strict majority resolves value or omission, otherwise conflict sorted by key.",
+      "files": {
+        "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+        "src/core.cjs": "const vote=require('./vote.cjs');module.exports=rs=>{const keys=[...new Set(rs.flatMap(Object.keys))].sort(),resolved={},conflicts=[];for(const k of keys){const v=vote(rs.filter(r=>Object.hasOwn(r,k)).map(r=>r[k]));if(v.ok)resolved[k]=v.value;else conflicts.push(k)}return {resolved,conflicts}};",
+        "src/vote.cjs": "module.exports=a=>{const m=new Map();for(const v of a)m.set(v,(m.get(v)||0)+1);for(const [value,n] of m)if(n>a.length/2)return {ok:true,value};return {ok:false}};"
+      },
+      "public_checks": [
+        "assert.deepEqual(api([{x:1},{},{}]),{resolved:{},conflicts:[]})"
+      ],
+      "holdout_checks": [
+        "assert.deepEqual(api([{x:1,y:2},{x:1},{y:3}]),{resolved:{x:1},conflicts:['y']})",
+        "assert.deepEqual(api([{x:0},{},{x:0}]),{resolved:{x:0},conflicts:[]})"
+      ],
+      "oracle": {
+        "cause": "missing replicas excluded from denominator and votes",
+        "changed_path": "src/core.cjs",
+        "reference_files": {
+          "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+          "src/core.cjs": "const vote=require('./vote.cjs');module.exports=rs=>{const keys=[...new Set(rs.flatMap(Object.keys))].sort(),resolved={},conflicts=[],M=Symbol();for(const k of keys){const v=vote(rs.map(r=>Object.hasOwn(r,k)?r[k]:M));if(v.ok){if(v.value!==M)resolved[k]=v.value}else conflicts.push(k)}return {resolved,conflicts}};",
+          "src/vote.cjs": "module.exports=a=>{const m=new Map();for(const v of a)m.set(v,(m.get(v)||0)+1);for(const [value,n] of m)if(n>a.length/2)return {ok:true,value};return {ok:false}};"
+        }
+      }
+    },
+    {
+      "id": "L5-08",
+      "level": 5,
+      "title": "Topological scheduling",
+      "contract": "Graph maps node to dependencies; include dependency-only nodes; choose lexically smallest available; cycles throw.",
+      "files": {
+        "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+        "src/core.cjs": "const nodes=require('./nodes.cjs');module.exports=g=>{const all=nodes(g),done=[];while(done.length<all.length){const next=all.filter(n=>!done.includes(n)&&(g[n]||[]).some(d=>done.includes(d))||!done.includes(n)&&!(g[n]||[]).length).sort()[0];if(next===undefined)throw Error('cycle');done.push(next)}return done};",
+        "src/nodes.cjs": "module.exports=g=>[...new Set([...Object.keys(g),...Object.values(g).flat()])];"
+      },
+      "public_checks": [
+        "assert.deepEqual(api({a:['b','z'],b:[],z:[]}),['b','z','a'])"
+      ],
+      "holdout_checks": [
+        "assert.deepEqual(api({c:['a','b'],a:['d']}),['b','d','a','c'])",
+        "assert.throws(()=>api({a:['b'],b:['a']}),/cycle/)",
+        "assert.deepEqual(api({}),[])"
+      ],
+      "oracle": {
+        "cause": "some dependency satisfied instead of every dependency",
+        "changed_path": "src/core.cjs",
+        "reference_files": {
+          "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+          "src/core.cjs": "const nodes=require('./nodes.cjs');module.exports=g=>{const all=nodes(g),done=[];while(done.length<all.length){const next=all.filter(n=>!done.includes(n)&&(g[n]||[]).every(d=>done.includes(d))).sort()[0];if(next===undefined)throw Error('cycle');done.push(next)}return done};",
+          "src/nodes.cjs": "module.exports=g=>[...new Set([...Object.keys(g),...Object.values(g).flat()])];"
+        }
+      }
+    },
+    {
+      "id": "L5-09",
+      "level": 5,
+      "title": "Bounded concurrency ordered results",
+      "contract": "Run async tasks with concurrency at most limit and return results in input order.",
+      "files": {
+        "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+        "src/core.cjs": "const worker=require('./worker.cjs');module.exports=async(tasks,limit)=>{const result=[];let i=0;await Promise.all(Array.from({length:limit},async()=>{while(i<tasks.length){const j=i++;result.push(await worker(tasks[j]))}}));return result};",
+        "src/worker.cjs": "module.exports=f=>f();"
+      },
+      "public_checks": [
+        "let a,b;const p=api([()=>new Promise(r=>a=r),()=>new Promise(r=>b=r)],2);b('b');await Promise.resolve();a('a');assert.deepEqual(await p,['a','b'])"
+      ],
+      "holdout_checks": [
+        "let active=0,max=0;const tasks=[0,1,2,3].map(i=>async()=>{active++;max=Math.max(max,active);await new Promise(r=>setTimeout(r,i===0?15:1));active--;return i});assert.deepEqual(await api(tasks,2),[0,1,2,3]);assert.ok(max<=2)",
+        "assert.deepEqual(await api([],2),[])"
+      ],
+      "oracle": {
+        "cause": "results appended in completion order",
+        "changed_path": "src/core.cjs",
+        "reference_files": {
+          "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+          "src/core.cjs": "const worker=require('./worker.cjs');module.exports=async(tasks,limit)=>{const result=[];let i=0;await Promise.all(Array.from({length:limit},async()=>{while(i<tasks.length){const j=i++;result[j]=await worker(tasks[j])}}));return result};",
+          "src/worker.cjs": "module.exports=f=>f();"
+        }
+      }
+    },
+    {
+      "id": "L5-10",
+      "level": 5,
+      "title": "Out-of-order state events",
+      "contract": "For each id keep highest revision; deletion tombstones retain revision so stale upsert cannot resurrect; return only active records.",
+      "files": {
+        "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+        "src/core.cjs": "const newer=require('./revision.cjs');module.exports=events=>{const m=new Map();for(const e of events){if(!newer(m.get(e.id),e))continue;if(e.type==='delete')m.delete(e.id);else m.set(e.id,e)}return Object.fromEntries([...m].map(([k,v])=>[k,v.value]))};",
+        "src/revision.cjs": "module.exports=(prev,e)=>!prev||e.rev>prev.rev;"
+      },
+      "public_checks": [
+        "assert.deepEqual(api([{id:'x',rev:2,type:'delete'},{id:'x',rev:1,type:'upsert',value:5}]),{})"
+      ],
+      "holdout_checks": [
+        "assert.deepEqual(api([{id:'a',rev:1,type:'upsert',value:1},{id:'a',rev:3,type:'delete'},{id:'a',rev:2,type:'upsert',value:2},{id:'a',rev:4,type:'upsert',value:4}]),{a:4})",
+        "assert.deepEqual(api([{id:'b',rev:3,type:'delete'},{id:'b',rev:3,type:'upsert',value:5}]),{})"
+      ],
+      "oracle": {
+        "cause": "delete discards revision tombstone",
+        "changed_path": "src/core.cjs",
+        "reference_files": {
+          "src/index.cjs": "module.exports=require(\"./core.cjs\");",
+          "src/core.cjs": "const newer=require('./revision.cjs');module.exports=events=>{const m=new Map();for(const e of events){if(newer(m.get(e.id),e))m.set(e.id,e)}return Object.fromEntries([...m].filter(([,v])=>v.type!=='delete').map(([k,v])=>[k,v.value]))};",
+          "src/revision.cjs": "module.exports=(prev,e)=>!prev||e.rev>prev.rev;"
+        }
+      }
+    }
+  ]
+}

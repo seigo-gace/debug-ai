@@ -1,0 +1,5 @@
+"use strict";
+const test=require("node:test"),assert=require("node:assert/strict"),fs=require("node:fs"),os=require("node:os"),path=require("node:path");
+const {corpus,payload,fixtureCheck}=require("../../scripts/real-debug-suite.cjs");
+test("real debug corpus is exactly five levels with ten independently reproducible faults per level",()=>{assert.equal(corpus.cases.length,50);assert.equal(new Set(corpus.cases.map(c=>c.id)).size,50);for(let n=1;n<=5;n++)assert.equal(corpus.cases.filter(c=>c.level===n).length,10);for(const c of corpus.cases){assert.ok(c.public_checks.length&&c.holdout_checks.length);assert.equal(Object.keys(c.files).length,Object.keys(c.oracle.reference_files).length);assert.equal(Object.keys(c.files).filter(p=>c.files[p]!==c.oracle.reference_files[p]).length,1);assert.ok(!Object.hasOwn(payload(c),"oracle"));}});
+for(const c of corpus.cases)test("actual RED/GREEN public and independent holdout "+c.id,t=>{const root=fs.mkdtempSync(path.join(os.tmpdir(),"real-debug-oracle-"));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));const r=fixtureCheck(c,root);assert.equal(r.pass,true,JSON.stringify(r));});
