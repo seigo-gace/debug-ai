@@ -600,11 +600,11 @@
       ],
       "oracle": {
         "cause": "projection loses zero quantity",
-        "changed_path": "src/core.cjs",
+        "changed_path": "src/project.cjs",
         "reference_files": {
           "src/index.cjs": "module.exports=require(\"./core.cjs\");",
-          "src/core.cjs": "const project=require('./project.cjs');module.exports=rows=>Object.fromEntries(rows.map(r=>[r.id,r.qty??null]));",
-          "src/project.cjs": "module.exports=r=>r.qty||null;"
+          "src/core.cjs": "const project=require('./project.cjs');module.exports=rows=>Object.fromEntries(rows.map(r=>[r.id,project(r)]));",
+          "src/project.cjs": "module.exports=r=>r.qty??null;"
         }
       }
     },
@@ -837,10 +837,10 @@
         "src/invoke.cjs": "module.exports=fn=>Promise.resolve().then(fn);"
       },
       "public_checks": [
-        "let n=0;assert.equal(await api(()=>{if(++n===1)throw Error('x');return 7},1),7)"
+        "let n=0,v;await assert.doesNotReject(async()=>{v=await api(()=>{if(++n===1)throw Error('x');return 7},1)});assert.equal(v,7)"
       ],
       "holdout_checks": [
-        "assert.equal(await api(()=>9,0),9)",
+        "let v;await assert.doesNotReject(async()=>{v=await api(()=>9,0)});assert.equal(v,9)",
         "let n=0;await assert.rejects(api(()=>{n++;throw Error('last')},2),/last/);assert.equal(n,3)"
       ],
       "oracle": {
@@ -955,11 +955,11 @@
       ],
       "oracle": {
         "cause": "truncate toward zero instead of floor",
-        "changed_path": "src/core.cjs",
+        "changed_path": "src/bucket.cjs",
         "reference_files": {
           "src/index.cjs": "module.exports=require(\"./core.cjs\");",
-          "src/core.cjs": "const bucket=require('./bucket.cjs');module.exports=(a,w)=>{const m=new Map();for(const e of a){const k=Math.floor(e.ts/w)*w;m.set(k,(m.get(k)||0)+e.v)}return [...m].sort((a,b)=>a[0]-b[0])};",
-          "src/bucket.cjs": "module.exports=(t,w)=>Math.trunc(t/w)*w;"
+          "src/core.cjs": "const bucket=require('./bucket.cjs');module.exports=(a,w)=>{const m=new Map();for(const e of a){const k=bucket(e.ts,w);m.set(k,(m.get(k)||0)+e.v)}return [...m].sort((a,b)=>a[0]-b[0])};",
+          "src/bucket.cjs": "module.exports=(t,w)=>Math.floor(t/w)*w;"
         }
       }
     },
@@ -1079,7 +1079,7 @@
         "src/conflict.cjs": "module.exports=e=>e.code==='CONFLICT';"
       },
       "public_checks": [
-        "let rev=1;const r={read:async()=>rev,write:async(s,v)=>{if(rev===1){rev=2;throw Object.assign(Error('conflict'),{code:'CONFLICT'})}if(s!==rev)throw Error('stale');return v}};assert.equal(await api(r,9),9)"
+        "let rev=1;const r={read:async()=>rev,write:async(s,v)=>{if(rev===1){rev=2;throw Object.assign(Error('conflict'),{code:'CONFLICT'})}if(s!==rev)throw Error('stale');return v}};let v;await assert.doesNotReject(async()=>{v=await api(r,9)});assert.equal(v,9)"
       ],
       "holdout_checks": [
         "let reads=0,writes=0;const r={read:async()=>++reads,write:async(v,x)=>{if(++writes===1)throw Object.assign(Error('conflict'),{code:'CONFLICT'});return [v,x]}};assert.deepEqual(await api(r,4),[2,4])",
@@ -1189,6 +1189,7 @@
         "assert.deepEqual(api([{x:1},{},{}]),{resolved:{},conflicts:[]})"
       ],
       "holdout_checks": [
+        "assert.deepEqual(api([{z:7},{},{},{}]),{resolved:{},conflicts:[]})",
         "assert.deepEqual(api([{x:1,y:2},{x:1},{y:3}]),{resolved:{x:1},conflicts:['y']})",
         "assert.deepEqual(api([{x:0},{},{x:0}]),{resolved:{x:0},conflicts:[]})"
       ],
