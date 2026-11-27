@@ -165,6 +165,39 @@ function testInventory(repo){
   const checks=["lint","typecheck","test","build"].map(name=>({name,configured:typeof scripts[name]==="string"&&scripts[name].trim().length>0,command:typeof scripts[name]==="string"?scripts[name].slice(0,1000):null}));
   return{package_json:{path:item.path,sha256:item.sha256},package_manager:packageManager,checks};
 }
+// Treat stderr as untrusted observation data. Only paths in the actual
+// repository or the exact isolated job's repo are eligible for readback.
+function observedStackLocations(repo,checks,{maxFrames=8,jobRoot=process.env.DEBUG_AI_SANDBOX_JOB_ROOT||"/sandbox-jobs"}={}){
+  const root=fs.realpathSync(repo),frames=[],seen=new Set();
+  for(const check of Array.isArray(checks)?checks:[]){
+    if(check?.executed!==true||check.status!=="FAIL"||check.timed_out||check.sandbox?.backend!=="sidecar+landlock+seccomp")continue;
+    const jobId=String(check.sandbox.job_id||"");
+    const isolated=/^JOB_[a-f0-9]{24}$/.test(jobId)?path.resolve(jobRoot,"jobs",jobId,"repo"):null;
+    const stderr=String(check.stderr||"").slice(-16000);
+    for(const line of stderr.split(/\r?\n/)){
+      const py=line.match(/^\s*File "([^"]+)", line ([1-9]\d*)\b/);
+      const node=line.match(/(?:^|\s|\()((?:\/|\.\/)?[A-Za-z0-9_./-]+\.(?:[cm]?[jt]sx?|py|go|rs|java|rb|php)):([1-9]\d*)(?::([1-9]\d*))?(?:\)|\s|$)/);
+      const m=py||node;if(!m)continue;
+      let name=m[1];const row=Number(m[2]),column=py||!m[3]?null:Number(m[3]);
+      if(!Number.isSafeInteger(row)||row>1000000||column!==null&&(!Number.isSafeInteger(column)||column>1000000))continue;
+      if(path.isAbsolute(name)){
+        const base=[root,isolated].filter(Boolean).find(p=>name.startsWith(p+path.sep));
+        if(!base)continue;name=path.relative(base,name);
+      }
+      let source;try{
+        const rel=normalizeRel(name);
+        if(rel.split("/").some(x=>SKIP_DIRS.has(x))||blockedReadPath(rel))continue;
+        source=readText(root,rel,{maxChars:100000});
+      }catch{continue;}
+      const lines=source.content.split(/\r?\n/);if(row>lines.length)continue;
+      const key=source.path+":"+row+":"+column;if(seen.has(key))continue;seen.add(key);
+      const from=Math.max(1,row-3),to=Math.min(lines.length,row+3);
+      frames.push({path:source.path,line:row,column,sha256:source.sha256,source_truncated:source.truncated,excerpt_start_line:from,excerpt_end_line:to,excerpt:lines.slice(from-1,to).join("\n").slice(0,2400),job_id:jobId,authority:"OBSERVED_STACK_LOCATION_NOT_CAUSAL_PROOF"});
+      if(frames.length>=maxFrames)return frames;
+    }
+  }
+  return frames;
+}
 function initialInvestigationEvidence(repo,{request="",failure=null,checks=[]}={}){
   const explicit=[...(Array.isArray(failure?.source_paths)?failure.source_paths:[]),...(Array.isArray(failure?.test_paths)?failure.test_paths:[])];
   const mentioned=String(request||failure?.message||"").match(/[A-Za-z0-9_./-]+\.(?:[cm]?[jt]sx?|py|go|rs|java|rb|php)\b/g)||[];
@@ -177,12 +210,20 @@ function initialInvestigationEvidence(repo,{request="",failure=null,checks=[]}={
     try{const source=readText(repo,name,{maxChars:3000});records.push({kind:"initial_source",value:source});}
     catch(error){unavailable.push({path:name,reason:String(error?.message||"SOURCE_UNAVAILABLE").split(":")[0]});}
   }
+  const stackLocations=observedStackLocations(repo,checks);
+  for(const frame of stackLocations){
+    // If a full matching source is already in the packet, transfer only its
+    // location and digest rather than a second copy of the same source.
+    const prior=records.find(r=>r.kind==="initial_source"&&r.value.path===frame.path&&r.value.sha256===frame.sha256&&!r.value.truncated);
+    if(prior){const {excerpt,...location}=frame;records.push({kind:"initial_stack_location",value:{...location,excerpt_in:"initial_source"}});}
+    else records.push({kind:"initial_stack_location",value:frame});
+  }
   // Local source and an actually executed failing check warrant a narrow first
   // investigation, not a confirmed cause or exhaustive search receipt.
   const pkg=inventory?JSON.parse(readText(repo,"package.json",{maxChars:1024*1024}).content):null;
   const hasDependencies=pkg&&["dependencies","devDependencies","optionalDependencies","peerDependencies"].some(key=>Object.keys(pkg[key]||{}).length>0);
   const local=records.some(item=>item.kind==="initial_source"&&!/\.(?:test|spec)\.[^/]+$/.test(item.value.path))&&!hasDependencies&&Boolean(configuredTest)&&checks.some(item=>item.executed===true&&item.status==="FAIL"&&!item.timed_out);
-  return {records,scope:{mode:local?"LOCAL_REPRODUCTION":"OPEN_INVESTIGATION",source_paths:records.filter(item=>item.kind==="initial_source").map(item=>item.value.path),unavailable,additional_search:"REQUEST_FOR_MISSING_OR_COUNTER_EVIDENCE",coverage:"PARTIAL"}};
+  return {records,scope:{mode:local?"LOCAL_REPRODUCTION":"OPEN_INVESTIGATION",source_paths:records.filter(item=>item.kind==="initial_source").map(item=>item.value.path),unavailable,stack_location_count:stackLocations.length,additional_search:"REQUEST_FOR_MISSING_OR_COUNTER_EVIDENCE",coverage:"PARTIAL"}};
 }
 function languageIdFor(rel){
   const low=String(rel).toLowerCase();
@@ -323,4 +364,4 @@ function createReadOnlyToolRuntime({repo,repoPolicy=new RepoPolicy(),tgserver=nu
   }
   return {repo:root,availableTools:[...AVAILABLE_TOOLS],createEvidenceContext,addEvidenceToContext,execute};
 }
-module.exports={AVAILABLE_TOOLS,stableStringify,normalizeRel,blockedReadPath,resolveSafeFile,readText,walkFiles,searchSource,localDependencyMap,testInventory,initialInvestigationEvidence,languageIdFor,repoRelativeLocation,sanitizeSymbols,symbolLookup,toolResultHash,makeToolResult,assertToolResultIntegrity,normalizeRegisteredEvidence,evidenceProjection,evidenceViewCandidates,addEvidenceToContext,createEvidenceContext,createReadOnlyToolRuntime};
+module.exports={AVAILABLE_TOOLS,stableStringify,normalizeRel,blockedReadPath,resolveSafeFile,readText,walkFiles,searchSource,localDependencyMap,testInventory,observedStackLocations,initialInvestigationEvidence,languageIdFor,repoRelativeLocation,sanitizeSymbols,symbolLookup,toolResultHash,makeToolResult,assertToolResultIntegrity,normalizeRegisteredEvidence,evidenceProjection,evidenceViewCandidates,addEvidenceToContext,createEvidenceContext,createReadOnlyToolRuntime};
