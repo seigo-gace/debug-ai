@@ -64,6 +64,31 @@ function gradePayload(c,operations){
   for(const op of operations){if(op.type!=="replace"||!Object.hasOwn(c.files,op.path)||typeof op.content_utf8!=="string")throw Error("BENCHMARK_CANDIDATE_SCOPE_INVALID");out[op.path]=op.content_utf8;}
   return out;
 }
+// A benchmark owns its child run. On service restart, only a positively
+// bound saved checkpoint may defer automatic child recovery. Other runs retain
+// the normal startup recovery behavior.
+function benchmarkRunOwner(item,runtimeEvidence){
+  const state=item?.state;
+  if(!state||typeof state.project_dir!=="string"||typeof runtimeEvidence?.list!=="function")return null;
+  const match=state.project_dir.match(/\/debug-ai\/\.verification\/real-debug\/(realdebug_[a-f0-9]{32})\/(L[1-5]-[0-9]{2})$/);
+  if(!match||state.project_id!=="debugai-real-debug-"+match[2])return null;
+  const [_,id,caseId]=match;
+  const cp=runtimeEvidence.list(id,{types:["real_debug_benchmark"],limit:1})[0]?.payload;
+  if(cp?.schema!==SCHEMA||cp.benchmark_id!==id||!["RUNNING","PAUSED","INCOMPLETE"].includes(cp.state)||!Array.isArray(cp.case_ids)||!cp.case_ids.includes(caseId)||cp.current?.case_id!==caseId||cp.current?.run_id!==item.run_id)return null;
+  return cp;
+}
+async function holdInterruptedBenchmarkRun({item,authority,runtimeEvidence,now=Date.now}){
+  const cp=benchmarkRunOwner(item,runtimeEvidence);
+  if(!cp)return null;
+  if(item.state.job_status!=="PAUSED"||item.manifest.policy_refs?.benchmark_resume_required!==true){
+    await authority.bumpDurableEpoch({runId:item.run_id,manifestPatch:{job:{status:"PAUSED"},policy_refs:{benchmark_resume_required:true,benchmark_id:cp.benchmark_id}},runStatePatch:{job_status:"PAUSED"}});
+  }
+  if(cp.state!=="PAUSED"||cp.pause_reason!=="INTERRUPTED_BENCHMARK_REQUIRES_RESUME"){
+    runtimeEvidence.write(cp.benchmark_id,"real_debug_benchmark",{...cp,state:"PAUSED",pause_reason:"INTERRUPTED_BENCHMARK_REQUIRES_RESUME",error_code:null,updated_at:now(),summary:makeSummary(cp.results,cp.case_ids.length)});
+  }
+  return {run_id:item.run_id,benchmark_id:cp.benchmark_id,reason:"INTERRUPTED_BENCHMARK_REQUIRES_RESUME"};
+}
+function isHeldBenchmarkRun(item,runtimeEvidence){return item?.state?.job_status==="PAUSED"&&item.manifest?.policy_refs?.benchmark_resume_required===true&&Boolean(benchmarkRunOwner(item,runtimeEvidence));}
 function createRealDebugBenchmark({workflow,repoPolicy,runtimeEvidence,authority=null,pollMs=2000,analysisDeadlineMs=60*60e3,now=Date.now,wait=sleep}={}){
   if(!workflow||!repoPolicy||!runtimeEvidence)throw Error("REAL_DEBUG_PORT_REQUIRED");
   let active=null;
@@ -98,6 +123,17 @@ function createRealDebugBenchmark({workflow,repoPolicy,runtimeEvidence,authority
     if(!current.run_id)throw Error("REAL_DEBUG_START_UNCERTAIN");
     exactFixture(repo,initial);
     if(current.snapshot!==repositorySnapshotId(repo,{allowMissingGitMarker:true}))throw Error("REAL_DEBUG_FIXTURE_REVISION_CHANGED");
+    // Explicit resume of the owning suite may reclaim its exact paused child.
+    // Never create a second analysis or replay a candidate for this case.
+    if(authority?.durableEnabled?.()){
+      const loaded=authority.loadDurable(current.run_id);
+      if(isHeldBenchmarkRun({run_id:current.run_id,...loaded},runtimeEvidence)){
+        if(current.phase!=="ANALYSIS")throw Error("REAL_DEBUG_RESUME_PHASE_UNCERTAIN");
+        await authority.claimRecoverableRun(current.run_id);
+        const accepted=await workflow.resumeAnalysis({runId:current.run_id});
+        if(accepted?.run_id!==current.run_id)throw Error("REAL_DEBUG_RESUME_ID_MISMATCH");
+      }
+    }
     const r=await waitAnalysis(current.run_id),d=r.durable;
     const row={id:c.id,level:c.level,run_id:current.run_id,duration_ms:now()-current.started_at,stage_timings_ms:{analysis:now()-current.started_at,candidate:null,holdout:null},analysis_state:d.job_status,analysis_step:d.workflow_cursor?.step_id||null,role_invocations:d.role_invocations||[],public_red:false,public_green:false,holdout_green:false,scope_pass:false,source_unchanged:true,repair_pass:false,review_pass:false,cause_accuracy:"UNREVIEWED",state:"BLOCKED"};
     if(d.job_status!=="DONE"){row.error_code=d.last_execution_error||d.last_execution_failure?.code||d.job_status;return row;}
@@ -172,11 +208,11 @@ function createRealDebugBenchmark({workflow,repoPolicy,runtimeEvidence,authority
     const resumed=input.benchmark_id?statusOf(input.benchmark_id):null;
     if(input.benchmark_id&&!resumed)throw Error("REAL_DEBUG_NOT_FOUND");
     if(resumed&&(resumed.corpus_digest!==corpusDigest||resumed.state==="DONE"))throw Error("REAL_DEBUG_RESUME_NOT_APPLICABLE");
-    if(recovered.some(x=>x.run_id!==resumed?.current?.run_id))throw Error("REAL_DEBUG_OTHER_RUN_ACTIVE");
+    if(recovered.some(x=>x.run_id!==resumed?.current?.run_id&&!isHeldBenchmarkRun(x,runtimeEvidence)))throw Error("REAL_DEBUG_OTHER_RUN_ACTIVE");
     const cp=resumed?{...resumed,state:"RUNNING",error_code:null,pause_reason:null}:{schema:SCHEMA,benchmark_id:"realdebug_"+crypto.randomUUID().replaceAll("-",""),corpus_version:corpus.version,corpus_digest:corpusDigest,case_ids:selectCases(input.case_ids),state:"RUNNING",started_at:now(),results:[],current:null};
     active=cp.benchmark_id;save(cp);void execute(cp);
     return {schema:SCHEMA,benchmark_id:cp.benchmark_id,state:"RUNNING",total:cp.case_ids.length,corpus_digest:corpusDigest};
   }
   return {start,status};
 }
-module.exports={SCHEMA,corpusDigest,selectCases,exactFixture,requestFor,measuredTest,makeSummary,repeatedBlockedCode,gradePayload,createRealDebugBenchmark};
+module.exports={SCHEMA,corpusDigest,selectCases,exactFixture,requestFor,measuredTest,makeSummary,repeatedBlockedCode,gradePayload,benchmarkRunOwner,holdInterruptedBenchmarkRun,isHeldBenchmarkRun,createRealDebugBenchmark};
