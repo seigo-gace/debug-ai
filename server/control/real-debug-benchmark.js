@@ -46,6 +46,13 @@ function makeSummary(rows,total){
   const byLevel={};for(let l=1;l<=5;l++){const r=rows.filter(x=>x.level===l);byLevel[l]={completed:r.length,repair_pass:r.filter(x=>x.repair_pass===true).length,review_pass:r.filter(x=>x.review_pass===true).length,blocked:r.filter(x=>x.state==="BLOCKED").length};}
   return {total,completed:rows.length,repair_pass:rows.filter(x=>x.repair_pass===true).length,review_pass:rows.filter(x=>x.review_pass===true).length,failed:rows.filter(x=>x.state==="FAILED").length,blocked:rows.filter(x=>x.state==="BLOCKED").length,unreviewed_diagnoses:rows.filter(x=>x.diagnosis&&x.cause_accuracy==="UNREVIEWED").length,by_level:byLevel};
 }
+// Repeated infrastructure/review blockage is not a useful precision sample.
+// Preserve every result and pause only before the next case, never abandon an active run.
+function repeatedBlockedCode(rows){
+  const tail=rows.slice(-3);
+  if(tail.length!==3||tail.some(r=>r.state!=="BLOCKED"||typeof r.error_code!=="string"||!r.error_code))return null;
+  return tail.every(r=>r.error_code===tail[0].error_code)?tail[0].error_code:null;
+}
 function candidateScope(candidate,repo,c){
   if(candidate?.repo!==repo||!Array.isArray(candidate.files)||!candidate.files.length||!Array.isArray(candidate.operations))throw Error("BENCHMARK_CANDIDATE_SCOPE_INVALID");
   const allowed=new Set(Object.keys(c.files));for(const f of candidate.files)if(!allowed.has(f))throw Error("BENCHMARK_CANDIDATE_SCOPE_INVALID");
@@ -92,7 +99,7 @@ function createRealDebugBenchmark({workflow,repoPolicy,runtimeEvidence,authority
     exactFixture(repo,initial);
     if(current.snapshot!==repositorySnapshotId(repo,{allowMissingGitMarker:true}))throw Error("REAL_DEBUG_FIXTURE_REVISION_CHANGED");
     const r=await waitAnalysis(current.run_id),d=r.durable;
-    const row={id:c.id,level:c.level,run_id:current.run_id,duration_ms:now()-current.started_at,analysis_state:d.job_status,analysis_step:d.workflow_cursor?.step_id||null,role_invocations:d.role_invocations||[],public_red:false,public_green:false,holdout_green:false,scope_pass:false,source_unchanged:true,repair_pass:false,review_pass:false,cause_accuracy:"UNREVIEWED",state:"BLOCKED"};
+    const row={id:c.id,level:c.level,run_id:current.run_id,duration_ms:now()-current.started_at,stage_timings_ms:{analysis:now()-current.started_at,candidate:null,holdout:null},analysis_state:d.job_status,analysis_step:d.workflow_cursor?.step_id||null,role_invocations:d.role_invocations||[],public_red:false,public_green:false,holdout_green:false,scope_pass:false,source_unchanged:true,repair_pass:false,review_pass:false,cause_accuracy:"UNREVIEWED",state:"BLOCKED"};
     if(d.job_status!=="DONE"){row.error_code=d.last_execution_error||d.last_execution_failure?.code||d.job_status;return row;}
     const inspected=await workflow.inspect(current.run_id),analysis=inspected.artifacts?.analysis?.payload;
     if(!analysis){row.error_code="ANALYSIS_EVIDENCE_MISSING";return row;}
@@ -102,13 +109,14 @@ function createRealDebugBenchmark({workflow,repoPolicy,runtimeEvidence,authority
     // Resume ONLY a positively identified pending work-item step, never a blind
     // repeat of a timed out/unknown candidate call.
     if(current.phase!=="ANALYSIS"&&current.phase!=="PATCH_CONTINUE")throw Error("REAL_DEBUG_PATCH_OUTCOME_UNCERTAIN");
-    let result=null;
+    let result=null;const candidateStartedAt=now();
     for(let n=0;n<12;n++){
       current.phase="PATCH_IN_PROGRESS";save(cp);
       try{result=await workflow.patchCandidate({runId:current.run_id,analysis,repo,selectedPaths:Object.keys(c.files),context:{requirements:task.failure.requirements},task:task.rawRequest});break;}
       catch(e){if(!isRoleWorkItemPending(e?.code))throw e;current.phase="PATCH_CONTINUE";save(cp);}
     }
     if(!result)throw Error("REAL_DEBUG_PATCH_BUDGET_EXHAUSTED");
+    row.stage_timings_ms.candidate=now()-candidateStartedAt;row.duration_ms=now()-current.started_at;
     row.candidate_id=result.candidate?.id||null;row.candidate_hash=result.candidate?.candidate_hash||null;
     row.public_green=measuredTest(result.candidate_verification,c.public_checks);
     const operations=candidateScope(result.candidate,repo,c);row.scope_pass=true;
@@ -120,7 +128,9 @@ function createRealDebugBenchmark({workflow,repoPolicy,runtimeEvidence,authority
     current.phase="HOLDOUT_IN_PROGRESS";save(cp);
     const grade=path.join(base,c.id+"-grade");if(fs.existsSync(grade))throw Error("REAL_DEBUG_GRADE_EXISTS");
     const grading=gradePayload(c,operations);writeNew(grade,grading);repoPolicy.assertRepo(grade);exactFixture(grade,grading);
+    const holdoutStartedAt=now();
     const check=await workflow.verifyReadOnly({repo:grade,selectedPaths:operations.map(x=>x.path),changeScope:operations.map(x=>x.path),task:"Independent contract verification of the already generated candidate; do not modify any files."});
+    row.stage_timings_ms.holdout=now()-holdoutStartedAt;
     row.holdout_verification_id=check.verification_id||null;
     row.holdout_green=measuredTest(check.deterministic_verification,c.holdout_checks);
     row.review_pass=check.verdict==="PASS";row.local_review=check.local_review?.verdict||null;
@@ -148,6 +158,8 @@ function createRealDebugBenchmark({workflow,repoPolicy,runtimeEvidence,authority
           cp.results.push({id:c.id,level:c.level,run_id:current?.run_id||null,state:"BLOCKED",error_code:error,repair_pass:false,review_pass:false,source_unchanged:null,cause_accuracy:"UNREVIEWED"});
         }
         cp.current=null;save(cp);
+        const repeated=repeatedBlockedCode(cp.results);
+        if(repeated&&cp.results.length<cp.case_ids.length){cp.state="PAUSED";cp.error_code="REPEATED_BLOCKED_CASES";cp.pause_reason=repeated;save(cp);return;}
       }
       cp.state="DONE";cp.finished_at=now();save(cp);
     }catch(e){cp.state="INCOMPLETE";cp.error_code=code(e);save(cp);}
@@ -161,10 +173,10 @@ function createRealDebugBenchmark({workflow,repoPolicy,runtimeEvidence,authority
     if(input.benchmark_id&&!resumed)throw Error("REAL_DEBUG_NOT_FOUND");
     if(resumed&&(resumed.corpus_digest!==corpusDigest||resumed.state==="DONE"))throw Error("REAL_DEBUG_RESUME_NOT_APPLICABLE");
     if(recovered.some(x=>x.run_id!==resumed?.current?.run_id))throw Error("REAL_DEBUG_OTHER_RUN_ACTIVE");
-    const cp=resumed?{...resumed,state:"RUNNING",error_code:null}:{schema:SCHEMA,benchmark_id:"realdebug_"+crypto.randomUUID().replaceAll("-",""),corpus_version:corpus.version,corpus_digest:corpusDigest,case_ids:selectCases(input.case_ids),state:"RUNNING",started_at:now(),results:[],current:null};
+    const cp=resumed?{...resumed,state:"RUNNING",error_code:null,pause_reason:null}:{schema:SCHEMA,benchmark_id:"realdebug_"+crypto.randomUUID().replaceAll("-",""),corpus_version:corpus.version,corpus_digest:corpusDigest,case_ids:selectCases(input.case_ids),state:"RUNNING",started_at:now(),results:[],current:null};
     active=cp.benchmark_id;save(cp);void execute(cp);
     return {schema:SCHEMA,benchmark_id:cp.benchmark_id,state:"RUNNING",total:cp.case_ids.length,corpus_digest:corpusDigest};
   }
   return {start,status};
 }
-module.exports={SCHEMA,corpusDigest,selectCases,exactFixture,requestFor,measuredTest,makeSummary,gradePayload,createRealDebugBenchmark};
+module.exports={SCHEMA,corpusDigest,selectCases,exactFixture,requestFor,measuredTest,makeSummary,repeatedBlockedCode,gradePayload,createRealDebugBenchmark};
