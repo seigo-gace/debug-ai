@@ -189,3 +189,15 @@ test("frozen Scout input cannot be used after actual source change",async t=>{
   await assert.rejects(wf().runAnalysis({runId}),/SCOUT_INPUT_CONTEXT_BINDING_MISMATCH/);
   assert.equal(calls,2,"changed source must never dispatch a continuation");
 });
+
+test("real durable canonical ordering does not invalidate the same structured role work item",async t=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),"canonical-work-item-"));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+  const {canonicalJson}=require("../../orchestrator/durable-primitives.js");
+  class CanonicalIO extends IO{writeImmutableRecord(p,r){super.writeImmutableRecord(p,JSON.parse(canonicalJson(r)));}replaceRecord(p,r){super.replaceRecord(p,JSON.parse(canonicalJson(r)));}}
+  const io=new CanonicalIO(),authority=new RunAuthority({runtimeRoot:root,durableIo:io});const run=authority.start({rawRequest:"canonical"});await authority.initializeDurable(run);
+  const calls=[];const wf=()=>createWorkflow({authority:new RunAuthority({runtimeRoot:root,durableIo:io}),aiCore:{call:async(role,prompt)=>{const input=JSON.parse(prompt.user);calls.push(input);return {content:JSON.stringify(input.step===1?{status:"CONTINUE",progress:{evidence_refs:[],remaining_work:"next"}}:{status:"COMPLETE",result:{relevant_files:[],call_path:[],contract_mismatch:null,excluded_files:[],unknowns:[]}})};}}});
+  const args={runId:run.run_id,role:"code_scout",workItemId:"analysis.scout.code_scout",inputBinding:"fixed",structuredTask:true};
+  const first=await wf().continueRoleTask({...args,task:JSON.stringify({z:1,a:{y:2,b:3}})});assert.equal(first.status,"CONTINUE");
+  const next=await wf().continueRoleTask({...args,task:JSON.stringify({a:{b:3,y:2},z:1})});assert.equal(next.status,"COMPLETE");assert.equal(calls.length,2);assert.deepEqual(calls[0].task,calls[1].task);
+  await assert.rejects(wf().continueRoleTask({...args,task:JSON.stringify({a:{b:4,y:2},z:1})}),{code:"INPUT_BINDING_MISMATCH"});assert.equal(calls.length,2);
+});

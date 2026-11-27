@@ -1,7 +1,7 @@
 "use strict";
 const crypto=require("node:crypto");
 const path=require("node:path");
-const {contentHash,WorkflowStepId,StepPhase}=require("../orchestrator/durable-contracts.js");
+const {contentHash,stableStringify,WorkflowStepId,StepPhase}=require("../orchestrator/durable-contracts.js");
 const {buildDownstreamInputBundle}=require("../orchestrator/role-result.js");
 const {assertPromotable}=require("./asset-promotion.js");
 const {initialInvestigationEvidence,createReadOnlyToolRuntime,assertToolResultIntegrity,evidenceProjection,readText,testInventory,localDependencyMap,blockedReadPath}=require("./control/read-only-tool-runtime.js");
@@ -194,7 +194,8 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
   // Six independent role consumers, all using the ONE continuation module.
   // Explicit opt-in until the legacy full workflow passes live semantic acceptance.
   function registeredEvidenceUserPayload({task,step,previousProgress,evidence,validatedRecords,structuredTask=false,criteria=null}){
-    return JSON.stringify(projectRolePrompt({task,step,previousProgress,evidence,views:evidencePromptView(validatedRecords),structuredTask,criteria}));
+    const views=evidencePromptView(validatedRecords);
+    return JSON.stringify(projectRolePrompt({task,step,previousProgress,evidence,views:structuredTask?JSON.parse(stableStringify(views)):views,structuredTask,criteria}));
   }
   function assertHorizontalStageComplete(role,stage){
     if(stage.status==="CONTINUE")throw makeRoleWorkItemContinuePending(role);
@@ -215,6 +216,9 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
     const semanticRequired=requireSemanticProgress||recoveryHooks?.requireSemanticProgress===true;
     if(semanticRequired&&criteria===null)throw new Error("ROLE_PROGRESS_CRITERIA_REQUIRED");
     const evaluator=criteria===null?null:createRoleProgressEvaluator({role,criteria,evidenceRecords:validatedRecords});
+    // A durable envelope canonicalizes object keys. Do not bind the incidental
+    // JSON text order of internal tasks. Literal user strings remain unchanged.
+    if(structuredTask)task=stableStringify(JSON.parse(task));
     const boundTask=contentHash({role,task,evidence,input_binding:inputBinding,...(aiCore.runtime_route_binding?{core_route_binding:aiCore.runtime_route_binding}:{}),...(evaluator?{semantic_contract:evaluator.binding}:{})});
     function validateIntermediate({progress,previousProgress,ctx}){
       if(evaluator){try{return contentHash(evaluator.qualifyProgress({progress,previousProgress:previousProgress||ctx?.previousProgress||{}}))===contentHash(progress);}catch{return false;}}
@@ -262,6 +266,7 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
     authority.loadDurable(runId); // No implicit new run, no approval bypass.
     const validatedRecords=validateEvidenceRecords(evidenceRecords);
     const evidence=mergeBaseEvidenceWithRecords(baseEvidenceIds,validatedRecords);
+    if(structuredTask)task=stableStringify(JSON.parse(task));
     const boundInput=contentHash({role:"diagnoser",task,evidence,input_binding:inputBinding,...(aiCore.runtime_route_binding?{core_route_binding:aiCore.runtime_route_binding}:{})});
     return continueDiagnoserWorkItem({authority,runId,workItemId,inputBinding:boundInput,
       maxStepsPerCall,maxTotalSteps,signal,
@@ -366,7 +371,13 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
     const toolRuntime=makeReadOnlyToolRuntime(targetRepo,runId),durable=Boolean(authority?.durableEnabled?.());
     const binding=durable?localStageBinding({repo:targetRepo,repoSnapshotId:snapshotRepo(targetRepo),inputDigest:inputRecord.payload_digest,runtimeContextTokens:aiCore.runtime_context_tokens??null,runtimeRouteBinding:aiCore.runtime_route_binding??null}):null;
     let contextStage=durable?loadStageRef(runId,"research_context"):null,context,scouts=null;
-    if(contextStage&&!reusableLocalStage(contextStage,binding))contextStage=null;
+    if(contextStage&&!reusableLocalStage(contextStage,binding)){
+      if(durable&&loadStageRef(runId,"scout_input_context")){
+        if(!binding||contextStage.payload.reuse_binding!==binding)throw new Error("RESEARCH_CONTEXT_BINDING_MISMATCH");
+        // Same-run historical context is not a fresh verification. Do not
+        // replace it merely because the model took over 30 minutes.
+      }else contextStage=null;
+    }
     if(contextStage){
       context=contextStage.payload;const currentSnapshot=snapshotRepo(targetRepo);if(currentSnapshot!==context.repo_snapshot_id)throw new Error("DURABLE_REPO_SNAPSHOT_MISMATCH");
     }else{
@@ -425,7 +436,7 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
         const step=role==="code_scout"?WorkflowStepId.CODE_SCOUT:WorkflowStepId.CAUSAL_SCOUT;
         const compactCausal=role==="causal_scout"&&initialScope.mode==="LOCAL_REPRODUCTION"&&recoveryHooks?.enableHorizontalCausalScout!==true;
         const user=JSON.stringify({task:rawRequest,failure,evidence:compactCausal?causalEvidencePromptView(localRecords):evidencePromptView(localRecords),initial_scope:initialScope,dap_hint:dapHint});
-        const scoutBinding=binding?contentHash({binding,role,system,user}):null,saved=durable?loadStageRef(runId,role):null;
+        const scoutBinding=binding?contentHash({binding,role,system,user:JSON.parse(user)}):null,saved=durable?loadStageRef(runId,role):null;
         if(reusableLocalStage(saved,scoutBinding)&&saved.payload.reusable===true){
           const out=saved.payload.result;parseAndValidateRoleOutput(role,JSON.stringify(out.validated_output),{availableEvidenceIds:mergeEvidenceIds(localIds,out.tool_loop?.evidence_ids||[]),strictEvidenceRefs:true});toolEvidenceRecords(out);
           scoutStates.set(role,StepPhase.DONE);runtimeEvidence?.write(runId,"stage_reuse",{stage:role,saved_at:saved.payload.saved_at,new_execution:false});return out;
