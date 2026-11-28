@@ -56,6 +56,28 @@ function qualificationPacket(record){
   exact(record,["id","instruction"],"COMMAND_QUALIFICATION_PROMPT_ONLY_REQUIRED");
   return makePacket({case_id:record.id,instruction:record.instruction,context:"",evidence:[],data_class:"SYNTHETIC_QUALIFICATION"});
 }
+// Only the audited synthetic SFT/recovery candidates are training inputs.
+// Keep reference decisions, corrections, preference labels and source links
+// in the original file. They must never be sent in the teacher request.
+function trainingPacket(record){
+  if(!record||typeof record!=="object"||Array.isArray(record)||
+     !["sft","recovery"].includes(record.dataset_split)||
+     record.training_eligible!=="candidate_only"||
+     record.provenance!=="assistant_authored_synthetic"||
+     record.verification_status!=="authored_and_static_review_not_executed_or_teacher_verified"||
+     record.teacher_model!==null||record.scenario_group!==record.id||
+     !["requirements","orchestration","debugging","efficiency","kb","quality_control","failure_recovery"].includes(record.category)||
+     !Number.isSafeInteger(record.difficulty)||record.difficulty<1||record.difficulty>5||
+     typeof record.instruction!=="string"||typeof record.context!=="string"||
+     !Array.isArray(record.evidence)||record.evidence.length===0)
+    fail("COMMAND_TRAINING_CANDIDATE_REQUIRED");
+  const evidence=record.evidence.map((item,index)=>{
+    exact(item,["kind","observation"],"COMMAND_TRAINING_OBSERVATION_INVALID");
+    if(item.kind!=="synthetic_fixture")fail("COMMAND_TRAINING_OBSERVATION_INVALID");
+    return {evidence_id:record.id+"_obs_"+(index+1),observation:item.observation};
+  });
+  return makePacket({case_id:record.id,instruction:record.instruction,context:record.context,evidence,data_class:"SYNTHETIC_QUALIFICATION"});
+}
 function refs(value,allowed,code){
   const out=strings(value,code,{unique:true});
   if(out.some(x=>!allowed.has(x)))fail(code);
@@ -173,4 +195,4 @@ function createCommandModule({aiCore,allowExternalQualification=false}={}){
   }
   return Object.freeze({status,evaluate});
 }
-module.exports={VERSION,MODES,MODELS,SYSTEM,PEER_SYSTEM,makePacket,qualificationPacket,validateCandidate,createCommandModule};
+module.exports={VERSION,MODES,MODELS,SYSTEM,PEER_SYSTEM,makePacket,qualificationPacket,trainingPacket,validateCandidate,createCommandModule};

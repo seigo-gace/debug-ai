@@ -99,3 +99,20 @@ test("existing Workflow exposes internal module qualification without adding a s
   assert.equal((await w.evaluateCommandModule(request("QWEN_ONLY"))).state,"CANDIDATE_ONLY");
   assert.equal(ai.calls.length,1);
 });
+
+test("audited training candidate retains original context and observations, never leaks reference labels to a model",async()=>{
+  const {trainingPacket}=require("../command-module/index.js");
+  const row={id:"rec-01",scenario_group:"rec-01",category:"failure_recovery",difficulty:3,dataset_split:"recovery",training_eligible:"candidate_only",provenance:"assistant_authored_synthetic",verification_status:"authored_and_static_review_not_executed_or_teacher_verified",teacher_model:null,instruction:"Check the previous request",context:"State unknown",evidence:[{kind:"synthetic_fixture",observation:"Request already issued"}],expected_decision:"REFERENCE_ONLY_DECISION",action_plan:["REFERENCE_ONLY_ACTION"],correction:"REFERENCE_ONLY_CORRECTION",model_selection:{roles:"司令塔"},verification:"REFERENCE_ONLY_VERIFICATION",completion_criteria:"REFERENCE_ONLY_COMPLETION"};
+  const input=trainingPacket(row);
+  assert.deepEqual(input.evidence,[{evidence_id:"rec-01_obs_1",observation:"Request already issued"}]);
+  assert.equal(input.context,row.context);
+  assert.equal(input.data_class,"SYNTHETIC_QUALIFICATION");
+  assert.equal(JSON.stringify(input).includes("REFERENCE_ONLY"),false);
+  const ai=mock({deepseek:plan({evidence_refs:["rec-01_obs_1"]})});
+  const out=await createCommandModule({aiCore:ai,allowExternalQualification:true}).evaluate(request("DEEPSEEK_ONLY",input));
+  assert.equal(out.state,"CANDIDATE_ONLY");
+  assert.equal(JSON.stringify(ai.calls).includes("REFERENCE_ONLY"),false);
+  for(const invalid of [{dataset_split:"evaluation"},{dataset_split:"preference"},{training_eligible:false},{provenance:"real"},{teacher_model:"another"},{scenario_group:"heldout-E01"},{evidence:[{kind:"source",observation:"data"}]}]){
+    assert.throws(()=>trainingPacket({...row,...invalid}),/COMMAND_TRAINING/);
+  }
+});
