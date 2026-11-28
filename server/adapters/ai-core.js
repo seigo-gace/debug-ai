@@ -205,8 +205,9 @@ function reportedGateErrorCode(body){
     return typeof value==="string"&&KNOWN_CORE_GATE_ERROR_CODES.has(value)?value:null;
   }catch{return null;}
 }
-function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=process.env.AI_CORE_API_KEY,fetchImpl=undiciFetch,timeoutMs=600000,maxTransportTimeoutAttempts=2,maxTimeoutRetries,dispatcher,runtimeContextTokens=process.env.DEBUG_AI_CORE_CONTEXT_TOKENS??null,requireRuntimeContextQualification=false,promptCache=true,inputTokenShadow=false,inputTokenShadowRoute="router",observationIntervalMs=60000,modelGateBaseUrls=null,dispatchMode="legacy",scoutPairDispatch=false,adaptiveLocalDiagnosis=false,commandModelGates=null,commandExternalQualification=false}={}){
+function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=process.env.AI_CORE_API_KEY,fetchImpl=undiciFetch,timeoutMs=600000,maxTransportTimeoutAttempts=2,maxTimeoutRetries,dispatcher,runtimeContextTokens=process.env.DEBUG_AI_CORE_CONTEXT_TOKENS??null,requireRuntimeContextQualification=false,promptCache=true,inputTokenShadow=false,inputTokenShadowRoute="router",observationIntervalMs=60000,modelGateBaseUrls=null,dispatchMode="legacy",scoutPairDispatch=false,adaptiveLocalDiagnosis=false,commandModelGates=null,commandExternalQualification=false,parallelTeaching=false}={}){
   const commandOnly=dispatchMode==="command_only";
+  if(typeof parallelTeaching!=="boolean"||(parallelTeaching&&!commandOnly))throw new AiCoreError("TEACHING_PARALLEL_MODE_INVALID","Parallel teaching is limited to standalone command mode");
   if(!baseUrl&&!commandOnly)throw new AiCoreError("AI_CORE_URL_REQUIRED","DEBUG_AI_CORE_URL is required");
   if(!apiKey)throw new AiCoreError("AI_CORE_API_KEY_REQUIRED","AI_CORE_API_KEY is required");
   if(typeof fetchImpl!=="function")throw new AiCoreError("FETCH_REQUIRED","fetch implementation is required");
@@ -247,7 +248,15 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
   const endpoint=commandOnly?null:new URL("/v1/chat/completions",baseUrl).toString();
   const transport=dispatcher||new Agent({headersTimeout:timeoutMs+5000,bodyTimeout:timeoutMs+5000});
   let queueTail=Promise.resolve(),queueTailRole=null,queueDepth=0,openScoutPair=null;
+  const teachingLanes=new Map();
   function reserveDispatch(role,options){
+    if(parallelTeaching){
+      const lane=role==="chat:qwen35"||role==="command:qwen35"?"qwen35":role==="command:deepseek"?"deepseek":null;
+      if(!lane)throw new AiCoreError("TEACHING_PARALLEL_ROLE_INVALID","Unknown standalone teaching lane");
+      const prior=teachingLanes.get(lane);let resolve;
+      const entry={role,tail:new Promise(r=>{resolve=r;})};teachingLanes.set(lane,entry);
+      let released=false;return {previous:prior?.tail||Promise.resolve(),predecessorRole:prior?.role||null,release(){if(released)return;released=true;if(teachingLanes.get(lane)===entry)teachingLanes.delete(lane);resolve();}};
+    }
     const batch=typeof options.scoutBatchId==="string"&&options.scoutBatchId.length>0&&options.scoutBatchId.length<=128?options.scoutBatchId:null;
     const eligible=scoutPairDispatch&&batch!==null&&["code_scout","causal_scout"].includes(role);
     const peer=eligible&&openScoutPair?.batch===batch&&openScoutPair.role!==role?openScoutPair:null;
