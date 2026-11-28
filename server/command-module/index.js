@@ -56,6 +56,12 @@ function makePacket(value){
   });
   return Object.freeze({...value,evidence:Object.freeze(evidence)});
 }
+// Ordinary private input is never implicitly classified as synthetic qualification.
+function localTaskPacket(record){
+  const input=makePacket(record);
+  if(input.data_class!=="LOCAL_ONLY")fail("COMMAND_LOCAL_TASK_REQUIRED");
+  return input;
+}
 // The qualification caller reads ONLY prompts_only.jsonl. A reference answer,
 // rubric, expected decision, or any extra field is rejected, not projected away.
 function qualificationPacket(record){
@@ -201,4 +207,4 @@ function createCommandModule({aiCore,allowExternalQualification=false,standalone
   }
   return Object.freeze({status,evaluate});
 }
-module.exports={VERSION,MODES,MODELS,SYSTEM,PEER_SYSTEM,STANDALONE_SYSTEM,STANDALONE_PEER_SYSTEM,makePacket,qualificationPacket,trainingPacket,validateCandidate,createCommandModule};
+module.exports={VERSION,MODES,MODELS,SYSTEM,PEER_SYSTEM,STANDALONE_SYSTEM,STANDALONE_PEER_SYSTEM,makePacket,localTaskPacket,qualificationPacket,trainingPacket,validateCandidate,createCommandModule};
