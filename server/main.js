@@ -90,7 +90,7 @@ const chatOrigin=process.env.DEBUG_AI_CHAT_ORIGIN;
 const chat=chatEnabled?createChatHandler({aiCore,runtimeRoot,token:process.env.DEBUG_AI_CHAT_ACCESS_TOKEN,access:chatAccess?{origin:chatOrigin,verify:createAccessVerifier({team:process.env.DEBUG_AI_CHAT_ACCESS_TEAM,audience:process.env.DEBUG_AI_CHAT_ACCESS_AUD,ownerEmail:process.env.DEBUG_AI_CHAT_OWNER_EMAIL})}:null}):null;
 // Only the chat handler is reachable through the public-facing origin listener;
 // the main DebugAI HTTP APIs are not mounted on it. Same process/model queue.
-const chatPort=chatAccess?envInt("DEBUG_AI_CHAT_PORT",8788,{min:1024,max:65535}):null;
+const chatPort=chatAccess?envInt("DEBUG_AI_CHAT_PORT",18788,{min:1024,max:65535}):null;
 if(chatAccess&&chatPort===port)throw new Error("CHAT_PORT_CONFLICT");
 const chatServer=chatAccess?http.createServer(async(req,res)=>{try{const url=new URL(req.url,"http://chat.local");if(!await chat(req,res,url)){res.writeHead(404);res.end();}}catch{if(!res.headersSent)res.writeHead(500);res.end();}}):null;
 const server=createServer({workflow,gitOps,githubCommand:serverCommand,serverCommand,host,port,chat:chatAccess?null:chat});
