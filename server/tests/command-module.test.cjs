@@ -130,3 +130,19 @@ test("standalone teacher and student share the independent prompt without assumi
   await createCommandModule({aiCore:legacy}).evaluate(request("QWEN_ONLY"));
   assert.ok(legacy.calls[0].system.includes("Existing Workflow,"));
 });
+
+test("ordinary standalone tasks preserve context and evidence without external relabeling",async()=>{
+  const {localTaskPacket}=require("../command-module/index.js");
+  const local=localTaskPacket({case_id:"private_task",instruction:"Check existing task",context:"Continue the same objective",evidence:[{evidence_id:"e1",observation:"Test failed"}],data_class:"LOCAL_ONLY"});
+  assert.equal(local.context,"Continue the same objective");
+  assert.throws(()=>localTaskPacket({...local,data_class:"SYNTHETIC_QUALIFICATION"}),/COMMAND_LOCAL_TASK_REQUIRED/);
+  assert.throws(()=>localTaskPacket({...local,teacher_answer:"x"}),/COMMAND_INPUT_SCHEMA_INVALID/);
+  const ai=mock({qwen35:plan({evidence_refs:["e1"]}),deepseek:peer()});
+  const m=createCommandModule({aiCore:ai,standalone:true,allowExternalQualification:true});
+  const result=await m.evaluate(request("QWEN_ONLY",local));
+  assert.equal(result.state,"CANDIDATE_ONLY");
+  assert.deepEqual(JSON.parse(ai.calls[0].user).task,local);
+  const blocked=await m.evaluate(request("COOPERATIVE",local));
+  assert.equal(blocked.reason,"COMMAND_EXTERNAL_DATA_NOT_ADMITTED");
+  assert.deepEqual(ai.calls.map(x=>x.model),["qwen35"]);
+});
