@@ -91,7 +91,7 @@ const workflow=createWorkflow({aiCore,externalReview,evidenceSearch,runtimeEvide
 const host=process.env.DEBUG_AI_HOST||"127.0.0.1",port=Number(process.env.DEBUG_AI_PORT||8787);
 const chatEnabled=process.env.DEBUG_AI_CHAT_ENABLED==="true",chatAccess=chatEnabled&&process.env.DEBUG_AI_CHAT_AUTH_MODE==="cloudflare_access";
 const chatOrigin=process.env.DEBUG_AI_CHAT_ORIGIN;
-const chat=chatEnabled?createChatHandler({aiCore,runtimeRoot,teachingBudgets,token:process.env.DEBUG_AI_CHAT_ACCESS_TOKEN,access:chatAccess?{origin:chatOrigin,verify:createAccessVerifier({team:process.env.DEBUG_AI_CHAT_ACCESS_TEAM,audience:process.env.DEBUG_AI_CHAT_ACCESS_AUD,ownerEmail:process.env.DEBUG_AI_CHAT_OWNER_EMAIL})}:null}):null;
+const chat=chatEnabled?createChatHandler({aiCore,runtimeRoot,teachingBudgets,token:process.env.DEBUG_AI_CHAT_ACCESS_TOKEN,access:chatAccess?{origin:chatOrigin,verify:createAccessVerifier({team:process.env.DEBUG_AI_CHAT_ACCESS_TEAM,audience:process.env.DEBUG_AI_CHAT_ACCESS_AUD,ownerEmail:process.env.DEBUG_AI_CHAT_OWNER_EMAIL})}:null,serverCommand}):null;
 // Only the chat handler is reachable through the public-facing origin listener;
 // the main DebugAI HTTP APIs are not mounted on it. Same process/model queue.
 const chatPort=chatAccess?envInt("DEBUG_AI_CHAT_PORT",18788,{min:1024,max:65535}):null;
