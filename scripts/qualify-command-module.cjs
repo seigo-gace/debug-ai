@@ -1,15 +1,14 @@
 #!/usr/bin/env node
 "use strict";
 
-// Explicit one-case qualification of the module in the existing Workflow.
+// Explicit one-case standalone qualification of the existing command module.
 // Evaluation reads only prompts; training projects only audited observations.
 // Reference labels never enter a model request. Does not run real-debug suites, start a server,
 // mutate source, train weights, or publish raw model reasoning.
 const fs=require("node:fs");
 const {createHash}=require("node:crypto");
 const {createAiCoreAdapter}=require("../server/adapters/ai-core.js");
-const {createWorkflow}=require("../server/workflow.js");
-const {qualificationPacket,trainingPacket,MODES}=require("../server/command-module/index.js");
+const {createCommandModule,qualificationPacket,trainingPacket,MODES}=require("../server/command-module/index.js");
 function integer(value,label){
   const n=Number(value);if(!Number.isSafeInteger(n)||n<1)throw new Error(label);return n;
 }
@@ -28,13 +27,12 @@ async function main(){
   if(qwenBudget!=="0")maxTokensByModel.qwen35=integer(qwenBudget,"QWEN_BUDGET_INVALID");
   if(deepseekBudget!=="0")maxTokensByModel.deepseek=integer(deepseekBudget,"DEEPSEEK_BUDGET_INVALID");
   const aiCore=createAiCoreAdapter({
-    dispatchMode:"model_gates",
-    modelGateBaseUrls:{coder:process.env.DEBUG_AI_CORE_GATE_CODER_URL,qwen3:process.env.DEBUG_AI_CORE_GATE_QWEN3_URL,granite:process.env.DEBUG_AI_CORE_GATE_GRANITE_URL,ministral:process.env.DEBUG_AI_CORE_GATE_MINISTRAL_URL},
+    dispatchMode:"command_only",
     commandModelGates:JSON.parse(process.env.DEBUG_AI_COMMAND_MODEL_GATES||"{}"),
     commandExternalQualification
   });
-  const workflow=createWorkflow({aiCore,commandExternalQualification});
-  const result=await workflow.evaluateCommandModule({packet,mode,maxTokensByModel,deadlineAt:Date.now()+integer(wallMs,"COMMAND_WALL_BUDGET_INVALID")});
+  const commandModule=createCommandModule({aiCore,allowExternalQualification:commandExternalQualification});
+  const result=await commandModule.evaluate({packet,mode,maxTokensByModel,deadlineAt:Date.now()+integer(wallMs,"COMMAND_WALL_BUDGET_INVALID")});
   console.log(JSON.stringify({prompt_file_sha256:createHash("sha256").update(raw).digest("hex"),input_split:training?"TRAINING_CANDIDATE":"HELDOUT_PROMPT_ONLY",...result}));
   if(result.state==="BLOCKED"||result.state==="REVIEW_REQUIRED")process.exitCode=2;
 }
