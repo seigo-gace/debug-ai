@@ -5,8 +5,9 @@ function json(res,status,body){res.writeHead(status,{"content-type":"application
 function error(code,status=400){const e=new Error(code);e.code=code;e.status=status;throw e;}
 async function body(req){let n=0,parts=[];for await(const chunk of req){n+=chunk.length;if(n>MAX_BODY)error("CHAT_INPUT_TOO_LARGE",413);parts.push(chunk);}try{return JSON.parse(Buffer.concat(parts));}catch{error("CHAT_INVALID_JSON");}}
 function equal(a,b){const x=Buffer.from(a),y=Buffer.from(b);return x.length===y.length&&crypto.timingSafeEqual(x,y);}
-function createChatHandler({aiCore,runtimeRoot,token}){
-  if(typeof token!=="string"||token.length<32)throw new Error("CHAT_ACCESS_TOKEN_REQUIRED");
+function createChatHandler({aiCore,runtimeRoot,token,access=null}){
+  if(access!==null&&(typeof access.verify!=="function"||!/^https:\/\/[a-z0-9.-]+$/.test(access.origin||"")))throw new Error("CHAT_ACCESS_CONFIG_INVALID");
+  if(!access&&(typeof token!=="string"||token.length<32))throw new Error("CHAT_ACCESS_TOKEN_REQUIRED");
   if(!aiCore.commandModelStatus().configured_models.includes("qwen35"))throw new Error("CHAT_QWEN_GATE_REQUIRED");
   const dir=path.join(runtimeRoot,"chat");fs.mkdirSync(dir,{mode:0o700,recursive:true});
   const stat=fs.lstatSync(dir);if(!stat.isDirectory()||stat.isSymbolicLink()||(stat.mode&0o077))throw new Error("CHAT_STORE_PERMISSIONS_INVALID");
@@ -24,13 +25,19 @@ function createChatHandler({aiCore,runtimeRoot,token}){
   const staticFiles={"/chat":["index.html","text/html"],"/chat/ui.js":["ui.js","text/javascript"],"/chat/ui.css":["ui.css","text/css"]};
   return async function chat(req,res,url){
     const p=url.pathname;
-    if(!Object.hasOwn(staticFiles,p)&&p!=="/chat/api"&&!p.startsWith("/chat/api/"))return false;
+    if(!Object.hasOwn(staticFiles,p)&&p!=="/chat/api"&&!p.startsWith("/chat/api/")&&!(access&&p==="/"))return false;
     try{
+      if(access){
+        if(!await access.verify(req))error("CHAT_AUTH_REQUIRED",401);
+        if(req.headers.host!==new URL(access.origin).host)error("CHAT_HOST_DENIED",403);
+        if(!["GET","HEAD"].includes(req.method)&&req.headers.origin!==access.origin)error("CHAT_ORIGIN_DENIED",403);
+        if(p==="/"&&req.method==="GET"){res.writeHead(302,{location:"/chat","cache-control":"no-store"});res.end();return true;}
+      }
       if(req.method==="GET"&&Object.hasOwn(staticFiles,p)){
         const [name,type]=staticFiles[p];res.writeHead(200,{"content-type":type+"; charset=utf-8","cache-control":"no-store","x-content-type-options":"nosniff","referrer-policy":"no-referrer","content-security-policy":"default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"});res.end(fs.readFileSync(path.join(__dirname,name)));return true;
       }
-      if(!equal(String(req.headers.authorization||""),"Bearer "+token))error("CHAT_AUTH_REQUIRED",401);
-      if(req.headers.origin){const expected=(req.socket.encrypted?"https://":"http://")+req.headers.host;if(req.headers.origin!==expected)error("CHAT_ORIGIN_DENIED",403);}
+      if(!access&&!equal(String(req.headers.authorization||""),"Bearer "+token))error("CHAT_AUTH_REQUIRED",401);
+      if(!access&&req.headers.origin){const expected=(req.socket.encrypted?"https://":"http://")+req.headers.host;if(req.headers.origin!==expected)error("CHAT_ORIGIN_DENIED",403);}
       if(req.method==="GET"&&p==="/chat/api"){
         const items=fs.readdirSync(dir).filter(n=>n.endsWith(".json")&&ID.test(n.slice(0,-5))).map(n=>{const {id,title,updated_at,archived}=read(n.slice(0,-5));return {id,title,updated_at,archived:!!archived};}).sort((a,b)=>b.updated_at.localeCompare(a.updated_at));
         json(res,200,{items,active:active?.id||null});return true;
@@ -66,14 +73,17 @@ function createChatHandler({aiCore,runtimeRoot,token}){
         const prior=item.turns.find(t=>t.id===input.turn_id);if(prior){if(prior.user!==input.text)error("CHAT_TURN_CONFLICT",409);json(res,200,item);return true;}
         const controller=new AbortController();active={id:item.id,turnId:input.turn_id,controller,preview:""};
         const turn={id:input.turn_id,user:input.text,state:"running"};item.turns.push(turn);item.updated_at=new Date().toISOString();
+        try{save(item);}catch(e){active=null;throw e;}
+        const run=async()=>{
         try{
-          save(item);
           const messages=item.turns.filter(t=>t.state==="complete").flatMap(t=>[{role:"user",content:t.user},{role:"assistant",content:t.answer}]);messages.push({role:"user",content:turn.user});
           const result=await aiCore.callChatModel({messages,maxTokens:input.max_tokens??256,deadlineAt:Date.now()+600000,signal:controller.signal,onDelta:delta=>{active.preview+=delta;}});
           Object.assign(turn,{state:result.finish_reason==="length"?"partial":"complete",answer:result.content,model_id:result.model_id,queue_wait_ms:result.queue_wait_ms,elapsed_ms:result.elapsed_ms});
         }catch(e){turn.state=controller.signal.aborted?"cancelled":"failed";if(active.preview)turn.answer=active.preview;turn.error=/^[A-Z0-9_]{1,100}$/.test(e.code||"")?e.code:"CHAT_INFERENCE_FAILED";}
         finally{try{item.updated_at=new Date().toISOString();save(item);}finally{active=null;}}
-        json(res,200,item);return true;
+        };
+        if(access){void run().catch(()=>console.error("CHAT_PERSISTENCE_FAILED"));json(res,202,item);return true;}
+        await run();json(res,200,item);return true;
       }
       error("CHAT_ROUTE_NOT_FOUND",404);
     }catch(e){json(res,e.status||500,{error:/^[A-Z0-9_]{1,100}$/.test(e.code||"")?e.code:"CHAT_INTERNAL_ERROR"});return true;}
