@@ -7,6 +7,7 @@ const OUT_SCHEMA="debugai.teacher-training-candidate/v1";
 const TEACHER="deepseek/deepseek-v4.1-flash-1017";
 const STUDENT="Qwen/Qwen3.5-4B";
 const fail=code=>{const e=new Error(code);e.code=code;throw e;};
+const clip=(text,max)=>{if(typeof text!=="string")return"";const t=text.trim();return t.length<=max?t:t.slice(0,max-1)+"…";};
 function str(v,code){if(typeof v!=="string"||!v.trim())fail(code);return v.trim();}
 function lines(text,max=6){return text.split(/[。\n]/).map(s=>s.trim()).filter(Boolean).slice(0,max);}
 function requireRecord(record){
@@ -17,8 +18,8 @@ function requireRecord(record){
 function taskPacket(record,{recovery=false}={}){
   requireRecord(record);
   const case_id=recovery?`itc-rec-${record.topic}-${record.id}`:`itc-${record.topic}-${record.id}`;
-  let instruction=str(record.teacher_lesson.exercise||selectTopic(record.topic).task,"TEACHING_DISTILL_INSTRUCTION_MISSING");
-  let context=[record.teacher_lesson.lesson,record.teacher_lesson.criteria,`provenance:interactive_kb/${record.id}`,record.batch_id?`batch:${record.batch_id}`:null,record.chat_id?`chat:${record.chat_id}`:null].filter(Boolean).join("\n");
+  let instruction=clip(str(record.teacher_lesson.exercise||selectTopic(record.topic).task,"TEACHING_DISTILL_INSTRUCTION_MISSING"),480);
+  let context=clip([record.teacher_lesson.lesson,record.teacher_lesson.criteria,`provenance:interactive_kb/${record.id}`,record.batch_id?`batch:${record.batch_id}`:null,record.chat_id?`chat:${record.chat_id}`:null].filter(Boolean).join("\n"),1400);
   const evidence=[];
   if(record.sandbox_evidence?.pass===true){
     const s=record.sandbox_evidence;
@@ -30,9 +31,9 @@ function taskPacket(record,{recovery=false}={}){
   }else{
     fail("TEACHING_DISTILL_EVIDENCE_MISSING");
   }
-  if(recovery&&record.student_answer?.answer){
-    context+="\nprior_student_answer:"+record.student_answer.answer.slice(0,2000);
-    if(record.teacher_review?.feedback)context+="\nteacher_feedback:"+record.teacher_review.feedback.slice(0,2000);
+  if(recovery){
+    context=clip(context+"\nprior_student_answer_digest:"+contentHash(record.student_answer||{}),1600);
+    if(record.teacher_review?.feedback)context=clip(context+"\nteacher_feedback:"+clip(record.teacher_review.feedback,500),1900);
   }
   const packet=makePacket({case_id,instruction,context,evidence,data_class:"SYNTHETIC_QUALIFICATION"});
   return {case_id,packet};
@@ -44,13 +45,13 @@ function assistantSft(record,{case_id,packet}){
   if(!student||typeof student.answer!=="string")fail("TEACHING_DISTILL_STUDENT_MISSING");
   const steps=lines(record.teacher_review?.feedback||student.answer,6);
   const plan={disposition:"PLAN",
-    expected_decision:str(student.answer,"TEACHING_DISTILL_STUDENT_MISSING").slice(0,2000),
-    action_plan:steps.length?steps:[str(student.answer,"TEACHING_DISTILL_STUDENT_MISSING").slice(0,240)],
+    expected_decision:clip(str(student.answer,"TEACHING_DISTILL_STUDENT_MISSING"),900),
+    action_plan:steps.length?steps.map(s=>clip(s,320)).slice(0,5):[clip(str(student.answer,"TEACHING_DISTILL_STUDENT_MISSING"),240)],
     model_selection:{roles:[],policy:"Interactive teaching student transcript. Sandbox-verified code task only."},
     tool_selection:"なし",
     correction:record.teacher_review?.correction?.trim()?record.teacher_review.correction:"修正不要。",
     verification:`Sandbox executed: pass=${record.sandbox_evidence.pass}, assertion_count=${record.sandbox_evidence.assertion_count}.`,
-    completion_criteria:str(record.teacher_lesson.criteria,"TEACHING_DISTILL_CRITERIA_MISSING"),
+    completion_criteria:clip(str(record.teacher_lesson.criteria,"TEACHING_DISTILL_CRITERIA_MISSING"),900),
     evidence_refs:[case_id+"_obs_1"],
     unknowns:[]};
   validateCandidate(JSON.stringify(plan),packet);
@@ -59,17 +60,17 @@ function assistantSft(record,{case_id,packet}){
 function assistantRecovery(record,{case_id,packet}){
   requireRecord(record);
   if(record.verdict!=="REVISE_REQUIRED"||record.teacher_review?.verdict!=="REVISE")fail("TEACHING_DISTILL_RECOVERY_INELIGIBLE");
-  const correction=str(record.teacher_review.correction,"TEACHING_DISTILL_CORRECTION_MISSING");
+  const correction=clip(str(record.teacher_review.correction,"TEACHING_DISTILL_CORRECTION_MISSING"),420);
   const plan={disposition:"PLAN",
-    expected_decision:correction.slice(0,2000),
-    action_plan:lines(correction,8).length?lines(correction,8):[correction.slice(0,240)],
+    expected_decision:correction,
+    action_plan:lines(correction,4).map(s=>clip(s,200)),
     model_selection:{roles:[],policy:"Follow teacher correction after failed interactive attempt; no execution assumed."},
     tool_selection:"なし",
     correction:correction,
-    verification:str(record.teacher_review.feedback||correction,"TEACHING_DISTILL_FEEDBACK_MISSING").slice(0,1500),
-    completion_criteria:str(record.teacher_lesson.criteria,"TEACHING_DISTILL_CRITERIA_MISSING"),
+    verification:clip(str(record.teacher_review.feedback||correction,"TEACHING_DISTILL_FEEDBACK_MISSING"),420),
+    completion_criteria:clip(str(record.teacher_lesson.criteria,"TEACHING_DISTILL_CRITERIA_MISSING"),420),
     evidence_refs:[case_id+"_obs_1"],
-    unknowns:["Prior attempt did not satisfy teacher criteria; independent execution may still be missing."]};
+    unknowns:["Prior attempt incomplete; see interactive_kb record for full transcript."]};
   validateCandidate(JSON.stringify(plan),packet);
   return plan;
 }
