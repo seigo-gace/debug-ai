@@ -1,12 +1,14 @@
 "use strict";
 const fs=require("node:fs"),path=require("node:path"),crypto=require("node:crypto");
 const {teachingTopics,selectTopic,canTeach,testSyntheticCode,runTeaching}=require("../command-module/teaching.js");
+const {runDevelopTurn}=require("./develop-lane.js");
+const turnMode=t=>t.mode==="teaching"?"teaching":(t.interaction_mode==="develop"||t.mode==="develop")?"develop":"converse";
 const MAX_BODY=128*1024,ID=/^[a-f0-9-]{36}$/;
 function json(res,status,body){res.writeHead(status,{"content-type":"application/json; charset=utf-8","cache-control":"no-store","x-content-type-options":"nosniff"});res.end(JSON.stringify(body));}
 function error(code,status=400){const e=new Error(code);e.code=code;e.status=status;throw e;}
 async function body(req){let n=0,parts=[];for await(const chunk of req){n+=chunk.length;if(n>MAX_BODY)error("CHAT_INPUT_TOO_LARGE",413);parts.push(chunk);}try{return JSON.parse(Buffer.concat(parts));}catch{error("CHAT_INVALID_JSON");}}
 function equal(a,b){const x=Buffer.from(a),y=Buffer.from(b);return x.length===y.length&&crypto.timingSafeEqual(x,y);}
-function createChatHandler({aiCore,runtimeRoot,token,access=null,teachingBudgets=null,teachingSandbox=null}){
+function createChatHandler({aiCore,runtimeRoot,token,access=null,teachingBudgets=null,teachingSandbox=null,serverCommand=null}){
   if(access!==null&&(typeof access.verify!=="function"||!/^https:\/\/[a-z0-9.-]+$/.test(access.origin||"")))throw new Error("CHAT_ACCESS_CONFIG_INVALID");
   if(!access&&(typeof token!=="string"||token.length<32))throw new Error("CHAT_ACCESS_TOKEN_REQUIRED");
   if(!aiCore.commandModelStatus().configured_models.includes("qwen35"))throw new Error("CHAT_QWEN_GATE_REQUIRED");
@@ -66,16 +68,16 @@ function createChatHandler({aiCore,runtimeRoot,token,access=null,teachingBudgets
       if(req.method==="POST"&&p==="/chat/api"){
         const input=await body(req);
         if(!input||typeof input.text!=="string"||!input.text.trim()||!ID.test(input.turn_id||"")||(input.id!=null&&!ID.test(input.id)))error("CHAT_INPUT_INVALID");
-        const mode=input.mode??"chat";if(!["chat","teaching"].includes(mode))error("CHAT_MODE_INVALID");
+        const mode=(input.mode==null||input.mode==="chat")?"converse":input.mode;if(!["converse","develop","teaching"].includes(mode))error("CHAT_MODE_INVALID");
         if(mode==="teaching"){if(!canTeach(aiCore)||!teachingBudgets)error("TEACHING_DEEPSEEK_NOT_CONFIGURED",503);try{selectTopic(input.topic);}catch{error("TEACHING_TOPIC_INVALID");}if(input.text!==teachingTopics().find(x=>x.id===input.topic).label)error("TEACHING_SYNTHETIC_TOPIC_REQUIRED");}
         if(active)error("CHAT_BUSY",409);
         const existing=input.id?read(input.id):null;
         const item=existing||{id:input.turn_id,title:input.text.trim().slice(0,80),updated_at:new Date().toISOString(),turns:[]};
-        if(!existing&&fs.existsSync(file(item.id))){const prev=read(item.id);const t=prev.turns.find(t=>t.id===input.turn_id);if(t&&t.user===input.text&&(t.mode??"chat")===mode&&(mode!=="teaching"||t.topic===input.topic)){json(res,200,prev);return true;}error("CHAT_TURN_CONFLICT",409);}
+        if(!existing&&fs.existsSync(file(item.id))){const prev=read(item.id);const t=prev.turns.find(t=>t.id===input.turn_id);if(t&&t.user===input.text&&turnMode(t)===mode&&(mode!=="teaching"||t.topic===input.topic)){json(res,200,prev);return true;}error("CHAT_TURN_CONFLICT",409);}
         if(item.archived)error("CHAT_ARCHIVED",409);
-        const prior=item.turns.find(t=>t.id===input.turn_id);if(prior){if(prior.user!==input.text||(prior.mode??"chat")!==mode||(mode==="teaching"&&prior.topic!==input.topic))error("CHAT_TURN_CONFLICT",409);json(res,200,item);return true;}
+        const prior=item.turns.find(t=>t.id===input.turn_id);if(prior){if(prior.user!==input.text||turnMode(prior)!==mode||(mode==="teaching"&&prior.topic!==input.topic))error("CHAT_TURN_CONFLICT",409);json(res,200,item);return true;}
         const controller=new AbortController();active={id:item.id,turnId:input.turn_id,controller,preview:""};
-        const turn={id:input.turn_id,user:input.text,state:"running",...(mode==="teaching"?{mode,topic:input.topic,teaching:{stages:[],phase:null,kb_status:"NOT_CONNECTED",weight_update:false}}:{})};item.turns.push(turn);item.updated_at=new Date().toISOString();
+        const turn={id:input.turn_id,user:input.text,state:"running",interaction_mode:mode,...(mode==="teaching"?{mode,topic:input.topic,teaching:{stages:[],phase:null,kb_status:"NOT_CONNECTED",weight_update:false}}:{})};item.turns.push(turn);item.updated_at=new Date().toISOString();
         try{save(item);}catch(e){active=null;throw e;}
         const run=async()=>{
         try{
@@ -84,8 +86,15 @@ function createChatHandler({aiCore,runtimeRoot,token,access=null,teachingBudgets
             Object.assign(turn,{state:"complete",teaching:result,answer:result.verdict==="TEACHER_PASS"?"教師評価PASS（"+result.verification+"）。KB未接続・重み更新なし。":"学習課題の再検証が必要です（"+result.verdict+"）。"});
             return;
           }
-          const messages=item.turns.filter(t=>t.state==="complete"&&t.mode!=="teaching").flatMap(t=>[{role:"user",content:t.user},{role:"assistant",content:t.answer}]);messages.push({role:"user",content:turn.user});
-          const result=await aiCore.callChatModel({messages,maxTokens:input.max_tokens??256,deadlineAt:Date.now()+600000,signal:controller.signal,onDelta:delta=>{active.preview+=delta;}});
+          if(mode==="develop"){
+            active.preview="Contaboサーバー状態を読み取り中...\n";
+            const commandMode=typeof input.command_mode==="string"&&["QWEN_ONLY","AUTO"].includes(input.command_mode)?input.command_mode:"QWEN_ONLY";
+            const result=await runDevelopTurn({aiCore,serverCommand,instruction:turn.user,commandMode,deadlineAt:Date.now()+600000,signal:controller.signal});
+            Object.assign(turn,{state:result.finish_reason==="length"?"partial":"complete",answer:result.content,model_id:result.model_id,develop_meta:result.develop,queue_wait_ms:null,elapsed_ms:null});
+            active.preview=result.content;return;
+          }
+          const messages=item.turns.filter(t=>t.state==="complete"&&turnMode(t)==="converse").flatMap(t=>[{role:"user",content:t.user},{role:"assistant",content:t.answer}]);messages.push({role:"user",content:turn.user});
+          const result=await aiCore.callChatModel({messages,maxTokens:input.max_tokens??256,deadlineAt:Date.now()+600000,signal:controller.signal,chatMode:"converse",onDelta:delta=>{active.preview+=delta;}});
           Object.assign(turn,{state:result.finish_reason==="length"?"partial":"complete",answer:result.content,model_id:result.model_id,queue_wait_ms:result.queue_wait_ms,elapsed_ms:result.elapsed_ms});
         }catch(e){turn.state=controller.signal.aborted?"cancelled":"failed";if(active.preview)turn.answer=active.preview;turn.error=/^[A-Z0-9_]{1,100}$/.test(e.code||"")?e.code:"CHAT_INFERENCE_FAILED";}
         finally{try{item.updated_at=new Date().toISOString();save(item);}finally{active=null;}}
