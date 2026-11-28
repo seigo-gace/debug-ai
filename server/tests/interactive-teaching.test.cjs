@@ -47,3 +47,13 @@ test("chat teaching route persists actual stages and never submits arbitrary cha
  const read=await(await fetch(base+"/chat/api/"+item.id,{headers})).json();assert.equal(read.turns[0].teaching.stages[0].output.lesson,teacher.lesson);
  const normal=await(await post({id:item.id,turn_id:crypto.randomUUID(),text:"normal"})).json();assert.equal(normal.turns[1].answer,"ordinary");
 });
+
+test("existing develop mode remains local and independently callable after teaching integration",async t=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),"teaching-develop-")),token=crypto.randomBytes(24).toString("hex");let observations=0,calls=0;
+ const aiCore={commandModelStatus:()=>({configured_models:["qwen35","deepseek"],external_qualification_enabled:true}),callCommandModel:async(model,opts)=>{calls++;assert.equal(model,"qwen35");assert.equal(opts.dataClass,"LOCAL_ONLY");return{model_id:QWEN_MODEL,content:JSON.stringify({disposition:"PLAN",expected_decision:"inspect",action_plan:["inspect"],model_selection:{roles:[],policy:"local"},tool_selection:"read",correction:"none",verification:"check",completion_criteria:"proof",evidence_refs:[],unknowns:[]})};}};
+ const handler=createChatHandler({runtimeRoot:root,token,aiCore,teachingBudgets:{qwen35:512,deepseek:1024},serverCommand:{execute:async()=>{observations++;return{status:"PASS"};}}});
+ const server=http.createServer(async(req,res)=>{if(!await handler(req,res,new URL(req.url,"http://localhost")))res.writeHead(404).end();});
+ await new Promise(r=>server.listen(0,"127.0.0.1",r));t.after(async()=>{await new Promise(r=>server.close(r));fs.rmSync(root,{recursive:true,force:true});});
+ const res=await fetch("http://127.0.0.1:"+server.address().port+"/chat/api",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({text:"private local investigation",mode:"develop",turn_id:crypto.randomUUID()})});
+ const data=await res.json();assert.equal(res.status,200);assert.equal(data.turns[0].state,"complete");assert.equal(data.turns[0].interaction_mode,"develop");assert.equal(observations,4);assert.equal(calls,1);
+});
