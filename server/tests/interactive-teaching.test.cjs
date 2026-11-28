@@ -57,3 +57,25 @@ test("existing develop mode remains local and independently callable after teach
  const res=await fetch("http://127.0.0.1:"+server.address().port+"/chat/api",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({text:"private local investigation",mode:"develop",turn_id:crypto.randomUUID()})});
  const data=await res.json();assert.equal(res.status,200);assert.equal(data.turns[0].state,"complete");assert.equal(data.turns[0].interaction_mode,"develop");assert.equal(observations,4);assert.equal(calls,1);
 });
+
+
+test("parallel topics overlap, retain separate stages and one failed topic does not erase another",async()=>{
+ const {runTeachingBatch}=require("../command-module/teaching.js");
+ let release,entered;const held=new Promise(r=>release=r),start=new Promise(r=>entered=r);const events=[];
+ const aiCore={commandModelStatus:()=>({configured_models:["qwen35","deepseek"],external_qualification_enabled:true}),callCommandModel:async(model,o)=>{
+  const u=JSON.parse(o.user);
+  if(model==="deepseek"&&u.task.includes("メモアプリ"))throw Object.assign(Error(),{code:"FIXTURE_FAILURE"});
+  if(model==="deepseek"&&!u.teaching)return{model_id:TEACHER_MODEL_ID,content:JSON.stringify(teacher),telemetry:{cost:0.001}};
+  if(model==="qwen35"&&u.task.includes("在庫照会")){entered();await held;}
+  return{model_id:model==="deepseek"?TEACHER_MODEL_ID:QWEN_MODEL,content:JSON.stringify(model==="deepseek"?review("PASS"):{answer:"回答",verification:"確認"}),telemetry:{cost:0.001}};
+ }};
+ const p=runTeachingBatch({topics:["architecture","requirements","debugging"],aiCore,deadlineAt:Date.now()+10000,maxConcurrent:2,onTopic:e=>events.push(e)});
+ await start;await new Promise(r=>setImmediate(r));assert.ok(events.some(x=>x.topic==="requirements"&&x.state==="failed"));assert.ok(events.some(x=>x.topic==="debugging"&&x.state==="complete"));
+ release();const result=await p;assert.deepEqual(result.map(x=>x.state),["complete","failed","complete"]);
+ assert.equal(result[0].result.topic,"architecture");assert.equal(result[2].result.topic,"debugging");
+});
+test("parallel batch preserves pending topics when admission closes",async()=>{
+ const {runTeachingBatch}=require("../command-module/teaching.js");const aiCore=core([]);
+ const out=await runTeachingBatch({topics:["architecture","requirements"],aiCore,deadlineAt:Date.now()+10000,canStart:()=>false});
+ assert.deepEqual(out.map(x=>x.state),["pending","pending"]);assert.equal(aiCore.calls.length,0);
+});
