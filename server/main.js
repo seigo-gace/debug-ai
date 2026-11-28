@@ -55,11 +55,15 @@ const coreGateUrls=coreGateDispatchMode==="model_gates"?{
 const adaptiveFlag=process.env.DEBUG_AI_ADAPTIVE_LOCAL_DIAGNOSIS||"false",scoutPairFlag=process.env.DEBUG_AI_SCOUT_PAIR_COMPARISON||"false";
 if(![adaptiveFlag,scoutPairFlag].every(v=>["true","false"].includes(v)))throw new Error("DEBUG_AI_PERFORMANCE_MODE_INVALID");
 const adaptiveLocalDiagnosis=adaptiveFlag==="true";
+const chatGateConfig=process.env.DEBUG_AI_CHAT_ENABLED==="true"?JSON.parse(process.env.DEBUG_AI_COMMAND_MODEL_GATES||"{}"):null;
+const externalTeachingFlag=process.env.DEBUG_AI_COMMAND_EXTERNAL_QUALIFICATION||"false";
+if(!["true","false"].includes(externalTeachingFlag))throw new Error("COMMAND_EXTERNAL_FLAG_INVALID");
+const teachingBudgets=externalTeachingFlag==="true"&&chatGateConfig?.qwen35&&chatGateConfig?.deepseek?{qwen35:Math.min(1024,chatGateConfig.qwen35.max_output_tokens),deepseek:Math.min(1024,chatGateConfig.deepseek.max_output_tokens)}:null;
 const aiCore=createAiCoreAdapter({
   adaptiveLocalDiagnosis,scoutPairDispatch:scoutPairFlag==="true",
   runtimeContextTokens:aiCoreContextTokens,requireRuntimeContextQualification:true,
   dispatchMode:coreGateDispatchMode,modelGateBaseUrls:coreGateUrls,
-  commandModelGates:process.env.DEBUG_AI_CHAT_ENABLED==="true"?JSON.parse(process.env.DEBUG_AI_COMMAND_MODEL_GATES||"{}"):null,
+  commandModelGates:chatGateConfig,commandExternalQualification:externalTeachingFlag==="true",
   inputTokenShadow:inputTokenShadowFlag==="true",
   inputTokenShadowRoute:process.env.DEBUG_AI_CORE_INPUT_TOKEN_SHADOW_ROUTE||"router"
 });
@@ -87,7 +91,7 @@ const workflow=createWorkflow({aiCore,externalReview,evidenceSearch,runtimeEvide
 const host=process.env.DEBUG_AI_HOST||"127.0.0.1",port=Number(process.env.DEBUG_AI_PORT||8787);
 const chatEnabled=process.env.DEBUG_AI_CHAT_ENABLED==="true",chatAccess=chatEnabled&&process.env.DEBUG_AI_CHAT_AUTH_MODE==="cloudflare_access";
 const chatOrigin=process.env.DEBUG_AI_CHAT_ORIGIN;
-const chat=chatEnabled?createChatHandler({aiCore,runtimeRoot,token:process.env.DEBUG_AI_CHAT_ACCESS_TOKEN,access:chatAccess?{origin:chatOrigin,verify:createAccessVerifier({team:process.env.DEBUG_AI_CHAT_ACCESS_TEAM,audience:process.env.DEBUG_AI_CHAT_ACCESS_AUD,ownerEmail:process.env.DEBUG_AI_CHAT_OWNER_EMAIL})}:null}):null;
+const chat=chatEnabled?createChatHandler({aiCore,runtimeRoot,teachingBudgets,token:process.env.DEBUG_AI_CHAT_ACCESS_TOKEN,access:chatAccess?{origin:chatOrigin,verify:createAccessVerifier({team:process.env.DEBUG_AI_CHAT_ACCESS_TEAM,audience:process.env.DEBUG_AI_CHAT_ACCESS_AUD,ownerEmail:process.env.DEBUG_AI_CHAT_OWNER_EMAIL})}:null}):null;
 // Only the chat handler is reachable through the public-facing origin listener;
 // the main DebugAI HTTP APIs are not mounted on it. Same process/model queue.
 const chatPort=chatAccess?envInt("DEBUG_AI_CHAT_PORT",18788,{min:1024,max:65535}):null;
