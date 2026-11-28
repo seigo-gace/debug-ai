@@ -66,3 +66,26 @@ test("unconfigured and over-budget candidate requests do not dispatch",async()=>
   await assert.rejects(()=>ai.callCommandModel("qwen35",{...opts(),maxTokens:3000}),e=>e.code==="COMMAND_GATE_BUDGET_INVALID");
   assert.equal(n,0);
 });
+
+test("standalone command mode needs no legacy URL or four specialist Gates",async()=>{
+  const calls=[];
+  const deepseek={origin:"http://127.0.0.1:18186",model_id:"deepseek/deepseek-v4.1-flash-1017",runtime_context_tokens:8192,max_output_tokens:4096};
+  const ai=createAiCoreAdapter({baseUrl:null,apiKey:"synthetic-auth-example",dispatchMode:"command_only",
+    commandModelGates:{...candidate,deepseek},commandExternalQualification:true,
+    fetchImpl:async(url,o)=>{calls.push(url);const id=url.startsWith(deepseek.origin)?deepseek.model_id:QWEN_MODEL;return o.method==="GET"?identity(id):answer(id);}});
+  assert.deepEqual(ai.commandModelStatus().configured_models,["qwen35","deepseek"]);
+  assert.equal(ai.endpoint,null);
+  assert.throws(()=>ai.endpointForRole("researcher"),/Standalone command mode/);
+  await assert.rejects(()=>ai.call("code_scout",{user:"task"}),e=>e.code==="COMMAND_ONLY_ROLE_NOT_ADMITTED");
+  await assert.rejects(()=>ai.callPrepared("researcher",{system:"task"}),e=>e.code==="COMMAND_ONLY_ROLE_NOT_ADMITTED");
+  await assert.rejects(()=>ai.preflightConfiguredGates(),e=>e.code==="AI_CORE_GATE_PREFLIGHT_MODE_INVALID");
+  assert.equal(calls.length,0);
+  await ai.callCommandModel("qwen35",opts());
+  await ai.callCommandModel("deepseek",opts());
+  assert.deepEqual(calls,[candidate.qwen35.origin+"/v1/models",candidate.qwen35.origin+"/v1/chat/completions",deepseek.origin+"/v1/models",deepseek.origin+"/v1/chat/completions"]);
+});
+test("standalone rejects specialist settings and empty candidate set",()=>{
+  for(const override of [{modelGateBaseUrls:existing},{commandModelGates:{}},{scoutPairDispatch:true},{adaptiveLocalDiagnosis:true},{inputTokenShadow:true}]){
+    assert.throws(()=>createAiCoreAdapter({baseUrl:null,apiKey:"synthetic-auth-example",dispatchMode:"command_only",commandModelGates:candidate,fetchImpl:()=>{},...override}),e=>e.code==="COMMAND_ONLY_CONFIG_INVALID");
+  }
+});
