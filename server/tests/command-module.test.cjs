@@ -116,3 +116,17 @@ test("audited training candidate retains original context and observations, neve
     assert.throws(()=>trainingPacket({...row,...invalid}),/COMMAND_TRAINING/);
   }
 });
+
+test("standalone teacher and student share the independent prompt without assuming specialist services",async()=>{
+  const ai=mock({qwen35:plan(),deepseek:peer()});
+  const out=await createCommandModule({aiCore:ai,allowExternalQualification:true,standalone:true}).evaluate(request("COOPERATIVE"));
+  assert.equal(out.state,"AGREEMENT_CANDIDATE");
+  assert.equal(out.execution_authority,"NONE");
+  assert.deepEqual(ai.calls.map(c=>c.model),["qwen35","deepseek"]);
+  assert.ok(ai.calls.every(c=>c.system.includes("independent DeepSeek/Qwen3.5 decision assistant")&&c.system.includes("not available services")&&!c.system.includes("Existing Workflow,")));
+  assert.ok(ai.calls[1].system.includes("Independently assess the same task"));
+  assert.deepEqual(JSON.parse(ai.calls[1].user).task,packet);
+  const legacy=mock({qwen35:plan()});
+  await createCommandModule({aiCore:legacy}).evaluate(request("QWEN_ONLY"));
+  assert.ok(legacy.calls[0].system.includes("Existing Workflow,"));
+});
