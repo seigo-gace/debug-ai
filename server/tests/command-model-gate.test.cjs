@@ -89,3 +89,24 @@ test("standalone rejects specialist settings and empty candidate set",()=>{
     assert.throws(()=>createAiCoreAdapter({baseUrl:null,apiKey:"synthetic-auth-example",dispatchMode:"command_only",commandModelGates:candidate,fetchImpl:()=>{},...override}),e=>e.code==="COMMAND_ONLY_CONFIG_INVALID");
   }
 });
+
+
+test("standalone teaching lanes overlap different models and serialize the same model",async()=>{
+  const deepseek={origin:"http://127.0.0.1:18186",model_id:"deepseek/qualification-fixture",runtime_context_tokens:8192,max_output_tokens:2048};
+  let release,entered;const hold=new Promise(r=>release=r),start=new Promise(r=>entered=r);let qwenPosts=0,deepPosts=0;
+  const ai=createAiCoreAdapter({baseUrl:null,apiKey:"synthetic-auth-example",dispatchMode:"command_only",parallelTeaching:true,
+    commandModelGates:{...candidate,deepseek},commandExternalQualification:true,fetchImpl:async(url,o)=>{
+      const remote=url.startsWith(deepseek.origin),id=remote?deepseek.model_id:QWEN_MODEL;
+      if(o.method==="GET")return identity(id);
+      if(remote){deepPosts++;return answer(id);}
+      if(++qwenPosts===1){entered();await hold;}return answer(id);
+    }});
+  const first=ai.callCommandModel("qwen35",opts());await start;
+  const second=ai.callCommandModel("qwen35",opts());
+  await ai.callCommandModel("deepseek",opts());
+  assert.equal(deepPosts,1);assert.equal(qwenPosts,1);
+  release();await Promise.all([first,second]);assert.equal(qwenPosts,2);
+});
+test("parallel teaching cannot alter specialist dispatch defaults",()=>{
+  assert.throws(()=>adapter(()=>{},{parallelTeaching:true}),e=>e.code==="TEACHING_PARALLEL_MODE_INVALID");
+});
