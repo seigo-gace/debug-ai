@@ -98,3 +98,15 @@ test("malformed paid response without cost must not be repaired automatically",a
  const original=a.callCommandModel;a.callCommandModel=async(...args)=>{const v=await original(...args);if(a.calls.length===3)v.telemetry.cost=null;return v;};
  await assert.rejects(runTeaching(opts(a,"architecture",{repairFormat:true,maxReviews:4})),/TEACHING_RESPONSE_FIELD_INVALID/);assert.equal(a.calls.length,3);
 });
+
+
+test("resume validated teacher and student stages without repeating model requests",async()=>{
+ const a=core([review("PASS")]);const resume={source:{batch:"fixture",id:"fixture"},teaching:{phase:"teacher_lesson",state:"complete",model:"deepseek",model_id:TEACHER_MODEL_ID,output:teacher},answer:{phase:"student_attempt",state:"complete",model:"qwen35",model_id:QWEN_MODEL,output:{answer:"設計",verification:"確認"}}};
+ const out=await runTeaching(opts(a,"architecture",{resume}));assert.equal(out.verdict,"TEACHER_PASS");assert.equal(a.calls.length,1);assert.equal(out.reused_stages.length,2);
+});
+test("evidence-bound code rejects fabricated verification and mismatched sandbox evidence",async()=>{
+ const a=core([teacher,student]);
+ await assert.rejects(runTeaching(opts(a,"javascript",{evidenceBound:true,sandbox:async()=>{throw Error("must not run");}})),/TEACHING_VERIFICATION_CONTRACT_INVALID/);
+ const b=core([teacher,{...student,verification:"SANDBOX_PENDING"}]);
+ await assert.rejects(runTeaching(opts(b,"javascript",{evidenceBound:true,sandbox:async()=>({pass:true})})),/TEACHING_EVIDENCE_BINDING_INVALID/);
+});
