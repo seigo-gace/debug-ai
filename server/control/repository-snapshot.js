@@ -4,6 +4,7 @@ const fs=require("node:fs");
 const path=require("node:path");
 const {execFileSync}=require("node:child_process");
 const {contentHash}=require("../../orchestrator/durable-contracts.js");
+const {isParentOwnedSourcePath}=require("../../orchestrator/source-scope.js");
 
 const MAX_FILES=10000;
 const MAX_TOTAL_BYTES=256*1024*1024;
@@ -54,7 +55,9 @@ function sourceTreeSnapshotId(repoPath,{fsImpl=fs,maxFiles=MAX_FILES,maxTotalByt
     for(const child of children){
       if(child.name==="."||child.name===".."||child.name.includes("/"))throw new Error("REPOSITORY_SNAPSHOT_PATH_TRAVERSAL");
       if(child.name===".git")continue;
-      const absolute=path.join(directory,child.name),relative=relativePosix(root,absolute),stat=fsImpl.lstatSync(absolute);
+      const absolute=path.join(directory,child.name),relative=relativePosix(root,absolute);
+      if(isParentOwnedSourcePath(relative))continue;
+      const stat=fsImpl.lstatSync(absolute);
       if(stat.isDirectory()){
         if(EXCLUDED_DIRECTORIES.has(child.name))continue;
         add("directory",relative,EMPTY_HASH,0);walk(absolute);continue;

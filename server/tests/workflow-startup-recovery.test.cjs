@@ -143,3 +143,80 @@ test("G3 explicit blocked Causal Scout recovery preserves completed Code Scout a
   assert.equal(progressed.manifest.policy_refs.g3_causal_manual_recovery_used,true);
   assert.ok(progressed.state.execution_epoch>=1);
 });
+
+test("blocked AI Core Unix startup error retains safe upstream identity across durable restart",async t=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),"debugai-core-error-durable-")),repo=path.join(root,"repo"),runtimeRoot=path.join(root,"runtime");
+  t.after(()=>fs.rmSync(root,{recursive:true,force:true}));initializeRepo(repo);
+  const io=new FakeDurableIo(),policy=new RepoPolicy({workspaceRoot:root}),authority=new RunAuthority({runtimeRoot,repoPolicy:policy,durableIo:io}),events=[],secret="NEVER_PERSIST_PRIVATE_GATE_BODY";
+  const aiCore={call:async role=>{
+    if(role==="causal_scout"){
+      const e=Object.assign(Error("AI Core HTTP 503"),{code:"AI_CORE_HTTP",meta:{role,retryable:false,status:503,dispatch_mode:"model_gates",upstream_reported_code:"BACKEND_UNIX_SOCKET_PROBE_FAILED",private_body:secret}});
+      throw e;
+    }
+    return{content:JSON.stringify({relevant_files:[],call_path:[],contract_mismatch:null,excluded_files:[],unknowns:[]})};
+  }};
+  const wf=createWorkflow({aiCore,authority,repoPolicy:policy,repositorySnapshot:()=>"git_fixture",runtimeEvidence:{write:(runId,type,payload)=>events.push({runId,type,payload})}});
+  const accepted=await wf.startAnalysis({repo,projectId:"P",rawRequest:"diagnose Unix socket failure",failure:{message:"Gate start failed"}});
+  let durable;
+  for(let i=0;i<100;i++){durable=authority.loadDurable(accepted.run_id);if(durable.state.job_status==="BLOCKED")break;await new Promise(r=>setTimeout(r,10));}
+  assert.equal(durable.state.job_status,"BLOCKED");
+  const recordPath=durable.manifest.workflow_input_refs.last_execution_failure;
+  const original=io.readRecord(recordPath).payload;
+  const restartAuthority=new RunAuthority({runtimeRoot,repoPolicy:policy,durableIo:io});
+  const restored=restartAuthority.readDurableRecord(recordPath,{expectedSchema:"workflow-data/v1"}).payload;
+  assert.deepEqual(restored,original);
+  assert.equal(restored.code,"AI_CORE_HTTP");
+  assert.equal(restored.role,"causal_scout");
+  assert.equal(restored.upstream_http_status,503);
+  assert.equal(restored.upstream_reported_code,"BACKEND_UNIX_SOCKET_PROBE_FAILED");
+  assert.equal(restored.dispatch_mode,"model_gates");
+  assert.equal(events.find(e=>e.type==="execution_failure")?.payload.upstream_reported_code,restored.upstream_reported_code);
+  assert.doesNotMatch(JSON.stringify({restored,events}),/NEVER_PERSIST_PRIVATE_GATE_BODY/);
+  await assert.rejects(wf.resumeAnalysis({runId:accepted.run_id}),/RUN_NOT_RECOVERABLE:BLOCKED/);
+});
+
+test("adaptive route executes isolated candidate before reviewer, keeps it unreleased, and reuses exact candidate on release",async t=>{
+  const {RuntimeEvidenceStore}=require("../runtime-evidence.js");
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),"debugai-adaptive-release-")),repo=path.join(root,"repo"),runtimeRoot=path.join(root,"runtime");t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+  fs.mkdirSync(repo);fs.writeFileSync(path.join(repo,"value.cjs"),"module.exports=x=>x>10;\n");
+  fs.writeFileSync(path.join(repo,"check.cjs"),"const assert=require('node:assert/strict');const f=require('./value.cjs');assert.equal(f(10),true);\n");
+  fs.writeFileSync(path.join(repo,"package.json"),JSON.stringify({scripts:{test:"node check.cjs"}}));
+  fs.mkdirSync(runtimeRoot,{mode:0o700});
+  const policy=new RepoPolicy({workspaceRoot:root}),authority=new RunAuthority({runtimeRoot,repoPolicy:policy,durableIo:new FakeDurableIo()});
+  const patchService=new PatchService({runtimeRoot,repoPolicy:policy}),runtimeEvidence=new RuntimeEvidenceStore(runtimeRoot),events=[];
+  const rawRequest="Correct inclusive numeric boundary",requirements={requested_behavior:["At threshold 10 return true."],forbidden_paths:["check.cjs","package.json"],required_tests:["npm test"]};
+  const failure={message:"Assertion mismatch",source_paths:["value.cjs"],test_paths:["check.cjs"],requirements};
+  const red={kind:"deterministic_sandbox_check",check_type:"UNIT",name:"sandbox:test",status:"FAIL",executed:true,configured:true,timed_out:false,exit_code:1,stdout:"",stderr:"AssertionError [ERR_ASSERTION]: mismatch\n actual: false,\n expected: true,\n operator: 'strictEqual'",sandbox:{backend:"sidecar+landlock+seccomp",network:"CONTAINER_NETWORK_NONE",job_id:"red"}};
+  const green={...red,status:"PASS",exit_code:0,stderr:"",sandbox:{...red.sandbox,job_id:"green"}};
+  let isolated;
+  const aiCore={call:async(role,opts)=>{
+    events.push(role);const p=JSON.parse(opts.user);
+    if(role==="diagnoser"){
+      assert.equal(opts.thinkingOverride,false);
+      const ids=p.localEvidence.filter(r=>r.payload.kind==="deterministic_sandbox_check"||r.payload.value?.path==="value.cjs").map(r=>r.evidence_id);
+      return {content:JSON.stringify({diagnosis_status:"HYPOTHESES_RETAINED",hypotheses:[{id:"H1",status:"HYPOTHESIS",statement:"Boundary comparison excludes equality",evidence_refs:ids,counter_evidence_refs:[],falsification_condition:"Observe equal value returning true before repair"}],confirmed_root_cause:null,unsupported_claims:[]})};
+    }
+    if(role==="patch_engineer")return {content:JSON.stringify({operations:[{type:"replace",path:"value.cjs",old:"x>10",new:"x>=10"}],summary:"Include boundary"})};
+    if(role==="local_reviewer"){
+      assert.ok(isolated);assert.equal(p.candidate.id,isolated.id);
+      assert.equal(fs.existsSync(path.join(patchService.candidates,isolated.id+".json")),false);
+      const ids=p.evidence.filter(r=>r.payload?.kind==="deterministic_sandbox_check"||r.payload?.value?.path==="value.cjs").map(r=>r.evidence_id);
+      return {content:JSON.stringify({verdict:"PASS",decision:"DONE",claims:[{type:"FACT",statement:"Source and failing reproduction agree with isolated candidate check",evidence_refs:ids}]})};
+    }
+    throw Error("UNEXPECTED_ROLE:"+role);
+  }};
+  const wf=createWorkflow({adaptiveLocalDiagnosis:true,aiCore,authority,repoPolicy:policy,patchService,runtimeEvidence,sandboxVerification:{
+    collect:async()=>({status:"FINAL_INVALID",checks:[red]}),
+    collectCandidate:async candidate=>{events.push("isolated");isolated=candidate;assert.equal(fs.existsSync(path.join(patchService.candidates,candidate.id+".json")),false);return{status:"FINAL_VALID",checks:[green],patch_candidate_id:candidate.id,patch_candidate_hash:candidate.candidate_hash};}
+  }});
+  const analysis=await wf.runAnalysis({repo,projectId:"local",rawRequest,failure});
+  assert.equal(analysis.state,"HYPOTHESIS_APPROVED");
+  assert.deepEqual(events,["diagnoser","patch_engineer","isolated","local_reviewer"]);
+  assert.ok(analysis.adaptive_local.dispositions.every(d=>d.decision==="SATISFIED_BY_EVIDENCE"));
+  assert.equal(fs.readFileSync(path.join(repo,"value.cjs"),"utf8"),"module.exports=x=>x>10;\n");
+  const request={runId:analysis.run_id,analysis,repo,selectedPaths:["value.cjs"],context:{requirements},task:rawRequest};
+  await assert.rejects(wf.patchCandidate({...request,task:"different change"}),/ADAPTIVE_CANDIDATE_RELEASE_INPUT_MISMATCH/);
+  const out=await wf.patchCandidate(request);assert.equal(out.candidate.id,isolated.id);assert.equal(out.candidate_verification.status,"FINAL_VALID");
+  assert.equal(patchService.load(isolated.id).candidate_hash,isolated.candidate_hash);
+  assert.deepEqual(events,["diagnoser","patch_engineer","isolated","local_reviewer"]);
+});

@@ -107,3 +107,29 @@ test("fixed entry and byte limits fail closed",()=>{
     assert.throws(()=>treeSnapshot(fixture.root,{maxTotalBytes:1}),/DURABLE_REPO_SNAPSHOT_UNAVAILABLE/);
   }finally{fixture.cleanup();}
 });
+
+test("parent-owned worktrees and verification material do not affect the selected source revision",t=>{
+  const f=makeTree();t.after(f.cleanup);
+  const baseline=treeSnapshot(f.root);
+  for(const name of [".worktrees",".verification",".debugai-input"]){
+    const dir=path.join(f.root,name);fs.mkdirSync(dir);fs.mkdirSync(path.join(dir,"branch"));
+    fs.writeFileSync(path.join(dir,"branch","other.js"),"unrelated revision");
+    fs.symlinkSync("/outside/fixture/config",path.join(dir,"branch",".env"));
+  }
+  assert.equal(treeSnapshot(f.root),baseline);
+  fs.writeFileSync(path.join(f.root,".worktrees","branch","other.js"),"changed unrelated revision");
+  assert.equal(treeSnapshot(f.root),baseline);
+  fs.writeFileSync(path.join(f.root,"src","a.js"),"changed selected revision");
+  assert.notEqual(treeSnapshot(f.root),baseline);
+  fs.symlinkSync("/outside/fixture/source",path.join(f.root,"src","escape.js"));
+  assert.throws(()=>treeSnapshot(f.root),e=>String(e.cause?.message).includes("SYMLINK_TRAVERSAL"));
+});
+test("workspace root aliases are not followed, while nested ordinary source is still bound",t=>{
+  const f=makeTree();t.after(f.cleanup);
+  const first=treeSnapshot(f.root);
+  fs.symlinkSync("/outside/fixture/parent",path.join(f.root,".worktrees"));
+  assert.equal(treeSnapshot(f.root),first);
+  fs.mkdirSync(path.join(f.root,"src",".worktrees"));
+  fs.writeFileSync(path.join(f.root,"src",".worktrees","ordinary.js"),"source");
+  assert.notEqual(treeSnapshot(f.root),first);
+});

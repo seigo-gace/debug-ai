@@ -21,7 +21,7 @@ test('P0: Composer legacy UTC ledger must not reset or silently recover quota',a
  await assert.rejects(()=>a.final(payload));assert.equal(calls,0);
  assert.equal(JSON.parse(fs.readFileSync(path.join(root,'daily-provider-requests.json'))).groq,99);
 });
-const {createExternalReviewQuotaLedger,readTrustedQualification,WINDOWS,CAPS}=require('../adapters/external-review-quota');
+const {createExternalReviewQuotaLedger,readTrustedQualification,WINDOWS,CAPS,LIVE_CAPS,LIVE_TOKEN_CAPS}=require('../adapters/external-review-quota');
 const {mockOptions,qualification}=require('./helpers/external-review-mock.cjs');
 const {spawn}=require('node:child_process');
 function fixture(t){const parent=fs.mkdtempSync(path.join(os.tmpdir(),'er-p0-'));t.after(()=>fs.rmSync(parent,{recursive:true,force:true}));return path.join(parent,'ledger');}
@@ -134,7 +134,8 @@ test('upstream exhausted headers or token bound overrun disable further requests
 test('HTTP200 incomplete finish states and explicit pending second opinion never qualify PASS',async()=>{
  for(const reason of ['length','content_filter','tool_calls',null]){
  let calls=0;const a=createExternalReviewAdapter(mockOptions({groqKey:'g',geminiKey:'',fetchImpl:async()=>{calls++;return new Response(JSON.stringify({choices:[{finish_reason:reason,message:{content:'{"verdict":"PASS"}'}}]}));}}));
- await assert.rejects(()=>a.final(payload),/INCOMPLETE/);assert.equal(calls,2);
+ const expected=reason==='length'?/TRUNCATED/:reason==='content_filter'?/CONTENT_FILTER/:/INCOMPLETE/;
+ await assert.rejects(()=>a.final(payload),expected);assert.equal(calls,reason==='length'||reason==='content_filter'?1:2);
  }
  let calls=0;const a=createExternalReviewAdapter(mockOptions({fetchImpl:async()=>reply(++calls===1?'{"verdict":"PASS"}':'{"verdict":"PENDING"}')}));
  assert.equal((await a.final(payload,{secondOpinion:true})).json.verdict,'PENDING');
@@ -177,16 +178,18 @@ test('live ledger cannot silently initialize/recover a missing volume root',t=>{
 
 for(const provider of ['groq','gemini'])for(const window of Object.keys(WINDOWS))test(`${provider}: Master FREE-only local ${window} cap persists without account certificate`,t=>{
  const root=fixture(t);let now=Date.now();const ledger=createExternalReviewQuotaLedger({root,nowFn:()=>now});ledger.provisionEmptyLedger();
- const spacing={minute:0,hour:60_001,day:3_600_001,month:86_400_001}[window];
- for(let i=0;i<CAPS[window];i++){ledger.reserveLocalDispatch(provider,1,'offline-free-key');now+=spacing;}
+ const cap=LIVE_CAPS[provider][window];
+ const spacing=window==='minute'?0:Math.floor((WINDOWS[window]-1)/cap);
+ for(let i=0;i<cap;i++){ledger.reserveLocalDispatch(provider,1,'offline-free-key');now+=spacing;}
  const restart=createExternalReviewQuotaLedger({root,nowFn:()=>now,allowInitialize:false});assert.throws(()=>restart.reserveLocalDispatch(provider,1,'offline-free-key'),new RegExp(`QUOTA_${window.toUpperCase()}_EXHAUSTED`));
 });
 test('local token caps and key rotation cannot recover allowance',t=>{
  const root=fixture(t);let now=Date.now();const ledger=createExternalReviewQuotaLedger({root,nowFn:()=>now});ledger.provisionEmptyLedger();
- assert.throws(()=>ledger.reserveLocalDispatch('groq',4097,'offline-key'),/TOKENS_EXHAUSTED/);ledger.reserveLocalDispatch('groq',4096,'offline-key');now+=60_001;
+ const cap=LIVE_TOKEN_CAPS.groq.minute,day=LIVE_TOKEN_CAPS.groq.day;
+ assert.throws(()=>ledger.reserveLocalDispatch('groq',cap+1,'offline-key'),/TOKENS_EXHAUSTED/);ledger.reserveLocalDispatch('groq',cap,'offline-key');now+=60_001;
  assert.throws(()=>ledger.reserveLocalDispatch('groq',1,'different-offline-key'),/IDENTITY_CHANGED/);
- for(let i=0;i<3;i++){now+=3_600_001;ledger.reserveLocalDispatch('groq',4096,'offline-key');}
- now+=3_600_001;assert.throws(()=>ledger.reserveLocalDispatch('groq',1,'offline-key'),/DAY_EXHAUSTED|TOKENS_EXHAUSTED/);
+ for(let i=1;i<day/cap;i++){ledger.reserveLocalDispatch('groq',cap,'offline-key');now+=60_001;}
+ assert.throws(()=>ledger.reserveLocalDispatch('groq',1,'offline-key'),/TOKENS_EXHAUSTED/);
 });
 test('local 429 cooldown expires naturally without deleting or refunding requests',t=>{
  const root=fixture(t);let now=Date.now();const ledger=createExternalReviewQuotaLedger({root,nowFn:()=>now});ledger.provisionEmptyLedger();ledger.reserveLocalDispatch('groq',100,'offline-key');
@@ -194,7 +197,7 @@ test('local 429 cooldown expires naturally without deleting or refunding request
  now++;createExternalReviewQuotaLedger({root,nowFn:()=>now,allowInitialize:false}).reserveLocalDispatch('groq',100,'offline-key');assert.equal(ledger.readStateSync().providers.groq.events.length,2);
 });
 test('live budget reserves before injected HTTP without qualification file; minute retry sends nothing',async t=>{
- const previous=process.env.CI;delete process.env.CI;t.after(()=>{if(previous===undefined)delete process.env.CI;else process.env.CI=previous;});
+ const previous=process.env.CI,previousCap=process.env.DEBUG_AI_GROQ_MINUTE_REQUEST_LIMIT;delete process.env.CI;process.env.DEBUG_AI_GROQ_MINUTE_REQUEST_LIMIT='1';t.after(()=>{if(previous===undefined)delete process.env.CI;else process.env.CI=previous;if(previousCap===undefined)delete process.env.DEBUG_AI_GROQ_MINUTE_REQUEST_LIMIT;else process.env.DEBUG_AI_GROQ_MINUTE_REQUEST_LIMIT=previousCap;});
  const root=fixture(t),ledger=createExternalReviewQuotaLedger({root});ledger.provisionEmptyLedger();let calls=0;
  const a=createExternalReviewAdapter({groqKey:'offline-free-key',geminiKey:'',ledgerRoot:root,fetchImpl:async()=>{calls++;assert.equal(ledger.readStateSync().providers.groq.events.length,1);return reply();}});
  assert.equal((await a.hypothesis(payload)).json.verdict,'PASS');await assert.rejects(a.final(payload),/MINUTE_EXHAUSTED/);assert.equal(calls,1);

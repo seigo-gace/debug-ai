@@ -3,6 +3,7 @@ const test=require("node:test"),assert=require("node:assert/strict");
 const fs=require("node:fs"),os=require("node:os"),path=require("node:path");
 const {RunAuthority}=require("../run-authority.js");
 const {createWorkflow}=require("../workflow.js");
+const {horizontalRoleHooksForMode}=require("../control/role-work-item/adapter.js");
 class IO{
   constructor(){this.records=new Map();}
   readRecord(p,{allowMissing=false}={}){if(!this.records.has(p)){if(allowMissing)return null;throw Error("MISSING:"+p);}return structuredClone(this.records.get(p));}
@@ -72,7 +73,7 @@ test("post-apply Local Reviewer resumes without applying again, then replays no 
   };}};
   const runtimeEvidence={write:()=>{},list:(_id,{types})=>types.includes("analysis")?[{type:"analysis",payload:{evidence_gap:false}}]:[]};
   const wf=()=>createWorkflow({authority:new RunAuthority({runtimeRoot:root,durableIo:io}),patchService,runtimeEvidence,
-    repositorySnapshot:()=>revision,recoveryHooks:{enableHorizontalLocalReviewer:true},
+    repositorySnapshot:()=>revision,recoveryHooks:horizontalRoleHooksForMode("six_role"),
     externalReview:{final:async()=>{finals++;return {provider:"fixture",json:{verdict:"PASS"}};}},
     aiCore:{call:async(role,prompt)=>{
       assert.equal(role,"local_reviewer");const input=JSON.parse(prompt.user);models++;
@@ -98,11 +99,11 @@ test("actual Scout/Researcher/Diagnoser/hypothesis Reviewer hooks advance only a
     code_scout:{relevant_files:[],call_path:[],contract_mismatch:null,excluded_files:[],unknowns:[]},
     causal_scout:{claims:[{type:"UNKNOWN",statement:"missing trace"}]},
     researcher:{research_status:"INSUFFICIENT_EVIDENCE",answer:"missing trace",evidence_refs:[],rejected_source_refs:[],contradictions:[],bound_version:"fixture/v1"},
-    diagnoser:{diagnosis_status:"INSUFFICIENT_EVIDENCE",hypotheses:[],confirmed_root_cause:null,unsupported_claims:["missing trace"]},
+    diagnoser:{diagnosis_status:"HYPOTHESES_RETAINED",hypotheses:[{id:"H_TRACE",status:"HYPOTHESIS",statement:"A missing runtime trace may prevent the expected source branch from being observed",evidence_refs:[],counter_evidence_refs:[],falsification_condition:"Reproduce the source branch with a present trace"}],confirmed_root_cause:null,unsupported_claims:["missing trace"]},
     local_reviewer:{verdict:"PASS",decision:"DONE",claims:[]}
   };
   const wf=()=>createWorkflow({authority:new RunAuthority({runtimeRoot:root,durableIo:io}),repositorySnapshot:()=>"fixed",
-    recoveryHooks:{enableHorizontalCodeScout:true,enableHorizontalCausalScout:true,enableHorizontalResearcher:true,enableHorizontalDiagnoser:true,enableHorizontalLocalReviewer:true,
+    recoveryHooks:{...horizontalRoleHooksForMode("six_role"),
       beforeResearcherWorkUnit:async({runId:id,unit})=>{runId=id;units.push(unit.work_unit_id);}},
     // Only a local fixture; exercise existing fallback without external HTTP.
     externalReview:{hypothesis:async()=>{throw Object.assign(Error("GROQ_NETWORK"),{code:"GROQ_NETWORK"});}},
@@ -133,7 +134,7 @@ test("actual Patch Engineer hook creates no candidate until same-item completion
   const run=authority.start({rawRequest:"candidate fixture",repo:root});await authority.initializeDurable(run);
   for(const state of ["PARSED","CONTEXT_READY","VERIFYING","FAILED","RESOLVING"])authority.transition(run,state);
   let models=0,creates=0;
-  const wf=()=>createWorkflow({authority:new RunAuthority({runtimeRoot:root,durableIo:io}),repositorySnapshot:()=>"fixed",recoveryHooks:{enableHorizontalPatchEngineer:true},
+  const wf=()=>createWorkflow({authority:new RunAuthority({runtimeRoot:root,durableIo:io}),repositorySnapshot:()=>"fixed",recoveryHooks:horizontalRoleHooksForMode("six_role"),
     patchService:{create:({result})=>{creates++;return result;}},aiCore:{call:async(role,prompt)=>{
       assert.equal(role,"patch_engineer");models++;const input=JSON.parse(prompt.user);
       if(input.step===1)return {content:JSON.stringify({status:"CONTINUE",progress:{evidence_refs:[],remaining_work:"finish candidate"}})};
@@ -143,5 +144,117 @@ test("actual Patch Engineer hook creates no candidate until same-item completion
   await assert.rejects(wf().patchCandidate(args),{code:"PATCH_ENGINEER_WORK_ITEM_CONTINUE_PENDING"});assert.equal(creates,0);
   const result=await wf().patchCandidate(args);assert.equal(result.candidate.operations[0].new,"return 1");
   assert.equal(models,2);assert.equal(creates,1);
+  assert.equal(authority.load(run.run_id).state,"WAITING_APPROVAL");
+});
+
+test("same-run Scout continuation preserves exact observed input across changing test and DAP observations",async t=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),"scout-frozen-input-"));
+  t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+  const repo=path.join(root,"repo"),runtimeRoot=path.join(root,"runtime");fs.mkdirSync(repo);
+  fs.writeFileSync(path.join(repo,"a.js"),"module.exports=1;\n");
+  const io=new IO(),calls=[],events=[];let collections=0,hints=0;
+  const hooks={enableHorizontalCodeScout:true,enableHorizontalCausalScout:true};
+  const wf=()=>createWorkflow({authority:new RunAuthority({runtimeRoot,durableIo:io}),repositorySnapshot:()=>"fixed",recoveryHooks:hooks,
+    runtimeEvidence:{write:(_id,type,payload)=>{events.push({type,payload});}},
+    sandboxVerification:{collect:async()=>({status:"FAIL",checks:[{status:"FAIL",executed:true,check_type:"UNIT",stderr:"fixture failure",duration_ms:++collections}]})},
+    dapEvidence:{collect:async()=>({authority:"HINT_ONLY",local_only:true,status:"PASS",observed_at:++hints,records:[]})},
+    aiCore:{call:async(role,prompt)=>{
+      const input=JSON.parse(prompt.user);calls.push({role,input});
+      if(role==="code_scout"){
+        if(input.step===1)return {content:JSON.stringify({status:"CONTINUE",progress:{evidence_refs:input.registered_evidence_ids,remaining_work:"finish source localization"}})};
+        return {content:JSON.stringify({status:"COMPLETE",result:{relevant_files:["a.js"],call_path:[],contract_mismatch:null,excluded_files:[],unknowns:[]}})};
+      }
+      if(role==="causal_scout")return {content:JSON.stringify({status:"COMPLETE",result:{claims:[{type:"UNKNOWN",statement:"fixture cause unknown"}]}})};
+      if(role==="researcher")return {content:JSON.stringify({research_status:"INSUFFICIENT_EVIDENCE",answer:"fixture",evidence_refs:[],rejected_source_refs:[],contradictions:[],bound_version:"fixture/v1"})};
+      return {content:JSON.stringify({diagnosis_status:"INSUFFICIENT_EVIDENCE",hypotheses:[],confirmed_root_cause:null,unsupported_claims:["fixture"]})};
+    }}});
+  const first=wf();await assert.rejects(first.runAnalysis({repo,rawRequest:"investigate fixture",failure:{message:"fixture failure",source_paths:["a.js"]}}),{code:"CODE_SCOUT_WORK_ITEM_CONTINUE_PENDING"});
+  const authority=new RunAuthority({runtimeRoot,durableIo:io}),runId=authority.listRunIds()[0];
+  assert.ok(authority.loadDurable(runId).manifest.workflow_input_refs.scout_input_context);
+  await wf().runAnalysis({runId});
+  const code=calls.filter(x=>x.role==="code_scout"),causal=calls.filter(x=>x.role==="causal_scout");
+  assert.equal(collections,1);assert.equal(hints,1);assert.equal(code.length,2);assert.equal(causal.length,1);
+  assert.equal(code[1].input.step,2);
+  for(const field of ["task","registered_evidence_ids","registered_evidence"])assert.deepEqual(code[1].input[field],code[0].input[field]);
+  assert.ok(events.some(e=>e.type==="stage_reuse"&&e.payload.stage==="scout_input_context"&&e.payload.new_execution===false));
+});
+test("frozen Scout input cannot be used after actual source change",async t=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),"scout-frozen-source-"));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+  const repo=path.join(root,"repo"),runtimeRoot=path.join(root,"runtime");fs.mkdirSync(repo);
+  const file=path.join(repo,"a.js");fs.writeFileSync(file,"module.exports=1;\n");const io=new IO();let calls=0;
+  const wf=()=>createWorkflow({authority:new RunAuthority({runtimeRoot,durableIo:io}),repositorySnapshot:()=>"fixed",recoveryHooks:{enableHorizontalCodeScout:true,enableHorizontalCausalScout:true},
+    aiCore:{call:async()=>{calls++;return {content:JSON.stringify({status:"CONTINUE",progress:{evidence_refs:[],remaining_work:"next"}})};}}});
+  await assert.rejects(wf().runAnalysis({repo,rawRequest:"investigate fixture",failure:{message:"fixture failure",source_paths:["a.js"]}}),{code:"CODE_SCOUT_WORK_ITEM_CONTINUE_PENDING"});
+  const runId=new RunAuthority({runtimeRoot,durableIo:io}).listRunIds()[0];fs.writeFileSync(file,"module.exports=2;\n");
+  await assert.rejects(wf().runAnalysis({runId}),/SCOUT_INPUT_CONTEXT_BINDING_MISMATCH/);
+  assert.equal(calls,2,"changed source must never dispatch a continuation");
+});
+
+test("real durable canonical ordering does not invalidate the same structured role work item",async t=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),"canonical-work-item-"));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+  const {canonicalJson}=require("../../orchestrator/durable-primitives.js");
+  class CanonicalIO extends IO{writeImmutableRecord(p,r){super.writeImmutableRecord(p,JSON.parse(canonicalJson(r)));}replaceRecord(p,r){super.replaceRecord(p,JSON.parse(canonicalJson(r)));}}
+  const io=new CanonicalIO(),authority=new RunAuthority({runtimeRoot:root,durableIo:io});const run=authority.start({rawRequest:"canonical"});await authority.initializeDurable(run);
+  const calls=[];const wf=()=>createWorkflow({authority:new RunAuthority({runtimeRoot:root,durableIo:io}),aiCore:{call:async(role,prompt)=>{const input=JSON.parse(prompt.user);calls.push(input);return {content:JSON.stringify(input.step===1?{status:"CONTINUE",progress:{evidence_refs:[],remaining_work:"next"}}:{status:"COMPLETE",result:{relevant_files:[],call_path:[],contract_mismatch:null,excluded_files:[],unknowns:[]}})};}}});
+  const args={runId:run.run_id,role:"code_scout",workItemId:"analysis.scout.code_scout",inputBinding:"fixed",structuredTask:true};
+  const first=await wf().continueRoleTask({...args,task:JSON.stringify({z:1,a:{y:2,b:3}})});assert.equal(first.status,"CONTINUE");
+  const next=await wf().continueRoleTask({...args,task:JSON.stringify({a:{b:3,y:2},z:1})});assert.equal(next.status,"COMPLETE");assert.equal(calls.length,2);assert.deepEqual(calls[0].task,calls[1].task);
+  await assert.rejects(wf().continueRoleTask({...args,task:JSON.stringify({a:{b:4,y:2},z:1})}),{code:"INPUT_BINDING_MISMATCH"});assert.equal(calls.length,2);
+});
+
+test("native six-role investigation retains real admitted source and evidence reads instead of tool-less continuation",async t=>{
+  const {RepoPolicy}=require("../repo-policy.js");
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),"native-investigation-tools-")),repo=path.join(root,"repo"),runtimeRoot=path.join(root,"runtime");
+  fs.mkdirSync(repo);fs.writeFileSync(path.join(repo,"a.js"),"module.exports=()=>require('./hidden.js')();\n");
+  fs.writeFileSync(path.join(repo,"hidden.js"),"module.exports=()=>37; // ACTUAL_HIDDEN_SOURCE\n");
+  t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+  const repoPolicy=new RepoPolicy({workspaceRoot:root}),io=new IO(),counts={},seen={};
+  const authority=new RunAuthority({runtimeRoot,repoPolicy,durableIo:io});
+  const wf=createWorkflow({authority,repoPolicy,recoveryHooks:horizontalRoleHooksForMode("six_role"),
+    aiCore:{call:async(role,prompt)=>{
+      counts[role]=(counts[role]||0)+1;
+      if(role==="code_scout"||role==="diagnoser"){
+        assert.match(prompt.system,/RUNTIME_TOOLS=.*source\.read/);
+        if(counts[role]===1)return {content:JSON.stringify({tool_requests:[{tool:"source.read",arguments:{path:"hidden.js"},reason:"inspect actual implementation"}]})};
+        assert.match(prompt.user,/ACTUAL_HIDDEN_SOURCE/);
+        const ref=prompt.user.match(/TRE_[a-f0-9]+/)[0];seen[role]=ref;
+        if(role==="code_scout")return {content:JSON.stringify({relevant_files:["a.js","hidden.js"],call_path:["a.js -> hidden.js"],contract_mismatch:null,excluded_files:[],unknowns:[]})};
+        return {content:JSON.stringify({diagnosis_status:"INSUFFICIENT_EVIDENCE",hypotheses:[],confirmed_root_cause:null,unsupported_claims:["fixture has no independently established cause"]})};
+      }
+      if(role==="causal_scout"){assert.match(prompt.system,/RUNTIME_TOOLS=.*evidence\.read/);return {content:JSON.stringify({claims:[]})};}
+      if(role==="researcher"){
+        assert.match(prompt.system,/RUNTIME_TOOLS=/);
+        assert.match(prompt.user,/ACTUAL_HIDDEN_SOURCE/);
+        assert.ok(prompt.user.includes(seen.code_scout));
+        return {content:JSON.stringify({research_status:"INSUFFICIENT_EVIDENCE",answer:"source reviewed",evidence_refs:[],rejected_source_refs:[],contradictions:[],bound_version:null})};
+      }
+      throw Error("UNEXPECTED_ROLE:"+role);
+    }}});
+  const result=await wf.runAnalysis({repo,rawRequest:"Investigate source call path from a.js",failure:{message:"source behavior mismatch",source_paths:["a.js"]}});
+  assert.equal(counts.code_scout,2);assert.equal(counts.diagnoser,2);
+  assert.deepEqual(result.tool_audit.code_scout.tools,["source.read"]);
+  assert.deepEqual(result.tool_audit.diagnoser.tools,["source.read"]);
+  assert.ok(result.evidence_registry.tool_evidence_ids.includes(seen.code_scout));
+  assert.equal(result.state,"HYPOTHESIS_NOT_REVIEWABLE");
+  assert.equal(fs.readFileSync(path.join(repo,"hidden.js"),"utf8"),"module.exports=()=>37; // ACTUAL_HIDDEN_SOURCE\n");
+});
+
+test("native candidate generation with six-role mode uses actual candidate contract without tool-less CONTINUE envelope",async t=>{
+  const {RepoPolicy}=require("../repo-policy.js");
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),"native-candidate-contract-")),repo=path.join(root,"repo"),runtimeRoot=path.join(root,"runtime");
+  fs.mkdirSync(repo);fs.writeFileSync(path.join(repo,"a.js"),"module.exports=()=>0;\n");
+  t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+  const repoPolicy=new RepoPolicy({workspaceRoot:root}),authority=new RunAuthority({runtimeRoot,repoPolicy,durableIo:new IO()});
+  const run=authority.start({rawRequest:"fix fixture",repo});await authority.initializeDurable(run);
+  for(const state of ["PARSED","CONTEXT_READY","VERIFYING","FAILED","RESOLVING"])authority.transition(run,state);
+  let calls=0,created=0;
+  const wf=createWorkflow({authority,repoPolicy,recoveryHooks:horizontalRoleHooksForMode("six_role"),
+    patchService:{create:({result})=>{created++;return result;}},aiCore:{call:async(role,prompt)=>{
+      calls++;assert.equal(role,"patch_engineer");assert.match(prompt.system,/RUNTIME_TOOLS=/);
+      return {content:JSON.stringify({operations:[{type:"replace",path:"a.js",old:"()=>0",new:"()=>1"}],summary:"fixture candidate"})};
+    }}});
+  const result=await wf.patchCandidate({runId:run.run_id,repo,selectedPaths:["a.js"],context:{},task:"fix fixture",analysis:{diagnosis:{},external_hypothesis_review:{json:{verdict:"PASS"}},evidence_registry:{evidence_ids:[]}}});
+  assert.equal(result.candidate.operations[0].new,"()=>1");assert.equal(calls,1);assert.equal(created,1);
+  assert.equal(fs.readFileSync(path.join(repo,"a.js"),"utf8"),"module.exports=()=>0;\n");
   assert.equal(authority.load(run.run_id).state,"WAITING_APPROVAL");
 });

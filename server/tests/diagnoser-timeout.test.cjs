@@ -26,6 +26,6 @@ test("Diagnoser uses one Researcher payload and retains integrity-bound handoff 
   const workflow=fs.readFileSync(path.join(__dirname,"..","workflow.js"),"utf8");
   assert.match(workflow,/research:researchJson,researcher_role_result:handoff\?\{\.\.\.handoff,payload:undefined\}:null/);
   assert.match(workflow,/buildDownstreamInputBundle\(/);
-  assert.match(workflow,/research_tool_evidence:evidencePromptView\(researchToolEvidence\)/);
+  assert.match(workflow,/research_tool_evidence:downstreamToolEvidenceView\(researchToolEvidence,Boolean\(toolRuntime\)\)/);
   assert.doesNotMatch(workflow,/research:researchJson,researcher_role_result:handoff,research_tool_evidence/);
 });

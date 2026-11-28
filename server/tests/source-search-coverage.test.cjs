@@ -70,3 +70,23 @@ test("a Unicode-correct search hit still discloses source truncation",t=>{
   assert.equal(hits.length,1);assert.ok(hits[0].excerpt.includes("Original_Needle"));
   assert.equal(hits[0].truncated,true);assert.equal(coverage.state,"INCOMPLETE");assert.equal(coverage.repository_absence_proven,false);
 });
+
+test("source search, direct reads, dependency candidates and patch planning cannot cross parent workspace scope",t=>{
+  const repo=fixture(t,{"a.js":"needle; require('./.worktrees/branch/other.js')"});
+  const {readText,localDependencyMap}=require("../control/read-only-tool-runtime-base.js");
+  const {preparePatchCandidate}=require("../../orchestrator/patch-core.js");
+  for(const name of [".worktrees",".verification",".debugai-input"]){
+    fs.mkdirSync(path.join(repo,name,"branch"),{recursive:true});
+    fs.writeFileSync(path.join(repo,name,"branch","other.js"),"needle wrong branch");
+  }
+  fs.symlinkSync(".worktrees/branch",path.join(repo,"alias"),"dir");
+  const coverage={};
+  assert.deepEqual(searchSource(repo,"needle",{coverage}).map(x=>x.path),["a.js"]);
+  assert.deepEqual(coverage.excluded_root_directories,[".worktrees",".verification",".debugai-input"]);
+  assert.equal(coverage.repository_absence_proven,false);
+  for(const rel of [".worktrees/branch/other.js",".verification/branch/other.js",".debugai-input/branch/other.js","alias/other.js"]){
+    assert.throws(()=>readText(repo,rel),/READ_PROTECTED_PATH/);
+    assert.throws(()=>preparePatchCandidate({repo,selectedPaths:[rel],task:"fixture",requestHash:"a".repeat(64),stage:"fixture",result:{operations:[{type:"write",path:rel,content:"change"}]}}),/PATCH_PROTECTED_PATH/);
+  }
+  assert.equal(localDependencyMap(repo,"a.js").local_candidates[0].status,"BLOCKED_OR_UNVERIFIED");
+});

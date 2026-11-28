@@ -1,6 +1,6 @@
 # DebugAI MCP Adapter
 
-Status: **SOURCE + CI + REAL STDIO PROTOCOL + SOURCE DURABLE-CONTINUATION CONTRACT + RUNTIME-IMAGE ASSET CONTRACT VERIFIED; LIVE CURRENT-RUNTIME CALLS NOT YET VERIFIED**
+Status: **SOURCE/CI CONTRACT VERIFIED; EXISTING DEPLOYED CONTAINER MCP INITIALIZE + 13 TOOLS + LIVE HEALTH VERIFIED 2026-11-01; DURABLE RUN E2E AND CURRENT-SOURCE RUNTIME NOT VERIFIED**
 
 Read [`CURRENT_STATE.md`](CURRENT_STATE.md) for the exact current repository/runtime boundary.
 
@@ -119,7 +119,15 @@ approve/apply MCP tool           = ABSENT
 runtime-image MCP assets         = PASS
 ```
 
-The stdio regression uses an official MCP client against the real MCP entry with a controlled loopback HTTP fixture. The durable-continuation regression delegates through the same existing `execute` contract and proves explicit source-level start/status/resume/wait/inspect routing. These prove source/protocol behavior, not live Contabo Current-runtime operation.
+The stdio regression uses an official MCP client against the real MCP entry with a controlled loopback HTTP fixture. The durable-continuation regression delegates through the same existing `execute` contract and proves explicit source-level start/status/resume/wait/inspect routing. These prove the source/protocol behavior. Separate 2026-11-01 Host evidence below verifies a live health call only; it is not full durable-run or exact-current-source acceptance.
+
+## 2026-11-01 live container acceptance (historical evidence, not current-source parity)
+
+Read-only common Host verification on deployed checkout `70689ec0fdb9201742625d5d8a0054feeb31320d` started the preexisting `node bin/debugai-mcp.mjs` through the preexisting Docker app (Host OS Node was absent). A sequential, stdin-open JSON-RPC test passed **initialize**, **tools/list (13 tools, no approve/apply)**, and **debugai_health** against the real local DebugAI HTTP API with `debugai.mcp-result/v1` and `ok=true`. The Host command exited 0. [Host receipt](https://github.com/G-ACE-inc/server-core/issues/10#issuecomment-6556037071), [Actions run](https://github.com/G-ACE-inc/server-core/actions/runs/41292688159), and [owning Current](https://github.com/seigo-gace/debug-ai/issues/41#issuecomment-6556103804) provide exact request/Run correlation; full output was independently checked in a private artifact.
+
+The previous archived Run `run_mvrnydib_f5e96251e5` was **not** successfully read through `debugai_status` or the direct CLI status route. Both errored; retention/GC and API status remain unqualified causes, not a proven MCP defect. This check must not be replaced with a synthetic PASS or a duplicate model run.
+
+The trusted installed Host policy was separately read back as stale: it did not authorize the PR #115 branch nor the benchmark path. The canonical Source policy permits them but is not a grant. **No protected policy update, source reflection, six_role activation, remote MCP registration, or six-role product E2E was performed.** Those require their independent existing admission, exact-source acceptance, and protected Master decision when applicable.
 
 ## Runtime-image contract
 
@@ -136,7 +144,10 @@ MCP_STDIO_PROTOCOL=PASS
 MCP_ORIGINAL_TOOLS_9_OF_9=PASS
 MCP_DURABLE_CONTINUATION_SOURCE_CHAIN=PASS
 MCP_RUNTIME_IMAGE_ASSETS=PASS
-MCP_LIVE_DEBUGAI_RUNTIME=NOT_VERIFIED
+MCP_LIVE_DEPLOYED_OLD_SOURCE_INITIALIZE=PASS_2026_11_01
+MCP_LIVE_DEPLOYED_OLD_SOURCE_TOOLS_LIST_13=PASS_2026_11_01
+MCP_LIVE_DEPLOYED_OLD_SOURCE_HEALTH=PASS_2026_11_01
+MCP_LIVE_RUN_STATUS_INSPECT_RESUME=NOT_VERIFIED
 VS_CODEX_MCP_REGISTRATION=NOT_VERIFIED
 REAL_SERVER_TOOL_CALLS=NOT_VERIFIED
 CURRENT_SOURCE_SERVER_REFLECTION=NOT_EXECUTED

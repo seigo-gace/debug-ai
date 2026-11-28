@@ -85,7 +85,7 @@ class PatchService {
     fs.mkdirSync(this.candidates, { recursive: true });
   }
 
-  create({ repo, selectedPaths, task, result, stage = "debug-repair", patchPacket=null }) {
+  create({ repo, selectedPaths, task, result, stage = "debug-repair", patchPacket=null, persist=true }) {
     repo = this.repoPolicy ? this.repoPolicy.assertRepo(repo) : repo;
     if(patchPacket)assertPatchRequirements(patchPacket,{operations:result?.operations||[],repositoryRevision:repositorySnapshotId(repo,{allowMissingGitMarker:Boolean(this.repoPolicy)})});
     const verificationPlan = makeVerificationPlan({ testInventory: verificationInventory(repo) });
@@ -104,7 +104,22 @@ class PatchService {
     candidate.created_at = retention.created_at;
     candidate.retain_until = retention.retain_until;
     candidate.retention_ms = retention.retention_ms;
-    fs.writeFileSync(path.join(this.candidates, `${candidate.id}.json`), JSON.stringify(candidate, null, 2));
+    if(persist)this.persistCandidate(candidate);
+    return candidate;
+  }
+
+  persistCandidate(candidate) {
+    assertBoundCandidatePlans(candidate);
+    assertCandidateIntegrity(candidate);
+    if(candidate.requirement_binding!==undefined)assertPatchRequirements(candidate.requirement_binding,{operations:candidate.operations,repositoryRevision:repositorySnapshotId(candidate.repo,{allowMissingGitMarker:Boolean(this.repoPolicy)})});
+    if(this.repoPolicy)this.repoPolicy.assertRepo(candidate.repo);
+    const dest=path.join(this.candidates, `${candidate.id}.json`);
+    if(fs.existsSync(dest)){
+      const existing=this.load(candidate.id);
+      if(existing.candidate_hash!==candidate.candidate_hash)throw new Error("PATCH_CANDIDATE_PERSIST_COLLISION");
+      return existing;
+    }
+    fs.writeFileSync(dest, JSON.stringify(candidate, null, 2),{flag:"wx",mode:0o600});
     return candidate;
   }
 

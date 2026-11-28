@@ -43,3 +43,24 @@ test("changed evidence or task refuses to reuse previous role work item",async()
   await assert.rejects(wf.continueRoleTask({...args,task:"investigate B"}),{code:"INPUT_BINDING_MISMATCH"});
   await assert.rejects(wf.continueRoleTask({...args,baseEvidenceIds:["EVI_CHANGED"]}),{code:"INPUT_BINDING_MISMATCH"});
 });
+
+test("actual production entry wires opt-in six-role continuation only on authenticated model gates",()=>{
+  const fs=require("node:fs"),path=require("node:path");
+  const {horizontalRoleHooksForMode}=require("../control/role-work-item/adapter.js");
+  assert.equal(horizontalRoleHooksForMode(),null);
+  assert.equal(horizontalRoleHooksForMode("legacy"),null);
+  assert.throws(()=>horizontalRoleHooksForMode("anything_else"),/DEBUG_AI_ROLE_EXECUTION_MODE_INVALID/);
+  const hooks=horizontalRoleHooksForMode("six_role");
+  assert.deepEqual(Object.keys(hooks).sort(),[
+    "enableHorizontalCausalScout","enableHorizontalCodeScout","enableHorizontalDiagnoser",
+    "enableHorizontalLocalReviewer","enableHorizontalPatchEngineer","enableHorizontalResearcher"
+  ]);
+  assert.ok(Object.values(hooks).every(Boolean));
+  assert.equal(Object.isFrozen(hooks),true);
+  const source=fs.readFileSync(path.join(__dirname,"..","main.js"),"utf8");
+  const compose=fs.readFileSync(path.join(__dirname,"..","..","compose.yaml"),"utf8");
+  assert.match(source,/horizontalRoleHooksForMode\(process\.env\.DEBUG_AI_ROLE_EXECUTION_MODE\|\|"legacy"\)/);
+  assert.match(source,/recoveryHooks&&coreGateDispatchMode!=="model_gates"/);
+  assert.match(source,/serverCommand,recoveryHooks\}\)/);
+  assert.ok(compose.includes('DEBUG_AI_ROLE_EXECUTION_MODE: ${DEBUG_AI_ROLE_EXECUTION_MODE:-legacy}'));
+});

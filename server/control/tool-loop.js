@@ -1,7 +1,8 @@
 "use strict";
 const {selectSkills}=require("./invocation-compiler.js");
 const {getRoleContract}=require("./role-contracts.js");
-const {assertToolResultIntegrity}=require("./read-only-tool-runtime.js");
+const {assertToolResultIntegrity,evidenceProjection}=require("./read-only-tool-runtime.js");
+const {assertEvidenceRecord}=require("./evidence-registry.js");
 const {parseAndValidateRoleOutput}=require("./role-output-validator.js");
 const {getRoleRuntimeBudget}=require("./role-runtime-budgets.js");
 const {createProgressController}=require("./progress-controller.js");
@@ -74,7 +75,38 @@ function summarizeAiTelemetry(items,{toolWallMs=0,toolCallsExecutedCurrent=0,too
   return out;
 }
 
-async function runRoleWithReadOnlyTools({aiCore,role,system="",user="",toolRuntime=null,maxToolRounds=null,maxToolCalls=null,baseEvidenceIds=[],registeredEvidence=[],strictEvidenceRefs=false,continuationState=null,durableHooks=null,progressQualification=null}={}){
+// Compact only already-admitted, fully recoverable inventory records. Keep source,
+// reproduction, counter-evidence and all other record types inline. The original
+// user packet is used for skill selection and evidence registration.
+function compactResearchInventory(user,role,selected,registeredEvidence,baseEvidenceIds){
+  const baseline=String(user||"");
+  const unchanged={user:baseline,baseline_bytes:Buffer.byteLength(baseline,"utf8"),candidate_bytes:Buffer.byteLength(baseline,"utf8"),projected_records:0};
+  if(!["researcher","diagnoser"].includes(role)||!selected?.tools?.includes("evidence.read"))return unchanged;
+  let packet;try{packet=JSON.parse(baseline);}catch{return unchanged;}
+  if(!packet||typeof packet!=="object"||!Array.isArray(packet.localEvidence))return unchanged;
+  const allowed=new Set(baseEvidenceIds),canonical=new Map(registeredEvidence.map(r=>[r.evidence_id,r]));let count=0;
+  const records=packet.localEvidence.map(view=>{
+    const record=canonical.get(view?.evidence_id);
+    if(!record||!allowed.has(record.evidence_id)||record.source_type!=="LOCAL_RUNTIME"||record.payload?.kind!=="initial_test_inventory")return view;
+    assertEvidenceRecord(record);
+    const {integrity,...expected}=record;
+    if(stableJson(view)!==stableJson(expected))return view;
+    const full=evidenceProjection(record,{maxChars:12000});
+    if(full.projection_completeness!=="COMPLETE"||full.excerpt_truncated)return view;
+    const projected=evidenceProjection(record,{maxChars:700});
+    if(Buffer.byteLength(JSON.stringify(projected),"utf8")>=Buffer.byteLength(JSON.stringify(view),"utf8"))return view;
+    count++;return projected;
+  });
+  if(!count)return unchanged;
+  const compact=JSON.stringify({...packet,localEvidence:records});
+  const bytes=Buffer.byteLength(compact,"utf8");
+  if(bytes>=unchanged.baseline_bytes)return unchanged;
+  return {user:compact,baseline_bytes:unchanged.baseline_bytes,candidate_bytes:bytes,projected_records:count};
+}
+
+const {deduplicateRoleEvidence}=require("./role-prompt-evidence.js");
+
+async function runRoleWithReadOnlyTools({aiCore,role,system="",user="",toolRuntime=null,maxToolRounds=null,maxToolCalls=null,baseEvidenceIds=[],registeredEvidence=[],strictEvidenceRefs=false,continuationState=null,durableHooks=null,progressQualification=null,thinkingOverride=null}={}){
   if(!Array.isArray(registeredEvidence))throw new Error("ROLE_REGISTERED_EVIDENCE_INVALID");
   if(progressQualification!==null&&(typeof progressQualification!=="object"||typeof progressQualification.verify!=="function"))throw new Error("ROLE_PROGRESS_QUALIFICATION_INVALID");
   if(!aiCore||typeof aiCore.call!=="function")throw new Error("AI_CORE_CALL_REQUIRED");
@@ -83,7 +115,7 @@ async function runRoleWithReadOnlyTools({aiCore,role,system="",user="",toolRunti
     if(registeredEvidence.length)throw new Error("ROLE_REGISTERED_EVIDENCE_CONTEXT_UNAVAILABLE");
     if(continuationState!==null)throw new Error("ROLE_TOOL_CONTINUATION_REQUIRES_TOOL_RUNTIME");
     const deadlineAt=Date.now()+budget.turn_timeout_ms;
-    const out=await aiCore.call(role,{system:[system,evidencePolicy].filter(Boolean).join("\n"),user,maxTokens:budget.max_tokens,timeoutMsOverride:budget.turn_timeout_ms,deadlineAt,queueTimeoutMs:budget.turn_timeout_ms,excludeQueueFromDeadline:true});
+    const out=await aiCore.call(role,{system:[system,evidencePolicy].filter(Boolean).join("\n"),user,maxTokens:budget.max_tokens,timeoutMsOverride:budget.turn_timeout_ms,deadlineAt,queueTimeoutMs:budget.turn_timeout_ms,excludeQueueFromDeadline:true,...(thinkingOverride===null?{}:{thinkingOverride})});
     const available=mergeEvidenceIds(baseEvidenceIds),telemetry=summarizeAiTelemetry([out.telemetry]);
     if(progressQualification?.validateFinal&&progressQualification.validateFinal({result:parseAndValidateRoleOutput(role,out.content,{availableEvidenceIds:available,strictEvidenceRefs})})!==true)throw new Error(`ROLE_COMPLETION_NOT_QUALIFIED:${role}`);
     return {...out,validated_output:parseAndValidateRoleOutput(role,out.content,{availableEvidenceIds:available,strictEvidenceRefs}),tool_loop:{rounds:0,total_calls:0,observations:[],evidence_ids:available,progress:{max_no_progress_rounds:2,no_progress_rounds:0,total_evidence_ids:available.length,total_work_ids:0,total_effect_ids:0,seen_evidence_ids:[...available],completed_work_ids:[],completed_effect_ids:[],history:[],runtime_telemetry:telemetry},parse_status:"FINAL",selected_skill_ids:[...(out.control_plane?.selected_skill_ids||[])],continuation_state:null,telemetry}};
@@ -100,7 +132,10 @@ async function runRoleWithReadOnlyTools({aiCore,role,system="",user="",toolRunti
     toolRuntime.addEvidenceToContext(evidenceContext,registeredEvidence,{allowedEvidenceIds:baseEvidenceIds});
   }
   const selected=availableForSelection(role,toolRuntime,user),protocol=toolProtocol(selected.tools),deadlineAt=Date.now()+(budget.tool_loop_wall_ms||budget.turn_timeout_ms),progress=createProgressController({maxNoProgressRounds:2,initialState:resume.progress,requireQualifiedProgress:progressQualification!==null,verifyQualifiedProgress:progressQualification?.verify||null,qualificationBinding:progressQualification?.binding??null});
-  const baseUser=String(user||"");
+  const promptView=compactResearchInventory(user,role,selected,registeredEvidence,baseEvidenceIds);
+  const {user:inventoryUser,...promptViewMetrics}=promptView;
+  const dedup=registeredEvidence.length?deduplicateRoleEvidence(inventoryUser,baseEvidenceIds):{user:inventoryUser,baseline_bytes:Buffer.byteLength(inventoryUser,"utf8"),candidate_bytes:Buffer.byteLength(inventoryUser,"utf8"),deduplicated_records:0};
+  const {user:baseUser,...dedupMetrics}=dedup;
   let currentUser=withObservations(baseUser,resume.observations),totalCalls=resume.total_calls;
   const observations=resume.observations,seenToolCalls=new Set(resume.seen_tool_fingerprints),completedWorkIds=new Set(resume.completed_work_ids),completedEffectIds=new Set(resume.completed_effect_ids),llmTelemetry=[],inMemoryToolResults=new Map(),qualifiedProgressIds=new Set();
   let last=null,toolWallMs=0,toolCallsExecutedCurrent=0,toolCallsReusedCurrent=0;
@@ -112,14 +147,16 @@ async function runRoleWithReadOnlyTools({aiCore,role,system="",user="",toolRunti
   for(let round=resume.rounds_completed;round<=rounds;round++){
     if(Date.now()>=deadlineAt)throw new Error(`ROLE_TOOL_WALL_BUDGET_EXHAUSTED:${role}`);
     const finalRound=round===rounds;
-    const roundSystem=[system,evidencePolicy,protocol].filter(Boolean).join("\n");
-    last=await aiCore.call(role,{system:roundSystem,user:currentUser,selectedSkillIds:selected.skillIds,maxTokens:budget.max_tokens,timeoutMsOverride:budget.turn_timeout_ms,deadlineAt,queueTimeoutMs:Math.min(budget.turn_timeout_ms,Math.max(1,deadlineAt-Date.now())),excludeQueueFromDeadline:false,toolBudgetFinalRound:finalRound?true:null});
+    const roundSystem=[system,evidencePolicy,protocol,promptViewMetrics.projected_records?"The initial inventory projection is incomplete. Read its parent_evidence_id with evidence.read (max_chars=12000) if any omitted inventory detail is needed; never infer omitted checks or absence.":null].filter(Boolean).join("\n");
+    // On the final round no more reads are possible, so restore full input.
+    if(finalRound&&promptViewMetrics.projected_records)currentUser=withObservations(String(user||""),observations);
+    last=await aiCore.call(role,{system:roundSystem,user:currentUser,selectedSkillIds:selected.skillIds,maxTokens:budget.max_tokens,timeoutMsOverride:budget.turn_timeout_ms,deadlineAt,queueTimeoutMs:Math.min(budget.turn_timeout_ms,Math.max(1,deadlineAt-Date.now())),excludeQueueFromDeadline:false,toolBudgetFinalRound:finalRound?true:null,...(thinkingOverride===null?{}:{thinkingOverride})});
     llmTelemetry.push(last?.telemetry||null);
     const parsed=parseIntermediate(role,last.content),requests=requestList(parsed);
     if(!requests.length){
       const toolEvidenceIds=collectEvidenceIds(observations),available=mergeEvidenceIds(baseEvidenceIds,toolEvidenceIds),validated=parseAndValidateRoleOutput(role,last.content,{availableEvidenceIds:available,strictEvidenceRefs});
       if(progressQualification?.validateFinal&&progressQualification.validateFinal({result:validated})!==true)throw new Error(`ROLE_COMPLETION_NOT_QUALIFIED:${role}`);
-      const state=continuationSnapshot({roundsCompleted:round,totalCalls,observations,seenToolCalls,progress,completedWorkIds,completedEffectIds}),telemetry=summarizeAiTelemetry(llmTelemetry,{toolWallMs,toolCallsExecutedCurrent,toolCallsReusedCurrent});
+      const state=continuationSnapshot({roundsCompleted:round,totalCalls,observations,seenToolCalls,progress,completedWorkIds,completedEffectIds}),telemetry={...summarizeAiTelemetry(llmTelemetry,{toolWallMs,toolCallsExecutedCurrent,toolCallsReusedCurrent}),initial_inventory_prompt_view:promptViewMetrics,initial_evidence_dedup:dedupMetrics};
       return {...last,validated_output:validated,tool_loop:{rounds:round,total_calls:totalCalls,observations,evidence_ids:available,tool_evidence_ids:toolEvidenceIds,base_evidence_ids:mergeEvidenceIds(baseEvidenceIds),progress:{...progress.snapshot(),runtime_telemetry:telemetry},parse_status:"FINAL",selected_skill_ids:[...selected.skillIds],continuation_state:state,telemetry}};
     }
     if(finalRound)throw new Error(`ROLE_TOOL_LOOP_LIVELOCK:${role}`);
@@ -151,4 +188,4 @@ async function runRoleWithReadOnlyTools({aiCore,role,system="",user="",toolRunti
   }
   throw new Error(`ROLE_TOOL_LOOP_UNREACHABLE:${role}`);
 }
-module.exports={TOOL_OBSERVATION_MAX_EXCERPT_CHARS,TOOL_OBSERVATION_MAX_ITEMS,TOOL_OBSERVATION_MAX_CHARS,RUNTIME_CONTROL_POLICY,TOOL_OBSERVATION_MARKER,parseJsonContent,availableForSelection,toolProtocol,evidenceProtocol,toolFingerprint,collectEvidenceIds,mergeEvidenceIds,normalizeContinuationState,continuationSnapshot,observationPromptView,withObservations,numericTelemetry,telemetryKnownSum,summarizeAiTelemetry,runRoleWithReadOnlyTools};
+module.exports={TOOL_OBSERVATION_MAX_EXCERPT_CHARS,TOOL_OBSERVATION_MAX_ITEMS,TOOL_OBSERVATION_MAX_CHARS,RUNTIME_CONTROL_POLICY,TOOL_OBSERVATION_MARKER,parseJsonContent,availableForSelection,toolProtocol,evidenceProtocol,toolFingerprint,collectEvidenceIds,mergeEvidenceIds,normalizeContinuationState,continuationSnapshot,observationPromptView,withObservations,numericTelemetry,telemetryKnownSum,summarizeAiTelemetry,compactResearchInventory,runRoleWithReadOnlyTools};

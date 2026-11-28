@@ -5,7 +5,7 @@ const {fetch:undiciFetch,Agent}=require("undici");
 const {ROLES}=require("../roles.js");
 const {getRoleRuntimeBudget}=require("./role-runtime-budgets.js");
 const {getModelOutputHardCeilingForRole}=require("./model-profiles.js");
-const {resolveEffectiveMaxTokens}=require("../adapters/ai-core.js");
+const {resolveEffectiveMaxTokens,expectedGateForRole,normalizeGateUrls}=require("../adapters/ai-core.js");
 const localReviewer=require("./skill-effect-benchmark.js");
 const codeScout=require("./code-scout-skill-effect-benchmark.js");
 const causalScout=require("./causal-scout-skill-effect-benchmark.js");
@@ -55,7 +55,73 @@ function addTelemetry(target,result,elapsed){target.calls++;target.wall_ms+=elap
 function publicTelemetry(value){return Object.freeze({calls:value.calls,wall_ms:value.wall_ms,prompt_tokens:value.usage_complete?value.prompt_tokens:null,completion_tokens:value.usage_complete?value.completion_tokens:null,total_tokens:value.usage_complete?value.total_tokens:null,usage_complete:value.usage_complete});}
 function requestBody(config,system,user){const body={model:config.model,messages:[{role:"system",content:system},{role:"user",content:user}],max_tokens:config.max_tokens,temperature:config.temperature,stream:false,response_format:{type:"json_object"}};if(Number.isFinite(config.top_p))body.top_p=config.top_p;if(Number.isInteger(config.top_k))body.top_k=config.top_k;if(typeof config.thinking==="boolean")body.chat_template_kwargs={enable_thinking:config.thinking};return body;}
 function assertCompleteReply(role,config,reply){if(reply?.finish_reason==="length"){const error=new Error("AI_CORE_OUTPUT_TRUNCATED");error.code="AI_CORE_OUTPUT_TRUNCATED";error.benchmark_metadata=Object.freeze({role:ROLE_ORDER.includes(role)?role:null,max_tokens:Number.isFinite(config?.max_tokens)?config.max_tokens:null,finish_reason:"length",completion_tokens:Number.isFinite(reply?.usage?.completion_tokens)?reply.usage.completion_tokens:null,content_chars:typeof reply?.content==="string"?reply.content.length:null});throw error;}return reply;}
-function makeAiCoreCaller({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=process.env.AI_CORE_API_KEY,fetchImpl=undiciFetch,timeoutMs=600000,dispatcher=null,runtimeContextTokens=process.env.DEBUG_AI_CORE_CONTEXT_TOKENS??null}={}){if(!baseUrl)throw new Error("AI_CORE_URL_REQUIRED");if(!apiKey)throw new Error("AI_CORE_API_KEY_REQUIRED");const context=Number(runtimeContextTokens);if(!Number.isSafeInteger(context)||context<=1000){const error=new Error("AI_CORE_RUNTIME_CONTEXT_UNQUALIFIED");error.code="AI_CORE_RUNTIME_CONTEXT_UNQUALIFIED";throw error;}const endpoint=new URL("/v1/chat/completions",baseUrl).toString(),transport=dispatcher||new Agent({headersTimeout:timeoutMs+5000,bodyTimeout:timeoutMs+5000});const callModel=async function({role=null,config,system,user}){const ctl=new AbortController(),timer=setTimeout(()=>ctl.abort(),timeoutMs);try{const response=await fetchImpl(endpoint,{method:"POST",headers:{authorization:`Bearer ${apiKey}`,"content-type":"application/json"},body:JSON.stringify(requestBody(config,system,user)),signal:ctl.signal,dispatcher:transport}),text=await response.text();if(!response.ok)throw new Error(`AI_CORE_HTTP_${response.status}:${String(text).slice(0,300)}`);const envelope=JSON.parse(text),choice=envelope?.choices?.[0],content=choice?.message?.content;assertCompleteReply(role,config,{content,finish_reason:choice?.finish_reason??null,usage:envelope?.usage});if(typeof content!=="string"||!content.trim())throw new Error("AI_CORE_EMPTY");const usage=envelope?.usage||{};return{content,finish_reason:choice?.finish_reason??null,usage:{prompt_tokens:Number.isFinite(usage.prompt_tokens)?usage.prompt_tokens:null,completion_tokens:Number.isFinite(usage.completion_tokens)?usage.completion_tokens:null,total_tokens:Number.isFinite(usage.total_tokens)?usage.total_tokens:null}};}finally{clearTimeout(timer);}};callModel.runtime_context_tokens=context;callModel.qualify_variant=(role,axis,variant)=>qualifyVariantForRuntime(role,axis,variant,context);return callModel;}
+function makeAiCoreCaller({
+  baseUrl=process.env.DEBUG_AI_CORE_URL,
+  apiKey=process.env.AI_CORE_API_KEY,
+  fetchImpl=undiciFetch,
+  timeoutMs=600000,
+  dispatcher=null,
+  runtimeContextTokens=process.env.DEBUG_AI_CORE_CONTEXT_TOKENS??null,
+  dispatchMode=process.env.DEBUG_AI_CORE_GATE_DISPATCH_MODE||"legacy",
+  modelGateBaseUrls=null
+}={}){
+  if(!apiKey)throw new Error("AI_CORE_API_KEY_REQUIRED");
+  if(!["legacy","model_gates"].includes(dispatchMode))throw new Error("MODEL_AB_DISPATCH_MODE_INVALID");
+  const context=Number(runtimeContextTokens);
+  if(!Number.isSafeInteger(context)||context<=1000){
+    const error=new Error("AI_CORE_RUNTIME_CONTEXT_UNQUALIFIED");
+    error.code="AI_CORE_RUNTIME_CONTEXT_UNQUALIFIED";
+    throw error;
+  }
+  // Reuse production origin validation and role mapping. In Gate mode the
+  // old DEBUG_AI_CORE_URL must never be a fallback for a missing model Gate.
+  const declaredGateUrls=modelGateBaseUrls??{
+    coder:process.env.DEBUG_AI_CORE_GATE_CODER_URL,
+    qwen3:process.env.DEBUG_AI_CORE_GATE_QWEN3_URL,
+    granite:process.env.DEBUG_AI_CORE_GATE_GRANITE_URL,
+    ministral:process.env.DEBUG_AI_CORE_GATE_MINISTRAL_URL
+  };
+  const gateOrigins=dispatchMode==="model_gates"?normalizeGateUrls(declaredGateUrls):null;
+  if(dispatchMode==="legacy"&&!baseUrl)throw new Error("AI_CORE_URL_REQUIRED");
+  const legacyEndpoint=dispatchMode==="legacy"?new URL("/v1/chat/completions",baseUrl).toString():null;
+  const endpointForRole=role=>{
+    if(dispatchMode==="legacy")return legacyEndpoint;
+    return new URL("/v1/chat/completions",gateOrigins[expectedGateForRole(role).model]).toString();
+  };
+  const transport=dispatcher||new Agent({headersTimeout:timeoutMs+5000,bodyTimeout:timeoutMs+5000});
+  const callModel=async function({role=null,config,system,user}){
+    const ctl=new AbortController(),timer=setTimeout(()=>ctl.abort(),timeoutMs);
+    try{
+      const response=await fetchImpl(endpointForRole(role),{
+        method:"POST",
+        headers:{authorization:"Bearer "+apiKey,"content-type":"application/json"},
+        body:JSON.stringify(requestBody(config,system,user)),
+        signal:ctl.signal,dispatcher:transport,redirect:"error"
+      });
+      // Gate errors can contain private backend diagnostics, not benchmark evidence.
+      if(!response.ok){
+        const error=new Error("AI_CORE_HTTP_"+response.status);
+        error.code="AI_CORE_HTTP";
+        error.status=response.status;
+        throw error;
+      }
+      const envelope=await response.json(),choice=envelope?.choices?.[0],content=choice?.message?.content;
+      assertCompleteReply(role,config,{content,finish_reason:choice?.finish_reason??null,usage:envelope?.usage});
+      if(typeof content!=="string"||!content.trim())throw new Error("AI_CORE_EMPTY");
+      const usage=envelope?.usage||{};
+      return{content,finish_reason:choice?.finish_reason??null,usage:{
+        prompt_tokens:Number.isFinite(usage.prompt_tokens)?usage.prompt_tokens:null,
+        completion_tokens:Number.isFinite(usage.completion_tokens)?usage.completion_tokens:null,
+        total_tokens:Number.isFinite(usage.total_tokens)?usage.total_tokens:null
+      }};
+    }finally{clearTimeout(timer);}
+  };
+  callModel.runtime_context_tokens=context;
+  callModel.dispatch_mode=dispatchMode;
+  callModel.qualify_variant=(role,axis,variant)=>qualifyVariantForRuntime(role,axis,variant,context);
+  return callModel;
+}
+
 function assessScores(baselineScore,candidateScore){if(candidateScore<baselineScore)return"QUALITY_REGRESSION";if(candidateScore>baselineScore)return"QUALITY_IMPROVEMENT_MEASURED";return"NO_QUALITY_GAIN";}
 function executionOrder(repeat,caseIndex){if(!Number.isInteger(repeat)||repeat<1||!Number.isInteger(caseIndex)||caseIndex<0)throw new Error("MODEL_AB_ORDER_INPUT_INVALID");return(repeat+caseIndex)%2===1?Object.freeze(["baseline","candidate"]):Object.freeze(["candidate","baseline"]);}
 function validateScored(role,caseId,mode,scored){const score=scored?.score,maxScore=scored?.max_score;if(typeof score!=="number"||typeof maxScore!=="number"||!Number.isInteger(score)||!Number.isInteger(maxScore)||maxScore<=0||score<0||score>maxScore)throw new Error(`MODEL_AB_SCORE_INVALID:${role}:${caseId}:${mode}`);return Object.freeze({score,max_score:maxScore});}

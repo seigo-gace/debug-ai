@@ -15,3 +15,25 @@ test("LOCAL_FIXTURE_ONLY copy protects existing destination and accepts legacy n
 test("LOCAL_FIXTURE_ONLY changed source during staging fails and removes only its own copy",t=>{const f=fixture(t),write=fs.writeFileSync;fs.writeFileSync=function(file,...args){const out=write.call(fs,file,...args);if(file===path.join(f.dst,"a.js"))write.call(fs,path.join(f.repo,"a.js"),"changed during copy\n");return out;};try{assert.throws(()=>runtime.copySnapshot(f.repo,f.dst),/SNAPSHOT_SOURCE_CHANGED/);assert.equal(fs.existsSync(f.dst),false);}finally{fs.writeFileSync=write;}});
 test("LOCAL_FIXTURE_ONLY symlinked destination ancestor cannot create directories in source",t=>{const f=fixture(t),alias=path.join(f.root,"alias");fs.symlinkSync(f.repo,alias,"dir");assert.throws(()=>runtime.copySnapshot(f.repo,path.join(alias,"must-not-create","copy")),/SNAPSHOT_DESTINATION/);assert.equal(fs.existsSync(path.join(f.repo,"must-not-create")),false);});
 test("LOCAL_FIXTURE_ONLY worktree Git pointer is excluded without reading its contents",t=>{const f=fixture(t);fs.writeFileSync(path.join(f.repo,".git"),"gitdir: /fixture/host-only\n");const copy=runtime.copySnapshot(f.repo,f.dst);assert.equal(fs.existsSync(path.join(f.dst,".git")),false);assert.ok(copy.manifest.exclusions.some(e=>e.path===".git"&&e.reason==="POLICY_EXCLUDED"));assert.equal(JSON.stringify(copy.manifest).includes("host-only"),false);assert.throws(()=>runtime.copySnapshot(f.repo,path.join(f.root,"copy2"),{requiredPaths:[".git"]}),/SNAPSHOT_INCOMPLETE/);});
+
+test("LOCAL_FIXTURE_ONLY sandbox copies selected source without parent-owned worktree and verification trees",t=>{
+  const f=fixture(t);
+  for(const name of [".worktrees",".verification",".debugai-input"]){
+    fs.mkdirSync(path.join(f.repo,name,"branch"),{recursive:true});
+    fs.writeFileSync(path.join(f.repo,name,"branch","other.js"),"other revision");
+    fs.symlinkSync("/outside/fixture/config",path.join(f.repo,name,"branch",".env"));
+  }
+  const copy=runtime.copySnapshot(f.repo,f.dst,{requiredPaths:["a.js"]});
+  for(const name of [".worktrees",".verification",".debugai-input"]){
+    assert.equal(fs.existsSync(path.join(f.dst,name)),false);
+    assert.ok(copy.manifest.exclusions.some(e=>e.path===name&&e.reason==="POLICY_EXCLUDED"));
+    assert.throws(()=>runtime.copySnapshot(f.repo,path.join(f.root,"another-"+name),{requiredPaths:[name+"/branch/other.js"]}),/SNAPSHOT_INCOMPLETE/);
+  }
+  assert.equal(runtime.verifySnapshotCopy(f.dst,copy.manifest).status,"MATERIALIZED_ENTRIES_MATCH");
+});
+
+test("LOCAL_FIXTURE_ONLY unreadable runtime request queue is never traversed by sandbox inventory",t=>{
+  const f=fixture(t),queue=path.join(f.repo,".debugai-input");fs.mkdirSync(queue);fs.writeFileSync(path.join(queue,"request.json"),"not source");
+  const orig=fs.readdirSync;fs.readdirSync=function(dir,...args){if(path.resolve(String(dir))===queue)throw Object.assign(new Error("queue must not be read"),{code:"EACCES"});return orig.call(this,dir,...args);};
+  try{const m=runtime.snapshotInventory(f.repo,{requiredPaths:["a.js"]});assert.ok(m.exclusions.some(e=>e.path===".debugai-input"&&e.reason==="POLICY_EXCLUDED"));assert.equal(m.entries.some(e=>e.path.startsWith(".debugai-input/")),false);}finally{fs.readdirSync=orig;}
+});

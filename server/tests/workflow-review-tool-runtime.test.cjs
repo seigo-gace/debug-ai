@@ -64,3 +64,28 @@ test("post-apply Local Reviewer reads registered Evidence and records its Run in
   assert.ok(events.some(x=>x.type==="tool_invocation"&&x.payload.tool==="evidence.read"&&x.payload.phase==="SUCCEEDED"));
   assert.doesNotMatch(JSON.stringify(events),/ORIGINAL_SOURCE/);
 });
+
+
+test("failed preapproval candidate cannot spend external review or create a replacement from an ID-only re-diagnosis",async t=>{
+  const f=fixture();t.after(f.cleanup);
+  const called=[],events=[];let reviewCalls=0,createCalls=0;
+  const aiCore={call:async role=>{
+    called.push(role);
+    if(role==="patch_engineer")return{content:JSON.stringify({operations:[{type:"replace",path:"a.js",old:"ORIGINAL_SOURCE",new:"REPAIRED_SOURCE"}],summary:"candidate from verified requirement"})};
+    if(role==="diagnoser")return{content:JSON.stringify({diagnosis_status:"HYPOTHESES_RETAINED",hypotheses:[{id:"HYP1",status:"HYPOTHESIS",evidence_refs:[],counter_evidence_refs:[],falsification_condition:"Reproduce the same failing assertion"}],confirmed_root_cause:null,unsupported_claims:[]})};
+    throw new Error("UNEXPECTED_ROLE:"+role);
+  }};
+  const runtimeEvidence={write:(_runId,type,payload)=>{events.push({type,payload});return{id:type};},list:()=>[]};
+  const patchService={create:()=>{createCalls++;return{schema:"patch-candidate/v1",id:"candidate_preapproval",candidate_hash:"candidate_hash",diff_hash:"diff_hash",summary:"candidate only"};}};
+  const sandboxVerification={collectCandidate:async()=>({status:"FINAL_INVALID",checks:[{name:"fixture:test",kind:"deterministic_sandbox_check",configured:true,executed:true,status:"FAIL",code:1,stderr:"wrong return value",stdout:""}]})};
+  const workflow=createWorkflow({aiCore,repoPolicy:new RepoPolicy({workspaceRoot:f.workspace}),patchService,runtimeEvidence,sandboxVerification,
+    externalReview:{hypothesis:async()=>{reviewCalls++;return{json:{verdict:"PASS"}};}}});
+  const analysis={external_hypothesis_review:{json:{verdict:"PASS"}},diagnosis:{hypothesis:"incorrect return branch"},deterministic_verification:{status:"FINAL_INVALID",checks:[]},evidence_registry:{evidence_ids:[],tool_evidence_ids:[]}};
+  await assert.rejects(workflow.patchCandidate({runId:"run_preapproval",analysis,repo:f.repo,selectedPaths:["a.js"],context:{},task:"repair incorrect return branch"}),
+    /HYPOTHESIS_REVIEW_STATEMENT_MISSING/);
+  assert.deepEqual(called,["patch_engineer","diagnoser"]);
+  assert.equal(createCalls,1,"no second candidate from invalid diagnosis");
+  assert.equal(reviewCalls,0,"unknown hypothesis must not become a paid/simulated PASS");
+  assert.ok(events.some(e=>e.type==="preapproval_refix_attempt"));
+  assert.equal(events.some(e=>e.type==="preapproval_refix_review"),false);
+});

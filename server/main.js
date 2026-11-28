@@ -10,8 +10,12 @@ const {RunAuthority}=require("./run-authority.js");
 const {RepoPolicy}=require("./repo-policy.js");
 const {createWorkflow}=require("./workflow-observed.js");
 const {createServer}=require("./http.js");
+const {createChatHandler}=require("./chat/index.js");
+const {createAccessVerifier}=require("./chat/access.js");
+const http=require("node:http");
 const {sourceGate}=require("./gates.js");
 const {createSandboxVerificationLane}=require("./control/sandbox-verification.js");
+const {horizontalRoleHooksForMode}=require("./control/role-work-item/adapter.js");
 const {createDapEvidenceLane}=require("./control/dap-evidence-runtime.js");
 const {GitOpsRequestService}=require("./control/gitops-request.js");
 const {ServerCommandRequestService}=require("./control/server-command-request.js");
@@ -39,15 +43,28 @@ if(inputTokenShadowFlag!=="true"&&inputTokenShadowFlag!=="false")throw new Error
 // Absence preserves the current 18080 route. These URLs are not credentials or
 // a second model lifecycle owner; Gate POST still requires AI Core admission.
 const coreGateDispatchMode=process.env.DEBUG_AI_CORE_GATE_DISPATCH_MODE||"legacy";
+// Horizontal continuation is opt-in; the legacy workflow remains default.
+const recoveryHooks=horizontalRoleHooksForMode(process.env.DEBUG_AI_ROLE_EXECUTION_MODE||"legacy");
+if(recoveryHooks&&coreGateDispatchMode!=="model_gates")throw new Error("DEBUG_AI_HORIZONTAL_MODEL_GATES_REQUIRED");
 const coreGateUrls=coreGateDispatchMode==="model_gates"?{
   coder:process.env.DEBUG_AI_CORE_GATE_CODER_URL,
   qwen3:process.env.DEBUG_AI_CORE_GATE_QWEN3_URL,
   granite:process.env.DEBUG_AI_CORE_GATE_GRANITE_URL,
   ministral:process.env.DEBUG_AI_CORE_GATE_MINISTRAL_URL
 }:null;
+const adaptiveFlag=process.env.DEBUG_AI_ADAPTIVE_LOCAL_DIAGNOSIS||"false",scoutPairFlag=process.env.DEBUG_AI_SCOUT_PAIR_COMPARISON||"false";
+if(![adaptiveFlag,scoutPairFlag].every(v=>["true","false"].includes(v)))throw new Error("DEBUG_AI_PERFORMANCE_MODE_INVALID");
+const adaptiveLocalDiagnosis=adaptiveFlag==="true";
+const chatGateConfig=process.env.DEBUG_AI_CHAT_ENABLED==="true"?JSON.parse(process.env.DEBUG_AI_COMMAND_MODEL_GATES||"{}"):null;
+const externalTeachingFlag=process.env.DEBUG_AI_COMMAND_EXTERNAL_QUALIFICATION||"false";
+if(!["true","false"].includes(externalTeachingFlag))throw new Error("COMMAND_EXTERNAL_FLAG_INVALID");
+const studentGate=chatGateConfig?.qwen35_teaching?"qwen35_teaching":"qwen35";
+const teachingBudgets=externalTeachingFlag==="true"&&chatGateConfig?.[studentGate]&&chatGateConfig?.deepseek?{qwen35:Math.min(1024,chatGateConfig.qwen35?.max_output_tokens||chatGateConfig.qwen35_teaching.max_output_tokens),qwen35_teaching:Math.min(1024,chatGateConfig.qwen35_teaching?.max_output_tokens||1024),deepseek:Math.min(1024,chatGateConfig.deepseek.max_output_tokens)}:null;
 const aiCore=createAiCoreAdapter({
+  adaptiveLocalDiagnosis,scoutPairDispatch:scoutPairFlag==="true",
   runtimeContextTokens:aiCoreContextTokens,requireRuntimeContextQualification:true,
   dispatchMode:coreGateDispatchMode,modelGateBaseUrls:coreGateUrls,
+  commandModelGates:chatGateConfig,commandExternalQualification:externalTeachingFlag==="true",
   inputTokenShadow:inputTokenShadowFlag==="true",
   inputTokenShadowRoute:process.env.DEBUG_AI_CORE_INPUT_TOKEN_SHADOW_ROUTE||"router"
 });
@@ -71,15 +88,23 @@ const externalReview=createExternalReviewAdapter();
 const patchService=new PatchService({runtimeRoot,repoPolicy});
 const gitOps=new GitOpsRequestService({repoPolicy});
 const serverCommand=new ServerCommandRequestService({repoPolicy,defaultRepo:path.join(repoPolicy.workspaceRoot,"debug-ai")});
-const workflow=createWorkflow({aiCore,externalReview,evidenceSearch,runtimeEvidence,tgserver,patchService,authority,repoPolicy,sandboxVerification,dapEvidence,serverCommand});
+const workflow=createWorkflow({aiCore,externalReview,evidenceSearch,runtimeEvidence,tgserver,patchService,authority,repoPolicy,sandboxVerification,dapEvidence,adaptiveLocalDiagnosis,serverCommand,recoveryHooks});
 const host=process.env.DEBUG_AI_HOST||"127.0.0.1",port=Number(process.env.DEBUG_AI_PORT||8787);
-const server=createServer({workflow,gitOps,githubCommand:serverCommand,serverCommand,host,port});
+const chatEnabled=process.env.DEBUG_AI_CHAT_ENABLED==="true",chatAccess=chatEnabled&&process.env.DEBUG_AI_CHAT_AUTH_MODE==="cloudflare_access";
+const chatOrigin=process.env.DEBUG_AI_CHAT_ORIGIN;
+const chat=chatEnabled?createChatHandler({aiCore,runtimeRoot,teachingBudgets,token:process.env.DEBUG_AI_CHAT_ACCESS_TOKEN,access:chatAccess?{origin:chatOrigin,verify:createAccessVerifier({team:process.env.DEBUG_AI_CHAT_ACCESS_TEAM,audience:process.env.DEBUG_AI_CHAT_ACCESS_AUD,ownerEmail:process.env.DEBUG_AI_CHAT_OWNER_EMAIL})}:null,serverCommand}):null;
+// Only the chat handler is reachable through the public-facing origin listener;
+// the main DebugAI HTTP APIs are not mounted on it. Same process/model queue.
+const chatPort=chatAccess?envInt("DEBUG_AI_CHAT_PORT",18788,{min:1024,max:65535}):null;
+if(chatAccess&&chatPort===port)throw new Error("CHAT_PORT_CONFLICT");
+const chatServer=chatAccess?http.createServer(async(req,res)=>{try{const url=new URL(req.url,"http://chat.local");if(!await chat(req,res,url)){res.writeHead(404);res.end();}}catch{if(!res.headersSent)res.writeHead(500);res.end();}}):null;
+const server=createServer({workflow,gitOps,githubCommand:serverCommand,serverCommand,host,port,chat:chatAccess?null:chat});
 let shuttingDown=false,rotationTimer=null,archiveTimer=null,archiveSweepRunning=false;
 function rotateRuntimeEvidence(){try{const result=runtimeEvidence.rotate();if(result.orphans_removed>0)console.warn(`DebugAI runtime cache cleanup: files=${result.files} bytes=${result.bytes} orphans_removed=${result.orphans_removed}`);}catch(error){console.error(`DebugAI runtime cache cleanup failed: ${String(error?.message||error)}`);}}
 async function runArchiveSweep(){if(shuttingDown||archiveSweepRunning)return;archiveSweepRunning=true;try{const archive=await archiveTerminalRuns({authority,tgserver,maxRuns:archiveMaxRuns}),gc=gcArchivedTerminalRuns({authority,maxRuns:archiveMaxRuns}),patchGc=sweepPatchRetention({runtimeRoot,maxDeletes:archiveMaxRuns});if(archive.archived.length||archive.errors.length||gc.deleted.length||gc.resumed.length||gc.errors.length||patchGc.backup_deleted.length||patchGc.candidate_deleted.length||patchGc.errors.length){const archiveHist=archive.errors.length?formatRetentionErrorHistogram("archive_error",summarizeRetentionErrorClasses(archive.errors)):"",gcHist=gc.errors.length?formatRetentionErrorHistogram("durable_gc_error",summarizeRetentionErrorClasses(gc.errors)):"",histSuffix=[archiveHist,gcHist].filter(Boolean).join(" ");console.warn(`DebugAI retention sweep: archived=${archive.archived.length} already=${archive.already_archived.length} archive_errors=${archive.errors.length} durable_gc_deleted=${gc.deleted.length} durable_gc_resumed=${gc.resumed.length} durable_gc_errors=${gc.errors.length} patch_backup_deleted=${patchGc.backup_deleted.length} patch_candidate_deleted=${patchGc.candidate_deleted.length} patch_gc_errors=${patchGc.errors.length}${histSuffix?` ${histSuffix}`:""}`);}}catch(error){console.error(`DebugAI retention sweep failed: code=${String(error?.code||error?.name||"ERROR")}`);}finally{archiveSweepRunning=false;}}
 function scheduleArchiveSweep(delayMs){if(shuttingDown)return;archiveTimer=setTimeout(async()=>{await runArchiveSweep();scheduleArchiveSweep(archiveSweepMs);},delayMs);archiveTimer.unref();}
 async function finishShutdown(exitCode){try{await tgserver.shutdownLogSink(1000);}catch(error){console.error(`DebugAI TGserver log flush failed during shutdown: code=${String(error?.code||error?.name||"ERROR")}`);}try{writerLock.close();}finally{process.exit(exitCode);}}
-function shutdown(signal){if(shuttingDown)return;shuttingDown=true;if(rotationTimer)clearInterval(rotationTimer);if(archiveTimer)clearTimeout(archiveTimer);server.close(()=>{void finishShutdown(0);});setTimeout(()=>{try{writerLock.close();}finally{process.exit(1);}},5000).unref();if(signal)console.error(`DebugAI shutdown: ${signal}`);}
+function shutdown(signal){if(shuttingDown)return;shuttingDown=true;if(rotationTimer)clearInterval(rotationTimer);if(archiveTimer)clearTimeout(archiveTimer);if(chatServer)chatServer.close();server.close(()=>{void finishShutdown(0);});setTimeout(()=>{try{writerLock.close();}finally{process.exit(1);}},5000).unref();if(signal)console.error(`DebugAI shutdown: ${signal}`);}
 process.once("SIGTERM",()=>shutdown("SIGTERM"));
 process.once("SIGINT",()=>shutdown("SIGINT"));
 async function start(){
@@ -87,5 +112,5 @@ async function start(){
   // authenticated Gate model identities is missing or mismatched. This GET
   // check is not a live resident/lease/Stage B qualification.
   if(aiCore.dispatch_mode==="model_gates")await aiCore.preflightConfiguredGates();
-  rotateRuntimeEvidence();tgserver.prewarmLogSink();rotationTimer=setInterval(rotateRuntimeEvidence,runtimeEvidenceRotateMs);rotationTimer.unref();const recovery=await workflow.recoverStartup();if(recovery.claimed.length||recovery.incompatible.length){const incompatibleHist=recovery.incompatible.length?formatRetentionErrorHistogram("startup_incompatible",summarizeRetentionErrorClasses(recovery.incompatible)):"";console.log(`DebugAI startup recovery: claimed=${recovery.claimed.length} incompatible=${recovery.incompatible.length}${incompatibleHist?` ${incompatibleHist}`:""}`);}server.listen(port,host,()=>console.log(`DebugAI listening on http://${host}:${port}; ai_core_context_tokens=${aiCoreContextTokens}; runtime-cache retention_ms=${runtimeEvidenceRetentionMs} max_bytes=${runtimeEvidenceMaxBytes} rotate_ms=${runtimeEvidenceRotateMs}; retention_sweep_ms=${archiveSweepMs} retention_max_items=${archiveMaxRuns}`));scheduleArchiveSweep(archiveInitialDelayMs);}
+  rotateRuntimeEvidence();tgserver.prewarmLogSink();rotationTimer=setInterval(rotateRuntimeEvidence,runtimeEvidenceRotateMs);rotationTimer.unref();const recovery=await workflow.recoverStartup();if(recovery.claimed.length||recovery.incompatible.length){const incompatibleHist=recovery.incompatible.length?formatRetentionErrorHistogram("startup_incompatible",summarizeRetentionErrorClasses(recovery.incompatible)):"";console.log(`DebugAI startup recovery: claimed=${recovery.claimed.length} incompatible=${recovery.incompatible.length}${incompatibleHist?` ${incompatibleHist}`:""}`);}if(chatServer)await new Promise((resolve,reject)=>{chatServer.once("error",reject);chatServer.listen(chatPort,"127.0.0.1",resolve);});server.listen(port,host,()=>console.log(`DebugAI listening on http://${host}:${port}; ai_core_context_tokens=${aiCoreContextTokens}; runtime-cache retention_ms=${runtimeEvidenceRetentionMs} max_bytes=${runtimeEvidenceMaxBytes} rotate_ms=${runtimeEvidenceRotateMs}; retention_sweep_ms=${archiveSweepMs} retention_max_items=${archiveMaxRuns}`));scheduleArchiveSweep(archiveInitialDelayMs);}
 void start().catch(error=>{console.error(`DebugAI startup failed: ${String(error?.message||error)}`);try{writerLock.close();}finally{process.exitCode=1;}});

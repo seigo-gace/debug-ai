@@ -5,6 +5,7 @@ const path = require("node:path");
 const crypto = require("node:crypto");
 const os = require("node:os");
 const C = require("./contracts.js");
+const { isParentOwnedSourcePath } = require("./source-scope.js");
 
 function sha256(value) {
   return crypto.createHash("sha256").update(value).digest("hex");
@@ -23,7 +24,9 @@ function normalizeRel(value) {
 }
 
 function blockedPath(rel) {
-  const p = normalizeRel(rel).toLowerCase();
+  const normalized = normalizeRel(rel);
+  if (isParentOwnedSourcePath(normalized)) return true;
+  const p = normalized.toLowerCase();
   return (
     p === ".git" || p.includes("/.git/") || p.startsWith(".git/") ||
     p === "secrets" || p.includes("/secrets/") || p.startsWith("secrets/") ||
@@ -60,6 +63,9 @@ function ensureInside(repo, rel) {
     throw new Error(`PATCH_SYMLINK_ESCAPE:${safeRel}`);
   }
 
+  if (isParentOwnedSourcePath(path.relative(root, realExisting))) {
+    throw new Error(`PATCH_PROTECTED_PATH:${safeRel}`);
+  }
   return full;
 }
 

@@ -69,7 +69,9 @@ test("investigation role prompts, validators, and diagnosis handoff share canoni
   assert.match(diagnosisPrompt,/OUTPUT_FIELDS=diagnosis_status,hypotheses,confirmed_root_cause,unsupported_claims/);
   const diagnosis=parseAndValidateRoleOutput("diagnoser",JSON.stringify({diagnosis_status:"HYPOTHESES_RETAINED",hypotheses:[{id:"H_QUEUE",evidence_refs:[],falsification_condition:"queue wait absent",counter_evidence_refs:[],status:"HYPOTHESIS"}],confirmed_root_cause:null,unsupported_claims:[]}),{roleSemantics:"enforce"});
   assert.equal(diagnosis.hypotheses[0].id,"H_QUEUE");
-  assert.equal(pickDiagnosisStatement(diagnosis),"H_QUEUE");
+  assert.equal(pickDiagnosisStatement(diagnosis),null,"opaque IDs must not masquerade as reviewable causal statements");
+  diagnosis.hypotheses[0].statement="Queue waits may exceed the upstream deadline";
+  assert.equal(pickDiagnosisStatement(diagnosis),"Queue waits may exceed the upstream deadline");
 });
 
 test("patch engineer output is semantic-gated before patch candidate construction",async()=>{

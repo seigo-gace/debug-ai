@@ -65,7 +65,16 @@ function createWorkflow(options={}){
   const authority=options.authority?wrapAuthorityForRunObservation(options.authority,historyRuntimeEvidence):options.authority;
   const observed=withSearchGateShadow({...options,runtimeEvidence:historyRuntimeEvidence,authority},authority);
   const workflow=enforceWorkflowRoleSemantics(base.createWorkflow(observed));
-  return withAuthorityContexts(workflow,{authority:options.authority||null,runtimeEvidence:historyRuntimeEvidence});
+  const observedWorkflow=withAuthorityContexts(workflow,{authority:options.authority||null,runtimeEvidence:historyRuntimeEvidence});
+  // Reuse the existing benchmark transport; all actual analysis/candidate/
+  // verification calls enter the same observed production workflow.
+  if(!options.repoPolicy||!options.runtimeEvidence||!options.authority)return observedWorkflow;
+  const real=require("./control/real-debug-benchmark.js").createRealDebugBenchmark({workflow:observedWorkflow,repoPolicy:options.repoPolicy,runtimeEvidence:historyRuntimeEvidence,authority:options.authority});
+  return new Proxy(observedWorkflow,{get(target,key,receiver){
+    if(key==="startInvestigationBenchmark")return input=>input?.suite==="real-debug"?real.start(input):target.startInvestigationBenchmark(input);
+    if(key==="investigationBenchmarkStatus")return id=>String(id).startsWith("realdebug_")?real.status(id):target.investigationBenchmarkStatus(id);
+    return Reflect.get(target,key,receiver);
+  }});
 }
 
 module.exports={...base,enforceWorkflowRoleSemantics,wrapRuntimeEvidenceForRejectedHistory,withAuthorityContexts,withSearchGateShadow,createWorkflow};

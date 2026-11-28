@@ -11,6 +11,14 @@ const WINDOWS={minute:60_000,hour:3_600_000,day:86_400_000,month:31*86_400_000};
 const CAPS={minute:1,hour:2,day:4,month:20};
 // Local ceilings, not a claim about provider account entitlement or remaining quota.
 const TOKEN_CAPS={minute:4096,day:16384};
+// The live path uses existing Master-confirmed FREE-only keys. Groq's
+// published free limits for gpt-oss-20b are 30 RPM / 1000 RPD / 8K TPM / 200K TPD.
+// Account-level limits can be lower; keep configurable local ceilings and
+// provider rate-limit responses authoritative. Gemini account limits are not
+// known, so do not silently raise its live ceiling.
+const LIVE_CAPS=Object.freeze({groq:Object.freeze({minute:10,hour:60,day:250,month:3000}),gemini:Object.freeze({...CAPS})});
+const LIVE_TOKEN_CAPS=Object.freeze({groq:Object.freeze({minute:6000,day:120000}),gemini:Object.freeze({...TOKEN_CAPS})});
+const MAX_LEDGER_EVENTS=Math.max(...Object.values(LIVE_CAPS).map(c=>c.month),CAPS.month);
 const PROVIDERS={
   groq:{url:'https://api.groq.com/openai/v1/chat/completions',model:'openai/gpt-oss-20b'},
   gemini:{url:'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',model:'gemini-3.8-flash'}
@@ -46,14 +54,15 @@ function validateQualification(document,provider,{key,url,model,now}){
   // Budget allocation must be backed by the account audit, including other consumers.
   return q;
 }
-function configuredCaps(provider){
+function configuredCaps(provider,localBudget=false){
+  const ceiling=localBudget?LIVE_CAPS[provider]:CAPS;
   const prefix=`DEBUG_AI_${provider.toUpperCase()}`;
   const result={};
   for(const [w,suffix] of Object.entries({minute:'MINUTE',hour:'HOUR',day:'DAILY',month:'MONTH'})){
     const raw=process.env[`${prefix}_${suffix}_REQUEST_LIMIT`];
-    const value=raw===undefined||raw===''?CAPS[w]:Number(raw);
+    const value=raw===undefined||raw===''?ceiling[w]:Number(raw);
     if(!integer(value))fail('EXTERNAL_REVIEW_QUOTA_CONFIG_INVALID',{provider});
-    result[w]=Math.min(value,CAPS[w]);
+    result[w]=Math.min(value,ceiling[w]);
   }
   return result;
 }
@@ -71,7 +80,7 @@ function createExternalReviewQuotaLedger({root=defaultQuotaRoot(),nowFn=Date.now
   function validateState(s){
     if(s?.schema!==SCHEMA||!integer(s.last_now)||!s.providers||Object.keys(s.providers).some(p=>!PROVIDERS[p]))fail('EXTERNAL_REVIEW_QUOTA_LEDGER_CORRUPT');
     for(const p of Object.values(s.providers)){
-      if(!identifier(p.account_id)||!identifier(p.ledger_id)||!Array.isArray(p.events)||p.events.length>20||!(p.blocks===null||(integer(p.blocks?.at)&&identifier(p.blocks?.code))))fail('EXTERNAL_REVIEW_QUOTA_LEDGER_CORRUPT');
+      if(!identifier(p.account_id)||!identifier(p.ledger_id)||!Array.isArray(p.events)||p.events.length>MAX_LEDGER_EVENTS||!(p.blocks===null||(integer(p.blocks?.at)&&identifier(p.blocks?.code))))fail('EXTERNAL_REVIEW_QUOTA_LEDGER_CORRUPT');
       if(p.blocks?.until!==undefined&&(!integer(p.blocks.until)||p.blocks.until<=p.blocks.at))fail('EXTERNAL_REVIEW_QUOTA_LEDGER_CORRUPT');
       let last=0;
       for(const e of p.events){if(!integer(e.at)||e.at<last||e.at>s.last_now||!integer(e.tokens)||e.tokens<1)fail('EXTERNAL_REVIEW_QUOTA_LEDGER_CORRUPT');last=e.at;}
@@ -121,7 +130,7 @@ function createExternalReviewQuotaLedger({root=defaultQuotaRoot(),nowFn=Date.now
         else fail('EXTERNAL_REVIEW_QUOTA_ACCOUNT_BLOCKED',{provider});
       }
       const events=p.events.filter(e=>now-e.at<=WINDOWS.month);
-      const caps=configuredCaps(provider);
+      const caps=configuredCaps(provider,q.local_budget===true);
       for(const [window,ms] of Object.entries(WINDOWS)){
         const count=events.filter(e=>now-e.at<=ms).length;
         if(count>=Math.min(caps[window],q.request_limits[window]))fail(`EXTERNAL_REVIEW_QUOTA_${window.toUpperCase()}_EXHAUSTED`,{provider});
@@ -137,7 +146,7 @@ function createExternalReviewQuotaLedger({root=defaultQuotaRoot(),nowFn=Date.now
   }
   function reserveLocalDispatch(provider,tokens,key){
     if(typeof key!=='string'||!key)fail('EXTERNAL_REVIEW_QUOTA_CONFIG_INVALID');
-    return reserveDispatch(provider,tokens,{local_budget:true,account_id:`local-key:${hash(key)}`,ledger_id:'master-free-only-v1',request_limits:CAPS,token_limits:TOKEN_CAPS});
+    return reserveDispatch(provider,tokens,{local_budget:true,account_id:`local-key:${hash(key)}`,ledger_id:'master-free-only-v1',request_limits:LIVE_CAPS[provider],token_limits:LIVE_TOKEN_CAPS[provider]});
   }
   function blockProvider(provider,code,{until=null}={}){return withLock(state=>{
     if(!state.providers[provider])fail('EXTERNAL_REVIEW_QUOTA_LEDGER_CORRUPT');
@@ -149,4 +158,4 @@ function createExternalReviewQuotaLedger({root=defaultQuotaRoot(),nowFn=Date.now
   function provisionEmptyLedger(){return withLock(state=>state);}
   return {reserveDispatch,reserveLocalDispatch,blockProvider,readStateSync,provisionEmptyLedger,filePath};
 }
-module.exports={ExternalReviewError,createExternalReviewQuotaLedger,readTrustedQualification,validateQualification,defaultQuotaRoot,QUALIFICATION_SCHEMA,PROVIDERS,WINDOWS,CAPS,TOKEN_CAPS};
+module.exports={ExternalReviewError,createExternalReviewQuotaLedger,readTrustedQualification,validateQualification,defaultQuotaRoot,QUALIFICATION_SCHEMA,PROVIDERS,WINDOWS,CAPS,TOKEN_CAPS,LIVE_CAPS,LIVE_TOKEN_CAPS};

@@ -11,6 +11,7 @@ const {getSkill}=require("./skill-registry.js");
 const {assertToolAdmission}=require("./tool-risk.js");
 const {makeEvidenceRecord,assertEvidenceRecord}=require("./evidence-registry.js");
 const {makeEvidenceProjection}=require("./evidence-projection.js");
+const {PARENT_OWNED_SOURCE_ROOTS,isParentOwnedSourcePath}=require("../../orchestrator/source-scope.js");
 
 const SEARCH_EXT=/\.(?:[cm]?[jt]sx?|json|md|py|go|rs|java|kt|kts|cs|cpp|cc|c|h|hpp|rb|php|swift|vue|svelte|toml|ya?ml|css|scss|html)$/i;
 const TS_JS_EXT=/\.(?:[cm]?[jt]sx?)$/i;
@@ -31,7 +32,8 @@ function normalizeRel(value){
   return rel;
 }
 function blockedReadPath(rel){
-  const p=normalizeRel(rel).toLowerCase();
+  const normalized=normalizeRel(rel);if(isParentOwnedSourcePath(normalized))return true;
+  const p=normalized.toLowerCase();
   return p===".git"||p.startsWith(".git/")||p.includes("/.git/")||p==="secrets"||p.startsWith("secrets/")||p.includes("/secrets/")||/(^|\/)\.env($|\.)/.test(p)||/\.(pem|key|p12|pfx)$/.test(p);
 }
 function resolveSafeFile(repo,rel){
@@ -57,7 +59,7 @@ function walkFiles(repo,{maxFiles=500,coverage=null}={}){
     entries.sort((a,b)=>a.name.localeCompare(b.name));
     for(const e of entries){
       if(out.length>=maxFiles)break;
-      if(e.isDirectory()){if(SKIP_DIRS.has(e.name))continue;stack.push(path.join(dir,e.name));continue;}
+      if(e.isDirectory()){const rel=path.relative(repo,path.join(dir,e.name)).replace(/\\/g,"/");if(SKIP_DIRS.has(e.name)||isParentOwnedSourcePath(rel))continue;stack.push(path.join(dir,e.name));continue;}
       if(!e.isFile())continue;
       const rel=path.relative(repo,path.join(dir,e.name)).replace(/\\/g,"/");if(blockedReadPath(rel)||!SEARCH_EXT.test(rel))continue;out.push(rel);
     }
@@ -68,7 +70,7 @@ function walkFiles(repo,{maxFiles=500,coverage=null}={}){
 function excerpt(text,index,limit=900){const start=Math.max(0,index-250),end=Math.min(text.length,start+limit);return text.slice(start,end);}
 function searchSource(repo,query,{limit=12,maxFiles=500,coverage=null}={}){
   const q=String(query||"").trim().toLowerCase();if(q.length<2)throw new Error("SOURCE_SEARCH_QUERY_REQUIRED");const hits=[];
-  const receipt={schema:"debugai.source-search-coverage/v1",state:"INCOMPLETE",scope:"SEARCHABLE_REGULAR_FILES_ONLY",repository_absence_proven:false,query:q,max_files:maxFiles,match_limit:limit,max_content_chars:128000,file_limit_reached:false,match_limit_reached:false,directory_errors:0,read_errors:0,truncated_files:0,inspected_paths:[],excluded_directories:[...SKIP_DIRS],search_extensions:SEARCH_EXT.source};
+  const receipt={schema:"debugai.source-search-coverage/v1",state:"INCOMPLETE",scope:"SEARCHABLE_REGULAR_FILES_ONLY",repository_absence_proven:false,query:q,max_files:maxFiles,match_limit:limit,max_content_chars:128000,file_limit_reached:false,match_limit_reached:false,directory_errors:0,read_errors:0,truncated_files:0,inspected_paths:[],excluded_directories:[...SKIP_DIRS],excluded_root_directories:[...PARENT_OWNED_SOURCE_ROOTS],search_extensions:SEARCH_EXT.source};
   const files=walkFiles(repo,{maxFiles,coverage:receipt});
   for(const rel of files){
     if(hits.length>=limit){receipt.match_limit_reached=true;break;}
@@ -163,6 +165,39 @@ function testInventory(repo){
   const checks=["lint","typecheck","test","build"].map(name=>({name,configured:typeof scripts[name]==="string"&&scripts[name].trim().length>0,command:typeof scripts[name]==="string"?scripts[name].slice(0,1000):null}));
   return{package_json:{path:item.path,sha256:item.sha256},package_manager:packageManager,checks};
 }
+// Treat stderr as untrusted observation data. Only paths in the actual
+// repository or the exact isolated job's repo are eligible for readback.
+function observedStackLocations(repo,checks,{maxFrames=8,jobRoot=process.env.DEBUG_AI_SANDBOX_JOB_ROOT||"/sandbox-jobs"}={}){
+  const root=fs.realpathSync(repo),frames=[],seen=new Set();
+  for(const check of Array.isArray(checks)?checks:[]){
+    if(check?.executed!==true||check.status!=="FAIL"||check.timed_out||check.sandbox?.backend!=="sidecar+landlock+seccomp")continue;
+    const jobId=String(check.sandbox.job_id||"");
+    const isolated=/^JOB_[a-f0-9]{24}$/.test(jobId)?path.resolve(jobRoot,"jobs",jobId,"repo"):null;
+    const stderr=String(check.stderr||"").slice(-16000);
+    for(const line of stderr.split(/\r?\n/)){
+      const py=line.match(/^\s*File "([^"]+)", line ([1-9]\d*)\b/);
+      const node=line.match(/(?:^|\s|\()((?:\/|\.\/)?[A-Za-z0-9_./-]+\.(?:[cm]?[jt]sx?|py|go|rs|java|rb|php)):([1-9]\d*)(?::([1-9]\d*))?(?:\)|\s|$)/);
+      const m=py||node;if(!m)continue;
+      let name=m[1];const row=Number(m[2]),column=py||!m[3]?null:Number(m[3]);
+      if(!Number.isSafeInteger(row)||row>1000000||column!==null&&(!Number.isSafeInteger(column)||column>1000000))continue;
+      if(path.isAbsolute(name)){
+        const base=[root,isolated].filter(Boolean).find(p=>name.startsWith(p+path.sep));
+        if(!base)continue;name=path.relative(base,name);
+      }
+      let source;try{
+        const rel=normalizeRel(name);
+        if(rel.split("/").some(x=>SKIP_DIRS.has(x))||blockedReadPath(rel))continue;
+        source=readText(root,rel,{maxChars:100000});
+      }catch{continue;}
+      const lines=source.content.split(/\r?\n/);if(row>lines.length)continue;
+      const key=source.path+":"+row+":"+column;if(seen.has(key))continue;seen.add(key);
+      const from=Math.max(1,row-3),to=Math.min(lines.length,row+3);
+      frames.push({path:source.path,line:row,column,sha256:source.sha256,source_truncated:source.truncated,excerpt_start_line:from,excerpt_end_line:to,excerpt:lines.slice(from-1,to).join("\n").slice(0,2400),job_id:jobId,authority:"OBSERVED_STACK_LOCATION_NOT_CAUSAL_PROOF"});
+      if(frames.length>=maxFrames)return frames;
+    }
+  }
+  return frames;
+}
 function initialInvestigationEvidence(repo,{request="",failure=null,checks=[]}={}){
   const explicit=[...(Array.isArray(failure?.source_paths)?failure.source_paths:[]),...(Array.isArray(failure?.test_paths)?failure.test_paths:[])];
   const mentioned=String(request||failure?.message||"").match(/[A-Za-z0-9_./-]+\.(?:[cm]?[jt]sx?|py|go|rs|java|rb|php)\b/g)||[];
@@ -175,12 +210,20 @@ function initialInvestigationEvidence(repo,{request="",failure=null,checks=[]}={
     try{const source=readText(repo,name,{maxChars:3000});records.push({kind:"initial_source",value:source});}
     catch(error){unavailable.push({path:name,reason:String(error?.message||"SOURCE_UNAVAILABLE").split(":")[0]});}
   }
+  const stackLocations=observedStackLocations(repo,checks);
+  for(const frame of stackLocations){
+    // If a full matching source is already in the packet, transfer only its
+    // location and digest rather than a second copy of the same source.
+    const prior=records.find(r=>r.kind==="initial_source"&&r.value.path===frame.path&&r.value.sha256===frame.sha256&&!r.value.truncated);
+    if(prior){const {excerpt,...location}=frame;records.push({kind:"initial_stack_location",value:{...location,excerpt_in:"initial_source"}});}
+    else records.push({kind:"initial_stack_location",value:frame});
+  }
   // Local source and an actually executed failing check warrant a narrow first
   // investigation, not a confirmed cause or exhaustive search receipt.
   const pkg=inventory?JSON.parse(readText(repo,"package.json",{maxChars:1024*1024}).content):null;
   const hasDependencies=pkg&&["dependencies","devDependencies","optionalDependencies","peerDependencies"].some(key=>Object.keys(pkg[key]||{}).length>0);
   const local=records.some(item=>item.kind==="initial_source"&&!/\.(?:test|spec)\.[^/]+$/.test(item.value.path))&&!hasDependencies&&Boolean(configuredTest)&&checks.some(item=>item.executed===true&&item.status==="FAIL"&&!item.timed_out);
-  return {records,scope:{mode:local?"LOCAL_REPRODUCTION":"OPEN_INVESTIGATION",source_paths:records.filter(item=>item.kind==="initial_source").map(item=>item.value.path),unavailable,additional_search:"REQUEST_FOR_MISSING_OR_COUNTER_EVIDENCE",coverage:"PARTIAL"}};
+  return {records,scope:{mode:local?"LOCAL_REPRODUCTION":"OPEN_INVESTIGATION",source_paths:records.filter(item=>item.kind==="initial_source").map(item=>item.value.path),unavailable,stack_location_count:stackLocations.length,additional_search:"REQUEST_FOR_MISSING_OR_COUNTER_EVIDENCE",coverage:"PARTIAL"}};
 }
 function languageIdFor(rel){
   const low=String(rel).toLowerCase();
@@ -321,4 +364,4 @@ function createReadOnlyToolRuntime({repo,repoPolicy=new RepoPolicy(),tgserver=nu
   }
   return {repo:root,availableTools:[...AVAILABLE_TOOLS],createEvidenceContext,addEvidenceToContext,execute};
 }
-module.exports={AVAILABLE_TOOLS,stableStringify,normalizeRel,blockedReadPath,resolveSafeFile,readText,walkFiles,searchSource,localDependencyMap,testInventory,initialInvestigationEvidence,languageIdFor,repoRelativeLocation,sanitizeSymbols,symbolLookup,toolResultHash,makeToolResult,assertToolResultIntegrity,normalizeRegisteredEvidence,evidenceProjection,evidenceViewCandidates,addEvidenceToContext,createEvidenceContext,createReadOnlyToolRuntime};
+module.exports={AVAILABLE_TOOLS,stableStringify,normalizeRel,blockedReadPath,resolveSafeFile,readText,walkFiles,searchSource,localDependencyMap,testInventory,observedStackLocations,initialInvestigationEvidence,languageIdFor,repoRelativeLocation,sanitizeSymbols,symbolLookup,toolResultHash,makeToolResult,assertToolResultIntegrity,normalizeRegisteredEvidence,evidenceProjection,evidenceViewCandidates,addEvidenceToContext,createEvidenceContext,createReadOnlyToolRuntime};

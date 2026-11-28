@@ -1,8 +1,10 @@
 "use strict";
 const crypto=require("node:crypto");
 const {performance}=require("node:perf_hooks");
+const {validateChat,executeChat}=require("./chat-model-gate.js");
 const {Agent,fetch:undiciFetch}=require("undici");
 const {ROLES}=require("../roles.js");
+const {normalizeCommandModelGates,validateRequest:validateCommandModelRequest,executeCommandModel}=require("./command-model-gate.js");
 const {compileInvocation}=require("../control/invocation-compiler.js");
 const {assessInputReservation,resolveCounterTarget}=require("../control/input-token-shadow.js");
 const {OUTPUT_HEADROOM_TOKENS,getModelOutputHardCeilingForRole}=require("../control/model-profiles.js");
@@ -143,8 +145,70 @@ function normalizeGateUrls(value){
   }
   return Object.freeze(safe);
 }
-function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=process.env.AI_CORE_API_KEY,fetchImpl=undiciFetch,timeoutMs=600000,maxTransportTimeoutAttempts=2,maxTimeoutRetries,dispatcher,runtimeContextTokens=process.env.DEBUG_AI_CORE_CONTEXT_TOKENS??null,requireRuntimeContextQualification=false,promptCache=true,inputTokenShadow=false,inputTokenShadowRoute="router",observationIntervalMs=60000,modelGateBaseUrls=null,dispatchMode="legacy"}={}){
-  if(!baseUrl)throw new AiCoreError("AI_CORE_URL_REQUIRED","DEBUG_AI_CORE_URL is required");
+// Measurement-only Skill clients must select the same Gate as production.
+function resolveSkillBenchmarkEndpoint(role,{baseUrl=process.env.DEBUG_AI_CORE_URL,dispatchMode=process.env.DEBUG_AI_CORE_GATE_DISPATCH_MODE||"legacy",modelGateBaseUrls=null}={}){
+  if(dispatchMode==="legacy"){
+    if(!baseUrl)throw new Error("AI_CORE_URL_REQUIRED");
+    return new URL("/v1/chat/completions",baseUrl).toString();
+  }
+  if(dispatchMode!=="model_gates")throw new Error("SKILL_BENCHMARK_DISPATCH_MODE_INVALID");
+  const origins=normalizeGateUrls(modelGateBaseUrls??{
+    coder:process.env.DEBUG_AI_CORE_GATE_CODER_URL,
+    qwen3:process.env.DEBUG_AI_CORE_GATE_QWEN3_URL,
+    granite:process.env.DEBUG_AI_CORE_GATE_GRANITE_URL,
+    ministral:process.env.DEBUG_AI_CORE_GATE_MINISTRAL_URL
+  });
+  return new URL("/v1/chat/completions",origins[expectedGateForRole(role).model]).toString();
+}
+// Only previously verified AI Core Gate error identifiers are retained. Unknown or
+// untrusted response bodies stay redacted; this is reported provenance, not RCA.
+const KNOWN_CORE_GATE_ERROR_CODES=new Set([
+  "UNAUTHORIZED","BAD_REQUEST","OBSERVE_ONLY_NO_INFERENCE","GLOBAL_CONCURRENCY_LIMIT",
+  "MODEL_CONCURRENCY_LIMIT","MODEL_TRANSITION_BUSY","ADMISSION_QUEUE_BUSY",
+  "ADMISSION_QUEUE_FULL","ADMISSION_DEADLINE_EXPIRED","MODEL_START_TIMEOUT",
+  "MODEL_START_ROLLBACK_FAILED","ORPHANED_LEASE_RECOVERY_PENDING",
+  "UPSTREAM_UNAVAILABLE","UPSTREAM_HTTP_FRAMING_INVALID","UPSTREAM_JSON_CONTRACT_INVALID",
+  "UPSTREAM_COMPLETION_CONTRACT_INVALID","UPSTREAM_RESPONSE_TOO_LARGE",
+  "UPSTREAM_STREAM_CONTRACT_INVALID","UPSTREAM_STREAM_INTERRUPTED","UPSTREAM_STREAM_TOO_LARGE",
+  "UPSTREAM_STREAM_AFTER_DONE","UPSTREAM_STREAM_INCOMPLETE",
+  "WRONG_MODEL_FOR_ENDPOINT","UNKNOWN_MODEL","ALL_RESIDENT_MODELS_LEASED",
+  "HANDOFF_MODEL_LEASED","LEASE_JOURNAL_CORRUPT","LEASE_JOURNAL_WRITE_FAILED",
+  // Exact AI Core PR #3 Unix-backend migration admission/stop diagnostics (HTTP provenance only).
+  "BACKEND_UNIX_LISTENER_MISMATCH","BACKEND_UNIX_TCP_EXPOSED",
+  "BACKEND_UNIX_VOLUME_NOT_SHARED","BACKEND_SLOTS_BUSY_OR_UNVERIFIED",
+  // Confirmed AI Core Coordinator model lease/physical recovery failure codes.
+  "HANDOFF_IN_PROGRESS","EVICTION_NOT_CONFIRMED","EXISTING_RESIDENCY_EXCEEDS_POLICY",
+  "ROLLBACK_RESIDENT_NOT_RUNNING","BACKEND_MODEL_ID_MISMATCH",
+  "BACKEND_MEMORY_LIMIT_MISMATCH","BACKEND_CPU_LIMIT_MISMATCH",
+  // AI Core private-socket start() fail-closed provenance, reachable by model lease.
+  "BACKEND_UNIX_SOCKET_PATH_INVALID","BACKEND_UNIX_SOCKET_STAT_FAILED",
+  "BACKEND_UNIX_SOCKET_TYPE_UNSAFE","BACKEND_UNIX_SOCKET_PROBE_FAILED",
+  "BACKEND_UNIX_SOCKET_NOT_STALE","BACKEND_UNIX_CONTAINER_RESTARTED",
+  "BACKEND_UNIX_SOCKET_CHANGED","BACKEND_UNIX_SOCKET_REMOVE_FAILED",
+  "SOURCE_FINGERPRINT_UNAVAILABLE","RESOURCE_READBACK_UNAVAILABLE"
+]);
+// Only coordinator admission rejections; never retry arbitrary HTTP errors or unknown outcomes.
+const RETRYABLE_GATE_ADMISSION_CODES=new Set(["MODEL_CONCURRENCY_LIMIT","GLOBAL_CONCURRENCY_LIMIT","MODEL_TRANSITION_BUSY","ADMISSION_QUEUE_BUSY"]);
+// Diagnostic identity alone is not authorization to retry. The Gate's own
+// admission rejection is exactly {error:{code}}; arbitrary upstream metadata
+// or a malformed envelope cannot establish that inference never started.
+function confirmedGateAdmissionRejection(body,code){
+  if(!RETRYABLE_GATE_ADMISSION_CODES.has(code))return false;
+  try{const value=JSON.parse(body);
+    return value&&typeof value==="object"&&!Array.isArray(value)&&Object.keys(value).length===1&&
+      value.error&&typeof value.error==="object"&&!Array.isArray(value.error)&&Object.keys(value.error).length===1&&value.error.code===code;
+  }catch{return false;}
+}
+function reportedGateErrorCode(body){
+  if(typeof body!=="string"||Buffer.byteLength(body,"utf8")>1024)return null;
+  try{const value=JSON.parse(body)?.error?.code;
+    return typeof value==="string"&&KNOWN_CORE_GATE_ERROR_CODES.has(value)?value:null;
+  }catch{return null;}
+}
+function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=process.env.AI_CORE_API_KEY,fetchImpl=undiciFetch,timeoutMs=600000,maxTransportTimeoutAttempts=2,maxTimeoutRetries,dispatcher,runtimeContextTokens=process.env.DEBUG_AI_CORE_CONTEXT_TOKENS??null,requireRuntimeContextQualification=false,promptCache=true,inputTokenShadow=false,inputTokenShadowRoute="router",observationIntervalMs=60000,modelGateBaseUrls=null,dispatchMode="legacy",scoutPairDispatch=false,adaptiveLocalDiagnosis=false,commandModelGates=null,commandExternalQualification=false,parallelTeaching=false}={}){
+  const commandOnly=dispatchMode==="command_only";
+  if(typeof parallelTeaching!=="boolean"||(parallelTeaching&&!commandOnly))throw new AiCoreError("TEACHING_PARALLEL_MODE_INVALID","Parallel teaching is limited to standalone command mode");
+  if(!baseUrl&&!commandOnly)throw new AiCoreError("AI_CORE_URL_REQUIRED","DEBUG_AI_CORE_URL is required");
   if(!apiKey)throw new AiCoreError("AI_CORE_API_KEY_REQUIRED","AI_CORE_API_KEY is required");
   if(typeof fetchImpl!=="function")throw new AiCoreError("FETCH_REQUIRED","fetch implementation is required");
   if(!Number.isSafeInteger(observationIntervalMs)||observationIntervalMs<1||observationIntervalMs>60000)throw new AiCoreError("AI_CORE_OBSERVATION_INTERVAL_INVALID","Observation interval must be 1..60000ms");
@@ -152,14 +216,23 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
   if(typeof inputTokenShadow!=="boolean")throw new AiCoreError("AI_CORE_INPUT_SHADOW_INVALID","inputTokenShadow must be boolean");
   if(inputTokenShadowRoute!=="router"&&inputTokenShadowRoute!=="g0_loopback")throw new AiCoreError("AI_CORE_INPUT_SHADOW_ROUTE_INVALID","unsupported counter route");
   const qualifiedGateUrls=normalizeGateUrls(modelGateBaseUrls);
-  if(!["legacy","model_gates"].includes(dispatchMode))
+  const candidateGates=normalizeCommandModelGates(commandModelGates,qualifiedGateUrls);
+  if(typeof commandExternalQualification!=="boolean"||(Object.keys(candidateGates).length&&dispatchMode!=="model_gates"&&!commandOnly))throw new AiCoreError("COMMAND_GATE_MODE_INVALID","Candidate models require explicit model Gate dispatch");
+  if(!["legacy","model_gates","command_only"].includes(dispatchMode))
     throw new AiCoreError("AI_CORE_DISPATCH_MODE_INVALID","Unknown AI Core dispatch mode");
+  if(commandOnly&&(qualifiedGateUrls||inputTokenShadow||scoutPairDispatch||adaptiveLocalDiagnosis||Object.keys(candidateGates).length===0))
+    throw new AiCoreError("COMMAND_ONLY_CONFIG_INVALID","Standalone command mode requires only candidate Gates and no specialist settings");
   if(dispatchMode==="model_gates"&&!qualifiedGateUrls)
     throw new AiCoreError("AI_CORE_GATE_UNCONFIGURED","Four verified Gate origins must be explicitly configured before opt-in routing");
   if(dispatchMode==="model_gates"&&inputTokenShadow)
     throw new AiCoreError("AI_CORE_GATE_SHADOW_UNQUALIFIED","Legacy input token counter cannot certify model Gate traffic");
-  const runtimeRouteBinding=dispatchMode==="model_gates"?crypto.createHash("sha256").update(JSON.stringify(qualifiedGateUrls)).digest("hex"):null;
+  if(typeof scoutPairDispatch!=="boolean"||(scoutPairDispatch&&dispatchMode!=="model_gates"))throw new AiCoreError("AI_CORE_SCOUT_PAIR_MODE_INVALID","Scout pair comparison requires authenticated per-model Gates");
+  if(typeof adaptiveLocalDiagnosis!=="boolean")throw new AiCoreError("AI_CORE_ADAPTIVE_LOCAL_MODE_INVALID","Adaptive diagnosis requires explicit boolean configuration");
+  // Candidate B is explicit opt-in for isolated comparison; keep existing
+  // baseline binding and serial default unchanged.
+  const runtimeRouteBinding=dispatchMode==="model_gates"?crypto.createHash("sha256").update(JSON.stringify(scoutPairDispatch?{gates:qualifiedGateUrls,dispatch:"SCOUT_PAIR_COMPARISON"}:qualifiedGateUrls)).digest("hex"):null;
   function endpointForRole(role){
+    if(commandOnly)throw new AiCoreError("COMMAND_ONLY_ROLE_NOT_ADMITTED","Standalone command mode does not call specialist models");
     if(dispatchMode==="legacy"){
       if(!ROLES[role])throw new AiCoreError("ROLE_INVALID","Unknown DebugAI role");
       return endpoint;
@@ -172,10 +245,38 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
   if(requireRuntimeContextQualification&&qualifiedRuntimeContext===null)throw new AiCoreError("AI_CORE_RUNTIME_CONTEXT_UNQUALIFIED","DEBUG_AI_CORE_CONTEXT_TOKENS is required for qualified production execution");
   if(maxTimeoutRetries!==undefined)maxTransportTimeoutAttempts=maxTimeoutRetries;
   if(!Number.isInteger(maxTransportTimeoutAttempts)||maxTransportTimeoutAttempts<1||maxTransportTimeoutAttempts>2)throw new AiCoreError("AI_CORE_RETRY_INVALID","transport timeout attempts must be an integer between 1 and 2");
-  const endpoint=new URL("/v1/chat/completions",baseUrl).toString();
+  const endpoint=commandOnly?null:new URL("/v1/chat/completions",baseUrl).toString();
   const transport=dispatcher||new Agent({headersTimeout:timeoutMs+5000,bodyTimeout:timeoutMs+5000});
-  let queueTail=Promise.resolve(),queueTailRole=null,queueDepth=0;
-  async function execute(role,{system="",user="",maxTokens=1024,responseFormat="json_object",temperature=0,topP=null,topK=null,selectedSkillIds=null,timeoutMsOverride=null,deadlineAt=null,toolBudgetFinalRound=null,signal=null}={},runtimeMeta={}){
+  let queueTail=Promise.resolve(),queueTailRole=null,queueDepth=0,openScoutPair=null;
+  const teachingLanes=new Map();
+  function reserveDispatch(role,options){
+    if(parallelTeaching){
+      const lane=role==="chat:qwen35"||role==="command:qwen35"||role==="command:qwen35_teaching"?"qwen35":role==="command:deepseek"?"deepseek":null;
+      if(!lane)throw new AiCoreError("TEACHING_PARALLEL_ROLE_INVALID","Unknown standalone teaching lane");
+      const prior=teachingLanes.get(lane);let resolve;
+      const entry={role,tail:new Promise(r=>{resolve=r;})};teachingLanes.set(lane,entry);
+      let released=false;return {previous:prior?.tail||Promise.resolve(),predecessorRole:prior?.role||null,release(){if(released)return;released=true;if(teachingLanes.get(lane)===entry)teachingLanes.delete(lane);resolve();}};
+    }
+    const batch=typeof options.scoutBatchId==="string"&&options.scoutBatchId.length>0&&options.scoutBatchId.length<=128?options.scoutBatchId:null;
+    const eligible=scoutPairDispatch&&batch!==null&&["code_scout","causal_scout"].includes(role);
+    const peer=eligible&&openScoutPair?.batch===batch&&openScoutPair.role!==role?openScoutPair:null;
+    let resolveTurn;const turn=new Promise(resolve=>{resolveTurn=resolve;});
+    const previous=peer?peer.previous:queueTail,predecessorRole=peer?peer.predecessorRole:queueDepth>0?queueTailRole:null;
+    // The next work item still waits for BOTH Scouts to settle. A new batch,
+    // same physical model, or other role cannot join a pair.
+    const pair=eligible&&!peer?{batch,role,previous,predecessorRole}:null;
+    queueTail=peer?Promise.all([queueTail,turn]).then(()=>undefined):turn;
+    openScoutPair=pair;queueTailRole=role;queueDepth++;
+    let released=false;
+    function release(){
+      if(released)return;released=true;
+      if(openScoutPair===pair)openScoutPair=null;
+      queueDepth--;if(queueDepth===0)queueTailRole=null;
+      resolveTurn();
+    }
+    return {previous,predecessorRole,release};
+  }
+  async function execute(role,{system="",user="",maxTokens=1024,responseFormat="json_object",temperature=0,topP=null,topK=null,selectedSkillIds=null,timeoutMsOverride=null,deadlineAt=null,toolBudgetFinalRound=null,signal=null,outputEnvelope=null,thinkingOverride=null}={},runtimeMeta={}){
     const roleStartedAt=Date.now(),prepareStartedAt=Date.now();
     if(signal?.aborted)throw new AiCoreError("AI_CORE_ABORTED","DebugAI role invocation cancelled before dispatch",{role,timeout_class:TIMEOUT_CLASS.EXTERNAL_ABORT,attempts:0});
     const cfg=ROLES[role];if(!cfg)throw new AiCoreError("ROLE_INVALID",`Unknown DebugAI role: ${role}`);
@@ -184,12 +285,14 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
     const effectiveMaxTokens=tokenBudget.effective_max_tokens;
     let effectiveTimeoutMs=resolveEffectiveTimeoutMs(role,timeoutMs,{timeoutMsOverride,deadlineAt,now:Date.now()});
     const preparedSystem=typeof runtimeMeta.preparedSystem==="string"&&runtimeMeta.preparedSystem?runtimeMeta.preparedSystem:null;
-    const invocation=preparedSystem?null:compileInvocation(role,{task:user,extraSystem:system,selectedSkillIds});
+    const invocation=preparedSystem?null:compileInvocation(role,{task:user,extraSystem:system,selectedSkillIds,outputEnvelope});
     const effectiveSystem=preparedSystem||invocation.system;
     const compiledPrefixHash=prefixHash(effectiveSystem);
     const wireUser=runtimeControlWireUser(user,toolBudgetFinalRound);
     const body={model:cfg.backend_model,messages:[{role:"system",content:effectiveSystem},{role:"user",content:wireUser}],max_tokens:effectiveMaxTokens,temperature,stream:false,cache_prompt:promptCache,response_format:responseFormat?{type:responseFormat}:undefined};if(topP!==null&&topP!==undefined){if(!Number.isFinite(topP)||topP<0||topP>1)throw new AiCoreError("AI_CORE_TOP_P_INVALID","topP must be between 0 and 1",{role,top_p:topP});body.top_p=topP;}if(topK!==null&&topK!==undefined){if(!Number.isInteger(topK)||topK<0)throw new AiCoreError("AI_CORE_TOP_K_INVALID","topK must be a nonnegative integer",{role,top_k:topK});body.top_k=topK;}
-    if(typeof cfg.thinking==="boolean")body.chat_template_kwargs={enable_thinking:cfg.thinking};
+    if(thinkingOverride!==null&&!(adaptiveLocalDiagnosis&&role==="diagnoser"&&thinkingOverride===false))throw new AiCoreError("AI_CORE_THINKING_OVERRIDE_NOT_ADMITTED","Only the explicit local diagnosis candidate may request non-thinking");
+    const requestedThinking=thinkingOverride??cfg.thinking;
+    if(typeof requestedThinking==="boolean")body.chat_template_kwargs={enable_thinking:requestedThinking};
     const requestBody=JSON.stringify(body),requestBytesPerAttempt=Buffer.byteLength(requestBody,"utf8"),prepareMs=Date.now()-prepareStartedAt;
     // Optional observational exact-chat-count endpoint; never modify dispatch.
     let inputShadow=null;
@@ -216,7 +319,7 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
       inputShadow=Object.freeze({...assessInputReservation({inputTokens:counted,contextTokens:qualifiedRuntimeContext,outputTokens:effectiveMaxTokens}),counter_route:target?.route||"ROUTE_NOT_ADMITTED",counter_http_status:counterStatus});
       runtimeMeta.observe?.({phase:"INPUT_TOKEN_SHADOW",input_token_shadow:inputShadow});
     }
-    let upstreamMs=0,responseBytes=0,parseValidateMs=0;
+    let upstreamMs=0,responseBytes=0,parseValidateMs=0,admissionRetryDeadlineAt=null,admissionWaitRequestedMs=0;
     for(let attempt=1;attempt<=maxTransportTimeoutAttempts;attempt++){
       const ctl=new AbortController();let deadlineTriggered=false;
       let timer=null,externalAbortListener=null;
@@ -225,7 +328,12 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
         // A transport retry must not restart the absolute role deadline.
         // Recompute the remaining time after the previous attempt and fail
         // before making another request if the shared budget is exhausted.
-        effectiveTimeoutMs=resolveEffectiveTimeoutMs(role,timeoutMs,{timeoutMsOverride,deadlineAt,now:Date.now()});
+        const attemptNow=Date.now();
+        const attemptDeadline=admissionRetryDeadlineAt===null?deadlineAt:Math.min(Number.isFinite(deadlineAt)?deadlineAt:Infinity,admissionRetryDeadlineAt);
+        effectiveTimeoutMs=resolveEffectiveTimeoutMs(role,timeoutMs,{timeoutMsOverride,deadlineAt:attemptDeadline,now:attemptNow});
+        // Only a positively identified pre-inference rejection may use the existing
+        // Gate's bounded admission queue. Preserve the original attempt deadline.
+        admissionWaitRequestedMs=admissionRetryDeadlineAt===null?0:Math.min(30000,Math.max(0,Math.floor(effectiveTimeoutMs)-1000));
         timer=setTimeout(()=>{deadlineTriggered=true;ctl.abort();},effectiveTimeoutMs);
         if(signal){
           externalAbortListener=()=>ctl.abort();
@@ -236,18 +344,25 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
         requestDispatched=true;
         runtimeMeta.observe?.({phase:"UPSTREAM_WAIT",dispatch_attempt:attempt,prepare_ms:prepareMs});
         const upstreamStartedAt=Date.now();let r,text;
-        try{r=await fetchImpl(endpointForRole(role),{method:"POST",headers:{authorization:`Bearer ${apiKey}`,"content-type":"application/json"},body:requestBody,signal:ctl.signal,dispatcher:transport,...(dispatchMode==="model_gates"?{redirect:"error"}:{})});text=await r.text();}finally{upstreamMs+=Date.now()-upstreamStartedAt;}
+        try{r=await fetchImpl(endpointForRole(role),{method:"POST",headers:{authorization:`Bearer ${apiKey}`,"content-type":"application/json",...(admissionWaitRequestedMs>0?{"X-AI-Core-Wait-Ms":String(admissionWaitRequestedMs),"X-AI-Core-Client":"debug-ai"}:{})},body:requestBody,signal:ctl.signal,dispatcher:transport,...(dispatchMode==="model_gates"?{redirect:"error"}:{})});text=await r.text();}finally{upstreamMs+=Date.now()-upstreamStartedAt;}
         if(typeof text==="string")responseBytes+=Buffer.byteLength(text,"utf8");
         if(signal?.aborted)throw new AiCoreError("AI_CORE_ABORTED","DebugAI role invocation cancelled during inference",{role,timeout_class:TIMEOUT_CLASS.EXTERNAL_ABORT,attempts:attempt});
         runtimeMeta.observe?.({phase:"RESPONSE",dispatch_attempt:attempt});
-        if(!r.ok)throw new AiCoreError("AI_CORE_HTTP",`AI Core HTTP ${r.status}`,{status:r.status});
+        if(!r.ok){
+          const gateCode=dispatchMode==="model_gates"?reportedGateErrorCode(text):null;
+          if(r.status===429&&confirmedGateAdmissionRejection(text,gateCode)&&admissionRetryDeadlineAt===null&&attempt<maxTransportTimeoutAttempts&&attemptNow+effectiveTimeoutMs-Date.now()>1000){
+            admissionRetryDeadlineAt=attemptNow+effectiveTimeoutMs;
+            continue;
+          }
+          throw new AiCoreError("AI_CORE_HTTP",`AI Core HTTP ${r.status}`,{status:r.status,dispatch_mode:dispatchMode,upstream_reported_code:gateCode,admission_wait_requested_ms:admissionWaitRequestedMs});
+        }
         const parseStartedAt=Date.now();
         try{envelope=JSON.parse(text);}catch{parseValidateMs+=Date.now()-parseStartedAt;throw new AiCoreError("AI_CORE_ENVELOPE","AI Core returned non-JSON envelope");}
         const content=envelope?.choices?.[0]?.message?.content;finishReason=envelope?.choices?.[0]?.finish_reason??null;parseValidateMs+=Date.now()-parseStartedAt;
         const telemetry=makeTelemetry({queueWaitMs:runtimeMeta.queueWaitMs,prepareMs,upstreamMs,parseValidateMs,roleStartedAt,requestBytes:requestBytesPerAttempt*attempt,responseBytes,attempts:attempt,envelope,finishReason,prefix:compiledPrefixHash});
         if(String(finishReason||"").toLowerCase()==="length")throw truncationError(role,cfg,{maxTokens:effectiveMaxTokens,finishReason,content,envelope,telemetry});
         if(typeof content!=="string"||!content.trim()){const reasoningOnly=typeof envelope?.choices?.[0]?.message?.reasoning_content==="string"&&envelope.choices[0].message.reasoning_content.trim().length>0;throw new AiCoreError(reasoningOnly?"AI_CORE_REASONING_ONLY":"AI_CORE_EMPTY",reasoningOnly?"AI Core returned reasoning without final content":"AI Core returned empty content",{role,model:cfg.backend_model,finish_reason:finishReason,reasoning_content_present:reasoningOnly,telemetry});}
-        return {provider:"llama-swap",role,alias:cfg.alias,model:cfg.backend_model,thinking:cfg.thinking,content,raw:envelope,attempts:attempt,telemetry,control_plane:{selected_skill_ids:invocation?[...invocation.selected_skill_ids]:[...(selectedSkillIds||[])],skill_selection_mode:invocation?invocation.skill_selection_mode:"PRECOMPILED_MEASUREMENT",role_contract_version:invocation?invocation.role_contract_version:null,output_schema:invocation?invocation.output_schema:null,guardrail_profile:invocation?invocation.guardrail_profile:null,effective_timeout_ms:effectiveTimeoutMs,max_tokens:effectiveMaxTokens,requested_max_tokens:tokenBudget.requested_max_tokens,model_output_hard_ceiling_tokens:tokenBudget.model_output_hard_ceiling_tokens,runtime_context_tokens:tokenBudget.runtime_context_tokens,runtime_output_ceiling_tokens:tokenBudget.runtime_output_ceiling_tokens,runtime_context_qualified:tokenBudget.runtime_context_qualified,context_limited:tokenBudget.context_limited,prompt_cache_requested:promptCache,...(inputTokenShadow?{input_token_shadow:inputShadow}:{}),tool_budget_final_round:toolBudgetFinalRound===true,prefix_hash:compiledPrefixHash}};
+        return {provider:"llama-swap",role,alias:cfg.alias,model:cfg.backend_model,thinking:requestedThinking,content,raw:envelope,attempts:attempt,telemetry,control_plane:{selected_skill_ids:invocation?[...invocation.selected_skill_ids]:[...(selectedSkillIds||[])],skill_selection_mode:invocation?invocation.skill_selection_mode:"PRECOMPILED_MEASUREMENT",role_contract_version:invocation?invocation.role_contract_version:null,output_schema:invocation?invocation.output_schema:null,guardrail_profile:invocation?invocation.guardrail_profile:null,effective_timeout_ms:effectiveTimeoutMs,admission_wait_requested_ms:admissionWaitRequestedMs,max_tokens:effectiveMaxTokens,requested_max_tokens:tokenBudget.requested_max_tokens,model_output_hard_ceiling_tokens:tokenBudget.model_output_hard_ceiling_tokens,runtime_context_tokens:tokenBudget.runtime_context_tokens,runtime_output_ceiling_tokens:tokenBudget.runtime_output_ceiling_tokens,runtime_context_qualified:tokenBudget.runtime_context_qualified,context_limited:tokenBudget.context_limited,prompt_cache_requested:promptCache,...(inputTokenShadow?{input_token_shadow:inputShadow}:{}),tool_budget_final_round:toolBudgetFinalRound===true,prefix_hash:compiledPrefixHash}};
       }catch(e){
         const timeoutClass=signal?.aborted?TIMEOUT_CLASS.EXTERNAL_ABORT:classifyTimeoutError(e,{deadlineTriggered});
         const attemptsStarted=requestDispatched?attempt:attempt-1;
@@ -286,14 +401,14 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
       observe({phase:"SUCCEEDED",telemetry:out.telemetry,dispatch_attempt:out.attempts,node_process_resources:resourceStart?nodeProcessResourceObservation(resourceStart,sampleNodeProcessResources()):null});
       return out;
     }catch(error){
-      observe({phase:"FAILED",failure_code:String(error?.code||"AI_CORE_ERROR"),timeout_class:error?.meta?.timeout_class||null,telemetry:error?.meta?.telemetry||null,dispatch_attempt:error?.meta?.attempts??progress.dispatch_attempt,node_process_resources:resourceStart?nodeProcessResourceObservation(resourceStart,sampleNodeProcessResources()):null});
+      observe({phase:"FAILED",failure_code:String(error?.code||"AI_CORE_ERROR"),timeout_class:error?.meta?.timeout_class||null,upstream_http_status:Number.isInteger(error?.meta?.status)?error.meta.status:null,upstream_reported_code:error?.meta?.upstream_reported_code||null,dispatch_mode:error?.meta?.dispatch_mode||dispatchMode,telemetry:error?.meta?.telemetry||null,dispatch_attempt:error?.meta?.attempts??progress.dispatch_attempt,node_process_resources:resourceStart?nodeProcessResourceObservation(resourceStart,sampleNodeProcessResources()):null});
       throw error;
     }finally{if(heartbeat)clearInterval(heartbeat);}
   }
   async function queuedExecution(role,options={},internalMeta={}){
     if(options.signal!=null&&(typeof options.signal.aborted!=="boolean"||typeof options.signal.addEventListener!=="function"||typeof options.signal.removeEventListener!=="function"))
       throw new AiCoreError("AI_CORE_SIGNAL_INVALID","signal must be an AbortSignal",{role});
-    let release;const queuedAt=Date.now(),turn=new Promise(resolve=>{release=resolve;}),previous=queueTail,predecessorRole=queueDepth>0?queueTailRole:null;queueTail=turn;queueTailRole=role;queueDepth++;const resolveTurn=release;let released=false;release=()=>{if(released)return;released=true;queueDepth--;if(queueDepth===0)queueTailRole=null;resolveTurn();};
+    const queuedAt=Date.now(),{previous,predecessorRole,release}=reserveDispatch(role,options);
     internalMeta.observe?.({phase:"QUEUE",queue_predecessor_role:predecessorRole});
     const queueTimeoutMs=options.queueTimeoutMs===null||options.queueTimeoutMs===undefined?null:Number(options.queueTimeoutMs);
     if(queueTimeoutMs!==null&&(!Number.isFinite(queueTimeoutMs)||queueTimeoutMs<=0)){previous.finally(release);throw new AiCoreError("AI_CORE_QUEUE_TIMEOUT_INVALID","queueTimeoutMs must be a positive finite number",{role,queue_timeout_ms:options.queueTimeoutMs});}
@@ -318,7 +433,7 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
     if(options.signal?.aborted){previous.finally(release);throw cancelled();}
     const queueWaitMs=Date.now()-queuedAt;
     const executeOptions=options.excludeQueueFromDeadline===true&&Number.isFinite(options.deadlineAt)?{...options,deadlineAt:Number(options.deadlineAt)+queueWaitMs}:options;
-    try{return await execute(role,executeOptions,{queueWaitMs,...internalMeta});}finally{release();}
+    try{return await (internalMeta.executeCandidate||execute)(role,executeOptions,{queueWaitMs,...internalMeta});}finally{release();}
   }
   async function preflightRoleGate(role,{probeTimeoutMs=3000}={}){
     const expected=expectedGateForRole(role);
@@ -367,8 +482,25 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
       models:Object.freeze(checks.map(({model})=>model)),identity:"MATCH",
       inference_qualified:false,lifecycle_qualified:false});
   }
-  async function call(role,options={}){return queuedCall(role,options);}
-  async function callPrepared(role,{system,user="",...options}={}){if(typeof system!=="string"||!system.trim())throw new AiCoreError("AI_CORE_PREPARED_SYSTEM_REQUIRED","Prepared benchmark system prompt is required",{role});return queuedCall(role,{...options,user},{preparedSystem:system});}
-  return{endpoint,dispatch_mode:dispatchMode,runtime_route_binding:runtimeRouteBinding,endpointForRole,runtime_context_tokens:qualifiedRuntimeContext,runtime_context_qualified:qualifiedRuntimeContext!==null,prompt_cache_requested:promptCache,preflightRoleGate,preflightConfiguredGates,call,callPrepared};
+  function commandModelStatus(){return Object.freeze({configured_models:Object.freeze(Object.keys(candidateGates)),inference_qualified:false,external_qualification_enabled:commandExternalQualification});}
+  async function callCommandModel(model,options={}){
+    const spec=Object.prototype.hasOwnProperty.call(candidateGates,model)?candidateGates[model]:null;
+    validateCommandModelRequest(model,spec,options,commandExternalQualification);
+    const remaining=options.deadlineAt-Date.now();
+    if(remaining<=0)throw new AiCoreError("COMMAND_DEADLINE_EXPIRED","Candidate deadline expired before queue");
+    // The existing queue and same Core admission own all model calls. A
+    // candidate never joins the Scout pair or receives a fresh turn deadline.
+    return queuedExecution("command:"+model,{...options,queueTimeoutMs:remaining,excludeQueueFromDeadline:false,scoutBatchId:null},{
+      executeCandidate:(_role,opts,meta)=>executeCommandModel({model,spec,options:opts,fetchImpl,apiKey,transport,timeoutMs,externalQualification:commandExternalQualification,queueWaitMs:meta.queueWaitMs})
+    });
+  }
+  async function callChatModel(options={}){
+    const spec=candidateGates.qwen35;
+    validateChat(spec,options);
+    return queuedExecution("chat:qwen35",{...options,queueTimeoutMs:options.deadlineAt-Date.now(),excludeQueueFromDeadline:false,scoutBatchId:null},{executeCandidate:(_role,opts,meta)=>executeChat({spec,options:opts,fetchImpl,apiKey,transport,timeoutMs,queueWaitMs:meta.queueWaitMs,chatMode:opts.chatMode})});
+  }
+  async function call(role,options={}){if(commandOnly)throw new AiCoreError("COMMAND_ONLY_ROLE_NOT_ADMITTED","Standalone command mode does not call specialist models");return queuedCall(role,options);}
+  async function callPrepared(role,{system,user="",...options}={}){if(commandOnly)throw new AiCoreError("COMMAND_ONLY_ROLE_NOT_ADMITTED","Standalone command mode does not call specialist models");if(typeof system!=="string"||!system.trim())throw new AiCoreError("AI_CORE_PREPARED_SYSTEM_REQUIRED","Prepared benchmark system prompt is required",{role});return queuedCall(role,{...options,user},{preparedSystem:system});}
+  return{endpoint,dispatch_mode:dispatchMode,scout_pair_dispatch:scoutPairDispatch,runtime_route_binding:runtimeRouteBinding,endpointForRole,runtime_context_tokens:qualifiedRuntimeContext,runtime_context_qualified:qualifiedRuntimeContext!==null,prompt_cache_requested:promptCache,preflightRoleGate,preflightConfiguredGates,call,callPrepared,commandModelStatus,callCommandModel,callChatModel};
 }
-module.exports={ROLE_ALIASES,TIMEOUT_CLASS,AiCoreError,classifyTimeoutError,isTimeoutError,resolveRoleTimeoutMs,resolveEffectiveTimeoutMs,normalizeRuntimeContextTokens,resolveEffectiveMaxTokens,finiteUsage,usageTelemetry,providerTimingTelemetry,prefixHash,truncationError,runtimeControlWireUser,sampleNodeProcessResources,nodeProcessResourceObservation,createAiCoreAdapter};
+module.exports={ROLE_ALIASES,TIMEOUT_CLASS,AiCoreError,classifyTimeoutError,isTimeoutError,resolveRoleTimeoutMs,resolveEffectiveTimeoutMs,normalizeRuntimeContextTokens,resolveEffectiveMaxTokens,finiteUsage,usageTelemetry,providerTimingTelemetry,prefixHash,truncationError,runtimeControlWireUser,sampleNodeProcessResources,nodeProcessResourceObservation,expectedGateForRole,normalizeGateUrls,resolveSkillBenchmarkEndpoint,createAiCoreAdapter};
