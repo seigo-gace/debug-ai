@@ -73,4 +73,23 @@ async function runTeaching({aiCore,topic,deadlineAt,signal,maxTokensByModel,onSt
   const success=review.verdict==="PASS"&&(!lesson.code||evidence?.pass===true);
   return {schema:"debugai.interactive-teaching/v1",topic,stages,verdict:success?"TEACHER_PASS":review.verdict==="UNDETERMINED"?"UNDETERMINED":"REVISE_REQUIRED",verification:lesson.code?(evidence?.pass?"SANDBOX_PASS":"SANDBOX_FAIL"):"TEACHER_ONLY_NOT_INDEPENDENTLY_VERIFIED",kb_status:"NOT_CONNECTED",weight_update:false,cost_usd:stages.filter(s=>s.model==="deepseek").every(s=>typeof s.cost==="number"&&Number.isFinite(s.cost)&&s.cost>=0)?stages.filter(s=>s.model==="deepseek").reduce((a,s)=>a+s.cost,0):null};
 }
-module.exports={teachingTopics,selectTopic,canTeach,testSyntheticCode,runTeaching};
+// Independent topics can be in flight together. Each topic retains the existing
+// lesson -> student -> review -> correction dependency and its own evidence.
+async function runTeachingBatch({topics,aiCore,maxConcurrent=2,deadlineAt,signal,maxTokensByModel,sandbox,onStage=()=>{},onTopic=()=>{},canStart=()=>true}={}){
+  if(!Array.isArray(topics)||!topics.length||new Set(topics).size!==topics.length||!Number.isInteger(maxConcurrent)||maxConcurrent<1||maxConcurrent>3||!Number.isSafeInteger(deadlineAt))fail("TEACHING_BATCH_CONFIG_INVALID");
+  topics.forEach(selectTopic);
+  let next=0;const results=new Array(topics.length);
+  async function worker(){
+    for(;;){
+      if(signal?.aborted||Date.now()>=deadlineAt||next>=topics.length||!canStart())return;
+      const i=next++,topic=topics[i];onTopic({topic,state:"running"});
+      let row;
+      try{const result=await runTeaching({aiCore,topic,deadlineAt,signal,maxTokensByModel,sandbox,onStage:stage=>onStage({topic,...stage})});row={topic,state:"complete",result};}
+      catch(e){row={topic,state:"failed",error:/^[A-Z0-9_]{1,100}$/.test(e?.code||"")?e.code:"TEACHING_BATCH_ERROR"};}
+      results[i]=row;onTopic(row);
+    }
+  }
+  await Promise.all(Array.from({length:Math.min(maxConcurrent,topics.length)},worker));
+  return topics.map((topic,i)=>results[i]||{topic,state:"pending"});
+}
+module.exports={teachingTopics,selectTopic,canTeach,testSyntheticCode,runTeaching,runTeachingBatch};
