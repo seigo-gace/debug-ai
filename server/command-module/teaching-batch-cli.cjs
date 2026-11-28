@@ -70,6 +70,6 @@ async function main(){
     onStage:({topic,...s})=>{const t=rows.get(topic);t.row.phase=s.phase;t.turn.teaching.phase=s.phase;if(s.state!=="running"){t.turn.teaching.stages.push(s);if(s.model==="deepseek"){t.row.teacher_calls++;t.row.cost_usd=typeof s.cost==="number"&&Number.isFinite(s.cost)&&t.row.cost_usd!==null?t.row.cost_usd+s.cost:null;}}persist(t);}
   });
   state.pending=results.filter(x=>x.state==="pending").map(x=>x.topic);
-  state.status=state.cost_usd===null?"PAUSED_COST_UNKNOWN":state.pending.length?"PAUSED_COST_LIMIT_OR_UNKNOWN":"FINISHED";save();
+  state.status=state.cost_usd===null?"PAUSED_COST_UNKNOWN":state.pending.length?(active()?"PAUSED_EXISTING_CHAT_OR_JOB":state.cost_usd+reserve>cap?"PAUSED_COST_LIMIT_OR_UNKNOWN":"PAUSED_DEADLINE"):"FINISHED";save();
 }
 main().catch(e=>{state.status="FAILED";state.error=safe(e);save();process.exitCode=1;});
