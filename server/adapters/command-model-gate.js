@@ -76,7 +76,9 @@ async function executeCommandModel({model,spec,options,fetchImpl,apiKey,transpor
     // design. Do not assume the external provider accepts llama.cpp settings.
     if(model==="qwen35")body.chat_template_kwargs={enable_thinking:false};
     dispatched=true;
-    const response=await fetchImpl(spec.origin+"/v1/chat/completions",{method:"POST",headers:{...headers,"X-AI-Core-Client":"debug-ai"},body:JSON.stringify(body),dispatcher:transport,signal:abort,redirect:"error"});
+    const requestHeaders={...headers,"X-AI-Core-Client":"debug-ai"};
+    if(model==="deepseek")requestHeaders["X-AI-Core-Data-Class"]=options.dataClass;
+    const response=await fetchImpl(spec.origin+"/v1/chat/completions",{method:"POST",headers:requestHeaders,body:JSON.stringify(body),dispatcher:transport,signal:abort,redirect:"error"});
     if(!response?.ok||response.status!==200){await response?.body?.cancel?.();reject("COMMAND_GATE_INFERENCE_HTTP",{status:response?.status??null});}
     const envelope=await boundedJson(response,2*1024*1024);
     if(abort.aborted||Date.now()>=deadlineAt)reject(signal?.aborted?"COMMAND_CANCELLED":"COMMAND_DEADLINE_EXPIRED");

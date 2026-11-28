@@ -54,7 +54,7 @@ test("external candidate accepts only explicit synthetic qualification, never a 
   const deepseek={origin:"http://127.0.0.1:18186",model_id:"deepseek/qualification-fixture",runtime_context_tokens:8192,max_output_tokens:2048};
   let calls=0;const ai=adapter(async(_,o)=>{calls++;return o.method==="GET"?identity(deepseek.model_id):answer(deepseek.model_id);},{commandModelGates:{deepseek}});
   await assert.rejects(()=>ai.callCommandModel("deepseek",opts()),e=>e.code==="COMMAND_EXTERNAL_DATA_NOT_ADMITTED");assert.equal(calls,0);
-  const enabled=adapter(async(_,o)=>{calls++;return o.method==="GET"?identity(deepseek.model_id):answer(deepseek.model_id);},{commandModelGates:{deepseek},commandExternalQualification:true});
+  const enabled=adapter(async(_,o)=>{calls++;if(o.method==="POST"){assert.equal(o.headers["X-AI-Core-Data-Class"],"SYNTHETIC_QUALIFICATION");assert.equal(JSON.parse(o.body).chat_template_kwargs,undefined);}return o.method==="GET"?identity(deepseek.model_id):answer(deepseek.model_id);},{commandModelGates:{deepseek},commandExternalQualification:true});
   await assert.rejects(()=>enabled.callCommandModel("deepseek",{...opts(),dataClass:"LOCAL_ONLY"}),e=>e.code==="COMMAND_EXTERNAL_DATA_NOT_ADMITTED");assert.equal(calls,0);
   await enabled.callCommandModel("deepseek",opts());assert.equal(calls,2);
   assert.throws(()=>adapter(()=>{},{commandModelGates:{deepseek:{...deepseek,origin:"https://example.com"}}}),/COMMAND_GATE_ORIGIN_INVALID/);
