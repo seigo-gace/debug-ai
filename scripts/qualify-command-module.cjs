@@ -31,7 +31,7 @@ async function main(){
     commandModelGates:JSON.parse(process.env.DEBUG_AI_COMMAND_MODEL_GATES||"{}"),
     commandExternalQualification
   });
-  const commandModule=createCommandModule({aiCore,allowExternalQualification:commandExternalQualification});
+  const commandModule=createCommandModule({aiCore,allowExternalQualification:commandExternalQualification,standalone:true});
   const result=await commandModule.evaluate({packet,mode,maxTokensByModel,deadlineAt:Date.now()+integer(wallMs,"COMMAND_WALL_BUDGET_INVALID")});
   console.log(JSON.stringify({prompt_file_sha256:createHash("sha256").update(raw).digest("hex"),input_split:training?"TRAINING_CANDIDATE":"HELDOUT_PROMPT_ONLY",...result}));
   if(result.state==="BLOCKED"||result.state==="REVIEW_REQUIRED")process.exitCode=2;
