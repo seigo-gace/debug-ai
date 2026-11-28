@@ -14,6 +14,13 @@ function createChatHandler({aiCore,runtimeRoot,token}){
   const file=id=>{if(!ID.test(id))error("CHAT_ID_INVALID");return path.join(dir,id+".json");};
   function read(id){const p=file(id);if(!fs.existsSync(p))error("CHAT_NOT_FOUND",404);const s=fs.lstatSync(p);if(!s.isFile()||s.isSymbolicLink()||s.size>2*1024*1024)error("CHAT_STORE_INVALID",500);return JSON.parse(fs.readFileSync(p,"utf8"));}
   function save(item){const p=file(item.id),tmp=p+"."+crypto.randomUUID()+".tmp";const raw=JSON.stringify(item);if(Buffer.byteLength(raw)>2*1024*1024)error("CHAT_HISTORY_LIMIT",413);let fd;try{fd=fs.openSync(tmp,"wx",0o600);fs.writeFileSync(fd,raw);fs.fsyncSync(fd);fs.closeSync(fd);fd=undefined;fs.renameSync(tmp,p);const d=fs.openSync(dir,"r");try{fs.fsyncSync(d);}finally{fs.closeSync(d);}}finally{if(fd!==undefined)fs.closeSync(fd);if(fs.existsSync(tmp))fs.unlinkSync(tmp);}}
+  // A crash can leave a durable in-progress marker. Never replay that turn.
+  for(const n of fs.readdirSync(dir)){
+    if(!n.endsWith(".json")||!ID.test(n.slice(0,-5)))continue;
+    const item=read(n.slice(0,-5));let changed=false;
+    for(const t of item.turns)if(t.state==="running"){t.state="interrupted";t.error="CHAT_RESTART_INTERRUPTED";changed=true;}
+    if(changed)save(item);
+  }
   const staticFiles={"/chat":["index.html","text/html"],"/chat/ui.js":["ui.js","text/javascript"],"/chat/ui.css":["ui.css","text/css"]};
   return async function chat(req,res,url){
     const p=url.pathname;
@@ -25,11 +32,27 @@ function createChatHandler({aiCore,runtimeRoot,token}){
       if(!equal(String(req.headers.authorization||""),"Bearer "+token))error("CHAT_AUTH_REQUIRED",401);
       if(req.headers.origin){const expected=(req.socket.encrypted?"https://":"http://")+req.headers.host;if(req.headers.origin!==expected)error("CHAT_ORIGIN_DENIED",403);}
       if(req.method==="GET"&&p==="/chat/api"){
-        const items=fs.readdirSync(dir).filter(n=>n.endsWith(".json")&&ID.test(n.slice(0,-5))).map(n=>read(n.slice(0,-5))).map(({id,title,updated_at})=>({id,title,updated_at})).sort((a,b)=>b.updated_at.localeCompare(a.updated_at));
+        const items=fs.readdirSync(dir).filter(n=>n.endsWith(".json")&&ID.test(n.slice(0,-5))).map(n=>{const {id,title,updated_at,archived}=read(n.slice(0,-5));return {id,title,updated_at,archived:!!archived};}).sort((a,b)=>b.updated_at.localeCompare(a.updated_at));
         json(res,200,{items,active:active?.id||null});return true;
       }
       const match=/^\/chat\/api\/([a-f0-9-]{36})$/.exec(p);
-      if(req.method==="GET"&&match){json(res,200,read(match[1]));return true;}
+      if(req.method==="GET"&&match){
+        const item=read(match[1]);if(active?.id===item.id){const t=item.turns.find(t=>t.id===active.turnId&&t.state==="running");if(t)t.answer=active.preview;}
+        json(res,200,item);return true;
+      }
+      if(req.method==="PATCH"&&match){
+        if(active?.id===match[1])error("CHAT_BUSY",409);
+        const item=read(match[1]),input=await body(req);
+        if(!input||typeof input!=="object"||Array.isArray(input))error("CHAT_INPUT_INVALID");
+        if(input.title!==undefined){if(typeof input.title!=="string"||!input.title.trim()||input.title.length>120)error("CHAT_TITLE_INVALID");item.title=input.title.trim();}
+        if(input.archived!==undefined){if(typeof input.archived!=="boolean")error("CHAT_INPUT_INVALID");item.archived=input.archived;}
+        if(input.feedback!==undefined){
+          const f=input.feedback,t=item.turns.find(t=>t.id===f?.turn_id);
+          if(!t||!["up","down",null].includes(f.value)||!["complete","partial"].includes(t.state))error("CHAT_FEEDBACK_INVALID");
+          t.feedback=f.value;
+        }
+        item.updated_at=new Date().toISOString();save(item);json(res,200,item);return true;
+      }
       if(req.method==="DELETE"&&match){if(active?.id===match[1])error("CHAT_BUSY",409);read(match[1]);fs.unlinkSync(file(match[1]));json(res,200,{deleted:true});return true;}
       if(req.method==="POST"&&p==="/chat/api/cancel"){const input=await body(req);if(active&&active.id===input.id){active.controller.abort();json(res,200,{cancel_requested:true});}else json(res,409,{error:"CHAT_NOT_RUNNING"});return true;}
       if(req.method==="POST"&&p==="/chat/api"){
@@ -39,15 +62,16 @@ function createChatHandler({aiCore,runtimeRoot,token}){
         const existing=input.id?read(input.id):null;
         const item=existing||{id:input.turn_id,title:input.text.trim().slice(0,80),updated_at:new Date().toISOString(),turns:[]};
         if(!existing&&fs.existsSync(file(item.id))){const prev=read(item.id);const t=prev.turns.find(t=>t.id===input.turn_id);if(t&&t.user===input.text){json(res,200,prev);return true;}error("CHAT_TURN_CONFLICT",409);}
+        if(item.archived)error("CHAT_ARCHIVED",409);
         const prior=item.turns.find(t=>t.id===input.turn_id);if(prior){if(prior.user!==input.text)error("CHAT_TURN_CONFLICT",409);json(res,200,item);return true;}
-        const controller=new AbortController();active={id:item.id,controller};
+        const controller=new AbortController();active={id:item.id,turnId:input.turn_id,controller,preview:""};
         const turn={id:input.turn_id,user:input.text,state:"running"};item.turns.push(turn);item.updated_at=new Date().toISOString();
         try{
           save(item);
           const messages=item.turns.filter(t=>t.state==="complete").flatMap(t=>[{role:"user",content:t.user},{role:"assistant",content:t.answer}]);messages.push({role:"user",content:turn.user});
-          const result=await aiCore.callChatModel({messages,maxTokens:input.max_tokens||256,deadlineAt:Date.now()+600000,signal:controller.signal});
+          const result=await aiCore.callChatModel({messages,maxTokens:input.max_tokens??256,deadlineAt:Date.now()+600000,signal:controller.signal,onDelta:delta=>{active.preview+=delta;}});
           Object.assign(turn,{state:result.finish_reason==="length"?"partial":"complete",answer:result.content,model_id:result.model_id,queue_wait_ms:result.queue_wait_ms,elapsed_ms:result.elapsed_ms});
-        }catch(e){turn.state=controller.signal.aborted?"cancelled":"failed";turn.error=/^[A-Z0-9_]{1,100}$/.test(e.code||"")?e.code:"CHAT_INFERENCE_FAILED";}
+        }catch(e){turn.state=controller.signal.aborted?"cancelled":"failed";if(active.preview)turn.answer=active.preview;turn.error=/^[A-Z0-9_]{1,100}$/.test(e.code||"")?e.code:"CHAT_INFERENCE_FAILED";}
         finally{try{item.updated_at=new Date().toISOString();save(item);}finally{active=null;}}
         json(res,200,item);return true;
       }
