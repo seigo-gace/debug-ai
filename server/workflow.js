@@ -8,6 +8,7 @@ const {initialInvestigationEvidence,createReadOnlyToolRuntime,assertToolResultIn
 const {mergeEvidenceIds}=require("./control/tool-loop.js");
 const {localDiagnosisAdmission,acceptedLocalDiagnosisDispositions}=require("./control/role-disposition.js");
 const {getRoleModule}=require("./role-modules/index.js");
+const {createCommandModule}=require("./command-module/index.js");
 const {parseAndValidateRoleOutput,createRoleProgressEvaluator}=require("./control/role-output-validator.js");
 const {getRoleRuntimeBudget}=require("./control/role-runtime-budgets.js");
 const {registerEvidenceList,evidenceIds,registrySummary}=require("./control/evidence-registry.js");
@@ -259,9 +260,12 @@ function reviewPacketInvariants(result){
   for(const [name,gate] of Object.entries(result?.gates||{}))out.push({name,status:String(gate?.status||"UNKNOWN").toUpperCase()});
   return out;
 }
-function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeEvidence=null,tgserver=null,patchService=null,authority=null,repoPolicy=null,sandboxVerification=null,dapEvidence=null,serverCommand=null,recoveryHooks=null,repositorySnapshot=repositorySnapshotId,adaptiveLocalDiagnosis=false}={}){
+function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeEvidence=null,tgserver=null,patchService=null,authority=null,repoPolicy=null,sandboxVerification=null,dapEvidence=null,serverCommand=null,recoveryHooks=null,repositorySnapshot=repositorySnapshotId,adaptiveLocalDiagnosis=false,commandExternalQualification=false}={}){
   if(!aiCore)throw new Error("AI_CORE_ADAPTER_REQUIRED");
   if(typeof adaptiveLocalDiagnosis!=="boolean")throw new Error("ADAPTIVE_LOCAL_MODE_INVALID");
+  // Explicit internal qualification entry. No extra calls in ordinary analysis,
+  // no role bypass or public execution route, no resumed benchmark.
+  const commandModule=createCommandModule({aiCore,allowExternalQualification:commandExternalQualification});
   const activeRuns=new Map(),backgroundErrors=new Map(),activeCodegenBenchmarks=new Map(),activeInvestigationBenchmarks=new Map(),activeModelAbBenchmarks=new Map();
   const retryTimers=new Map(),MAX_AUTONOMOUS_RETRIES=2,RETRY_DELAY_MS=30000;
   async function logRuntime(event){if(tgserver)await tgserver.log(event);}
@@ -1199,6 +1203,6 @@ function createWorkflow({aiCore,externalReview=null,evidenceSearch=null,runtimeE
   }
   async function promote(asset){assertPromotable(asset);if(!tgserver)throw new Error("TGSERVER_ADAPTER_REQUIRED");return tgserver.promote(asset);}
   async function searchKnowledge(query,opts={}){if(!tgserver)throw new Error("TGSERVER_ADAPTER_REQUIRED");return tgserver.search(query,opts);}
-  return{continueRoleTask,continueDiagnoserTask,runAnalysis,startAnalysis,resumeAnalysis,recoverStartup,patchCandidate,startCodegenBenchmark,codegenBenchmarkStatus,startInvestigationBenchmark,investigationBenchmarkStatus,startModelAbBenchmark,modelAbBenchmarkStatus,approveAndVerify,verifyReadOnly,status,inspect,promote,searchKnowledge};
+  return{commandModuleStatus:commandModule.status,evaluateCommandModule:commandModule.evaluate,continueRoleTask,continueDiagnoserTask,runAnalysis,startAnalysis,resumeAnalysis,recoverStartup,patchCandidate,startCodegenBenchmark,codegenBenchmarkStatus,startInvestigationBenchmark,investigationBenchmarkStatus,startModelAbBenchmark,modelAbBenchmarkStatus,approveAndVerify,verifyReadOnly,status,inspect,promote,searchKnowledge};
 }
 module.exports={observedAssertionFields,hypothesisFeedback,activeHypothesisMaterial,boundedHypothesisFeedback,createWorkflow,parseJson,roleOutput,toolEvidenceRecords,toolAudit,pickDiagnosisStatement,publicLocalEvidence,publicHypothesisReviewEvidence,makePublicHypothesisReviewPayload,addBoundedTestDependencyEvidence,dapFailureChecks,activeDapHint,dapHintProtocol,reviewStreamEvidence,reviewableVerificationCheck,evidencePromptView,canonicalToolEvidence,downstreamToolEvidenceView,causalEvidencePromptView,localEvidenceProjectionShadow,repositorySnapshotId};
