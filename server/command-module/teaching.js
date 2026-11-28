@@ -4,6 +4,10 @@
 const fs=require("node:fs"),os=require("node:os"),path=require("node:path"),crypto=require("node:crypto");
 const {TEACHER_MODEL_ID}=require("./index.js");
 const {QWEN_MODEL}=require("../adapters/command-model-gate.js");
+const {readWeightManifest}=require("./teaching-weight-registry.js");
+const TEACHING_QWEN_MODEL="qwen35_teaching";
+function studentGate(){const w=readWeightManifest();return w.student_model_gate===TEACHING_QWEN_MODEL?TEACHING_QWEN_MODEL:"qwen35";}
+function studentModelId(name){return name===TEACHING_QWEN_MODEL?process.env.DEBUG_AI_QWEN35_TEACHING_MODEL_ID||"Qwen/Qwen3.5-4B-teaching-interactive":QWEN_MODEL;}
 const {prepareSandboxJob,waitSandboxResult}=require("../control/sandbox-runtime.js");
 const TOPICS=Object.freeze({
   requirements:{label:"要件定義・受入条件",task:"合成事例: メモアプリの保存と復元を設計する。目的、制約、例外、観測可能な受入条件を区別する。"},
@@ -21,7 +25,7 @@ const tests="const assert=require('node:assert/strict');const clamp=require('./c
 function fail(code){const e=new Error(code);e.code=code;throw e;}
 function teachingTopics(){return Object.entries(TOPICS).map(([id,v])=>({id,label:v.label}));}
 function selectTopic(id){if(typeof id!=="string"||!Object.hasOwn(TOPICS,id))fail("TEACHING_TOPIC_INVALID");return TOPICS[id];}
-function canTeach(aiCore){const s=aiCore?.commandModelStatus?.();return !!(s?.external_qualification_enabled&&s.configured_models?.includes("deepseek")&&s.configured_models?.includes("qwen35")&&typeof aiCore.callCommandModel==="function");}
+function canTeach(aiCore){const s=aiCore?.commandModelStatus?.();const q=s?.configured_models?.includes("qwen35")||s?.configured_models?.includes(TEACHING_QWEN_MODEL);return !!(s?.external_qualification_enabled&&s.configured_models?.includes("deepseek")&&q&&typeof aiCore.callCommandModel==="function");}
 function parse(content,fields){let v;try{v=JSON.parse(content);}catch{fail("TEACHING_RESPONSE_JSON_INVALID");}if(!v||typeof v!=="object"||Array.isArray(v)||Object.keys(v).sort().join(",")!==[...fields].sort().join(","))fail("TEACHING_RESPONSE_SCHEMA_INVALID");for(const f of fields){const x=v[f],empty=typeof x==="string"&&!x.trim();if(typeof x!=="string"||Buffer.byteLength(x)>6000||(empty&&!(f==="correction"&&v.verdict==="PASS"))){const e=new Error("TEACHING_RESPONSE_FIELD_INVALID");e.code="TEACHING_RESPONSE_FIELD_INVALID";e.field=f;e.kind=typeof x!=="string"?(x===null?"null":Array.isArray(x)?"array":typeof x):empty?"empty":"too_long";throw e;}}return v;}
 function checkSignal(signal,deadlineAt){if(signal?.aborted)fail("COMMAND_CANCELLED");if(Date.now()>=deadlineAt)fail("TEACHING_DEADLINE_EXPIRED");}
 function observed(v){return {job_id:v.job_id,pass:v.pass,code:v.code,timed_out:v.timed_out};}
@@ -40,7 +44,9 @@ async function testSyntheticCode(code,{runtimeRoot,jobRoot=process.env.DEBUG_AI_
 }
 async function runTeaching({aiCore,topic,deadlineAt,signal,maxTokensByModel,onStage=()=>{},sandbox,maxReviews=2,repairFormat=false,priorFeedback=null,resume=null,evidenceBound=false,persistKb=null}={}){
   const lesson=selectTopic(topic);if(!canTeach(aiCore))fail("TEACHING_DEEPSEEK_NOT_CONFIGURED");
-  const budgets=maxTokensByModel||{qwen35:512,deepseek:1024};
+  const gate=studentGate();
+  const budgets=maxTokensByModel||{qwen35:512,deepseek:1024,[TEACHING_QWEN_MODEL]:512};
+  if(!Number.isSafeInteger(budgets[gate])||budgets[gate]<1)fail("TEACHING_CONFIG_INVALID");
   if(!Number.isSafeInteger(deadlineAt)||!Number.isSafeInteger(budgets.qwen35)||budgets.qwen35<1||!Number.isSafeInteger(budgets.deepseek)||budgets.deepseek<1)fail("TEACHING_CONFIG_INVALID");
   if(lesson.code&&typeof sandbox!=="function")fail("TEACHING_SANDBOX_NOT_CONFIGURED");
   if(!Number.isInteger(maxReviews)||maxReviews<1||maxReviews>4||typeof repairFormat!=="boolean")fail("TEACHING_CONFIG_INVALID");
@@ -52,26 +58,26 @@ async function runTeaching({aiCore,topic,deadlineAt,signal,maxTokensByModel,onSt
     let r;
     try{r=await aiCore.callCommandModel(name,{system:common+"\n"+system,user:JSON.stringify(user),maxTokens:budgets[name],deadlineAt,signal,dataClass:"SYNTHETIC_QUALIFICATION"});}
     catch(e){emit({phase,state:"failed",model:name,error:/^[A-Z0-9_]{1,100}$/.test(e?.code||"")?e.code:"TEACHING_MODEL_FAILED",cost:e?.meta?.telemetry?.cost??null});throw e;}
-    const identity=name==="deepseek"?TEACHER_MODEL_ID:QWEN_MODEL;
+    const identity=name==="deepseek"?TEACHER_MODEL_ID:studentModelId(name);
     if(r?.model_id!==identity)fail("TEACHING_MODEL_IDENTITY_MISMATCH");
     let value;
-    try{value=parse(r.content,fields);if(evidenceBound&&name==="qwen35"&&lesson.code&&value.verification!=="SANDBOX_PENDING")fail("TEACHING_VERIFICATION_CONTRACT_INVALID");if(fields.includes("verdict")&&!["PASS","REVISE","UNDETERMINED"].includes(value.verdict))fail("TEACHING_VERDICT_INVALID");}catch(e){emit({phase,state:"failed",model:name,model_id:identity,error:e.code,invalid_field:e.field??null,invalid_kind:e.kind??null,cost:r.telemetry?.cost??null});if(repairFormat&&!repair&&(name==="qwen35"||typeof r.telemetry?.cost==="number"&&Number.isFinite(r.telemetry.cost)&&r.telemetry.cost>=0)){return model(name,phase+"_format_repair",system+" 前回は出力形式違反。指定キーを厳守し、値を文字列にする。評価内容を弱めたり判定を変更するための再試行ではない。",user,fields,true);}throw e;}
+    try{value=parse(r.content,fields);if(evidenceBound&&(name==="qwen35"||name===TEACHING_QWEN_MODEL)&&lesson.code&&value.verification!=="SANDBOX_PENDING")fail("TEACHING_VERIFICATION_CONTRACT_INVALID");if(fields.includes("verdict")&&!["PASS","REVISE","UNDETERMINED"].includes(value.verdict))fail("TEACHING_VERDICT_INVALID");}catch(e){emit({phase,state:"failed",model:name,model_id:identity,error:e.code,invalid_field:e.field??null,invalid_kind:e.kind??null,cost:r.telemetry?.cost??null});if(repairFormat&&!repair&&((name==="qwen35"||name===TEACHING_QWEN_MODEL)||typeof r.telemetry?.cost==="number"&&Number.isFinite(r.telemetry.cost)&&r.telemetry.cost>=0)){return model(name,phase+"_format_repair",system+" 前回は出力形式違反。指定キーを厳守し、値を文字列にする。評価内容を弱めたり判定を変更するための再試行ではない。",user,fields,true);}throw e;}
     emit({phase,state:"complete",model:name,model_id:identity,output:value,cost:r.telemetry?.cost??null});
     checkSignal(signal,deadlineAt);return value;
   }
   const reused=[];
-  function reuse(s,modelName,phase,fields){if(!s||s.state!=="complete"||s.model!==modelName||s.model_id!==(modelName==="deepseek"?TEACHER_MODEL_ID:QWEN_MODEL)||!phase.test(s.phase))return null;try{return parse(JSON.stringify(s.output),fields);}catch{return null;}}
-  const savedTeaching=reuse(resume?.teaching,"deepseek",/^teacher_lesson(?:_format_repair)?$/,["lesson","exercise","criteria"]);
+  function reuse(s,modelName,modelPattern,phase,fields){if(!s||s.state!=="complete"||!modelPattern.test(s.model)||s.model_id!==(s.model==="deepseek"?TEACHER_MODEL_ID:studentModelId(s.model))||!phase.test(s.phase))return null;try{return parse(JSON.stringify(s.output),fields);}catch{return null;}}
+  const savedTeaching=reuse(resume?.teaching,"deepseek",/^deepseek$/,/^teacher_lesson(?:_format_repair)?$/,["lesson","exercise","criteria"]);
   if(savedTeaching)reused.push({phase:resume.teaching.phase,source:resume.source});
   const teaching=savedTeaching||await model("deepseek","teacher_lesson","教師として課題を解説し、生徒が自力で解くための問いと合格基準を提示する。未提示のコード・ログ・実行結果を事実として要求しない。事実が不足する場合は確認手順と条件付き判断を評価する。キー lesson,exercise,criteria (文字列)。",{task:lesson.task},["lesson","exercise","criteria"]);
   const studentSystem="生徒として説明、解答、検証方法を示す。キー answer,verification"+(lesson.code?",code (完全な clamp.js のソース。Markdown禁止)":"")+"。すべて文字列。"+(evidenceBound?(lesson.code?" verification は厳密に SANDBOX_PENDING。実行結果はシステムが後から付与する。answer にも未実行の結果を書かない。":" 具体的な判定規則・手順・境界条件を記述する。未提示の観測結果や実行成功は捏造しない。"):"");
   const studentFields=lesson.code?["answer","verification","code"]:["answer","verification"];
-  const savedAnswer=savedTeaching&&!(evidenceBound&&lesson.code)?reuse(resume?.answer,"qwen35",/^student_(attempt|revision)(?:_format_repair)?$/,studentFields):null;
+  const savedAnswer=savedTeaching&&!(evidenceBound&&lesson.code)?reuse(resume?.answer,gate,/^(qwen35|qwen35_teaching)$/,/^student_(attempt|revision)(?:_format_repair)?$/,studentFields):null;
   if(savedAnswer)reused.push({phase:resume.answer.phase,source:resume.source});
-  let answer=savedAnswer||await model("qwen35","student_attempt",studentSystem+" 合格基準の各項目を具体的に満たし、過去の指摘があれば解消する。",{task:lesson.task,teaching,...(priorFeedback?{prior_feedback:priorFeedback}:{})},studentFields);
+  let answer=savedAnswer||await model(gate,"student_attempt",studentSystem+" 合格基準の各項目を具体的に満たし、過去の指摘があれば解消する。",{task:lesson.task,teaching,...(priorFeedback?{prior_feedback:priorFeedback}:{})},studentFields);
   let review,evidence=null;
-  const savedReview=savedAnswer?reuse(resume?.review,"deepseek",/^teacher_review_[1-4](?:_format_repair)?$/,["verdict","feedback","correction"]):null;
-  if(savedReview?.verdict==="REVISE"){reused.push({phase:resume.review.phase,source:resume.source});answer=await model("qwen35","student_revision",studentSystem+" 保存済みの教師指摘を一つずつ解消し、合格基準全体を満たす完全な再解答を出す。",{task:lesson.task,teaching,previous:answer,review:savedReview,evidence:resume.evidence??null},studentFields);}
+  const savedReview=savedAnswer?reuse(resume?.review,"deepseek",/^deepseek$/,/^teacher_review_[1-4](?:_format_repair)?$/,["verdict","feedback","correction"]):null;
+  if(savedReview?.verdict==="REVISE"){reused.push({phase:resume.review.phase,source:resume.source});answer=await model(gate,"student_revision",studentSystem+" 保存済みの教師指摘を一つずつ解消し、合格基準全体を満たす完全な再解答を出す。",{task:lesson.task,teaching,previous:answer,review:savedReview,evidence:resume.evidence??null},studentFields);}
 
   for(let attempt=1;attempt<=maxReviews;attempt++){
     if(lesson.code){checkSignal(signal,deadlineAt);onStage({phase:"sandbox_"+attempt,state:"running",model:"sandbox"});evidence=await sandbox(answer.code);if(evidenceBound&&(evidence?.candidate_sha256!==crypto.createHash("sha256").update(answer.code).digest("hex")||evidence?.test_sha256!==crypto.createHash("sha256").update(tests).digest("hex")||evidence?.assertion_count!==clampCases.length||!Array.isArray(evidence.cases)||evidence.cases.length!==clampCases.length))fail("TEACHING_EVIDENCE_BINDING_INVALID");emit({phase:"sandbox_"+attempt,state:"complete",model:"sandbox",output:evidence});checkSignal(signal,deadlineAt);}
@@ -79,10 +85,13 @@ async function runTeaching({aiCore,topic,deadlineAt,signal,maxTokensByModel,onSt
     if(!["PASS","REVISE","UNDETERMINED"].includes(review.verdict))fail("TEACHING_VERDICT_INVALID");
     if(review.verdict==="PASS"&&(!lesson.code||evidence?.pass===true))break;
     if(attempt===maxReviews||review.verdict==="UNDETERMINED")break;
-    answer=await model("qwen35","student_revision",studentSystem+" 教師の指摘を一つずつ解消し、前回の正しい部分を維持して、合格基準全体を満たす完全な再解答を出す。",{task:lesson.task,teaching,previous:answer,review,evidence},studentFields);
+    answer=await model(gate,"student_revision",studentSystem+" 教師の指摘を一つずつ解消し、前回の正しい部分を維持して、合格基準全体を満たす完全な再解答を出す。",{task:lesson.task,teaching,previous:answer,review,evidence},studentFields);
   }
   const success=review.verdict==="PASS"&&(!lesson.code||evidence?.pass===true);
   const base={schema:"debugai.interactive-teaching/v1",topic,stages,reused_stages:reused,verdict:success?"TEACHER_PASS":review.verdict==="UNDETERMINED"?"UNDETERMINED":"REVISE_REQUIRED",verification:lesson.code?(evidence?.pass?"SANDBOX_PASS":"SANDBOX_FAIL"):"TEACHER_ONLY_NOT_INDEPENDENTLY_VERIFIED",kb_status:"NOT_CONNECTED",weight_update:false,cost_usd:stages.filter(s=>s.model==="deepseek").every(s=>typeof s.cost==="number"&&Number.isFinite(s.cost)&&s.cost>=0)?stages.filter(s=>s.model==="deepseek").reduce((a,s)=>a+s.cost,0):null};
+  const weight=readWeightManifest();
+  base.weight_update=!!weight.weight_update;
+  base.weight_status=weight.weight_status||null;
   if(typeof persistKb==="function")return await persistKb({topic,result:base});
   return base;
 }

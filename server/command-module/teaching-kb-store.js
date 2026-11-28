@@ -1,6 +1,7 @@
 "use strict";
 const fs=require("node:fs"),path=require("node:path"),crypto=require("node:crypto");
 const {contentHash}=require("../../orchestrator/durable-contracts.js");
+const {readWeightManifest,writeRuntimeStatus}=require("./teaching-weight-registry.js");
 const SCHEMA="debugai.interactive-teaching-kb-candidate/v1";
 function fail(code){const e=new Error(code);e.code=code;throw e;}
 function storeRoot(runtimeRoot){const root=path.join(runtimeRoot,"teaching-kb");for(const sub of ["","candidates","export"])fs.mkdirSync(path.join(root,sub),{recursive:true,mode:0o700});return root;}
@@ -25,7 +26,10 @@ async function persistTeachingCandidate({runtimeRoot,tgserver,batchId,chatId,top
   }else{
     fs.appendFileSync(path.join(root,"export","review-candidates.jsonl"),JSON.stringify(exportLine)+"\n",{mode:0o600});
   }
-  let kb_status="STORED_LOCAL",weight_update=false;
+  let kb_status="STORED_LOCAL";
+  const weight=readWeightManifest();
+  writeRuntimeStatus(runtimeRoot,weight);
+  let weight_update=!!weight.weight_update;
   if(tgserver&&typeof tgserver.promote==="function"){
   try{
     const summary="teaching:"+topic+":"+result.verdict+":"+result.verification;
@@ -35,7 +39,7 @@ async function persistTeachingCandidate({runtimeRoot,tgserver,batchId,chatId,top
     record.promotion_error=/^[A-Z0-9_]{1,100}$/.test(error?.code||"")?error.code:String(error?.message||error).slice(0,120);
     kb_status=record.training_eligible?"TGSERVER_PROMOTION_FAILED":"STORED_LOCAL_ONLY";
   }}
-  return {...result,kb_status,weight_update,kb_record_id:record.id};
+  return {...result,kb_status,weight_update,weight_status:weight.weight_status||null,kb_record_id:record.id};
 }
 function studentMessages(record){
   if(!record.teacher_lesson||!record.student_answer?.answer)return null;
