@@ -1,11 +1,12 @@
 "use strict";
 const fs=require("node:fs"),path=require("node:path"),crypto=require("node:crypto");
+const {teachingTopics,selectTopic,canTeach,testSyntheticCode,runTeaching}=require("../command-module/teaching.js");
 const MAX_BODY=128*1024,ID=/^[a-f0-9-]{36}$/;
 function json(res,status,body){res.writeHead(status,{"content-type":"application/json; charset=utf-8","cache-control":"no-store","x-content-type-options":"nosniff"});res.end(JSON.stringify(body));}
 function error(code,status=400){const e=new Error(code);e.code=code;e.status=status;throw e;}
 async function body(req){let n=0,parts=[];for await(const chunk of req){n+=chunk.length;if(n>MAX_BODY)error("CHAT_INPUT_TOO_LARGE",413);parts.push(chunk);}try{return JSON.parse(Buffer.concat(parts));}catch{error("CHAT_INVALID_JSON");}}
 function equal(a,b){const x=Buffer.from(a),y=Buffer.from(b);return x.length===y.length&&crypto.timingSafeEqual(x,y);}
-function createChatHandler({aiCore,runtimeRoot,token,access=null}){
+function createChatHandler({aiCore,runtimeRoot,token,access=null,teachingBudgets=null,teachingSandbox=null}){
   if(access!==null&&(typeof access.verify!=="function"||!/^https:\/\/[a-z0-9.-]+$/.test(access.origin||"")))throw new Error("CHAT_ACCESS_CONFIG_INVALID");
   if(!access&&(typeof token!=="string"||token.length<32))throw new Error("CHAT_ACCESS_TOKEN_REQUIRED");
   if(!aiCore.commandModelStatus().configured_models.includes("qwen35"))throw new Error("CHAT_QWEN_GATE_REQUIRED");
@@ -40,11 +41,11 @@ function createChatHandler({aiCore,runtimeRoot,token,access=null}){
       if(!access&&req.headers.origin){const expected=(req.socket.encrypted?"https://":"http://")+req.headers.host;if(req.headers.origin!==expected)error("CHAT_ORIGIN_DENIED",403);}
       if(req.method==="GET"&&p==="/chat/api"){
         const items=fs.readdirSync(dir).filter(n=>n.endsWith(".json")&&ID.test(n.slice(0,-5))).map(n=>{const {id,title,updated_at,archived}=read(n.slice(0,-5));return {id,title,updated_at,archived:!!archived};}).sort((a,b)=>b.updated_at.localeCompare(a.updated_at));
-        json(res,200,{items,active:active?.id||null});return true;
+        json(res,200,{items,active:active?.id||null,teaching:{available:canTeach(aiCore)&&teachingBudgets!==null,topics:teachingTopics()}});return true;
       }
       const match=/^\/chat\/api\/([a-f0-9-]{36})$/.exec(p);
       if(req.method==="GET"&&match){
-        const item=read(match[1]);if(active?.id===item.id){const t=item.turns.find(t=>t.id===active.turnId&&t.state==="running");if(t)t.answer=active.preview;}
+        const item=read(match[1]);if(active?.id===item.id){const t=item.turns.find(t=>t.id===active.turnId&&t.state==="running");if(t&&t.mode!=="teaching")t.answer=active.preview;}
         json(res,200,item);return true;
       }
       if(req.method==="PATCH"&&match){
@@ -65,18 +66,25 @@ function createChatHandler({aiCore,runtimeRoot,token,access=null}){
       if(req.method==="POST"&&p==="/chat/api"){
         const input=await body(req);
         if(!input||typeof input.text!=="string"||!input.text.trim()||!ID.test(input.turn_id||"")||(input.id!=null&&!ID.test(input.id)))error("CHAT_INPUT_INVALID");
+        const mode=input.mode??"chat";if(!["chat","teaching"].includes(mode))error("CHAT_MODE_INVALID");
+        if(mode==="teaching"){if(!canTeach(aiCore)||!teachingBudgets)error("TEACHING_DEEPSEEK_NOT_CONFIGURED",503);try{selectTopic(input.topic);}catch{error("TEACHING_TOPIC_INVALID");}if(input.text!==teachingTopics().find(x=>x.id===input.topic).label)error("TEACHING_SYNTHETIC_TOPIC_REQUIRED");}
         if(active)error("CHAT_BUSY",409);
         const existing=input.id?read(input.id):null;
         const item=existing||{id:input.turn_id,title:input.text.trim().slice(0,80),updated_at:new Date().toISOString(),turns:[]};
-        if(!existing&&fs.existsSync(file(item.id))){const prev=read(item.id);const t=prev.turns.find(t=>t.id===input.turn_id);if(t&&t.user===input.text){json(res,200,prev);return true;}error("CHAT_TURN_CONFLICT",409);}
+        if(!existing&&fs.existsSync(file(item.id))){const prev=read(item.id);const t=prev.turns.find(t=>t.id===input.turn_id);if(t&&t.user===input.text&&(t.mode??"chat")===mode&&(mode!=="teaching"||t.topic===input.topic)){json(res,200,prev);return true;}error("CHAT_TURN_CONFLICT",409);}
         if(item.archived)error("CHAT_ARCHIVED",409);
-        const prior=item.turns.find(t=>t.id===input.turn_id);if(prior){if(prior.user!==input.text)error("CHAT_TURN_CONFLICT",409);json(res,200,item);return true;}
+        const prior=item.turns.find(t=>t.id===input.turn_id);if(prior){if(prior.user!==input.text||(prior.mode??"chat")!==mode||(mode==="teaching"&&prior.topic!==input.topic))error("CHAT_TURN_CONFLICT",409);json(res,200,item);return true;}
         const controller=new AbortController();active={id:item.id,turnId:input.turn_id,controller,preview:""};
-        const turn={id:input.turn_id,user:input.text,state:"running"};item.turns.push(turn);item.updated_at=new Date().toISOString();
+        const turn={id:input.turn_id,user:input.text,state:"running",...(mode==="teaching"?{mode,topic:input.topic,teaching:{stages:[],phase:null,kb_status:"NOT_CONNECTED",weight_update:false}}:{})};item.turns.push(turn);item.updated_at=new Date().toISOString();
         try{save(item);}catch(e){active=null;throw e;}
         const run=async()=>{
         try{
-          const messages=item.turns.filter(t=>t.state==="complete").flatMap(t=>[{role:"user",content:t.user},{role:"assistant",content:t.answer}]);messages.push({role:"user",content:turn.user});
+          if(mode==="teaching"){
+            const result=await runTeaching({aiCore,topic:input.topic,deadlineAt:Date.now()+600000,signal:controller.signal,maxTokensByModel:teachingBudgets,sandbox:teachingSandbox||((code)=>testSyntheticCode(code,{runtimeRoot})),onStage:stage=>{turn.teaching.phase=stage.phase;if(stage.state!=="running")turn.teaching.stages.push(stage);item.updated_at=new Date().toISOString();save(item);}});
+            Object.assign(turn,{state:"complete",teaching:result,answer:result.verdict==="TEACHER_PASS"?"教師評価PASS（"+result.verification+"）。KB未接続・重み更新なし。":"学習課題の再検証が必要です（"+result.verdict+"）。"});
+            return;
+          }
+          const messages=item.turns.filter(t=>t.state==="complete"&&t.mode!=="teaching").flatMap(t=>[{role:"user",content:t.user},{role:"assistant",content:t.answer}]);messages.push({role:"user",content:turn.user});
           const result=await aiCore.callChatModel({messages,maxTokens:input.max_tokens??256,deadlineAt:Date.now()+600000,signal:controller.signal,onDelta:delta=>{active.preview+=delta;}});
           Object.assign(turn,{state:result.finish_reason==="length"?"partial":"complete",answer:result.content,model_id:result.model_id,queue_wait_ms:result.queue_wait_ms,elapsed_ms:result.elapsed_ms});
         }catch(e){turn.state=controller.signal.aborted?"cancelled":"failed";if(active.preview)turn.answer=active.preview;turn.error=/^[A-Z0-9_]{1,100}$/.test(e.code||"")?e.code:"CHAT_INFERENCE_FAILED";}
