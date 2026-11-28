@@ -4,6 +4,9 @@ const {setTimeout:sleep}=require("node:timers/promises");
 const {fetch}=require("undici");
 const {createAiCoreAdapter}=require("../adapters/ai-core.js");
 const {runTeachingBatch,teachingTopics,testSyntheticCode,canTeach}=require("./teaching.js");
+const {readWeightManifest}=require("./teaching-weight-registry.js");
+const TEACHING_QWEN_MODEL="qwen35_teaching";
+function studentGate(){const w=readWeightManifest();return w.student_model_gate===TEACHING_QWEN_MODEL?TEACHING_QWEN_MODEL:"qwen35";}
 const {persistTeachingCandidate}=require("./teaching-kb-store.js");
 const terminal=new Set(["FINISHED","FAILED","PAUSED_COST_UNKNOWN","PAUSED_COST_LIMIT_OR_UNKNOWN","PAUSED_EXISTING_CHAT_OR_JOB","PAUSED_DEADLINE"]);
 const cap=0.10,reserve=0.01;
@@ -29,12 +32,12 @@ async function main(){
   if(active()){state.status="PAUSED_EXISTING_CHAT_OR_JOB";save();return;}
   const latest=new Map();for(let i=0;i<olds.length;i++)for(const x of olds[i].lessons)latest.set(x.topic,{...x,root:previous[i]});
   const labels=new Map(teachingTopics().map(t=>[t.id,t.label]));
-  const eligible=t=>{const x=latest.get(t);if(t==="javascript"&&x?.verdict==="TEACHER_PASS"&&typeof x.cost_usd==="number"&&Number.isFinite(x.cost_usd)){const p=path.join(x.root,x.id+".json");if(fs.existsSync(p)){const stages=read(p).turns?.[0]?.teaching?.stages||[];if(!stages.some(s=>s.model==="sandbox"&&s.output?.candidate_sha256&&s.output?.test_sha256))return true;}}return !x||((typeof x.cost_usd==="number"&&Number.isFinite(x.cost_usd))&&(x.verdict==="REVISE_REQUIRED"||/^TEACHING_(RESPONSE_(JSON|SCHEMA|FIELD)_INVALID|VERDICT_INVALID|VERIFICATION_CONTRACT_INVALID|EVIDENCE_BINDING_INVALID)$/.test(x.error||"")||(/^student_/.test(x.phase||"")&&x.error==="COMMAND_GATE_INCOMPLETE_RESPONSE")||x.error==="COMMAND_GATE_INFERENCE_HTTP"));};
+  const eligible=t=>{const x=latest.get(t);if(t==="javascript"&&x?.verdict==="TEACHER_PASS"&&typeof x.cost_usd==="number"&&Number.isFinite(x.cost_usd)){const p=path.join(x.root,x.id+".json");if(fs.existsSync(p)){const stages=read(p).turns?.[0]?.teaching?.stages||[];if(!stages.some(s=>s.model==="sandbox"&&s.output?.candidate_sha256&&s.output?.test_sha256))return true;}}return !x||((typeof x.cost_usd==="number"&&Number.isFinite(x.cost_usd))&&(x.verdict==="REVISE_REQUIRED"||/^TEACHING_(RESPONSE_(JSON|SCHEMA|FIELD)_INVALID|VERDICT_INVALID|VERIFICATION_CONTRACT_INVALID|EVIDENCE_BINDING_INVALID|BATCH_INTERRUPTED|CONFIG_INVALID)$/.test(x.error||"")||(/^student_/.test(x.phase||"")&&x.error==="COMMAND_GATE_INCOMPLETE_RESPONSE")||x.error==="COMMAND_GATE_INFERENCE_HTTP"));};
   const order=["kb","javascript","debugging","requirements","architecture","orchestration","recovery","quality"].filter(eligible);
   const priorFeedbackByTopic={},resumeByTopic={};for(const t of order){const x=latest.get(t);if(!x||!/^[0-9a-f-]{36}$/.test(x.id||""))continue;const f=path.join(x.root,x.id+".json");if(!fs.existsSync(f))continue;const v=read(f).turns?.[0];if(v?.topic!==t||v.mode!=="teaching")continue;const reviews=(v.teaching?.stages||[]).filter(s=>s.model==="deepseek"&&s.state==="complete"&&s.phase.startsWith("teacher_review_")&&s.output?.verdict==="REVISE");const last=reviews.at(-1)?.output;if(last&&typeof last.feedback==="string"&&typeof last.correction==="string")priorFeedbackByTopic[t]={feedback:last.feedback,correction:last.correction};
     if(t==="javascript"||t==="debugging")continue;
     const stages=v.teaching?.stages||[],lessonIndex=stages.findIndex(s=>s.model==="deepseek"&&s.state==="complete"&&/^teacher_lesson(?:_format_repair)?$/.test(s.phase));if(lessonIndex<0)continue;
-    const studentIndex=stages.findLastIndex(s=>s.model==="qwen35"&&s.state==="complete"&&/^student_(attempt|revision)(?:_format_repair)?$/.test(s.phase));
+    const studentIndex=stages.findLastIndex(s=>(s.model==="qwen35"||s.model===TEACHING_QWEN_MODEL)&&s.state==="complete"&&/^student_(attempt|revision)(?:_format_repair)?$/.test(s.phase));
     const after=studentIndex>lessonIndex?stages.slice(studentIndex+1):[];const review=after.filter(s=>s.model==="deepseek"&&s.state==="complete"&&/^teacher_review_[1-4](?:_format_repair)?$/.test(s.phase)).at(-1);
     resumeByTopic[t]={source:{batch:path.basename(x.root),id:x.id},teaching:stages[lessonIndex],answer:studentIndex>lessonIndex?stages[studentIndex]:null,review:review?.output?.verdict==="REVISE"?review:null};
   }
@@ -43,14 +46,16 @@ async function main(){
   if(!order.length){state.status="FINISHED";save();return;}
   const gates=JSON.parse(process.env.DEBUG_AI_COMMAND_MODEL_GATES||"{}");
   const ai=createAiCoreAdapter({dispatchMode:"command_only",parallelTeaching:true,commandModelGates:gates,commandExternalQualification:process.env.DEBUG_AI_COMMAND_EXTERNAL_QUALIFICATION==="true",fetchImpl:async(url,o)=>{
-    const model=url.startsWith(gates.deepseek.origin)?"deepseek":url.startsWith(gates.qwen35.origin)?"qwen35":null;
+    const model=url.startsWith(gates.deepseek?.origin)?"deepseek":url.startsWith(gates.qwen35_teaching?.origin)?"qwen35_teaching":url.startsWith(gates.qwen35?.origin)?"qwen35":null;
     if(o.method!=="POST")return fetch(url,o);
     const row={model,start_ms:Date.now()};state.dispatches.push(row);save();
-    if(model==="qwen35")o={...o,headers:{...o.headers,"X-AI-Core-Wait-Ms":"30000"}};
+    if(model==="qwen35"||model==="qwen35_teaching")o={...o,headers:{...o.headers,"X-AI-Core-Wait-Ms":"30000"}};
     try{const res=await fetch(url,o);row.http_status=res.status;return res;}finally{row.headers_ms=Date.now();save();}
   }});
   if(!canTeach(ai))fail("TEACHING_DEEPSEEK_NOT_CONFIGURED");
-  const budgets={qwen35:Math.min(1024,gates.qwen35.max_output_tokens),deepseek:Math.min(1024,gates.deepseek.max_output_tokens)};
+  const gate=studentGate();
+  const budgets={qwen35:Math.min(1024,gates.qwen35?.max_output_tokens||1024),deepseek:Math.min(1024,gates.deepseek.max_output_tokens)};
+  if(gate===TEACHING_QWEN_MODEL&&gates.qwen35_teaching)budgets.qwen35_teaching=Math.min(1024,gates.qwen35_teaching.max_output_tokens);
   let teacherTail=Promise.resolve();
   const core={commandModelStatus:ai.commandModelStatus,callCommandModel:(name,opts)=>{
     if(name!=="deepseek")return ai.callCommandModel(name,opts);
