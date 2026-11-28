@@ -4,8 +4,9 @@
 // existing credential, transport and shared dispatch queue; no direct provider
 // request, new queue, model lifecycle or external key is owned here.
 const {performance}=require("node:perf_hooks");
-const NAMES=new Set(["qwen35","deepseek"]);
+const NAMES=new Set(["qwen35","qwen35_teaching","deepseek"]);
 const QWEN_MODEL="/models/Qwen3.5-4B-Q4_K_M.gguf";
+const QWEN_TEACHING_MODEL="Qwen/Qwen3.5-4B-teaching-interactive";
 class CommandGateError extends Error{
   constructor(code,meta={}){super(code);this.code=code;this.meta=meta;}
 }
@@ -21,6 +22,7 @@ function normalizeCommandModelGates(value,existingOrigins){
     if(url.protocol!=="http:"||url.hostname!=="127.0.0.1"||url.username||url.password||url.pathname!=="/"||url.search||url.hash||!url.port||origins.has(url.origin))reject("COMMAND_GATE_ORIGIN_INVALID");
     if(typeof spec.model_id!=="string"||!spec.model_id.trim()||
       (name==="qwen35"&&spec.model_id!==QWEN_MODEL)||
+      (name==="qwen35_teaching"&&spec.model_id!==QWEN_TEACHING_MODEL)||
       (name==="deepseek"&&!/^deepseek\/[a-zA-Z0-9._:-]+$/.test(spec.model_id)))reject("COMMAND_GATE_MODEL_ID_INVALID");
     if(!Number.isSafeInteger(spec.runtime_context_tokens)||spec.runtime_context_tokens<2||
        !Number.isSafeInteger(spec.max_output_tokens)||spec.max_output_tokens<1||spec.max_output_tokens>=spec.runtime_context_tokens)reject("COMMAND_GATE_BUDGET_INVALID");
@@ -74,7 +76,7 @@ async function executeCommandModel({model,spec,options,fetchImpl,apiKey,transpor
     const body={model:spec.model_id,messages:[{role:"system",content:system},{role:"user",content:user}],max_tokens:maxTokens,temperature:0,stream:false,response_format:{type:"json_object"}};
     // Qwen candidate template is known from the current GGUF qualification
     // design. Do not assume the external provider accepts llama.cpp settings.
-    if(model==="qwen35")body.chat_template_kwargs={enable_thinking:false};
+    if(model==="qwen35"||model==="qwen35_teaching")body.chat_template_kwargs={enable_thinking:false};
     dispatched=true;
     const requestHeaders={...headers,"X-AI-Core-Client":"debug-ai"};
     if(model==="deepseek")requestHeaders["X-AI-Core-Data-Class"]=options.dataClass;

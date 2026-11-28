@@ -251,7 +251,7 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
   const teachingLanes=new Map();
   function reserveDispatch(role,options){
     if(parallelTeaching){
-      const lane=role==="chat:qwen35"||role==="command:qwen35"?"qwen35":role==="command:deepseek"?"deepseek":null;
+      const lane=role==="chat:qwen35"||role==="command:qwen35"||role==="command:qwen35_teaching"?"qwen35":role==="command:deepseek"?"deepseek":null;
       if(!lane)throw new AiCoreError("TEACHING_PARALLEL_ROLE_INVALID","Unknown standalone teaching lane");
       const prior=teachingLanes.get(lane);let resolve;
       const entry={role,tail:new Promise(r=>{resolve=r;})};teachingLanes.set(lane,entry);

@@ -58,7 +58,8 @@ const adaptiveLocalDiagnosis=adaptiveFlag==="true";
 const chatGateConfig=process.env.DEBUG_AI_CHAT_ENABLED==="true"?JSON.parse(process.env.DEBUG_AI_COMMAND_MODEL_GATES||"{}"):null;
 const externalTeachingFlag=process.env.DEBUG_AI_COMMAND_EXTERNAL_QUALIFICATION||"false";
 if(!["true","false"].includes(externalTeachingFlag))throw new Error("COMMAND_EXTERNAL_FLAG_INVALID");
-const teachingBudgets=externalTeachingFlag==="true"&&chatGateConfig?.qwen35&&chatGateConfig?.deepseek?{qwen35:Math.min(1024,chatGateConfig.qwen35.max_output_tokens),deepseek:Math.min(1024,chatGateConfig.deepseek.max_output_tokens)}:null;
+const studentGate=chatGateConfig?.qwen35_teaching?"qwen35_teaching":"qwen35";
+const teachingBudgets=externalTeachingFlag==="true"&&chatGateConfig?.[studentGate]&&chatGateConfig?.deepseek?{qwen35:Math.min(1024,chatGateConfig.qwen35?.max_output_tokens||chatGateConfig.qwen35_teaching.max_output_tokens),qwen35_teaching:Math.min(1024,chatGateConfig.qwen35_teaching?.max_output_tokens||1024),deepseek:Math.min(1024,chatGateConfig.deepseek.max_output_tokens)}:null;
 const aiCore=createAiCoreAdapter({
   adaptiveLocalDiagnosis,scoutPairDispatch:scoutPairFlag==="true",
   runtimeContextTokens:aiCoreContextTokens,requireRuntimeContextQualification:true,
