@@ -8,6 +8,7 @@ const {contentHash}=require("../../orchestrator/durable-contracts.js");
 const VERSION="debugai.command-module/v1";
 const MODES=Object.freeze(["QWEN_ONLY","DEEPSEEK_ONLY","COOPERATIVE","AUTO"]);
 const MODELS=Object.freeze(["qwen35","deepseek"]);
+const TEACHER_MODEL_ID="deepseek/deepseek-v4.1-flash-1017";
 const DISPOSITIONS=new Set(["PLAN","NEEDS_EVIDENCE","ABSTAIN"]);
 const DATA_CLASSES=new Set(["LOCAL_ONLY","SYNTHETIC_QUALIFICATION"]);
 const ROLE_IDS=new Set(Object.keys(ROLES));
@@ -100,7 +101,15 @@ function validateCandidate(content,packet,{peer=false}={}){
   try{obj=JSON.parse(content);}catch{fail("COMMAND_CANDIDATE_JSON_INVALID");}
   exact(obj,peer?[...PLAN_FIELDS,"peer_assessment"]:PLAN_FIELDS,"COMMAND_CANDIDATE_SCHEMA_INVALID");
   if(!DISPOSITIONS.has(obj.disposition))fail("COMMAND_DISPOSITION_INVALID");
-  for(const field of ["expected_decision","tool_selection","correction","verification","completion_criteria"])str(obj[field],"COMMAND_CANDIDATE_FIELD_INVALID");
+  for(const field of ["expected_decision","tool_selection","correction","verification","completion_criteria"]){
+    const value=obj[field];
+    if(typeof value!=="string"||!value.trim()){
+      const e=new Error("COMMAND_CANDIDATE_FIELD_INVALID");e.code="COMMAND_CANDIDATE_FIELD_INVALID";
+      e.validation_field=field;
+      e.validation_type=value===null?"null":Array.isArray(value)?"array":typeof value==="string"?"empty_string":typeof value;
+      throw e;
+    }
+  }
   strings(obj.action_plan,"COMMAND_ACTION_PLAN_INVALID",{nonempty:obj.disposition==="PLAN"});
   exact(obj.model_selection,["roles","policy"],"COMMAND_MODEL_SELECTION_INVALID");
   const roles=strings(obj.model_selection.roles,"COMMAND_ROLE_SELECTION_INVALID",{unique:true});
@@ -116,6 +125,33 @@ function validateCandidate(content,packet,{peer=false}={}){
     refs(obj.peer_assessment.counter_evidence_refs,allowed,"COMMAND_UNREGISTERED_COUNTER_EVIDENCE");
   }
   return obj;
+}
+// Projection for the existing KB learning store, not a rights receipt or training grant.
+function teacherTrainingCandidate(record,result){
+  const input=trainingPacket(record);
+  const messages=[{role:"system",content:STANDALONE_SYSTEM},{role:"user",content:JSON.stringify({task:input})}];
+  if(!result||result.schema!==VERSION||result.case_id!==input.case_id||
+      result.input_digest!==contentHash(input)||result.mode!=="DEEPSEEK_ONLY"||
+      result.state!=="CANDIDATE_ONLY"||result.quality_status!=="NOT_VERIFIED"||
+      result.execution_authority!=="NONE"||!Array.isArray(result.calls)||result.calls.length!==1)
+    fail("COMMAND_TEACHER_RESULT_MISMATCH");
+  const call=result.calls[0];
+  if(!call||call.model!=="deepseek"||call.model_id!==TEACHER_MODEL_ID||
+      call.status!=="CANDIDATE_VALID"||
+      call.prompt_digest!==contentHash({system:messages[0].content,user:messages[1].content})||
+      !call.output||call.output_digest!==contentHash(call.output)||
+      contentHash(result.selected_candidate)!==call.output_digest)
+    fail("COMMAND_TEACHER_RESULT_MISMATCH");
+  const answer=validateCandidate(JSON.stringify(call.output),input);
+  messages.push({role:"assistant",content:JSON.stringify(answer)});
+  return {schema:"debugai.teacher-training-candidate/v1",case_id:input.case_id,
+    scenario_group:record.scenario_group,dataset_split:record.dataset_split,
+    teacher_model:TEACHER_MODEL_ID,student_model:"Qwen/Qwen3.5-4B",
+    input_digest:result.input_digest,prompt_digest:call.prompt_digest,
+    output_digest:call.output_digest,messages,
+    example_digest:contentHash(messages),telemetry:telemetry(call.telemetry),
+    verification_status:"candidate_not_independently_verified",
+    training_execution_allowed:false,execution_authority:"NONE"};
 }
 function telemetry(value){
   const out={};
@@ -162,19 +198,25 @@ function createCommandModule({aiCore,allowExternalQualification=false,standalone
       const blocked=admission(model);
       if(blocked){calls.push({model,status:"NOT_RUN",error_code:blocked,output:null,telemetry:telemetry(null)});return null;}
       let response;
+      const system=standalone?(peer?STANDALONE_PEER_SYSTEM:STANDALONE_SYSTEM):(peer?PEER_SYSTEM:SYSTEM);
+      const user=JSON.stringify(peer?{task:input,student_candidate:peer}:{task:input});
+      const provenance=()=>standalone?{model_id:typeof response?.model_id==="string"?response.model_id:null,prompt_digest:contentHash({system,user})}:{};
       try{
         response=await aiCore.callCommandModel(model,{
-          system:standalone?(peer?STANDALONE_PEER_SYSTEM:STANDALONE_SYSTEM):(peer?PEER_SYSTEM:SYSTEM),
-          user:JSON.stringify(peer?{task:input,student_candidate:peer}:{task:input}),
+          system,user,
           maxTokens:maxTokensByModel[model],deadlineAt,signal,dataClass:input.data_class
         });
         if(signal?.aborted)fail("COMMAND_CANCELLED");
         if(Date.now()>=deadlineAt)fail("COMMAND_DEADLINE_EXPIRED");
         const output=validateCandidate(response.content,input,{peer:Boolean(peer)});
-        calls.push({model,status:"CANDIDATE_VALID",output,output_digest:contentHash(output),telemetry:telemetry(response.telemetry)});
+        calls.push({model,status:"CANDIDATE_VALID",output,output_digest:contentHash(output),telemetry:telemetry(response.telemetry),...provenance()});
         return output;
       }catch(error){
-        calls.push({model,status:"FAILED",error_code:safeCode(error),output:null,telemetry:telemetry(response?.telemetry||error?.meta?.telemetry)});
+        const diagnostic=standalone&&error?.code==="COMMAND_CANDIDATE_FIELD_INVALID"&&
+          ["expected_decision","tool_selection","correction","verification","completion_criteria"].includes(error.validation_field)&&
+          ["null","array","empty_string","object","number","boolean","undefined"].includes(error.validation_type)?
+          {validation_field:error.validation_field,validation_type:error.validation_type}:{};
+        calls.push({model,status:"FAILED",error_code:safeCode(error),output:null,telemetry:telemetry(response?.telemetry||error?.meta?.telemetry),...provenance(),...diagnostic});
         return null;
       }
     }
@@ -207,4 +249,4 @@ function createCommandModule({aiCore,allowExternalQualification=false,standalone
   }
   return Object.freeze({status,evaluate});
 }
-module.exports={VERSION,MODES,MODELS,SYSTEM,PEER_SYSTEM,STANDALONE_SYSTEM,STANDALONE_PEER_SYSTEM,makePacket,localTaskPacket,qualificationPacket,trainingPacket,validateCandidate,createCommandModule};
+module.exports={VERSION,MODES,MODELS,TEACHER_MODEL_ID,teacherTrainingCandidate,SYSTEM,PEER_SYSTEM,STANDALONE_SYSTEM,STANDALONE_PEER_SYSTEM,makePacket,localTaskPacket,qualificationPacket,trainingPacket,validateCandidate,createCommandModule};
