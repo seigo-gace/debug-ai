@@ -90,7 +90,6 @@ test("standalone rejects specialist settings and empty candidate set",()=>{
   }
 });
 
-
 test("standalone teaching lanes overlap different models and serialize the same model",async()=>{
   const deepseek={origin:"http://127.0.0.1:18186",model_id:"deepseek/qualification-fixture",runtime_context_tokens:8192,max_output_tokens:2048};
   let release,entered;const hold=new Promise(r=>release=r),start=new Promise(r=>entered=r);let qwenPosts=0,deepPosts=0;

@@ -38,7 +38,7 @@ async function testSyntheticCode(code,{runtimeRoot,jobRoot=process.env.DEBUG_AI_
     return {...observed(r),candidate_sha256:crypto.createHash("sha256").update(code).digest("hex"),test_sha256:crypto.createHash("sha256").update(tests).digest("hex"),cases:clampCases.map(([n,min,max,expected],i)=>({id:i+1,n,min,max,expected,assertion:r.pass?"PASS":"NOT_INDIVIDUALLY_VERIFIED"})),assertion_count:clampCases.length};
   }finally{fs.rmSync(root,{recursive:true,force:true});}
 }
-async function runTeaching({aiCore,topic,deadlineAt,signal,maxTokensByModel,onStage=()=>{},sandbox,maxReviews=2,repairFormat=false,priorFeedback=null,resume=null,evidenceBound=false}={}){
+async function runTeaching({aiCore,topic,deadlineAt,signal,maxTokensByModel,onStage=()=>{},sandbox,maxReviews=2,repairFormat=false,priorFeedback=null,resume=null,evidenceBound=false,persistKb=null}={}){
   const lesson=selectTopic(topic);if(!canTeach(aiCore))fail("TEACHING_DEEPSEEK_NOT_CONFIGURED");
   const budgets=maxTokensByModel||{qwen35:512,deepseek:1024};
   if(!Number.isSafeInteger(deadlineAt)||!Number.isSafeInteger(budgets.qwen35)||budgets.qwen35<1||!Number.isSafeInteger(budgets.deepseek)||budgets.deepseek<1)fail("TEACHING_CONFIG_INVALID");
@@ -82,11 +82,13 @@ async function runTeaching({aiCore,topic,deadlineAt,signal,maxTokensByModel,onSt
     answer=await model("qwen35","student_revision",studentSystem+" 教師の指摘を一つずつ解消し、前回の正しい部分を維持して、合格基準全体を満たす完全な再解答を出す。",{task:lesson.task,teaching,previous:answer,review,evidence},studentFields);
   }
   const success=review.verdict==="PASS"&&(!lesson.code||evidence?.pass===true);
-  return {schema:"debugai.interactive-teaching/v1",topic,stages,reused_stages:reused,verdict:success?"TEACHER_PASS":review.verdict==="UNDETERMINED"?"UNDETERMINED":"REVISE_REQUIRED",verification:lesson.code?(evidence?.pass?"SANDBOX_PASS":"SANDBOX_FAIL"):"TEACHER_ONLY_NOT_INDEPENDENTLY_VERIFIED",kb_status:"NOT_CONNECTED",weight_update:false,cost_usd:stages.filter(s=>s.model==="deepseek").every(s=>typeof s.cost==="number"&&Number.isFinite(s.cost)&&s.cost>=0)?stages.filter(s=>s.model==="deepseek").reduce((a,s)=>a+s.cost,0):null};
+  const base={schema:"debugai.interactive-teaching/v1",topic,stages,reused_stages:reused,verdict:success?"TEACHER_PASS":review.verdict==="UNDETERMINED"?"UNDETERMINED":"REVISE_REQUIRED",verification:lesson.code?(evidence?.pass?"SANDBOX_PASS":"SANDBOX_FAIL"):"TEACHER_ONLY_NOT_INDEPENDENTLY_VERIFIED",kb_status:"NOT_CONNECTED",weight_update:false,cost_usd:stages.filter(s=>s.model==="deepseek").every(s=>typeof s.cost==="number"&&Number.isFinite(s.cost)&&s.cost>=0)?stages.filter(s=>s.model==="deepseek").reduce((a,s)=>a+s.cost,0):null};
+  if(typeof persistKb==="function")return await persistKb({topic,result:base});
+  return base;
 }
 // Independent topics can be in flight together. Each topic retains the existing
 // lesson -> student -> review -> correction dependency and its own evidence.
-async function runTeachingBatch({topics,aiCore,maxConcurrent=2,deadlineAt,signal,maxTokensByModel,sandbox,onStage=()=>{},onTopic=()=>{},canStart=()=>true,maxReviews=2,repairFormat=false,priorFeedbackByTopic={},resumeByTopic={},evidenceBound=false}={}){
+async function runTeachingBatch({topics,aiCore,maxConcurrent=2,deadlineAt,signal,maxTokensByModel,sandbox,onStage=()=>{},onTopic=()=>{},canStart=()=>true,maxReviews=2,repairFormat=false,priorFeedbackByTopic={},resumeByTopic={},evidenceBound=false,persistKb=null}={}){
   if(!Array.isArray(topics)||!topics.length||new Set(topics).size!==topics.length||!Number.isInteger(maxConcurrent)||maxConcurrent<1||maxConcurrent>3||!Number.isSafeInteger(deadlineAt))fail("TEACHING_BATCH_CONFIG_INVALID");
   topics.forEach(selectTopic);
   let next=0;const results=new Array(topics.length);
@@ -95,7 +97,7 @@ async function runTeachingBatch({topics,aiCore,maxConcurrent=2,deadlineAt,signal
       if(signal?.aborted||Date.now()>=deadlineAt||next>=topics.length||!canStart())return;
       const i=next++,topic=topics[i];onTopic({topic,state:"running"});
       let row;
-      try{const result=await runTeaching({aiCore,topic,deadlineAt,signal,maxTokensByModel,sandbox,maxReviews,repairFormat,priorFeedback:priorFeedbackByTopic[topic]??null,resume:resumeByTopic[topic]??null,evidenceBound,onStage:stage=>onStage({topic,...stage})});row={topic,state:"complete",result};}
+      try{const result=await runTeaching({aiCore,topic,deadlineAt,signal,maxTokensByModel,sandbox,maxReviews,repairFormat,priorFeedback:priorFeedbackByTopic[topic]??null,resume:resumeByTopic[topic]??null,evidenceBound,persistKb,onStage:stage=>onStage({topic,...stage})});row={topic,state:"complete",result};}
       catch(e){row={topic,state:"failed",error:/^[A-Z0-9_]{1,100}$/.test(e?.code||"")?e.code:"TEACHING_BATCH_ERROR"};}
       results[i]=row;onTopic(row);
     }

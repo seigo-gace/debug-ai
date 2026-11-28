@@ -4,6 +4,7 @@ const {setTimeout:sleep}=require("node:timers/promises");
 const {fetch}=require("undici");
 const {createAiCoreAdapter}=require("../adapters/ai-core.js");
 const {runTeachingBatch,teachingTopics,testSyntheticCode,canTeach}=require("./teaching.js");
+const {persistTeachingCandidate}=require("./teaching-kb-store.js");
 const terminal=new Set(["FINISHED","FAILED","PAUSED_COST_UNKNOWN","PAUSED_COST_LIMIT_OR_UNKNOWN","PAUSED_EXISTING_CHAT_OR_JOB","PAUSED_DEADLINE"]);
 const cap=0.10,reserve=0.01;
 const fail=code=>{throw Object.assign(new Error(code),{code});};
@@ -63,7 +64,9 @@ async function main(){
   }};
   const rows=new Map();state.status="RUNNING";save();
   function persist(t){t.item.updated_at=new Date().toISOString();write(t.out,t.item);save();}
-  const results=await runTeachingBatch({topics:order,aiCore:core,maxConcurrent:2,maxReviews:4,repairFormat:true,priorFeedbackByTopic,resumeByTopic,evidenceBound:true,deadlineAt:Date.now()+1800000,maxTokensByModel:budgets,sandbox:code=>testSyntheticCode(code,{runtimeRoot:root}),canStart:()=>state.cost_usd!==null&&state.cost_usd+reserve<=cap&&!active(),
+  const tg=process.env.DEBUG_AI_TGSERVER_URL?require("../adapters/tgserver.js").createTgserverAdapter():null;
+  const persistKb=({topic,result})=>persistTeachingCandidate({runtimeRoot:root,tgserver:tg,batchId:state.id,chatId:null,topic,result});
+  const results=await runTeachingBatch({topics:order,aiCore:core,maxConcurrent:2,maxReviews:4,repairFormat:true,priorFeedbackByTopic,resumeByTopic,evidenceBound:true,persistKb,deadlineAt:Date.now()+1800000,maxTokensByModel:budgets,sandbox:code=>testSyntheticCode(code,{runtimeRoot:root}),canStart:()=>state.cost_usd!==null&&state.cost_usd+reserve<=cap&&!active(),
     onTopic:e=>{
       if(e.state==="running"){
         const id=crypto.randomUUID(),label=labels.get(e.topic),turn={id,user:"並列自主学習: "+label,state:"running",interaction_mode:"teaching",mode:"teaching",topic:e.topic,teaching:{stages:[],phase:null,kb_status:"NOT_CONNECTED",weight_update:false}};
@@ -71,7 +74,7 @@ async function main(){
         const t={row,turn,item:{id,title:"並列自主学習｜"+label,turns:[turn]},out:path.join(root,id+".json")};rows.set(e.topic,t);state.lessons.push(row);persist(t);return;
       }
       const t=rows.get(e.topic);t.row.status=e.state==="complete"?"COMPLETE":"FAILED";
-      if(e.result){t.row.verdict=e.result.verdict;t.row.verification=e.result.verification;t.turn.teaching=e.result;t.turn.answer=e.result.verdict+" / "+e.result.verification+" / KB未接続・重み更新なし";t.turn.state="complete";}
+      if(e.result){t.row.verdict=e.result.verdict;t.row.verification=e.result.verification;t.turn.teaching=e.result;t.turn.answer=e.result.verdict+" / "+e.result.verification+" / KB:"+e.result.kb_status+(e.result.weight_update?"・重み更新あり":"");t.turn.state="complete";}
       else{t.row.error=e.error;t.turn.error=e.error;t.turn.state="failed";}
       persist(t);fs.linkSync(t.out,path.join(chat,t.item.id+".json"));t.row.chat_history_saved=true;save();
     },

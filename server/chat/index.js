@@ -1,6 +1,7 @@
 "use strict";
 const fs=require("node:fs"),path=require("node:path"),crypto=require("node:crypto");
 const {teachingTopics,selectTopic,canTeach,testSyntheticCode,runTeaching}=require("../command-module/teaching.js");
+const {persistTeachingCandidate}=require("../command-module/teaching-kb-store.js");
 const {runDevelopTurn}=require("./develop-lane.js");
 const turnMode=t=>t.mode==="teaching"?"teaching":(t.interaction_mode==="develop"||t.mode==="develop")?"develop":"converse";
 const MAX_BODY=128*1024,ID=/^[a-f0-9-]{36}$/;
@@ -14,6 +15,8 @@ function createChatHandler({aiCore,runtimeRoot,token,access=null,teachingBudgets
   if(!aiCore.commandModelStatus().configured_models.includes("qwen35"))throw new Error("CHAT_QWEN_GATE_REQUIRED");
   const dir=path.join(runtimeRoot,"chat");fs.mkdirSync(dir,{mode:0o700,recursive:true});
   const stat=fs.lstatSync(dir);if(!stat.isDirectory()||stat.isSymbolicLink()||(stat.mode&0o077))throw new Error("CHAT_STORE_PERMISSIONS_INVALID");
+  let teachingTg=null;
+  try{if(process.env.DEBUG_AI_TGSERVER_URL)teachingTg=require("../adapters/tgserver.js").createTgserverAdapter();}catch{}
   let active=null;
   const file=id=>{if(!ID.test(id))error("CHAT_ID_INVALID");return path.join(dir,id+".json");};
   function read(id){const p=file(id);if(!fs.existsSync(p))error("CHAT_NOT_FOUND",404);const s=fs.lstatSync(p);if(!s.isFile()||s.isSymbolicLink()||s.size>2*1024*1024)error("CHAT_STORE_INVALID",500);return JSON.parse(fs.readFileSync(p,"utf8"));}
@@ -82,8 +85,8 @@ function createChatHandler({aiCore,runtimeRoot,token,access=null,teachingBudgets
         const run=async()=>{
         try{
           if(mode==="teaching"){
-            const result=await runTeaching({aiCore,topic:input.topic,deadlineAt:Date.now()+600000,signal:controller.signal,maxTokensByModel:teachingBudgets,sandbox:teachingSandbox||((code)=>testSyntheticCode(code,{runtimeRoot})),onStage:stage=>{turn.teaching.phase=stage.phase;if(stage.state!=="running")turn.teaching.stages.push(stage);item.updated_at=new Date().toISOString();save(item);}});
-            Object.assign(turn,{state:"complete",teaching:result,answer:result.verdict==="TEACHER_PASS"?"教師評価PASS（"+result.verification+"）。KB未接続・重み更新なし。":"学習課題の再検証が必要です（"+result.verdict+"）。"});
+            const result=await runTeaching({aiCore,topic:input.topic,deadlineAt:Date.now()+600000,signal:controller.signal,maxTokensByModel:teachingBudgets,evidenceBound:true,persistKb:payload=>persistTeachingCandidate({runtimeRoot,tgserver:teachingTg,batchId:null,chatId:item.id,topic:payload.topic,result:payload.result}),sandbox:teachingSandbox||((code)=>testSyntheticCode(code,{runtimeRoot})),onStage:stage=>{turn.teaching.phase=stage.phase;if(stage.state!=="running")turn.teaching.stages.push(stage);item.updated_at=new Date().toISOString();save(item);}});
+            Object.assign(turn,{state:"complete",teaching:result,answer:result.verdict==="TEACHER_PASS"?"教師評価PASS（"+result.verification+"）。KB:"+result.kb_status:"学習継続（"+result.verdict+" / "+result.verification+" / KB:"+result.kb_status+"）"});
             return;
           }
           if(mode==="develop"){

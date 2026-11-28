@@ -497,7 +497,7 @@ function createAiCoreAdapter({baseUrl=process.env.DEBUG_AI_CORE_URL,apiKey=proce
   async function callChatModel(options={}){
     const spec=candidateGates.qwen35;
     validateChat(spec,options);
-    return queuedExecution("chat:qwen35",{...options,queueTimeoutMs:options.deadlineAt-Date.now(),excludeQueueFromDeadline:false,scoutBatchId:null},{executeCandidate:(_role,opts,meta)=>executeChat({spec,options:opts,fetchImpl,apiKey,transport,timeoutMs,queueWaitMs:meta.queueWaitMs})});
+    return queuedExecution("chat:qwen35",{...options,queueTimeoutMs:options.deadlineAt-Date.now(),excludeQueueFromDeadline:false,scoutBatchId:null},{executeCandidate:(_role,opts,meta)=>executeChat({spec,options:opts,fetchImpl,apiKey,transport,timeoutMs,queueWaitMs:meta.queueWaitMs,chatMode:opts.chatMode})});
   }
   async function call(role,options={}){if(commandOnly)throw new AiCoreError("COMMAND_ONLY_ROLE_NOT_ADMITTED","Standalone command mode does not call specialist models");return queuedCall(role,options);}
   async function callPrepared(role,{system,user="",...options}={}){if(commandOnly)throw new AiCoreError("COMMAND_ONLY_ROLE_NOT_ADMITTED","Standalone command mode does not call specialist models");if(typeof system!=="string"||!system.trim())throw new AiCoreError("AI_CORE_PREPARED_SYSTEM_REQUIRED","Prepared benchmark system prompt is required",{role});return queuedCall(role,{...options,user},{preparedSystem:system});}

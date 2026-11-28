@@ -57,6 +57,10 @@ async function readStream(r,modelId,onDelta){
   if(pending.trim()||!done||!finish||!content.trim())fail("CHAT_STREAM_INCOMPLETE");
   return {content,finish_reason:finish};
 }
+const CHAT_SYSTEM_PROMPTS=Object.freeze({
+  converse:"日本語で自然に回答する開発支援AIです。未実行の作業を実行済みと報告しないでください。通常会話モードではサーバー操作は行いません。開発作業が必要なときはUIで開発作業モードを選んでください。",
+  develop:"日本語で回答するContabo開発AIです。同じTurnでサーバーが収集した観測データと計画候補のみを事実として扱ってください。未実行の変更・デプロイ・ファイル書き込みを実行済みと言わないでください。読み取り調査はサーバー側で実行済みです。"
+});
 async function executeChat({spec,options,fetchImpl,apiKey,transport,timeoutMs,queueWaitMs=0}){
   validateChat(spec,options);
   const remaining=Math.min(timeoutMs,options.deadlineAt-Date.now());if(remaining<=0)fail("CHAT_DEADLINE_EXPIRED");
@@ -67,7 +71,9 @@ async function executeChat({spec,options,fetchImpl,apiKey,transport,timeoutMs,qu
   if(identity.object!=="list"||identity.data?.length!==1||identity.data[0]?.id!==spec.model_id)fail("CHAT_MODEL_IDENTITY_MISMATCH");
   if(signal.aborted)fail("CHAT_CANCELLED");
   const started=performance.now();
-  const body={model:spec.model_id,messages:[{role:"system",content:"日本語で自然に回答する開発支援AIです。未実行の作業を実行済みと報告しないでください。この通常会話ではツールは実行できません。"},...options.messages],max_tokens:options.maxTokens,temperature:0.2,stream:typeof options.onDelta==="function",chat_template_kwargs:{enable_thinking:false}};
+  const mode=options.chatMode==="develop"?"develop":"converse";
+  const system=CHAT_SYSTEM_PROMPTS[mode];
+  const body={model:spec.model_id,messages:[{role:"system",content:system},...options.messages],max_tokens:options.maxTokens,temperature:0.2,stream:typeof options.onDelta==="function",chat_template_kwargs:{enable_thinking:false}};
   const response=await fetchImpl(spec.origin+"/v1/chat/completions",{...req,method:"POST",body:JSON.stringify(body)});
   if(body.stream){
     const result=await readStream(response,spec.model_id,options.onDelta);
@@ -80,4 +86,4 @@ async function executeChat({spec,options,fetchImpl,apiKey,transport,timeoutMs,qu
   if(signal.aborted)fail("CHAT_CANCELLED");
   return {content:choice.message.content,model_id:result.model,finish_reason:choice.finish_reason,queue_wait_ms:queueWaitMs,elapsed_ms:Math.round(performance.now()-started)};
 }
-module.exports={validateChat,executeChat};
+module.exports={validateChat,executeChat,CHAT_SYSTEM_PROMPTS};
