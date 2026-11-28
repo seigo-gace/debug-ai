@@ -10,6 +10,7 @@ const {RunAuthority}=require("./run-authority.js");
 const {RepoPolicy}=require("./repo-policy.js");
 const {createWorkflow}=require("./workflow-observed.js");
 const {createServer}=require("./http.js");
+const {createChatHandler}=require("./chat/index.js");
 const {sourceGate}=require("./gates.js");
 const {createSandboxVerificationLane}=require("./control/sandbox-verification.js");
 const {horizontalRoleHooksForMode}=require("./control/role-work-item/adapter.js");
@@ -56,6 +57,7 @@ const aiCore=createAiCoreAdapter({
   adaptiveLocalDiagnosis,scoutPairDispatch:scoutPairFlag==="true",
   runtimeContextTokens:aiCoreContextTokens,requireRuntimeContextQualification:true,
   dispatchMode:coreGateDispatchMode,modelGateBaseUrls:coreGateUrls,
+  commandModelGates:process.env.DEBUG_AI_CHAT_ENABLED==="true"?JSON.parse(process.env.DEBUG_AI_COMMAND_MODEL_GATES||"{}"):null,
   inputTokenShadow:inputTokenShadowFlag==="true",
   inputTokenShadowRoute:process.env.DEBUG_AI_CORE_INPUT_TOKEN_SHADOW_ROUTE||"router"
 });
@@ -81,7 +83,8 @@ const gitOps=new GitOpsRequestService({repoPolicy});
 const serverCommand=new ServerCommandRequestService({repoPolicy,defaultRepo:path.join(repoPolicy.workspaceRoot,"debug-ai")});
 const workflow=createWorkflow({aiCore,externalReview,evidenceSearch,runtimeEvidence,tgserver,patchService,authority,repoPolicy,sandboxVerification,dapEvidence,adaptiveLocalDiagnosis,serverCommand,recoveryHooks});
 const host=process.env.DEBUG_AI_HOST||"127.0.0.1",port=Number(process.env.DEBUG_AI_PORT||8787);
-const server=createServer({workflow,gitOps,githubCommand:serverCommand,serverCommand,host,port});
+const chat=process.env.DEBUG_AI_CHAT_ENABLED==="true"?createChatHandler({aiCore,runtimeRoot,token:process.env.DEBUG_AI_CHAT_ACCESS_TOKEN}):null;
+const server=createServer({workflow,gitOps,githubCommand:serverCommand,serverCommand,host,port,chat});
 let shuttingDown=false,rotationTimer=null,archiveTimer=null,archiveSweepRunning=false;
 function rotateRuntimeEvidence(){try{const result=runtimeEvidence.rotate();if(result.orphans_removed>0)console.warn(`DebugAI runtime cache cleanup: files=${result.files} bytes=${result.bytes} orphans_removed=${result.orphans_removed}`);}catch(error){console.error(`DebugAI runtime cache cleanup failed: ${String(error?.message||error)}`);}}
 async function runArchiveSweep(){if(shuttingDown||archiveSweepRunning)return;archiveSweepRunning=true;try{const archive=await archiveTerminalRuns({authority,tgserver,maxRuns:archiveMaxRuns}),gc=gcArchivedTerminalRuns({authority,maxRuns:archiveMaxRuns}),patchGc=sweepPatchRetention({runtimeRoot,maxDeletes:archiveMaxRuns});if(archive.archived.length||archive.errors.length||gc.deleted.length||gc.resumed.length||gc.errors.length||patchGc.backup_deleted.length||patchGc.candidate_deleted.length||patchGc.errors.length){const archiveHist=archive.errors.length?formatRetentionErrorHistogram("archive_error",summarizeRetentionErrorClasses(archive.errors)):"",gcHist=gc.errors.length?formatRetentionErrorHistogram("durable_gc_error",summarizeRetentionErrorClasses(gc.errors)):"",histSuffix=[archiveHist,gcHist].filter(Boolean).join(" ");console.warn(`DebugAI retention sweep: archived=${archive.archived.length} already=${archive.already_archived.length} archive_errors=${archive.errors.length} durable_gc_deleted=${gc.deleted.length} durable_gc_resumed=${gc.resumed.length} durable_gc_errors=${gc.errors.length} patch_backup_deleted=${patchGc.backup_deleted.length} patch_candidate_deleted=${patchGc.candidate_deleted.length} patch_gc_errors=${patchGc.errors.length}${histSuffix?` ${histSuffix}`:""}`);}}catch(error){console.error(`DebugAI retention sweep failed: code=${String(error?.code||error?.name||"ERROR")}`);}finally{archiveSweepRunning=false;}}

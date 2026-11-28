@@ -1,0 +1,620 @@
+/* Reused from astera-app native-composer.css blob 5caa3985e569bcc65e08f8212d2c8be0101206a7; original styles retained. */
+.native-composer-workspace {
+  --native-bg: var(--bg-primary);
+  --native-surface: var(--bg-secondary);
+  --native-surface-2: var(--bg-tertiary);
+  --native-text: var(--text-primary);
+  --native-muted: var(--text-tertiary);
+  --native-line: color-mix(in srgb, var(--border-color) 72%, transparent);
+  --native-accent: #0ea5e9;
+  --native-accent-strong: #0284c7;
+  --native-danger: #dc2626;
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  overflow: hidden;
+  background: var(--native-bg);
+  color: var(--native-text);
+}
+
+html.native-composer-route .platform-page-head { display: none !important; }
+html.native-composer-route .platform-main {
+  height: 100dvh;
+  min-height: 0;
+  padding: 0 !important;
+  overflow: hidden !important;
+}
+html.native-composer-route .platform-page-content {
+  width: 100% !important;
+  max-width: none !important;
+  height: 100%;
+  min-height: 0;
+  margin: 0 !important;
+  display: block !important;
+  overflow: hidden !important;
+}
+html.native-composer-route .platform-credit-layer {
+  top: calc(env(safe-area-inset-top) + 10px) !important;
+}
+
+.native-timeline {
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+.native-timeline-inner {
+  width: min(100%, 800px);
+  min-height: 100%;
+  margin: 0 auto;
+  padding: 72px 20px 36px;
+}
+.native-empty-state {
+  min-height: calc(100dvh - 250px);
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  text-align: center;
+  padding: 44px 20px;
+}
+.native-empty-state h1 {
+  margin: 0;
+  font: inherit;
+  font-size: clamp(28px, 4vw, 40px);
+  font-weight: 650;
+  letter-spacing: -.035em;
+}
+.native-empty-state p {
+  max-width: 620px;
+  margin: 14px 0 0;
+  color: var(--native-muted);
+  line-height: 1.65;
+}
+.native-empty-state strong { color: inherit; }
+
+/* ChatGPT-style conversation rhythm: user bubble right, assistant content left and unboxed. */
+.native-turn {
+  display: grid;
+  gap: 28px;
+  padding: 10px 0 44px;
+}
+.native-user-turn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 5px;
+}
+.native-user-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  min-height: 28px;
+  padding-right: 3px;
+}
+.native-user-actions button {
+  width: 28px;
+  height: 28px;
+  display: inline-grid;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  padding: 0;
+  background: transparent;
+  color: var(--native-muted);
+  cursor: pointer;
+}
+.native-user-actions button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--native-text) 7%, transparent);
+  color: var(--native-text);
+}
+.native-user-actions button:disabled {
+  opacity: .38;
+  cursor: not-allowed;
+}
+.native-user-message {
+  width: fit-content;
+  max-width: min(76%, 640px);
+  margin-left: auto;
+  border: 0;
+  border-radius: 20px;
+  background: var(--native-surface-2);
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.native-user-message > p {
+  margin: 0 !important;
+  padding: 10px 14px 11px !important;
+  white-space: pre-wrap;
+  line-height: 1.58 !important;
+}
+/* Options belong to the composer controls, not inside the posted chat bubble. */
+.native-message-chips { display: none !important; }
+
+.native-processing {
+  width: 100%;
+  margin: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+}
+.native-processing div { display: grid; gap: 2px; }
+.native-processing strong { font-weight: 500; }
+.native-processing small { color: var(--native-muted); }
+.native-processing-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--native-muted);
+  animation: native-pulse 1.2s ease-in-out infinite alternate;
+}
+.native-processing button,
+.native-error button {
+  min-height: 32px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--native-muted);
+  padding: 0 8px;
+  cursor: pointer;
+}
+.native-processing button:hover,
+.native-error button:hover { background: color-mix(in srgb, var(--native-text) 7%, transparent); color: var(--native-text); }
+@keyframes native-pulse { to { opacity: .35; transform: scale(.78); } }
+
+.native-error {
+  width: 100%;
+  margin: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+}
+.native-error div { display: grid; gap: 4px; min-width: 0; }
+.native-error strong { color: var(--native-danger); font-weight: 500; }
+.native-error code { color: var(--native-muted); overflow-wrap: anywhere; font-size: 11px; }
+
+.native-response {
+  width: 100%;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  border: 0;
+  background: transparent;
+}
+.native-result-sections {
+  order: 1;
+  display: grid;
+  gap: 24px;
+}
+.native-result-section {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.native-result-heading {
+  display: block;
+  margin: 0 0 8px;
+}
+/* The numbered/card controls were Astera-specific chrome, not ChatGPT chat presentation. */
+.native-result-heading > span,
+.native-result-heading > button { display: none !important; }
+.native-result-heading h2 {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.5;
+  font-weight: 650;
+  letter-spacing: 0;
+}
+.native-result-section p {
+  margin: 0;
+  white-space: pre-wrap;
+  line-height: 1.78;
+  overflow-wrap: anywhere;
+}
+.native-result-section small {
+  display: block;
+  margin-top: 8px;
+  color: var(--native-muted);
+  font-size: 11px;
+}
+.native-response > header {
+  order: 2;
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  padding-top: 10px;
+}
+.native-response > header strong { display: none !important; }
+.native-response > header button {
+  min-height: 32px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--native-muted);
+  padding: 0 8px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.native-response > header button:hover {
+  background: color-mix(in srgb, var(--native-text) 7%, transparent);
+  color: var(--native-text);
+}
+
+.native-composer-dock {
+  position: relative;
+  z-index: 40;
+  width: min(100%, 800px);
+  margin: 0 auto;
+  padding: 8px 20px max(14px, env(safe-area-inset-bottom));
+  background: linear-gradient(to top, var(--native-bg) 76%, transparent);
+}
+.native-notice {
+  margin: 0 4px 8px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--native-muted);
+  font-size: 11px;
+}
+.native-composer {
+  border: 1px solid var(--native-line);
+  border-radius: 26px;
+  background: var(--native-surface);
+  box-shadow: none;
+  overflow: hidden;
+}
+.native-composer textarea {
+  display: block;
+  width: 100%;
+  min-height: 52px;
+  max-height: 210px;
+  resize: none;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: inherit;
+  padding: 14px 16px 5px;
+  line-height: 1.55;
+  font-size: 16px;
+}
+.native-composer-actions {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 4px 8px 7px;
+}
+.native-left-tools,
+.native-right-tools { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.native-left-tools {
+  flex: 1 1 auto;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
+}
+.native-left-tools::-webkit-scrollbar { display: none; }
+.native-right-tools { flex: 0 0 auto; }
+.native-round-button,
+.native-run-button {
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  border-radius: 50%;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  cursor: pointer;
+}
+.native-round-button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 20px;
+}
+.native-round-button:hover { background: color-mix(in srgb, var(--native-text) 7%, transparent); }
+.native-run-button {
+  border: 1px solid var(--native-text);
+  background: var(--native-text);
+  color: var(--native-bg);
+  font-size: 19px;
+}
+.native-run-button:disabled { opacity: .35; cursor: not-allowed; }
+.native-text-button {
+  min-height: 34px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--native-muted);
+  padding: 0 8px;
+  cursor: pointer;
+}
+.native-text-button:hover { background: color-mix(in srgb, var(--native-text) 7%, transparent); color: var(--native-text); }
+.native-form-chip {
+  flex: 0 0 auto;
+  max-width: 190px;
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px 2px 10px;
+  border: 1px solid var(--native-line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--native-muted);
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+}
+.native-form-chip > span { overflow: hidden; text-overflow: ellipsis; }
+.native-form-chip > button {
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
+  display: inline-grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+}
+.native-form-chip > button:hover { background: color-mix(in srgb, var(--native-text) 7%, transparent); }
+.native-composer-hint {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 5px 8px 0;
+  color: var(--native-muted);
+  font-size: 10px;
+}
+
+.native-file-queue {
+  list-style: none;
+  display: flex;
+  gap: 7px;
+  margin: 0 4px 7px;
+  padding: 0;
+  overflow-x: auto;
+}
+.native-file-queue li {
+  flex: 0 0 min(250px, 75vw);
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 9px;
+  padding: 8px 9px;
+  border: 1px solid var(--native-line);
+  border-radius: 12px;
+  background: var(--native-surface);
+}
+.native-file-queue li > div:first-child { display: grid; gap: 2px; min-width: 0; }
+.native-file-queue strong,
+.native-file-queue small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.native-file-queue small { color: var(--native-muted); font-size: 10px; }
+.native-file-queue li > div:last-child { display: flex; gap: 4px; }
+.native-file-queue button {
+  min-width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+}
+
+.native-picker-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  place-items: center;
+  padding: 12px;
+  background: color-mix(in srgb, #000 42%, transparent);
+}
+.native-picker {
+  width: min(360px, calc(100vw - 24px));
+  max-height: min(72dvh, 520px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--native-line);
+  border-radius: 18px;
+  background: var(--native-bg);
+  box-shadow: none;
+}
+.native-picker > header {
+  flex: 0 0 auto;
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--native-line);
+}
+.native-picker > header button {
+  min-width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: inherit;
+}
+.native-picker > header button:hover { background: color-mix(in srgb, var(--native-text) 7%, transparent); }
+.native-picker-body {
+  min-height: 0;
+  flex: 0 1 auto;
+  display: grid;
+  align-content: start;
+  gap: 3px;
+  padding: 6px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+.native-picker-body > button,
+.native-option-accordion-trigger,
+.native-agent-mode-choices > button {
+  width: 100%;
+  min-height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  padding: 0 11px;
+  text-align: left;
+}
+.native-picker-body > button:hover,
+.native-picker-body > button.is-selected,
+.native-option-accordion-trigger:hover,
+.native-option-accordion-trigger.is-selected,
+.native-agent-mode-choices > button:hover,
+.native-agent-mode-choices > button.is-selected {
+  background: color-mix(in srgb, var(--native-text) 7%, transparent);
+}
+.native-picker-body > button b,
+.native-option-accordion-trigger b,
+.native-agent-mode-choices > button b {
+  color: var(--native-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+.native-picker-status { margin: 7px 6px 3px; color: var(--native-muted); font-size: 11px; }
+.native-option-accordion { display: grid; gap: 3px; }
+.native-option-accordion > summary { list-style: none; cursor: pointer; }
+.native-option-accordion > summary::-webkit-details-marker { display: none; }
+.native-agent-mode-choices { display: grid; gap: 2px; padding: 0 8px 4px 18px; }
+.native-agent-mode-choices > button { min-height: 42px; border-radius: 9px; padding-left: 14px; }
+.native-picker-field { display: grid; gap: 6px; padding: 6px; }
+.native-picker-field > span { color: var(--native-muted); font-size: 11px; }
+.native-picker-field input,
+.native-picker-field select {
+  width: 100%;
+  min-height: 46px;
+  border: 1px solid var(--native-line);
+  border-radius: 11px;
+  background: var(--native-bg);
+  color: inherit;
+  padding: 0 11px;
+  font-size: 16px;
+}
+.native-picker-link,
+.native-picker-apply {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--native-line);
+  border-radius: 11px;
+  background: transparent;
+  color: inherit;
+  text-decoration: none;
+}
+.native-picker-apply { background: var(--native-text) !important; color: var(--native-bg) !important; }
+
+@media (max-width: 1100px) {
+  html.native-composer-route .platform-main {
+    height: calc(100dvh - 64px);
+    margin-top: 64px;
+  }
+  html.native-composer-route .platform-page-content { height: 100%; }
+  .native-timeline-inner { padding-top: 58px; }
+  .native-composer-dock { width: min(100%, 800px); }
+}
+
+@media (max-width: 600px) {
+  html.native-composer-route .platform-main {
+    height: calc(100dvh - 58px - env(safe-area-inset-top));
+    margin-top: calc(58px + env(safe-area-inset-top));
+  }
+  .native-timeline-inner { width: 100%; padding: 46px 12px 24px; }
+  .native-empty-state { min-height: calc(100dvh - 240px); padding-inline: 14px; }
+  .native-empty-state h1 { font-size: 28px; }
+  .native-turn { gap: 24px; }
+  .native-user-message { max-width: 86%; border-radius: 18px; }
+  .native-user-message > p { padding: 9px 12px 10px !important; }
+  .native-result-sections { gap: 22px; }
+  .native-result-heading h2 { font-size: 15px; }
+  .native-result-section p { line-height: 1.72; }
+  .native-composer-dock { width: 100%; padding: 6px 8px max(8px, env(safe-area-inset-bottom)); }
+  .native-composer { border-radius: 24px; }
+  .native-composer textarea { min-height: 50px; max-height: 150px; padding: 13px 13px 4px; }
+  .native-composer-actions { padding-inline: 6px; }
+  .native-left-tools { gap: 4px; }
+  .native-form-chip { max-width: 150px; }
+  .native-round-button,
+  .native-run-button { width: 34px; height: 34px; min-width: 34px; }
+  .native-text-button { padding-inline: 5px; font-size: 11px; }
+  .native-composer-hint { display: none; }
+  .native-picker-backdrop { place-items: end center; padding: 0; }
+  .native-picker {
+    width: 100%;
+    max-height: min(78dvh, 620px);
+    border-width: 1px 0 0;
+    border-radius: 20px 20px 0 0;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
+@media (max-width: 380px) {
+  .native-composer-dock { padding-inline: 5px; }
+  .native-user-message { max-width: 90%; }
+}
+
+@media (orientation: landscape) and (max-height: 560px) and (max-width: 1100px) {
+  html.native-composer-route .platform-main {
+    height: calc(100dvh - 52px);
+    margin-top: 52px;
+  }
+  .native-timeline-inner { padding-top: 36px; }
+  .native-picker { max-height: calc(100dvh - 16px); }
+  .native-composer textarea { max-height: 88px; }
+}
+
+@media (pointer: coarse) {
+  .native-round-button,
+  .native-run-button,
+  .native-text-button,
+  .native-processing button,
+  .native-error button,
+  .native-response > header button,
+  .native-picker-body > button,
+  .native-option-accordion-trigger,
+  .native-agent-mode-choices > button,
+  .native-picker-link,
+  .native-picker-apply { min-height: 44px; }
+  .native-form-chip > button { width: 30px; height: 30px; min-width: 30px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .native-processing-dot { animation: none; }
+}
+
+:root{--bg-primary:#fff;--bg-secondary:#f8f8f8;--bg-tertiary:#eee;--text-primary:#222;--text-tertiary:#666;--border-color:#ccc;font:15px system-ui,sans-serif;color:#222}*{box-sizing:border-box}body{margin:0;height:100dvh;display:grid;grid-template-columns:240px minmax(0,1fr)}aside{background:#f7f7f7;padding:14px;overflow:auto;display:flex;flex-direction:column;gap:10px}aside h1{font-size:18px}button,select,input{font:inherit}button{cursor:pointer;border:1px solid #ccc;background:#fff;border-radius:8px;padding:7px}button:disabled{cursor:not-allowed;opacity:.5}header{display:flex;justify-content:space-between;padding:12px 20px;border-bottom:1px solid #eee}.native-composer-workspace{grid-template-rows:auto minmax(0,1fr) auto}.native-timeline-inner{padding-top:20px}.native-response>strong{display:block}.answer{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.65}.native-response small{color:#666}.native-response button{align-self:flex-start;margin-top:5px}.history-row{display:flex;gap:4px}.history-row button:first-child{flex:1;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.history-row button:last-child{font-size:11px}#history{display:grid;gap:5px}#search{width:100%;padding:8px}@media(max-width:650px){body{grid-template-columns:1fr;grid-template-rows:auto minmax(0,1fr)}aside{max-height:24dvh;padding:8px;display:grid;grid-template-columns:1fr 1fr}aside h1{margin:0}#history{grid-column:1/-1}.native-timeline-inner{padding:12px}.native-user-message{max-width:95%}.native-composer-dock{padding:5px}}
