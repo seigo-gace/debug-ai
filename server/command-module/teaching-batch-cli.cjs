@@ -26,10 +26,12 @@ async function main(){
     if(Date.now()>=waitUntil)fail("TEACHING_PREVIOUS_NOT_TERMINAL");await sleep(5000);
   }
   if(active()){state.status="PAUSED_EXISTING_CHAT_OR_JOB";save();return;}
-  const latest=new Map();for(const old of olds)for(const x of old.lessons)latest.set(x.topic,x);
+  const latest=new Map();for(let i=0;i<olds.length;i++)for(const x of olds[i].lessons)latest.set(x.topic,{...x,root:previous[i]});
   const labels=new Map(teachingTopics().map(t=>[t.id,t.label]));
-  const eligible=t=>{const x=latest.get(t);return !x||((typeof x.cost_usd==="number"&&Number.isFinite(x.cost_usd))&&(x.verdict==="REVISE_REQUIRED"||/^TEACHING_(RESPONSE_(JSON|SCHEMA|FIELD)_INVALID|VERDICT_INVALID)$/.test(x.error||"")));};
+  const eligible=t=>{const x=latest.get(t);return !x||((typeof x.cost_usd==="number"&&Number.isFinite(x.cost_usd))&&(x.verdict==="REVISE_REQUIRED"||/^TEACHING_(RESPONSE_(JSON|SCHEMA|FIELD)_INVALID|VERDICT_INVALID)$/.test(x.error||"")||(/^student_/.test(x.phase||"")&&x.error==="COMMAND_GATE_INCOMPLETE_RESPONSE")));};
   const order=["kb","javascript","debugging","requirements","architecture","orchestration","recovery","quality"].filter(eligible);
+  const priorFeedbackByTopic={};for(const t of order){const x=latest.get(t);if(!x||!/^[0-9a-f-]{36}$/.test(x.id||""))continue;const f=path.join(x.root,x.id+".json");if(!fs.existsSync(f))continue;const v=read(f).turns?.[0];if(v?.topic!==t||v.mode!=="teaching")continue;const reviews=(v.teaching?.stages||[]).filter(s=>s.model==="deepseek"&&s.state==="complete"&&s.phase.startsWith("teacher_review_")&&s.output?.verdict==="REVISE");const last=reviews.at(-1)?.output;if(last&&typeof last.feedback==="string"&&typeof last.correction==="string")priorFeedbackByTopic[t]={feedback:last.feedback,correction:last.correction};}
+  state.reused_feedback=Object.keys(priorFeedbackByTopic);
   state.selected=order;state.skipped=[...labels.keys()].filter(t=>!order.includes(t));state.prior_cost_status=olds.some(s=>s.cost_usd===null)?"UNKNOWN":"REPORTED";
   if(!order.length){state.status="FINISHED";save();return;}
   const gates=JSON.parse(process.env.DEBUG_AI_COMMAND_MODEL_GATES||"{}");
@@ -48,14 +50,14 @@ async function main(){
     const job=teacherTail.then(async()=>{
       if(state.cost_usd===null||state.cost_usd+reserve>cap)fail("TEACHING_COST_ADMISSION_CLOSED");
       try{
-        const r=await ai.callCommandModel(name,{...opts,system:opts.system+"\n指定キーのみ。全て空でない短い文字列。判定は指定された英大文字。"});
+        const r=await ai.callCommandModel(name,{...opts,system:opts.system+"\n指定キーのみ。値は短い文字列。空文字を許すのは明示された場合のみ。判定は指定された英大文字。"});
         const cost=r.telemetry?.cost;state.cost_usd=typeof cost==="number"&&Number.isFinite(cost)&&cost>=0?state.cost_usd+cost:null;save();return r;
       }catch(e){const c=e?.meta?.telemetry?.cost;state.cost_usd=typeof c==="number"&&Number.isFinite(c)&&c>=0?state.cost_usd+c:null;save();throw e;}
     });teacherTail=job.catch(()=>{});return job;
   }};
   const rows=new Map();state.status="RUNNING";save();
   function persist(t){t.item.updated_at=new Date().toISOString();write(t.out,t.item);save();}
-  const results=await runTeachingBatch({topics:order,aiCore:core,maxConcurrent:2,deadlineAt:Date.now()+1800000,maxTokensByModel:budgets,sandbox:code=>testSyntheticCode(code,{runtimeRoot:root}),canStart:()=>state.cost_usd!==null&&state.cost_usd+reserve<=cap&&!active(),
+  const results=await runTeachingBatch({topics:order,aiCore:core,maxConcurrent:2,maxReviews:4,repairFormat:true,priorFeedbackByTopic,deadlineAt:Date.now()+1800000,maxTokensByModel:budgets,sandbox:code=>testSyntheticCode(code,{runtimeRoot:root}),canStart:()=>state.cost_usd!==null&&state.cost_usd+reserve<=cap&&!active(),
     onTopic:e=>{
       if(e.state==="running"){
         const id=crypto.randomUUID(),label=labels.get(e.topic),turn={id,user:"並列自主学習: "+label,state:"running",interaction_mode:"teaching",mode:"teaching",topic:e.topic,teaching:{stages:[],phase:null,kb_status:"NOT_CONNECTED",weight_update:false}};
