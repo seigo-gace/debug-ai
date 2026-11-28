@@ -79,3 +79,22 @@ test("parallel batch preserves pending topics when admission closes",async()=>{
  const out=await runTeachingBatch({topics:["architecture","requirements"],aiCore,deadlineAt:Date.now()+10000,canStart:()=>false});
  assert.deepEqual(out.map(x=>x.state),["pending","pending"]);assert.equal(aiCore.calls.length,0);
 });
+
+
+test("teacher PASS permits empty correction, but REVISE still requires actionable correction",async()=>{
+ const a=core([teacher,{answer:"設計",verification:"確認"},{verdict:"PASS",feedback:"基準達成",correction:""}]);
+ const out=await runTeaching(opts(a,"architecture"));assert.equal(out.verdict,"TEACHER_PASS");assert.equal(out.stages.at(-1).output.correction,"");
+ const b=core([teacher,{answer:"設計",verification:"確認"},{verdict:"REVISE",feedback:"不足",correction:""}]);
+ await assert.rejects(runTeaching(opts(b,"architecture")),e=>e.code==="TEACHING_RESPONSE_FIELD_INVALID"&&e.field==="correction"&&e.kind==="empty");
+});
+test("known-cost malformed evaluation is repaired once and prior feedback reaches student",async()=>{
+ const a=core([teacher,{answer:"設計",verification:"確認"},{verdict:"REVISE",feedback:["不足"],correction:"修正"},review("REVISE"),{answer:"修正",verification:"確認"},review("REVISE"),{answer:"再修正",verification:"確認"},review("PASS")]);
+ const out=await runTeaching(opts(a,"architecture",{repairFormat:true,maxReviews:4,priorFeedback:{feedback:"過去の不足",correction:"修正"}}));
+ assert.equal(out.verdict,"TEACHER_PASS");assert.equal(out.stages.find(s=>s.invalid_field==="feedback").invalid_kind,"array");assert.ok(out.stages.some(s=>s.phase==="teacher_review_1_format_repair"&&s.state==="complete"));
+ assert.equal(JSON.parse(a.calls[1].user).prior_feedback.feedback,"過去の不足");assert.ok(out.stages.some(s=>s.phase==="teacher_review_3"));
+});
+test("malformed paid response without cost must not be repaired automatically",async()=>{
+ const a=core([teacher,{answer:"設計",verification:"確認"},{verdict:"REVISE",feedback:"不足",correction:""}]);
+ const original=a.callCommandModel;a.callCommandModel=async(...args)=>{const v=await original(...args);if(a.calls.length===3)v.telemetry.cost=null;return v;};
+ await assert.rejects(runTeaching(opts(a,"architecture",{repairFormat:true,maxReviews:4})),/TEACHING_RESPONSE_FIELD_INVALID/);assert.equal(a.calls.length,3);
+});
