@@ -146,3 +146,38 @@ test("ordinary standalone tasks preserve context and evidence without external r
   assert.equal(blocked.reason,"COMMAND_EXTERNAL_DATA_NOT_ADMITTED");
   assert.deepEqual(ai.calls.map(x=>x.model),["qwen35"]);
 });
+
+test("independent teacher output projects exact SFT messages as a candidate, never a training grant",async()=>{
+  const {trainingPacket,teacherTrainingCandidate,TEACHER_MODEL_ID}=require("../command-module/index.js");
+  const record={id:"train-01",scenario_group:"train-01",category:"debugging",difficulty:3,dataset_split:"sft",training_eligible:"candidate_only",provenance:"assistant_authored_synthetic",verification_status:"authored_and_static_review_not_executed_or_teacher_verified",teacher_model:null,instruction:"修正を検証",context:"CI未実行",evidence:[{kind:"synthetic_fixture",observation:"No test receipt"}],expected_decision:"REFERENCE_ONLY"};
+  const input=trainingPacket(record);
+  const ai=mock({deepseek:plan({evidence_refs:["train-01_obs_1"]})});
+  const base=ai.callCommandModel;ai.callCommandModel=async(...args)=>({...await base(...args),model_id:TEACHER_MODEL_ID});
+  const m=createCommandModule({aiCore:ai,standalone:true,allowExternalQualification:true});
+  const out=await m.evaluate(request("DEEPSEEK_ONLY",input));
+  const example=teacherTrainingCandidate(record,out);
+  assert.deepEqual(example.messages.map(x=>x.role),["system","user","assistant"]);
+  assert.equal(example.messages[0].content,ai.calls[0].system);
+  assert.equal(example.messages[1].content,ai.calls[0].user);
+  assert.deepEqual(JSON.parse(example.messages[2].content),out.selected_candidate);
+  assert.equal(example.teacher_model,TEACHER_MODEL_ID);
+  assert.equal(example.student_model,"Qwen/Qwen3.5-4B");
+  assert.equal(example.training_execution_allowed,false);
+  assert.equal(example.verification_status,"candidate_not_independently_verified");
+  assert.ok(!JSON.stringify(example).includes("REFERENCE_ONLY"));
+  for(const bad of [{mode:"COOPERATIVE"},{input_digest:"wrong"},{state:"BLOCKED"},{selected_candidate:plan({verification:"changed"})},{calls:[{...out.calls[0],model_id:"wrong"}]},{calls:[{...out.calls[0],prompt_digest:"wrong"}]},{calls:[{...out.calls[0],output_digest:"wrong"}]}]){
+    assert.throws(()=>teacherTrainingCandidate(record,{...out,...bad}),/COMMAND_TEACHER_RESULT_MISMATCH/);
+  }
+  assert.throws(()=>teacherTrainingCandidate({...record,dataset_split:"evaluation"},out),/COMMAND_TRAINING_CANDIDATE_REQUIRED/);
+  assert.throws(()=>teacherTrainingCandidate({...record,instruction:"different"},out),/COMMAND_TEACHER_RESULT_MISMATCH/);
+});
+test("standalone reports bounded invalid field type for correction learning without leaking malformed answer",async()=>{
+  const ai=mock({qwen35:plan({verification:["private malformed response"]})});
+  const out=await createCommandModule({aiCore:ai,standalone:true}).evaluate(request("QWEN_ONLY"));
+  assert.equal(out.state,"BLOCKED");
+  assert.equal(out.reason,"COMMAND_CANDIDATE_FIELD_INVALID");
+  assert.equal(out.calls[0].validation_field,"verification");
+  assert.equal(out.calls[0].validation_type,"array");
+  assert.equal(out.calls[0].output,null);
+  assert.ok(!JSON.stringify(out).includes("private malformed response"));
+});
