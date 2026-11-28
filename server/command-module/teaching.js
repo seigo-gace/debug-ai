@@ -16,7 +16,8 @@ const TOPICS=Object.freeze({
   javascript:{label:"JavaScript実践・修正",task:"合成事例: clamp(n,min,max) は n を閉区間 [min,max] 内に制限する。min<=max と有限数を前提にする。既存の CommonJS module.exports=clamp を維持し、関数を実装せよ。テストは境界値・負数を含む。",code:true}
 });
 const baseCode="module.exports=function clamp(n,min,max){return n;};\n";
-const tests="const assert=require('node:assert/strict');const clamp=require('./clamp.js');for(const [n,min,max,want] of [[5,0,10,5],[-1,0,10,0],[12,0,10,10],[0,0,10,0],[10,0,10,10],[-7,-5,-2,-5],[-1,-5,-2,-2],[3,3,3,3],[1.5,0,2,1.5]])assert.equal(clamp(n,min,max),want);\n";
+const clampCases=Object.freeze([[5,0,10,5],[-1,0,10,0],[12,0,10,10],[0,0,10,0],[10,0,10,10],[-7,-5,-2,-5],[-1,-5,-2,-2],[3,3,3,3],[1.5,0,2,1.5]].map(Object.freeze));
+const tests="const assert=require('node:assert/strict');const clamp=require('./clamp.js');for(const [n,min,max,want] of "+JSON.stringify(clampCases)+")assert.equal(clamp(n,min,max),want);\n";
 function fail(code){const e=new Error(code);e.code=code;throw e;}
 function teachingTopics(){return Object.entries(TOPICS).map(([id,v])=>({id,label:v.label}));}
 function selectTopic(id){if(typeof id!=="string"||!Object.hasOwn(TOPICS,id))fail("TEACHING_TOPIC_INVALID");return TOPICS[id];}
@@ -34,10 +35,10 @@ async function testSyntheticCode(code,{runtimeRoot,jobRoot=process.env.DEBUG_AI_
     const job=prepare({sourceRepo:root,jobRoot,action:"package.test",timeoutMs:30000,requiredPaths:["package.json","clamp.js","test.cjs"],candidate:{operations:[{type:"replace",path:"clamp.js",expected_sha256:crypto.createHash("sha256").update(baseCode).digest("hex"),content_utf8:code}]}});
     const r=await wait({jobRoot,jobId:job.job_id,timeoutMs:45000});
     if(r?.schema!=="debugai.sandbox-result/v1"||r.job_id!==job.job_id||r.action!=="package.test"||r.candidate_construction!=="MATERIALIZED_VERIFIED"||r.candidate_snapshot?.digest!==job.request.candidate_snapshot.digest||typeof r.pass!=="boolean"||typeof r.timed_out!=="boolean"||!Number.isInteger(r.code)||r.pass!==(r.code===0&&!r.timed_out))fail("TEACHING_SANDBOX_RESULT_INVALID");
-    return observed(r);
+    return {...observed(r),candidate_sha256:crypto.createHash("sha256").update(code).digest("hex"),test_sha256:crypto.createHash("sha256").update(tests).digest("hex"),cases:clampCases.map(([n,min,max,expected],i)=>({id:i+1,n,min,max,expected,assertion:r.pass?"PASS":"NOT_INDIVIDUALLY_VERIFIED"})),assertion_count:clampCases.length};
   }finally{fs.rmSync(root,{recursive:true,force:true});}
 }
-async function runTeaching({aiCore,topic,deadlineAt,signal,maxTokensByModel,onStage=()=>{},sandbox,maxReviews=2,repairFormat=false,priorFeedback=null,resume=null}={}){
+async function runTeaching({aiCore,topic,deadlineAt,signal,maxTokensByModel,onStage=()=>{},sandbox,maxReviews=2,repairFormat=false,priorFeedback=null,resume=null,evidenceBound=false}={}){
   const lesson=selectTopic(topic);if(!canTeach(aiCore))fail("TEACHING_DEEPSEEK_NOT_CONFIGURED");
   const budgets=maxTokensByModel||{qwen35:512,deepseek:1024};
   if(!Number.isSafeInteger(deadlineAt)||!Number.isSafeInteger(budgets.qwen35)||budgets.qwen35<1||!Number.isSafeInteger(budgets.deepseek)||budgets.deepseek<1)fail("TEACHING_CONFIG_INVALID");
@@ -54,7 +55,7 @@ async function runTeaching({aiCore,topic,deadlineAt,signal,maxTokensByModel,onSt
     const identity=name==="deepseek"?TEACHER_MODEL_ID:QWEN_MODEL;
     if(r?.model_id!==identity)fail("TEACHING_MODEL_IDENTITY_MISMATCH");
     let value;
-    try{value=parse(r.content,fields);if(fields.includes("verdict")&&!["PASS","REVISE","UNDETERMINED"].includes(value.verdict))fail("TEACHING_VERDICT_INVALID");}catch(e){emit({phase,state:"failed",model:name,model_id:identity,error:e.code,invalid_field:e.field??null,invalid_kind:e.kind??null,cost:r.telemetry?.cost??null});if(repairFormat&&!repair&&(name==="qwen35"||typeof r.telemetry?.cost==="number"&&Number.isFinite(r.telemetry.cost)&&r.telemetry.cost>=0)){return model(name,phase+"_format_repair",system+" 前回は出力形式違反。指定キーを厳守し、値を文字列にする。評価内容を弱めたり判定を変更するための再試行ではない。",user,fields,true);}throw e;}
+    try{value=parse(r.content,fields);if(evidenceBound&&name==="qwen35"&&lesson.code&&value.verification!=="SANDBOX_PENDING")fail("TEACHING_VERIFICATION_CONTRACT_INVALID");if(fields.includes("verdict")&&!["PASS","REVISE","UNDETERMINED"].includes(value.verdict))fail("TEACHING_VERDICT_INVALID");}catch(e){emit({phase,state:"failed",model:name,model_id:identity,error:e.code,invalid_field:e.field??null,invalid_kind:e.kind??null,cost:r.telemetry?.cost??null});if(repairFormat&&!repair&&(name==="qwen35"||typeof r.telemetry?.cost==="number"&&Number.isFinite(r.telemetry.cost)&&r.telemetry.cost>=0)){return model(name,phase+"_format_repair",system+" 前回は出力形式違反。指定キーを厳守し、値を文字列にする。評価内容を弱めたり判定を変更するための再試行ではない。",user,fields,true);}throw e;}
     emit({phase,state:"complete",model:name,model_id:identity,output:value,cost:r.telemetry?.cost??null});
     checkSignal(signal,deadlineAt);return value;
   }
@@ -62,10 +63,10 @@ async function runTeaching({aiCore,topic,deadlineAt,signal,maxTokensByModel,onSt
   function reuse(s,modelName,phase,fields){if(!s||s.state!=="complete"||s.model!==modelName||s.model_id!==(modelName==="deepseek"?TEACHER_MODEL_ID:QWEN_MODEL)||!phase.test(s.phase))return null;try{return parse(JSON.stringify(s.output),fields);}catch{return null;}}
   const savedTeaching=reuse(resume?.teaching,"deepseek",/^teacher_lesson(?:_format_repair)?$/,["lesson","exercise","criteria"]);
   if(savedTeaching)reused.push({phase:resume.teaching.phase,source:resume.source});
-  const teaching=savedTeaching||await model("deepseek","teacher_lesson","教師として課題を解説し、生徒が自力で解くための問いと合格基準を提示する。キー lesson,exercise,criteria (文字列)。",{task:lesson.task},["lesson","exercise","criteria"]);
-  const studentSystem="生徒として説明、解答、検証方法を示す。キー answer,verification"+(lesson.code?",code (完全な clamp.js のソース。Markdown禁止)":"")+"。すべて文字列。";
+  const teaching=savedTeaching||await model("deepseek","teacher_lesson","教師として課題を解説し、生徒が自力で解くための問いと合格基準を提示する。未提示のコード・ログ・実行結果を事実として要求しない。事実が不足する場合は確認手順と条件付き判断を評価する。キー lesson,exercise,criteria (文字列)。",{task:lesson.task},["lesson","exercise","criteria"]);
+  const studentSystem="生徒として説明、解答、検証方法を示す。キー answer,verification"+(lesson.code?",code (完全な clamp.js のソース。Markdown禁止)":"")+"。すべて文字列。"+(evidenceBound?(lesson.code?" verification は厳密に SANDBOX_PENDING。実行結果はシステムが後から付与する。answer にも未実行の結果を書かない。":" 具体的な判定規則・手順・境界条件を記述する。未提示の観測結果や実行成功は捏造しない。"):"");
   const studentFields=lesson.code?["answer","verification","code"]:["answer","verification"];
-  const savedAnswer=savedTeaching?reuse(resume?.answer,"qwen35",/^student_(attempt|revision)(?:_format_repair)?$/,studentFields):null;
+  const savedAnswer=savedTeaching&&!(evidenceBound&&lesson.code)?reuse(resume?.answer,"qwen35",/^student_(attempt|revision)(?:_format_repair)?$/,studentFields):null;
   if(savedAnswer)reused.push({phase:resume.answer.phase,source:resume.source});
   let answer=savedAnswer||await model("qwen35","student_attempt",studentSystem+" 合格基準の各項目を具体的に満たし、過去の指摘があれば解消する。",{task:lesson.task,teaching,...(priorFeedback?{prior_feedback:priorFeedback}:{})},studentFields);
   let review,evidence=null;
@@ -73,8 +74,8 @@ async function runTeaching({aiCore,topic,deadlineAt,signal,maxTokensByModel,onSt
   if(savedReview?.verdict==="REVISE"){reused.push({phase:resume.review.phase,source:resume.source});answer=await model("qwen35","student_revision",studentSystem+" 保存済みの教師指摘を一つずつ解消し、合格基準全体を満たす完全な再解答を出す。",{task:lesson.task,teaching,previous:answer,review:savedReview,evidence:resume.evidence??null},studentFields);}
 
   for(let attempt=1;attempt<=maxReviews;attempt++){
-    if(lesson.code){checkSignal(signal,deadlineAt);onStage({phase:"sandbox_"+attempt,state:"running",model:"sandbox"});evidence=await sandbox(answer.code);emit({phase:"sandbox_"+attempt,state:"complete",model:"sandbox",output:evidence});checkSignal(signal,deadlineAt);}
-    review=await model("deepseek","teacher_review_"+attempt,"教師として解答を厳密に評価する。判定 verdict は PASS, REVISE, UNDETERMINED のいずれか。キー verdict,feedback,correction (文字列)。feedback は基準ごとの達成・不足と根拠。REVISE/UNDETERMINED の correction は不足を埋める具体的な指示、PASS は修正不要（空文字も可）。実測検証が失敗したらPASSにしない。",{task:lesson.task,teaching,answer,evidence},["verdict","feedback","correction"]);
+    if(lesson.code){checkSignal(signal,deadlineAt);onStage({phase:"sandbox_"+attempt,state:"running",model:"sandbox"});evidence=await sandbox(answer.code);if(evidenceBound&&(evidence?.candidate_sha256!==crypto.createHash("sha256").update(answer.code).digest("hex")||evidence?.test_sha256!==crypto.createHash("sha256").update(tests).digest("hex")||evidence?.assertion_count!==clampCases.length||!Array.isArray(evidence.cases)||evidence.cases.length!==clampCases.length))fail("TEACHING_EVIDENCE_BINDING_INVALID");emit({phase:"sandbox_"+attempt,state:"complete",model:"sandbox",output:evidence});checkSignal(signal,deadlineAt);}
+    review=await model("deepseek","teacher_review_"+attempt,"教師として解答を厳密に評価する。判定 verdict は PASS, REVISE, UNDETERMINED のいずれか。キー verdict,feedback,correction (文字列)。feedback は基準ごとの達成・不足と根拠。REVISE/UNDETERMINED の correction は不足を埋める具体的な指示、PASS は修正不要（空文字も可）。実測検証が失敗したらPASSにしない。"+(evidenceBound?" 実行事実の根拠はシステム提供の evidence のみ。生徒に未実行の実測を要求してはならない。記載のないケースの成功を推測しない。非コード課題は未実行の計画を実行済みと扱わない。":""),{task:lesson.task,teaching,answer,evidence},["verdict","feedback","correction"]);
     if(!["PASS","REVISE","UNDETERMINED"].includes(review.verdict))fail("TEACHING_VERDICT_INVALID");
     if(review.verdict==="PASS"&&(!lesson.code||evidence?.pass===true))break;
     if(attempt===maxReviews||review.verdict==="UNDETERMINED")break;
@@ -85,7 +86,7 @@ async function runTeaching({aiCore,topic,deadlineAt,signal,maxTokensByModel,onSt
 }
 // Independent topics can be in flight together. Each topic retains the existing
 // lesson -> student -> review -> correction dependency and its own evidence.
-async function runTeachingBatch({topics,aiCore,maxConcurrent=2,deadlineAt,signal,maxTokensByModel,sandbox,onStage=()=>{},onTopic=()=>{},canStart=()=>true,maxReviews=2,repairFormat=false,priorFeedbackByTopic={},resumeByTopic={}}={}){
+async function runTeachingBatch({topics,aiCore,maxConcurrent=2,deadlineAt,signal,maxTokensByModel,sandbox,onStage=()=>{},onTopic=()=>{},canStart=()=>true,maxReviews=2,repairFormat=false,priorFeedbackByTopic={},resumeByTopic={},evidenceBound=false}={}){
   if(!Array.isArray(topics)||!topics.length||new Set(topics).size!==topics.length||!Number.isInteger(maxConcurrent)||maxConcurrent<1||maxConcurrent>3||!Number.isSafeInteger(deadlineAt))fail("TEACHING_BATCH_CONFIG_INVALID");
   topics.forEach(selectTopic);
   let next=0;const results=new Array(topics.length);
@@ -94,7 +95,7 @@ async function runTeachingBatch({topics,aiCore,maxConcurrent=2,deadlineAt,signal
       if(signal?.aborted||Date.now()>=deadlineAt||next>=topics.length||!canStart())return;
       const i=next++,topic=topics[i];onTopic({topic,state:"running"});
       let row;
-      try{const result=await runTeaching({aiCore,topic,deadlineAt,signal,maxTokensByModel,sandbox,maxReviews,repairFormat,priorFeedback:priorFeedbackByTopic[topic]??null,resume:resumeByTopic[topic]??null,onStage:stage=>onStage({topic,...stage})});row={topic,state:"complete",result};}
+      try{const result=await runTeaching({aiCore,topic,deadlineAt,signal,maxTokensByModel,sandbox,maxReviews,repairFormat,priorFeedback:priorFeedbackByTopic[topic]??null,resume:resumeByTopic[topic]??null,evidenceBound,onStage:stage=>onStage({topic,...stage})});row={topic,state:"complete",result};}
       catch(e){row={topic,state:"failed",error:/^[A-Z0-9_]{1,100}$/.test(e?.code||"")?e.code:"TEACHING_BATCH_ERROR"};}
       results[i]=row;onTopic(row);
     }
